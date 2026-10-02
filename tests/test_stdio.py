@@ -49,3 +49,11 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
         assert _text(await client.call_tool("book_issue_close", {"id": "I14", "project_id": "synth"})) == "I14 닫음"
         exported = _text(await client.call_tool("book_export", {"project_id": "synth"}))
         assert Path(exported.splitlines()[0].removeprefix("docx를 만들었다: ")).exists()
+
+        # 4단계
+        checked = _text(await client.call_tool("ref_check", {"chapter_number": 1, "project_id": "synth"}))
+        assert '"daeschler2006"' in checked
+        added = _text(await client.call_tool("ref_add", {"bib": {"key": "clack2012"}, "passages": [{"text": "네발동물의 기원", "reason": "1장"}]}))
+        assert added.startswith("clack2012: unverified → verified")
+        assert "clack2012 (verified)" in _text(await client.call_tool("ref_search", {"query": "네발동물"}))
+

@@ -19,6 +19,7 @@ from magus.book.comments import classify_comment
 from magus.book.docx_reader import Block, Manuscript, read_docx
 from magus.book.pdf_reader import read_pdf
 from magus.melchior.bibliography import BibReport, import_bibliography
+from magus.melchior.check import after_refs_changed
 from magus.store import Part, Store
 from magus.store.formats import one_line
 
@@ -281,6 +282,7 @@ def import_manuscript(
         rows.append((issue.id, chapter, kind, ref_key, one_line(c.text)[:40]))
 
     bib_report = import_bibliography(store, user_id, "\n".join(b.text for b in split.bib_blocks if b.kind == "para"))
+    after_refs_changed(store, user_id)  # 장별 미확인 인용 수, citation 이슈 → refs 연결(ref_id)
     numbers = [c.number for c in split.chapters]
     gaps = sorted(set(range(1, max(numbers) + 1)) - set(numbers)) if numbers else []
     report = ImportReport(

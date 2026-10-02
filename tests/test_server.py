@@ -60,7 +60,9 @@ async def test_read_returns_body_and_meta_separately(settings: Settings, store: 
         assert "---" not in ch["content"] and "version:" not in ch["content"]
         assert (ch["title"], ch["status"], ch["part_number"], ch["version"]) == ("목이 생긴 날", "draft", 1, 2)
         assert ch["last_note"] == "2장 끝에 한 문장 추가"
-        assert ch["unverified_cites"] is None  # 4단계 전에는 미검사
+        # 4단계부터 인용 게이트가 돈다: 데모 책장에는 refs가 없으므로 Clack(2012)은 unknown
+        assert ch["unverified_cites"] == [{"key": "clack2012", "count": 1, "cited_as": ["Clack(2012)"], "status": "unknown"}]
+        assert ch["needs_source"] == 0
         assert (await _call(client, "book_read_chapter", {"number": 1}))["open_issues"] == ["I1 Daeschler 2006 원문 확인 필요"]
         missing = await client.call_tool("book_read_chapter", {"number": 99})
         assert missing.is_error and "있는 장: 1, 2, 3, 4, 5" in missing.content[0].text
@@ -122,7 +124,7 @@ async def test_book_issues_lists_and_filters(settings: Settings, store: LocalSto
     async with Client(build_server(settings, store)) as client:
         everything = _text(await client.call_tool("book_issues", {}))
         assert everything.splitlines()[0] == "미해결 4건 (status=open)"
-        assert "- I1 · open · 1장 · import_comment · citation→daeschler2006 · Daeschler 2006 원문 확인 필요" in everything
+        assert "- I1 · open · 1장 · import_comment · citation→daeschler2006 ⇒ refs 없음 · Daeschler 2006 원문 확인 필요" in everything
         comments = _text(await client.call_tool("book_issues", {"origin": "import_comment"}))
         assert comments.splitlines()[0] == "미해결 1건 (status=open, origin=import_comment)"
         ch3 = _text(await client.call_tool("book_issues", {"chapter_number": 3, "kind": "general"}))

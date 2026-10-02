@@ -72,5 +72,9 @@ def main(argv: list[str] | None = None) -> None:
         print(f"{'생성' if created else '이미 있음'}: {project.id} ({project.title})\n")
         print(build_outline(store, settings.user_id, project.id))
     elif args.cmd == "reindex":
+        from magus.melchior.check import after_refs_changed
+
         store.reindex()
+        for user_id in store.list_users():
+            after_refs_changed(store, user_id)  # 파생값(장별 미확인 인용 수, citation 이슈 연결) 다시 계산
         print(f"재생성 완료: {settings.data_dir / 'index.sqlite'}")

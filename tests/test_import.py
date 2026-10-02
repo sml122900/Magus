@@ -6,6 +6,7 @@ import pytest
 
 from magus.book.importer import import_manuscript
 from magus.book.outline import TOKEN_BUDGET, build_outline, estimate_tokens
+from magus.melchior.check import refresh_cite_counts
 from magus.store import LocalStore
 from magus.synthetic import build_manuscript_docx, build_manuscript_pdf
 
@@ -91,7 +92,9 @@ def test_reimport_is_safe(store: LocalStore, report, manuscript: Path, data_dir:
 
 def test_import_reindex_roundtrip(store: LocalStore, report):
     before = (store.list_chapters("alice", "synth"), store.list_issues("alice", "synth", None), store.list_refs("alice"))
+    assert any(c.unverified_cite_count for c in before[0])
     store.reindex()
+    refresh_cite_counts(store, "alice")  # 장별 미확인 인용 수는 파생값: 재생성 뒤 서버 시작·magus reindex가 다시 계산한다
     assert (store.list_chapters("alice", "synth"), store.list_issues("alice", "synth", None), store.list_refs("alice")) == before
 
 

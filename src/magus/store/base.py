@@ -69,7 +69,8 @@ class Issue:
     created_at: str
     closed_note: str | None = None
     kind: IssueKind = "general"
-    ref_key: str | None = None  # kind=citation일 때 코멘트에서 뽑은 저자+연도 후보. 4단계에서 refs와 연결한다.
+    ref_key: str | None = None  # kind=citation일 때 코멘트에서 뽑은 저자+연도 후보(조사 뗀 한글 key일 수도 있다)
+    ref_id: str | None = None  # ref_key가 refs에서 해석된 정식 key. refs 행 id는 재생성되므로 key를 식별자로 쓴다.
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,10 @@ class Change:
 
 
 class Store(Protocol):
+    def list_users(self) -> list[str]:
+        """운영용(재생성 뒤 파생값 재계산). 도구에서는 쓰지 않는다."""
+        ...
+
     # 프로젝트
     def create_project(self, user_id: str, title: str, project_id: str | None = None) -> Project: ...
     def get_project(self, user_id: str, project_id: str | None = None) -> Project | None:
@@ -175,6 +180,12 @@ class Store(Protocol):
     ) -> Issue: ...
     def close_issue(self, user_id: str, project_id: str, issue_id: int, note: str | None = None) -> Issue | None:
         """없는 번호면 None. 이미 닫힌 이슈는 note만 갱신한다."""
+        ...
+    def set_issue_refs(self, user_id: str, project_id: str, ref_ids: dict[int, str | None]) -> None:
+        """citation 이슈의 ref_id를 한 번에 기록한다(issues.md를 한 번만 다시 쓴다)."""
+        ...
+    def set_cite_counts(self, user_id: str, project_id: str, counts: dict[int, int]) -> None:
+        """장별 미확인 인용 수. 본문과 refs로 계산되는 파생값이라 인덱스에만 둔다."""
         ...
     def save_export(self, user_id: str, project_id: str, filename: str, data: bytes) -> str:
         """exports/<filename>에 저장하고 위치를 돌려준다(P0: 절대 경로, P1: 내려받기 URL)."""

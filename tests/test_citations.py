@@ -49,3 +49,35 @@ def test_make_ref_key_folds_diacritics():
 )
 def test_classify_comment(comment, anchor, expected):
     assert classify_comment(comment, anchor) == expected
+
+
+def test_multiple_citations_in_one_parenthesis():
+    assert [c.key for c in find_citations("(Clack, 2012; Hu et al., 2023; 헨릭, 2016)")] == ["clack2012", "hu2023", "헨릭2016"]
+
+
+def test_korean_particle_is_stripped_but_original_kept_as_candidate():
+    [c] = find_citations("갤러는(2022) 이것을 넓힌다.")
+    assert c.key == "갤러2022" and c.lookup_keys == ("갤러는2022", "갤러2022")
+    [c] = find_citations("카를로(2010)는")  # 이름이 조사처럼 끝나도 원형이 첫 후보다
+    assert c.lookup_keys == ("카를로2010", "카를2010")
+
+
+def test_korean_non_author_words_are_ignored():
+    assert find_citations("그 논문(2006)에서, 당시(1998) 상황은") == []
+
+
+def test_year_suffix_is_part_of_key():
+    assert [c.key for c in find_citations("Clack(2012a)과 (Clack, 2012b)")] == ["clack2012a", "clack2012b"]
+
+
+@pytest.mark.parametrize(
+    ("comment", "kind"),
+    [
+        ("물고기가 일어서지 못하는 장면 보강", "general"),
+        ("서지 정보 누락", "citation"),
+        ("서지정보 확인", "citation"),
+        ("서지", "citation"),
+    ],
+)
+def test_seoji_false_positive(comment, kind):
+    assert classify_comment(comment)[0] == kind

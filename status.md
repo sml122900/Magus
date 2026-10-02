@@ -1,7 +1,7 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-03 04:40 KST — **야간 자율 작업 중**(사용자 부재, 아침 보고 예정)
+> 마지막 갱신: 2026-10-03 05:00 KST — **야간 자율 작업 중**(사용자 부재, 아침 보고 예정)
 
 ## 0. 아침 보고
 
@@ -10,15 +10,12 @@
 ## 1. 지금 바로 할 일
 
 - **야간 자율 작업 지시를 수행 중이다**(질문하지 않음, 단계마다 커밋과 태그, 2→7단계).
-- 다음 할 일: **4단계**
-  - ref_add / ref_search / ref_check와 write 게이트.
-  - 추출기 한계 3건 보강.
-  - citation 이슈를 refs와 연결(ref_id).
-- 그 뒤 5 → 6 → 7단계. 끝나면 "0. 아침 보고"를 채운다.
+- 다음 할 일: **5단계** idea_add / idea_add_conversation(세 형식, 합성 96쌍 기록) / idea_search.
+- 그 뒤 6 → 7단계. 끝나면 "0. 아침 보고"를 채운다.
 
 ## 2. 현재 단계
 
-**3단계 완료**(태그 `step3`). 4단계를 진행 중이다.
+**4단계 완료**(태그 `step4`, 합성 fixture). 5단계를 진행 중이다.
 
 ## 3. 단계별 체크리스트
 
@@ -34,7 +31,8 @@
   - 리포트: `docs/daily/2026-10-03.md` "야간 자율 작업" 절, `data/synthetic-fixtures/step2-import-report.md`, `data/users/default/projects/synth/original/import-report.md`
 - [x] **3단계** book_decide / book_issue_add / book_issue_close / book_export — 2026-10-03, 태그 `step3`
   - 산출물: `src/magus/book/export.py`, `tests/test_book_tools.py`. 도구 4개가 추가돼 instructions 4번 규칙이 활성화됐다.
-- [ ] **4단계** ref_add / ref_search / ref_check + 게이트, 추출기 보강, citation 이슈 ↔ refs 연결
+- [x] **4단계** ref_add / ref_search / ref_check + 게이트, 추출기 보강, citation 이슈 ↔ refs 연결 — 2026-10-03, 태그 `step4`, **합성 fixture**
+  - 산출물: `src/magus/melchior/{check,refs}.py`, `src/magus/search.py`, `tests/test_refs.py`. 장별 집계는 `data/synthetic-fixtures/step4-refcheck-report.md`와 일지에 있다.
 - [ ] **5단계** idea_*
 - [ ] **6단계** style_*
 - [ ] **7단계** 하이브리드 검색, provider 스텁, instructions 전체 확인, README, demo 재생성
@@ -93,6 +91,21 @@
     - 이유: Claude가 사용자 요청으로 남긴 것과 스스로 발견한 것을 outline에서 구분한다.
 14. **export 제목 단계**
     - 선택: 부는 Heading 1, 장은 Heading 2, 장 안 소제목은 Heading 3. 부가 없으면 장이 Heading 1이다. 문서 제목은 pandoc 메타데이터로 넣는다.
+15. **ref_add는 발췌가 하나 이상 있어야 받는다**
+    - 대안: bib만으로 verified 허용.
+    - 이유: "읽은 것만 verified". 사례의 실패(읽지 않은 문헌 인용)를 막는다.
+16. **이슈의 ref_id에 정식 ref key를 쓴다**
+    - 대안: refs.id(정수).
+    - 이유: 인덱스 행 id는 재생성되면 바뀐다. key는 파일에 남는 안정적인 식별자다.
+17. **장별 미확인 인용 수 = verified가 아닌 인용의 출현 수**(unverified + unknown, `[출처 필요]`는 따로 셈)
+    - 대안: 서로 다른 문헌 수.
+    - 이유: 고쳐야 할 자리의 수를 보여 준다.
+18. **ref_search의 scope 기본값 = both**
+    - 이유: 발췌를 먼저 보여 주고 전문을 뒤에 붙인다.
+19. **조사 처리**
+    - 선택: 한글 저자 key는 조사를 뗀 것을 대표로, 원형을 첫 후보로 둔다.
+    - 대안: 조사를 떼지 않는다.
+    - 이유: "갤러는(2022)"을 alias로 해석하면서도 "카를로" 같은 이름을 망가뜨리지 않는다.
 11. **합성 fixture 위치**
     - 선택: `data/synthetic-fixtures/`(gitignore). 생성기는 `src/magus/synthetic.py`.
     - 대안: `fixtures/`에 둔다.
@@ -125,14 +138,19 @@
 
 **2026-10-03 야간**
 - 2단계 완료(합성 fixture). 3단계 완료(export 왕복 테스트: 장 제목과 장별 단락 수 일치).
+- 4단계 완료(게이트, 추출기 보강 3건, 이슈 ↔ refs 연결). 합성 원고 미확인 인용 합계 9건(1장 8, 4장 1).
 - 결과: 7장·3부, 목차 줄 11개 제거, 코멘트 13건(citation 8 / general 5, ref_key 75%), refs 30건(실패 3, 충돌 1).
-- 테스트 81개 통과.
+- 테스트 95개 통과.
 
 ## 7. 알려진 문제
 
-- **코멘트 분류 "서지" 오탐**: "일어서지"(합성 I6)도 citation으로 분류된다. 4단계에서 보강한다.
-- **조사가 붙은 한글 저자 key**: `갤러는(2022)` → `갤러는2022`(합성 I4). 4단계에서 보강한다.
-- **괄호 안 다중 인용**: `(Clack, 2012; Hu et al., 2023)`은 괄호·서술형 패턴에서 첫 인용만 잡힌다. 4단계에서 보강한다.
+- ~~"서지" 오탐, 조사가 붙은 한글 저자 key, 괄호 안 다중 인용~~: 4단계에서 해결했다.
+- **인용 추출기의 남은 한계**
+  - 한글 저자 2~8자만 받는다.
+  - "제러드다이아몬드(1997)"처럼 띄어쓰기 없이 이름과 성을 붙여 쓰면 그대로 key가 된다.
+  - 각주형 인용(¹, [1])은 지원하지 않는다.
+  - 실원고로 보정해야 한다.
+- **장별 미확인 인용 수는 파생값**: 인덱스를 다시 만든 직후에는 0이다. 서버 시작과 `magus reindex`가 다시 계산한다.
 - **PDF 폴백의 한계**: 앵커는 바로 앞 블록으로 근사한다. 그림·표·수식은 구분하지 못한다.
 - **Desktop 서버는 03:33에 띄운 옛 코드다**: 새 도구를 보려면 Desktop을 다시 시작해야 한다.
 - 번호 충돌 가능성, 직접 수정 감지 없음, 토큰 추정 휴리스틱: 이전과 같다.

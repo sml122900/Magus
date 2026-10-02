@@ -17,6 +17,7 @@ from mcp.server.mcpserver.tools import Tool
 from magus.book.export import export_docx
 from magus.book.importer import import_manuscript
 from magus.book.outline import build_outline
+from magus.melchior.check import CheckResult, check_chapter, check_text
 from magus.store import Issue, Project, Store
 from magus.store.base import ChapterStatus
 from magus.store.formats import one_line, strip_front_matter
@@ -25,7 +26,11 @@ FRONT_MATTER_WARNING = (
     "content 앞의 front matter를 벗겨 냈습니다. 메타(제목·상태·버전·note)는 서버가 관리하니 본문만 보내세요. "
     "제목·상태를 바꾸려면 title·status 인자를 쓰세요."
 )
-UNVERIFIED_CITES_MEANING = "unverified_cites: null은 아직 검사 전(ref_check 전), []는 검사했고 미확인 인용이 없다는 뜻."
+UNVERIFIED_CITES_MEANING = (
+    "unverified_cites: 인용 게이트(ref_check) 결과 중 verified가 아닌 인용 목록"
+    "({key, status: unverified|unknown, count, cited_as}). null은 아직 검사 전, []는 검사했고 미확인 인용이 없다는 뜻. "
+    "needs_source는 본문의 [출처 필요: …] 표시 수."
+)
 ISSUE_LIST_MAX = 200
 
 
@@ -33,11 +38,18 @@ def _json(data: dict[str, Any]) -> str:
     return json.dumps(data, ensure_ascii=False)
 
 
+def _gate(result: CheckResult) -> dict[str, Any]:
+    return {"unverified_cites": result.unverified_cites(), "needs_source": result.needs_source}
+
+
 def _issue_line(i: Issue) -> str:
     parts = [f"I{i.id}", i.status]
     if i.chapter_number is not None:
         parts.append(f"{i.chapter_number}장")
-    parts += [i.origin, i.kind + (f"→{i.ref_key}" if i.ref_key else "")]
+    kind = i.kind + (f"→{i.ref_key}" if i.ref_key else "")
+    if i.kind == "citation" and i.ref_key:
+        kind += f" ⇒ {i.ref_id}" if i.ref_id and i.ref_id != i.ref_key else ("" if i.ref_id else " ⇒ refs 없음")
+    parts += [i.origin, kind]
     line = "- " + " · ".join(parts) + f" · {one_line(i.text)[:300]}"
     return line + (f" · 닫음: {one_line(i.closed_note)}" if i.closed_note else "")
 
@@ -71,7 +83,7 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
                 "last_note": m.last_note,
                 "updated_at": m.updated_at,
                 "char_count": m.char_count,
-                "unverified_cites": None,  # ref_check(4단계) 전에는 검사하지 않는다. null = 미검사
+                **_gate(check_text(store, user, chapter.content)),
                 "open_issues": [f"I{i.id} {one_line(i.text)[:120]}" for i in open_issues],
                 "content": chapter.content,
             }
@@ -93,6 +105,8 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
             meta = store.write_chapter(current_user(), project.id, number, body, note, title=title, status=status)
         except ValueError as e:
             raise ToolError(str(e)) from e
+        # 인용 게이트: 쓰기를 막지 않고, 쓴 뒤에 검사해서 결과를 돌려주고 장별 집계를 갱신한다.
+        gate = check_chapter(store, current_user(), project.id, number)
         return _json(
             {
                 "project_id": project.id,
@@ -102,7 +116,7 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
                 "version": meta.version,
                 "archived_version": meta.version - 1 if meta.version > 1 else None,
                 "char_count": meta.char_count,
-                "unverified_cites": None,  # 4단계에서 ref_check를 자동 실행해 채운다
+                **(_gate(gate) if gate else {"unverified_cites": None, "needs_source": None}),
                 "warnings": [FRONT_MATTER_WARNING] if had_front_matter else [],
             }
         )

@@ -76,6 +76,8 @@ def dump_issues(issues: list[Issue]) -> str:
             meta.append(f"- chapter: {i.chapter_number}")
         if i.ref_key:
             meta.append(f"- ref_key: {i.ref_key}")
+        if i.ref_id:
+            meta.append(f"- ref_id: {i.ref_id}")
         if i.closed_note:
             meta.append(f"- closed_note: {one_line(i.closed_note)}")
         out.append(f"## I{i.id} · {i.status}\n" + "\n".join(meta) + f"\n\n{i.text.strip()}\n")
@@ -103,6 +105,7 @@ def parse_issues(text: str) -> list[Issue]:
                 closed_note=meta.get("closed_note"),
                 kind="citation" if meta.get("kind") == "citation" else "general",
                 ref_key=meta.get("ref_key") or None,
+                ref_id=meta.get("ref_id") or None,
                 text="\n".join(lines).strip(),
             )
         )

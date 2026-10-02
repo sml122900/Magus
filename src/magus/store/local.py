@@ -78,6 +78,10 @@ class LocalStore(ShelfMixin):
     def _rel(self, path: Path) -> str:
         return path.relative_to(self.root).as_posix()
 
+    @_locked
+    def list_users(self) -> list[str]:
+        return [r[0] for r in self._db.execute("SELECT id FROM users ORDER BY id")]
+
     # ---- 프로젝트 --------------------------------------------------------------------
 
     @_locked
@@ -306,6 +310,27 @@ class LocalStore(ShelfMixin):
         return closed
 
     @_locked
+    def set_issue_refs(self, user_id: str, project_id: str, ref_ids: dict[int, str | None]) -> None:
+        if not ref_ids:
+            return
+        path = self._require_project(user_id, project_id) / "issues.md"
+        issues = [
+            replace(i, ref_id=ref_ids[i.id]) if i.id in ref_ids else i
+            for i in formats.parse_issues(_read_text(path))
+        ]
+        _write_text(path, formats.dump_issues(issues))
+        with self._db:
+            self._index_issues(user_id, project_id, [i for i in issues if i.id in ref_ids])
+
+    @_locked
+    def set_cite_counts(self, user_id: str, project_id: str, counts: dict[int, int]) -> None:
+        with self._db:
+            self._db.executemany(
+                "UPDATE chapters SET unverified_cite_count = ? WHERE user_id = ? AND project_id = ? AND number = ?",
+                [(count, user_id, project_id, number) for number, count in counts.items()],
+            )
+
+    @_locked
     def save_export(self, user_id: str, project_id: str, filename: str, data: bytes) -> str:
         path = self._require_project(user_id, project_id) / "exports" / Path(filename).name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -331,7 +356,7 @@ class LocalStore(ShelfMixin):
         return [
             Issue(
                 r["id"], r["text"], r["status"], r["origin"], r["chapter_number"], r["created_at"], r["closed_note"],
-                r["kind"], r["ref_key"],
+                r["kind"], r["ref_key"], r["ref_id"],
             )
             for r in rows
         ]
@@ -462,11 +487,11 @@ class LocalStore(ShelfMixin):
     def _index_issues(self, user_id: str, project_id: str, issues: list[Issue]) -> None:
         self._db.executemany(
             "INSERT OR REPLACE INTO issues "
-            "(user_id, project_id, id, text, status, origin, chapter_number, created_at, closed_note, kind, ref_key) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(user_id, project_id, id, text, status, origin, chapter_number, created_at, closed_note, kind, ref_key, "
+            "ref_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (user_id, project_id, i.id, i.text, i.status, i.origin, i.chapter_number, i.created_at, i.closed_note,
-                 i.kind, i.ref_key)
+                 i.kind, i.ref_key, i.ref_id)
                 for i in issues
             ],
         )

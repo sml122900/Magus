@@ -43,7 +43,7 @@ class BibReport:
         return "\n".join(out)
 
 
-def _first_author(authors: str) -> str:
+def first_author(authors: str) -> str:
     first = _AUTHOR_SPLIT.split(authors.strip(), maxsplit=1)[0].strip(" .")
     return first
 
@@ -79,7 +79,7 @@ def parse_bib_line(line: str) -> dict[str, Any] | None:
         approx = True
     else:
         return None
-    first = _first_author(authors)
+    first = first_author(authors)
     if not first or not re.search(r"[A-Za-z가-힣]", first):
         return None
     bib: dict[str, Any] = {
