@@ -43,6 +43,13 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
         bib = _text(await client.call_tool("ref_import_bibliography", {"text": "Zimmer, C. (1998). At the water's edge. Free Press."}))
         assert "이미 있음 1건" in bib
 
+        # 1단계 검토 반영(미리 구현된 도구)
+        ch1 = _text(await client.call_tool("book_read_chapter", {"number": 1, "project_id": "synth"}))
+        assert '"title": "물가의 망설임"' in ch1
+        written = _text(await client.call_tool("book_write_chapter", {"number": 7, "content": "닿으려는 것.", "note": "고침", "project_id": "synth"}))
+        assert '"version": 2' in written
+        assert _text(await client.call_tool("book_issues", {"project_id": "synth"})).startswith("미해결 13건")
+
         # 3단계
         assert _text(await client.call_tool("book_decide", {"text": "결정", "project_id": "synth"})).startswith("D1")
         assert _text(await client.call_tool("book_issue_add", {"text": "열린 문제", "project_id": "synth"})).startswith("I14")

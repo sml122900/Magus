@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Protocol
 
 from magus.store import Chunk, Store
@@ -13,6 +14,7 @@ from magus.store.base import Lane
 from magus.textindex import match_query
 
 RRF_K = 60
+log = logging.getLogger("magus.search")
 
 
 class Embedder(Protocol):
@@ -38,8 +40,11 @@ def hybrid_search(
     if match := match_query(query):
         rankings.append(store.search_fts(user_id, lanes, match, pool))
     if embedder is not None and query.strip():
-        embed_missing(store, user_id, embedder)
-        rankings.append(store.search_vector(user_id, lanes, embedder.embed([query])[0], pool))
+        try:
+            embed_missing(store, user_id, embedder)
+            rankings.append(store.search_vector(user_id, lanes, embedder.embed([query])[0], pool))
+        except Exception as e:  # 임베딩 API가 실패해도 검색은 FTS 결과로 계속한다
+            log.warning("벡터 검색 실패, FTS만 사용: %s", e)
     return rrf(rankings)[:k]
 
 

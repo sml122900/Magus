@@ -47,9 +47,10 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.cmd == "serve":
         from magus import transports
+        from magus.embeddings import get_embedder
         from magus.server import build_server
 
-        server = build_server(settings, store)
+        server = build_server(settings, store, get_embedder(settings))
         if args.transport == "stdio":
             transports.run_stdio(server)
         else:
@@ -75,10 +76,12 @@ def main(argv: list[str] | None = None) -> None:
         )
         print(f"{args.path.name}: {report}\n저장 {len(ideas)}건")
     elif args.cmd == "seed-demo":
-        from magus.book.demo import seed_demo
+        from magus.book.demo import seed_demo, seed_demo_shelf
         from magus.book.outline import build_outline
 
         project, created = seed_demo(store, settings.user_id)
+        if created:
+            seed_demo_shelf(store, settings.user_id)
         print(f"{'생성' if created else '이미 있음'}: {project.id} ({project.title})\n")
         print(build_outline(store, settings.user_id, project.id))
     elif args.cmd == "reindex":

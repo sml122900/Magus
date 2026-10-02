@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from magus.balthasar.style import validate_tags
 from magus.book.comments import classify_comment
-from magus.store import Part, Project, Store
+from magus.ids import new_id
+from magus.store import Idea, Part, Project, Store, StyleEntry
 
 DEMO_PROJECT_ID = "demo"
 
@@ -38,3 +40,32 @@ def seed_demo(store: Store, user_id: str) -> tuple[Project, bool]:
     store.add_issue(user_id, project.id, "3장 폐의 기원 출처 찾기", chapter_number=3)
     store.add_issue(user_id, project.id, "2부 제목 후보 더 생각하기")
     return store.get_project(user_id, project.id) or project, True
+
+
+def seed_demo_shelf(store: Store, user_id: str) -> None:
+    """Desktop에서 idea_*·style_*를 바로 써 볼 수 있게 책장에도 몇 개 넣는다(CLI seed-demo 전용)."""
+    store.add_ideas(
+        user_id,
+        [
+            Idea(new_id(), "물고기가 뭍으로 올라온 건 용기가 아니라 궁지였다.", "thought", "me", "데모"),
+            Idea(new_id(), "이 책의 축은 닿으려는 몸짓이다.", "thought", "me", "데모"),
+        ],
+    )
+    question = Idea(new_id(), "고래는 왜 다시 물로 돌아갔을까?", "conversation", "me", "데모 대화")
+    answer = Idea(new_id(), "먹이와 경쟁의 조건이 바뀌면 이전 환경이 다시 유리해질 수 있습니다.", "conversation", "ai", "데모 대화", question.id)
+    store.add_ideas(user_id, [question, answer])
+    for passage, reason, tags, work in [
+        (
+            "고래는 돌아갔다. 물이 고래를 불렀다. 고래는 대답했다.",
+            "짧은 문장과 같은 주어의 반복이 숨 가쁜 리듬을 만든다",
+            {"호흡": "짧고 끊김", "시점": "3인칭", "열기": "장면", "장치": ["반복"], "어미": "-다 체", "톤": "건조함"},
+            "데모 산문",
+        ),
+        (
+            "그 여름의 물가에는 아무도 없었고, 나는 오래도록 바람이 지나간 자리를 바라보았다.",
+            "길게 이어지는 회상이 느린 호흡과 여운을 만든다",
+            {"호흡": "길고 느림", "시점": "1인칭 회상", "열기": "풍경", "장치": ["열거"], "어미": "-었다", "톤": "서정적"},
+            "데모 산문",
+        ),
+    ]:
+        store.add_style(user_id, StyleEntry(new_id(), passage, reason, validate_tags(tags), work))
