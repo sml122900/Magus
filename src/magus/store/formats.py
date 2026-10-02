@@ -71,9 +71,11 @@ _META = re.compile(r"^- (\w+): (.*)$")
 def dump_issues(issues: list[Issue]) -> str:
     out = ["# 미해결\n"]
     for i in sorted(issues, key=lambda i: i.id):
-        meta = [f"- created_at: {i.created_at}", f"- origin: {i.origin}"]
+        meta = [f"- created_at: {i.created_at}", f"- origin: {i.origin}", f"- kind: {i.kind}"]
         if i.chapter_number is not None:
             meta.append(f"- chapter: {i.chapter_number}")
+        if i.ref_key:
+            meta.append(f"- ref_key: {i.ref_key}")
         if i.closed_note:
             meta.append(f"- closed_note: {one_line(i.closed_note)}")
         out.append(f"## I{i.id} · {i.status}\n" + "\n".join(meta) + f"\n\n{i.text.strip()}\n")
@@ -99,6 +101,8 @@ def parse_issues(text: str) -> list[Issue]:
                 chapter_number=int(chapter) if chapter and chapter.isdigit() else None,
                 created_at=meta.get("created_at", ""),
                 closed_note=meta.get("closed_note"),
+                kind="citation" if meta.get("kind") == "citation" else "general",
+                ref_key=meta.get("ref_key") or None,
                 text="\n".join(lines).strip(),
             )
         )

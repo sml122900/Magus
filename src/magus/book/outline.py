@@ -70,42 +70,46 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
     )
     header = "\n".join(header_lines)
 
+    # 목차 줄에는 집계만 싣는다. 장별 미해결 수에는 코멘트 유래까지 모두 센다.
     toc_items: list[str] = []
     current_part: int | None = None
     for c in chapters:
         if c.part_number is not None and c.part_number != current_part:
             toc_items.append(f"### 제{c.part_number}부 {parts.get(c.part_number, '')}".rstrip())
         current_part = c.part_number
-        line = f"- {c.number}. {_clip(c.title, 40)} · {c.status} · {c.char_count:,}자 · 미확인 {c.unverified_cite_count}"
-        if issues_per_chapter[c.number]:
-            line += f" · 미해결 {issues_per_chapter[c.number]}"
-        toc_items.append(line)
+        toc_items.append(
+            f"- 제{c.number}장 {_clip(c.title, 24)} · {c.status} · {c.char_count:,}자 · "
+            f"미해결 {issues_per_chapter[c.number]} · 미확인인용 {c.unverified_cite_count}"
+        )
 
-    change_items = [
-        f"- {ch.chapter_number}장 v{ch.version} · {local_time(ch.created_at)} · {_clip(ch.note, 60) or '(메모 없음)'}"
-        for ch in changes
-    ]
-    decision_items = [f"- D{d.id} ({local_time(d.created_at, '%m-%d')}) {_clip(d.text, 100)}" for d in decisions]
+    # 전문을 싣는 미해결은 사람(user)과 에이전트(agent)가 남긴 것만이다. 코멘트 유래는 건수만 싣는다.
+    direct = [i for i in issues if i.origin != "import_comment"]
+    from_comments = len(issues) - len(direct)
+    issue_head = f"## 열린 미해결 (직접 남긴 것 {len(direct)}건)"
+    if from_comments:
+        issue_head += f"\n- 코멘트 유래 미해결 {from_comments}건 — book_issues로 조회"
     issue_items = [
         f"- I{i.id}"
         + (f" · {i.chapter_number}장" if i.chapter_number is not None else "")
-        + (" · 코멘트" if i.origin == "import_comment" else "")
-        + f" · {_clip(i.text, 80)}"
-        for i in issues
+        + (" · agent" if i.origin == "agent" else "")
+        + f" · {_clip(i.text, 60)}"
+        for i in direct
+    ]
+    decision_items = [f"- D{d.id} ({local_time(d.created_at, '%m-%d')}) {_clip(d.text, 60)}" for d in decisions]
+    change_items = [
+        f"- {ch.chapter_number}장 v{ch.version} · {local_time(ch.created_at)} · {_clip(ch.note, 50) or '(메모 없음)'}"
+        for ch in changes
     ]
 
-    # 예산 배분 순서: 머리 → 목차 → 최근 변경 → 결정 → 미해결(남는 만큼). 출력 순서는 따로 정한다.
+    # 예산 배분 순서: 머리 → 목차 → 직접 남긴 미해결 → 결정 → 최근 변경. 출력 순서는 따로 정한다.
     remaining = budget - _MARGIN - estimate_tokens(header)
     toc, used = _fit("## 목차", toc_items or ["- (장 없음)"], remaining, lambda n: f"- … 외 {n}줄")
     remaining -= used
-    recent, used = _fit("## 최근 변경", change_items or ["- (없음)"], remaining, lambda n: f"- … 외 {n}건")
+    open_issues, used = _fit(
+        issue_head, issue_items or ["- (없음)"], remaining, lambda n: f"- … 외 {n}건 — book_issues로 조회"
+    )
     remaining -= used
     decided, used = _fit("## 최근 결정", decision_items or ["- (없음)"], remaining, lambda n: f"- … 외 {n}건")
     remaining -= used
-    open_issues, _ = _fit(
-        f"## 열린 미해결 ({len(issues)})",
-        issue_items or ["- (없음)"],
-        remaining,
-        lambda n: f"- … 외 {n}건 생략 (장별 미해결은 book_read_chapter 메타에 있음)",
-    )
+    recent, _ = _fit("## 최근 변경", change_items or ["- (없음)"], remaining, lambda n: f"- … 외 {n}건")
     return "\n\n".join([header, toc, decided, open_issues, recent])

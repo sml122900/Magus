@@ -4,7 +4,7 @@
 
 ## 진행상황
 
-- 현재 단계: 1단계 완료와 검토 반영(수정 1·2)이 끝났다. book_read/write는 미리 들어왔다. 2단계는 fixtures를 기다리는 중이다.
+- 현재 단계: 1단계 확정(태그 `step1`). 결정 4건, outline 구조 변경, 2단계 준비(코멘트 분류)까지 반영했다. 2단계는 fixtures를 기다리는 중이다.
 - 다음 할 일: fixtures가 들어오면 docx 구조를 조사하고 book_import를 구현한다. 리포트와 매핑표를 낸 뒤 멈추고 사용자 확인을 기다린다.
 - 대기 사항: fixtures 투입, Desktop 재시작 후 연결 확인(사용자). 상세는 status.md에만 적는다.
 
@@ -84,9 +84,12 @@
 - users(id), projects(id, user_id, title)
 - parts(user_id, project_id, number, title) — *추가(승인됨)*: 완료 기준의 "부 8개"를 위해 둔다. book_outline은 부 제목 아래에 장을 묶어 보여 준다.
 - chapters(id, user_id, project_id, number, title, status, part_number, path, char_count, unverified_cite_count, version, last_note, updated_at)
+  - **status 값은 `draft` | `revising` | `done` 중 하나다.** 쓸 때 그 밖의 값이 오면 거부한다(Store는 ValueError, 도구는 스키마 enum으로 막는다).
 - chapter_versions(id, user_id, chapter_id, version, path, note, created_at) — 보관된 **이전** 본문들
 - decisions(user_id, project_id, id, text, created_at) — id는 프로젝트별 일련번호 `D{n}`
-- issues(user_id, project_id, id, text, status: open|closed, origin: import_comment|user|agent, chapter_number?, created_at, closed_note?) — id는 프로젝트별 일련번호 `I{n}`
+- issues(user_id, project_id, id, text, status: open|closed, origin: import_comment|user|agent, chapter_number?, created_at, closed_note?, kind: citation|general, ref_key?) — id는 프로젝트별 일련번호 `I{n}`
+  - `kind`: 임포트할 때 코멘트 본문에 "확인 필요", "인용 확인 필요", "서지", "원문 대조"가 들어 있으면(공백 차이는 무시) `citation`, 아니면 `general`이다. 직접 남긴 이슈는 `general`이 기본값이다.
+  - `ref_key`: citation 코멘트에서 뽑은 저자·연도 후보(`daeschler2006`, 한글이면 `갤러2022`). 코멘트 본문에 없으면 앵커 원문에서 찾고, 그래도 없으면 null이다. 4단계에서 refs와 연결하는 자리다. 추출기는 `magus/melchior/citations.py`이고, 4단계 ref_check도 이것을 쓴다.
   - **한 번 준 번호는 절대 재사용하거나 다시 매기지 않는다.** 마지막 번호는 project.json의 `last_decision_id`/`last_issue_id`에 둔다.
 - refs(id, user_id, key, aliases json, bib json, status: unverified|verified, has_fulltext, file_path?, created_at)
   - key는 첫 저자 성(소문자 영문) + 연도다. 예: `daeschler2006`, `galor2022`. 한글 표기(갤러, 다이아몬드 등)는 aliases에 넣는다.
@@ -138,15 +141,22 @@ data/index.sqlite
 ## MCP 도구 (이름 고정)
 
 ### 책 (`magus/book/`)
-- `book_outline(project_id?)` → 제목, 장 목록(번호·제목·상태·글자수·미확인 인용 수), 최근 결정 10개, 열린 미해결, 최근 변경 5개를 돌려준다. **3,000 토큰 이하**로 자른다. 미해결은 예산 안에서 최대한 싣고, 넘치는 건수는 "외 N건"으로 표시한다(장별 미해결은 book_read_chapter 메타에서 볼 수 있다). 모든 원고 작업은 이 도구로 시작한다.
-- `book_read_chapter(number, project_id?)` → JSON을 돌려준다. `content`(본문 markdown만), `title`, `status`, `part_number`, `version`, `last_note`, `unverified_cites`(4단계 전에는 null, 곧 미검사), `open_issues`(그 장의 열린 미해결). *(1단계 검토 반영으로 미리 구현)*
+- `book_outline(project_id?)` → **3,000 토큰 이하**. 모든 원고 작업은 이 도구로 시작한다.
+  - 첫 줄은 `프로젝트: 제목 (id)`다. 프로젝트가 2개 이상이면 안내 줄을 붙인다.
+  - 장 목록은 부 제목 아래에 묶고, 각 줄에는 집계만 싣는다: `제N장 제목 · 상태 · N자 · 미해결 n · 미확인인용 n`. 장별 미해결 수에는 코멘트 유래까지 모두 센다.
+  - 미해결 전문은 origin이 `user`·`agent`인 것만 싣는다. `import_comment`는 `코멘트 유래 미해결 N건 — book_issues로 조회` 한 줄로만 보인다.
+  - 최근 결정 10개, 최근 변경 5개도 싣는다.
+  - 예산 배분 순서는 머리 → 목차 → 직접 남긴 미해결 → 결정 → 변경이다. 넘치는 것은 "외 N건"으로 접는다.
+- `book_issues(status=open|closed|all, chapter_number?, origin?, kind?, limit=50, project_id?)` → 미해결 목록(조회 전용). 한 줄에 `I번호 · 상태 · 장 · origin · kind(→ref_key) · 내용(300자)`를 담는다. limit 최대 200. *(사용자 요청으로 추가된 도구)*
+- `book_read_chapter(number, project_id?)` → JSON을 돌려준다. `content`(본문 markdown만), `title`, `status`, `part_number`, `version`, `last_note`, `unverified_cites`, `open_issues`(그 장의 열린 미해결). *(1단계 검토 반영으로 미리 구현)*
+  - **`unverified_cites`: null = 아직 검사 전(ref_check 전), [] = 검사했고 미확인 인용 없음.** 이 뜻은 read/write 도구 설명에도 한 줄 들어 있다.
 - `book_write_chapter(number, content, note, title?, status?, project_id?)` → content는 본문만 받는다. 이전 본문을 versions/에 저장하고 새 본문을 기록한 뒤 ref_check를 자동 실행하며(4단계), 응답에 미확인 인용 목록을 담는다. 없는 번호면 새 장을 만든다. front matter가 붙어 오면 벗겨 내고 `warnings`에 경고를 넣는다. 빈 본문은 거부한다. *(미리 구현, ref_check 연결만 4단계)*
 - `book_decide(text)` / `book_issue_add(text, chapter_number?)` / `book_issue_close(id, note?)`
 - `book_import(path)` → "제N장"(공백 변형 허용)과 "제N부" 제목으로 원고를 나눈다.
-  - 코멘트는 issues(origin=import_comment)로 넣고, 앵커가 속한 장 번호를 기록한다.
+  - 코멘트는 issues(origin=import_comment)로 넣고, 앵커가 속한 장 번호를 기록한다. `magus/book/comments.py`의 `classify_comment(코멘트, 앵커 원문)`으로 kind와 ref_key 후보를 붙인다.
   - 참고문헌 섹션은 ref_import_bibliography로 넘긴다.
   - 그림·표·수식은 자리표시자(`[그림 N]`, `[표 N]`, `[수식]`)로 남기고, 원본 docx는 original/에 복사한다.
-  - 리포트: 장 수, 분할 못 한 구간, 코멘트→이슈 수, 참고문헌→refs 수, 파싱 실패 줄, `ch-NN.md ↔ 제목` 매핑.
+  - 리포트: 장 수, 부 수, 분할 못 한 구간, 코멘트→이슈 수(**kind별 건수**와 ref_key를 찾은 수), 참고문헌→refs 수, 파싱 실패 줄, `ch-NN.md ↔ 제목` 매핑. 리포트를 낸 뒤 멈추고, 사용자가 매핑을 확인하면 다음 단계로 간다.
 - `book_export(path?)` → md를 합쳐 docx를 만들고 경로를 돌려준다. P0에서는 코멘트와 그림을 복원하지 않는다.
 
 ### 문헌 — Melchior (`magus/melchior/`)
@@ -244,6 +254,9 @@ docs/
 - **트러블슈팅**: 문제상황 / 시도한 것들 / 최종 해결법 / 이력서 소재 한 줄.
 - **par-materials.md**: 항목마다 날짜 / P / A / R / 근거 문서 링크 / 이력서용 한 문장을 적는다. 맨 위에 "사용법" 2줄을 둔다.
 - **커밋**: 컨벤셔널 커밋으로 쓰고, body 첫 줄에 "왜 이 결정을 했는지"를 한 줄로 적는다. 단계를 완료할 때마다 커밋한다.
+- **브랜치·태그**
+  - P0는 `master`에 바로 커밋한다. 단계를 완료하면 태그를 단다(`step1`, `step2`, …).
+  - 파서 실험처럼 되돌릴 가능성이 큰 작업만 브랜치를 쓴다. 끝나면 squash merge한다.
 
 ### 작업 명령어
 

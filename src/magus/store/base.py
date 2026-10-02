@@ -11,6 +11,9 @@ from typing import Literal, Protocol
 
 IssueStatus = Literal["open", "closed"]
 IssueOrigin = Literal["import_comment", "user", "agent"]
+IssueKind = Literal["citation", "general"]
+ChapterStatus = Literal["draft", "revising", "done"]
+CHAPTER_STATUSES: tuple[str, ...] = ("draft", "revising", "done")
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,8 @@ class Issue:
     chapter_number: int | None
     created_at: str
     closed_note: str | None = None
+    kind: IssueKind = "general"
+    ref_key: str | None = None  # kind=citation일 때 코멘트에서 뽑은 저자+연도 후보. 4단계에서 refs와 연결한다.
 
 
 @dataclass(frozen=True)
@@ -99,11 +104,12 @@ class Store(Protocol):
         note: str,
         *,
         title: str | None = None,
-        status: str | None = None,
+        status: ChapterStatus | None = None,
         part_number: int | None = None,
     ) -> ChapterMeta:
         """이전 본문을 versions/에 보관한 뒤 새 본문을 쓴다. 없는 번호면 새 장을 만든다.
-        content는 본문만이다. front matter가 붙어 오면 벗겨 내고, 메타는 인자로만 바꾼다."""
+        content는 본문만이다. front matter가 붙어 오면 벗겨 내고, 메타는 인자로만 바꾼다.
+        status는 CHAPTER_STATUSES 중 하나여야 하고, 빈 본문은 거부한다(ValueError)."""
         ...
     def recent_changes(self, user_id: str, project_id: str, limit: int = 5) -> list[Change]: ...
 
@@ -121,10 +127,22 @@ class Store(Protocol):
         text: str,
         origin: IssueOrigin = "user",
         chapter_number: int | None = None,
+        *,
+        kind: IssueKind = "general",
+        ref_key: str | None = None,
     ) -> Issue: ...
     def list_issues(
-        self, user_id: str, project_id: str, status: IssueStatus | None = "open"
-    ) -> list[Issue]: ...
+        self,
+        user_id: str,
+        project_id: str,
+        status: IssueStatus | None = "open",
+        *,
+        chapter_number: int | None = None,
+        origin: IssueOrigin | None = None,
+        kind: IssueKind | None = None,
+    ) -> list[Issue]:
+        """번호순. status=None이면 전체."""
+        ...
 
     # 인덱스
     def reindex(self) -> None:

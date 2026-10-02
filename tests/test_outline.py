@@ -4,35 +4,59 @@ from magus.book.demo import seed_demo
 from magus.book.outline import TOKEN_BUDGET, build_outline, estimate_tokens
 from magus.store import LocalStore, Part
 
+USER_ISSUES = 12
+AGENT_ISSUES = 4
+
 
 def _big_book(store: LocalStore) -> str:
-    """완료 기준 규모: 35장 8부, 코멘트 이슈 86개, 결정 15개."""
+    """완료 기준 규모: 35장 8부, 코멘트 유래 미해결 86건, 결정 15건. 여기에 직접 남긴 미해결 16건을 더한다."""
     p = store.create_project("alice", "닿으려는 종", project_id="big")
     store.set_parts("alice", p.id, [Part(n, f"{n}부의 제목입니다") for n in range(1, 9)])
     for n in range(1, 36):
         store.write_chapter(
-            "alice", p.id, n, "가" * 9700, "임포트", title=f"제{n}장의 꽤 긴 제목 — 부제까지 붙어 있는 경우", part_number=(n - 1) * 8 // 35 + 1
+            "alice", p.id, n, "가" * 9700, "임포트",
+            title=f"제{n}장의 꽤 긴 제목 — 부제까지 붙어 있는 경우", part_number=(n - 1) * 8 // 35 + 1,
         )
     for n in range(15):
         store.add_decision("alice", p.id, f"결정 {n}: " + "문장은 짧게 끊고 각 장은 장면으로 연다. " * 3)
     for n in range(86):
         store.add_issue(
             "alice", p.id, f"확인 필요: 이 인용의 원문 쪽수와 연도를 대조할 것 ({n}) " * 3,
-            origin="import_comment", chapter_number=n % 35 + 1,
+            origin="import_comment", chapter_number=n % 35 + 1, kind="citation",
+        )
+    for n in range(USER_ISSUES):
+        store.add_issue(
+            "alice", p.id, f"사용자 미해결 {n}: 이 장의 논지가 앞 장과 겹치는지 다시 읽고 판단해야 한다. " * 2,
+            chapter_number=n + 1,
+        )
+    for n in range(AGENT_ISSUES):
+        store.add_issue(
+            "alice", p.id, f"에이전트 미해결 {n}: 4부와 5부 사이 연결 문단이 비어 있어 초안이 필요하다. " * 2,
+            origin="agent",
         )
     return p.id
 
 
-def test_outline_fits_budget_at_full_book_scale(store: LocalStore):
+def test_outline_fits_budget_and_lists_every_direct_issue(store: LocalStore):
     project_id = _big_book(store)
     text = build_outline(store, "alice", project_id)
     assert estimate_tokens(text) <= TOKEN_BUDGET
+    # 목차: 35장 모두, 집계만 담은 줄. 장별 미해결 수에는 코멘트 유래도 들어간다(1장: 코멘트 3 + 사용자 1).
+    first = next(line for line in text.splitlines() if line.startswith("- 제1장 "))
+    assert first.endswith("… · draft · 9,700자 · 미해결 4 · 미확인인용 0")  # 제목은 24자로 자른다
     for n in range(1, 36):
-        assert f"\n- {n}. " in text  # 목차는 자르지 않는다
+        assert f"\n- 제{n}장 " in text
     assert text.count("### 제") == 8
-    assert "D15" in text and "D5 " not in text  # 최근 결정 10개 (D6~D15)
-    assert "## 열린 미해결 (86)" in text and "외 " in text
-    assert "## 최근 변경" in text
+    # 직접 남긴 미해결은 전부, 코멘트 유래는 건수 한 줄만.
+    for n in range(USER_ISSUES):
+        assert f"사용자 미해결 {n}:" in text
+    for n in range(AGENT_ISSUES):
+        assert f"에이전트 미해결 {n}:" in text
+    assert "- 코멘트 유래 미해결 86건 — book_issues로 조회" in text
+    assert "원문 쪽수와 연도를 대조할 것" not in text
+    assert "외 " not in text.split("## 열린 미해결")[1].split("## 최근 변경")[0]
+    # 남는 예산은 결정과 변경에 간다. 가장 최근 것은 반드시 실린다.
+    assert "- D15 " in text and "- 35장 v1 " in text
 
 
 def test_outline_demo(store: LocalStore):
@@ -42,8 +66,11 @@ def test_outline_demo(store: LocalStore):
     assert text.splitlines()[0] == "프로젝트: 데모: 물에서 뭍으로 (demo)"
     assert "프로젝트는" not in text  # 프로젝트가 하나면 안내 줄 없음
     assert "### 제1부 물가" in text and "### 제2부 뭍" in text
+    assert "- 제1장 물가의 망설임 · draft · 68자 · 미해결 1 · 미확인인용 0" in text
     assert "2장 v2" in text and "2장 끝에 한 문장 추가" in text
-    assert "I1 · 1장 · 코멘트 · Daeschler 2006 원문 확인 필요" in text
+    assert "- 코멘트 유래 미해결 1건 — book_issues로 조회" in text
+    assert "Daeschler 2006 원문 확인 필요" not in text
+    assert "I2 · 3장 · 3장 폐의 기원 출처 찾기" in text and "I3 · 2부 제목 후보 더 생각하기" in text
     assert "D2" in text
 
 

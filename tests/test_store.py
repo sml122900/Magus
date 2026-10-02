@@ -26,7 +26,9 @@ def project(store: LocalStore):
     store.write_chapter("alice", p.id, 1, "첫 본문", "초안", title="첫 장", part_number=1)
     store.write_chapter("alice", p.id, 1, "고친 본문\n\n둘째 문단", "둘째 문단 추가")
     store.add_decision("alice", p.id, "장마다 장면으로 연다.")
-    store.add_issue("alice", p.id, "여러 줄\n코멘트", origin="import_comment", chapter_number=1)
+    store.add_issue(
+        "alice", p.id, "여러 줄\n코멘트", origin="import_comment", chapter_number=1, kind="citation", ref_key="clack2012"
+    )
     store.add_issue("alice", p.id, "전체 이슈")
     return p
 
@@ -41,6 +43,7 @@ def test_files_are_the_source(store: LocalStore, project, data_dir: Path):
     assert "## D1 · " in (pdir / "decisions.md").read_text(encoding="utf-8")
     issues_md = (pdir / "issues.md").read_text(encoding="utf-8")
     assert "## I1 · open" in issues_md and "- origin: import_comment" in issues_md and "- chapter: 1" in issues_md
+    assert "- kind: citation" in issues_md and "- ref_key: clack2012" in issues_md and "- kind: general" in issues_md
 
 
 def test_write_keeps_meta_and_versions(store: LocalStore, project):
@@ -60,10 +63,29 @@ def test_caller_front_matter_is_ignored(store: LocalStore, project, data_dir: Pa
 
 def test_issue_text_roundtrips_multiline(store: LocalStore, project):
     issues = store.list_issues("alice", project.id)
-    assert [(i.id, i.text, i.chapter_number, i.origin) for i in issues] == [
-        (1, "여러 줄\n코멘트", 1, "import_comment"),
-        (2, "전체 이슈", None, "user"),
+    assert [(i.id, i.text, i.chapter_number, i.origin, i.kind, i.ref_key) for i in issues] == [
+        (1, "여러 줄\n코멘트", 1, "import_comment", "citation", "clack2012"),
+        (2, "전체 이슈", None, "user", "general", None),
     ]
+
+
+def test_list_issues_filters(store: LocalStore, project):
+    store.add_issue("alice", project.id, "에이전트 메모", origin="agent", chapter_number=1)
+    ids = lambda **kw: [i.id for i in store.list_issues("alice", project.id, **kw)]  # noqa: E731
+    assert ids(chapter_number=1) == [1, 3]
+    assert ids(origin="agent") == [3]
+    assert ids(kind="citation") == [1]
+    assert ids(kind="general", chapter_number=1) == [3]
+    assert ids(status="closed") == []
+
+
+def test_write_rejects_bad_status_and_empty_body(store: LocalStore, project):
+    with pytest.raises(ValueError, match="draft"):
+        store.write_chapter("alice", project.id, 1, "본문", "x", status="final")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="비어"):
+        store.write_chapter("alice", project.id, 1, "---\ntitle: x\n---\n  ", "x")
+    meta = store.write_chapter("alice", project.id, 1, "본문", "고치는 중", status="revising")
+    assert (meta.status, meta.version) == ("revising", 3)
 
 
 def test_reindex_rebuilds_same_index(store: LocalStore, project):

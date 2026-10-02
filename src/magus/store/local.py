@@ -22,11 +22,14 @@ from typing import Any, TypeVar
 from magus.ids import safe_id, utcnow
 from magus.store import formats
 from magus.store.base import (
+    CHAPTER_STATUSES,
     Change,
     Chapter,
     ChapterMeta,
+    ChapterStatus,
     Decision,
     Issue,
+    IssueKind,
     IssueOrigin,
     IssueStatus,
     Part,
@@ -164,13 +167,17 @@ class LocalStore:
         note: str,
         *,
         title: str | None = None,
-        status: str | None = None,
+        status: ChapterStatus | None = None,
         part_number: int | None = None,
     ) -> ChapterMeta:
         if number < 0:
             raise ValueError("장 번호는 0 이상")
+        if status is not None and status not in CHAPTER_STATUSES:
+            raise ValueError(f"status={status!r}: {'|'.join(CHAPTER_STATUSES)} 중 하나")
         # 메타는 서버가 관리한다. 호출자가 front matter를 붙여 보내도 버리고 본문만 쓴다.
         content, _ = formats.strip_front_matter(content)
+        if not content:
+            raise ValueError("본문이 비어 있다")
         pdir = self._require_project(user_id, project_id)
         path = pdir / "book" / f"ch-{number:02d}.md"
         old: dict[str, str] | None = None
@@ -249,6 +256,9 @@ class LocalStore:
         text: str,
         origin: IssueOrigin = "user",
         chapter_number: int | None = None,
+        *,
+        kind: IssueKind = "general",
+        ref_key: str | None = None,
     ) -> Issue:
         if not text.strip():
             raise ValueError("미해결 내용이 비어 있다")
@@ -261,6 +271,8 @@ class LocalStore:
             origin=origin,
             chapter_number=chapter_number,
             created_at=utcnow(),
+            kind=kind,
+            ref_key=ref_key,
         )
         _write_text(path, formats.dump_issues([*issues, issue]))
         with self._db:
@@ -270,14 +282,25 @@ class LocalStore:
 
     @_locked
     def list_issues(
-        self, user_id: str, project_id: str, status: IssueStatus | None = "open"
+        self,
+        user_id: str,
+        project_id: str,
+        status: IssueStatus | None = "open",
+        *,
+        chapter_number: int | None = None,
+        origin: IssueOrigin | None = None,
+        kind: IssueKind | None = None,
     ) -> list[Issue]:
         sql, args = "SELECT * FROM issues WHERE user_id = ? AND project_id = ?", [user_id, project_id]
-        if status:
-            sql, args = sql + " AND status = ?", [*args, status]
+        for column, value in (("status", status), ("chapter_number", chapter_number), ("origin", origin), ("kind", kind)):
+            if value is not None:
+                sql, args = sql + f" AND {column} = ?", [*args, value]
         rows = self._db.execute(sql + " ORDER BY id", args)
         return [
-            Issue(r["id"], r["text"], r["status"], r["origin"], r["chapter_number"], r["created_at"], r["closed_note"])
+            Issue(
+                r["id"], r["text"], r["status"], r["origin"], r["chapter_number"], r["created_at"], r["closed_note"],
+                r["kind"], r["ref_key"],
+            )
             for r in rows
         ]
 
@@ -406,10 +429,11 @@ class LocalStore:
     def _index_issues(self, user_id: str, project_id: str, issues: list[Issue]) -> None:
         self._db.executemany(
             "INSERT OR REPLACE INTO issues "
-            "(user_id, project_id, id, text, status, origin, chapter_number, created_at, closed_note) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(user_id, project_id, id, text, status, origin, chapter_number, created_at, closed_note, kind, ref_key) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
-                (user_id, project_id, i.id, i.text, i.status, i.origin, i.chapter_number, i.created_at, i.closed_note)
+                (user_id, project_id, i.id, i.text, i.status, i.origin, i.chapter_number, i.created_at, i.closed_note,
+                 i.kind, i.ref_key)
                 for i in issues
             ],
         )

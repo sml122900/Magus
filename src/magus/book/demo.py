@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from magus.book.comments import classify_comment
 from magus.store import Part, Project, Store
 
 DEMO_PROJECT_ID = "demo"
@@ -29,7 +30,11 @@ def seed_demo(store: Store, user_id: str) -> tuple[Project, bool]:
     )
     store.add_decision(user_id, project.id, "각 장은 하나의 생물 장면으로 연다.")
     store.add_decision(user_id, project.id, "학명은 처음 나올 때만 괄호 병기.")
-    store.add_issue(user_id, project.id, "Daeschler 2006 원문 확인 필요", origin="import_comment", chapter_number=1)
+    comment = "Daeschler 2006 원문 확인 필요"
+    kind, ref_key = classify_comment(comment)
+    store.add_issue(
+        user_id, project.id, comment, origin="import_comment", chapter_number=1, kind=kind, ref_key=ref_key
+    )
     store.add_issue(user_id, project.id, "3장 폐의 기원 출처 찾기", chapter_number=3)
     store.add_issue(user_id, project.id, "2부 제목 후보 더 생각하기")
     return store.get_project(user_id, project.id) or project, True
