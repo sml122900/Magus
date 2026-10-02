@@ -28,5 +28,5 @@ async def test_stdio_subprocess(data_dir: Path):
         assert client.server_info.name == "Magus"
         result = await client.call_tool("book_outline", {})
         text = "".join(block.text for block in result.content)
-        assert text.startswith("# 데모: 물에서 뭍으로")
+        assert text.startswith("프로젝트: 데모: 물에서 뭍으로 (demo)")
         assert "물가의 망설임" in text

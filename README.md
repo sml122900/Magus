@@ -16,6 +16,24 @@ uv sync
 uv run pytest
 ```
 
+### uv가 PATH에 없을 때
+
+`pip install --user uv`로 설치하면 uv.exe가 PATH에 없는 user Scripts 폴더에 놓입니다. 이때는 전체 경로로 실행하세요.
+
+```powershell
+# PowerShell
+& "$env:APPDATA\Python\Python313\Scripts\uv.exe" sync
+& "$env:APPDATA\Python\Python313\Scripts\uv.exe" run pytest
+```
+
+```bash
+# Git Bash
+UV=~/AppData/Roaming/Python/Python313/Scripts/uv.exe
+$UV sync && $UV run pytest
+```
+
+uv는 설치와 테스트에만 씁니다. 서버는 `uv sync`로 만들어진 `.venv\Scripts\magus.exe`를 직접 실행하므로, Claude Desktop 설정에는 uv가 필요 없습니다.
+
 ## Claude Desktop 연결
 
 Claude Desktop에서 **설정 → 개발자 → 구성 편집**을 누르면 `claude_desktop_config.json`이 열립니다.

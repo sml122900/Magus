@@ -1,7 +1,7 @@
 """SQLite 인덱스 스키마. 인덱스는 언제든 원본 파일에서 다시 만들 수 있으므로,
 스키마가 바뀌면 SCHEMA_VERSION을 올린다. 그러면 LocalStore가 인덱스를 지우고 다시 만든다."""
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # 지울 때는 역순으로 지운다. chunks_fts는 가상 테이블이다(그림자 테이블도 함께 지워진다).
 TABLES = (
@@ -49,12 +49,12 @@ CREATE TABLE chapters (
     number                 INTEGER NOT NULL,
     title                  TEXT NOT NULL,
     status                 TEXT NOT NULL,
-    part                   INTEGER,
+    part_number            INTEGER,
     path                   TEXT NOT NULL,
     char_count             INTEGER NOT NULL,
     unverified_cite_count  INTEGER NOT NULL DEFAULT 0,
     version                INTEGER NOT NULL,
-    note                   TEXT NOT NULL DEFAULT '',
+    last_note              TEXT NOT NULL DEFAULT '',
     updated_at             TEXT NOT NULL,
     UNIQUE (user_id, project_id, number)
 );

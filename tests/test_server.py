@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import dataclasses
+import json
+from pathlib import Path
 
 import pytest
 from mcp import Client
 
 from magus.book.demo import seed_demo
+from magus.book.tools import FRONT_MATTER_WARNING
 from magus.config import Settings
-from magus.instructions import INSTRUCTIONS
+from magus.instructions import build_instructions, required_tools
 from magus.server import build_server
 from magus.store import LocalStore
 
@@ -19,12 +22,18 @@ def _text(result) -> str:
     return "".join(block.text for block in result.content)
 
 
+async def _call(client: Client, name: str, args: dict) -> dict:
+    return json.loads(_text(await client.call_tool(name, args)))
+
+
 async def test_server_identity_and_tools(settings: Settings, store: LocalStore):
     async with Client(build_server(settings, store)) as client:
         assert client.server_info.name == "Magus"
-        assert client.instructions == INSTRUCTIONS
         names = {t.name for t in (await client.list_tools()).tools}
-        assert "book_outline" in names
+        assert {"book_outline", "book_read_chapter", "book_write_chapter"} <= names
+        # instructions는 등록된 도구로 조립되고, 등록되지 않은 도구를 언급하지 않는다.
+        assert client.instructions == build_instructions(names)
+        assert required_tools(client.instructions) <= names
 
 
 async def test_book_outline_tool(settings: Settings, store: LocalStore):
@@ -33,8 +42,63 @@ async def test_book_outline_tool(settings: Settings, store: LocalStore):
         result = await client.call_tool("book_outline", {})
         assert result.structured_content is None  # 텍스트만 돌려준다(중복 없이)
         text = _text(result)
-        assert text.startswith("# 데모: 물에서 뭍으로")
+        assert text.startswith("프로젝트: 데모: 물에서 뭍으로 (demo)")
         assert _text(await client.call_tool("book_outline", {"project_id": "demo"})) == text
+
+
+async def test_read_returns_body_and_meta_separately(settings: Settings, store: LocalStore):
+    seed_demo(store, settings.user_id)
+    async with Client(build_server(settings, store)) as client:
+        ch = await _call(client, "book_read_chapter", {"number": 2})
+        assert ch["content"] == "아가미덮개가 사라지고 목이 생겼다. Clack(2012)은 이 변화를 길게 다룬다.\n\n목은 머리를 돌리는 자유였다."
+        assert "---" not in ch["content"] and "version:" not in ch["content"]
+        assert (ch["title"], ch["status"], ch["part_number"], ch["version"]) == ("목이 생긴 날", "draft", 1, 2)
+        assert ch["last_note"] == "2장 끝에 한 문장 추가"
+        assert ch["unverified_cites"] is None  # 4단계 전에는 미검사
+        assert (await _call(client, "book_read_chapter", {"number": 1}))["open_issues"] == ["I1 Daeschler 2006 원문 확인 필요"]
+        missing = await client.call_tool("book_read_chapter", {"number": 99})
+        assert missing.is_error and "있는 장: 1, 2, 3, 4, 5" in missing.content[0].text
+
+
+async def test_read_then_write_same_body_only_bumps_version(settings: Settings, store: LocalStore):
+    seed_demo(store, settings.user_id)
+    async with Client(build_server(settings, store)) as client:
+        before = await _call(client, "book_read_chapter", {"number": 2})
+        written = await _call(
+            client, "book_write_chapter", {"number": 2, "content": before["content"], "note": "그대로 저장"}
+        )
+        assert written["warnings"] == [] and written["version"] == 3 and written["archived_version"] == 2
+        after = await _call(client, "book_read_chapter", {"number": 2})
+        assert after["content"] == before["content"]
+        assert after["version"] == before["version"] + 1
+        for key in ("title", "status", "part_number", "char_count"):
+            assert after[key] == before[key]
+        assert after["last_note"] == "그대로 저장"
+
+
+async def test_write_with_front_matter_keeps_server_meta(settings: Settings, store: LocalStore, data_dir: Path):
+    seed_demo(store, settings.user_id)
+    injected = "---\ntitle: 바꿔치기\nstatus: done\nversion: 99\npart_number: 7\n---\n\n새 본문"
+    async with Client(build_server(settings, store)) as client:
+        written = await _call(client, "book_write_chapter", {"number": 3, "content": injected, "note": "메타 주입"})
+        assert written["warnings"] == [FRONT_MATTER_WARNING]
+        after = await _call(client, "book_read_chapter", {"number": 3})
+        assert after["content"] == "새 본문"
+        assert (after["title"], after["status"], after["part_number"], after["version"]) == ("숨의 경제학", "draft", 1, 2)
+    raw = (data_dir / "users/alice/projects/demo/book/ch-03.md").read_text(encoding="utf-8")
+    assert raw.count("---") == 2 and "바꿔치기" not in raw
+
+
+async def test_write_creates_new_chapter_with_title(settings: Settings, store: LocalStore):
+    seed_demo(store, settings.user_id)
+    async with Client(build_server(settings, store)) as client:
+        written = await _call(
+            client, "book_write_chapter", {"number": 6, "content": "새 장 본문", "note": "신규", "title": "다시 물로"}
+        )
+        assert (written["title"], written["version"], written["archived_version"]) == ("다시 물로", 1, None)
+        assert "- 6. 다시 물로" in _text(await client.call_tool("book_outline", {}))
+        empty = await client.call_tool("book_write_chapter", {"number": 6, "content": "---\ntitle: x\n---\n", "note": "빈"})
+        assert empty.is_error
 
 
 async def test_other_user_gets_empty_result(settings: Settings, store: LocalStore):
@@ -43,3 +107,6 @@ async def test_other_user_gets_empty_result(settings: Settings, store: LocalStor
     async with Client(build_server(bob, store)) as client:
         assert "프로젝트가 없습니다" in _text(await client.call_tool("book_outline", {}))
         assert "없습니다" in _text(await client.call_tool("book_outline", {"project_id": "demo"}))
+        assert (await client.call_tool("book_read_chapter", {"number": 1})).is_error
+        assert (await client.call_tool("book_read_chapter", {"number": 1, "project_id": "demo"})).is_error
+        assert (await client.call_tool("book_write_chapter", {"number": 1, "content": "x", "note": "y", "project_id": "demo"})).is_error

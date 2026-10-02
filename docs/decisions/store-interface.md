@@ -22,6 +22,7 @@
   - 모든 테이블에 `user_id` 열이 있고, 모든 쿼리를 `user_id`로 필터한다.
   - 공개 메서드는 `RLock`으로 감쌌고, SQLite는 `check_same_thread=False`로 연다.
   - 결정·미해결 번호(`D3`, `I3`)는 파일에 적힌다. 재생성해도 사용자가 보던 번호가 바뀌지 않는다.
+  - **한 번 준 번호는 다시 쓰지 않는다**(1단계 검토 반영). 마지막 번호를 `project.json`의 `last_decision_id`/`last_issue_id`에 남긴다. 그래서 사람이 md에서 마지막 항목을 지워도 다음 번호가 앞당겨지지 않는다. 새 번호는 max(기록된 마지막 번호, 파일의 최대 번호) + 1이다.
 - 비교한 대안
   - **SQLite를 원본으로 두고 파일로 내보내기**: 사람이 파일을 고치면 반영할 경로가 없다. 원칙("원본은 파일")에도 어긋난다.
   - **파일만 쓰고 인덱스 없음**: 장 목록 정도는 충분하다. 하지만 FTS5 검색과 벡터 BLOB을 붙일 곳이 없다.
@@ -29,11 +30,12 @@
 
 ## Result
 
-- 테스트 24개가 모두 통과한다(`uv run pytest`). 이 결정을 직접 검증하는 테스트:
+- 테스트가 모두 통과한다(`uv run pytest`, 1단계 검토 반영 후 35개). 이 결정을 직접 검증하는 테스트:
   - `test_reindex_rebuilds_same_index`: reindex 전후로 프로젝트·부·장·결정·미해결·변경 이력 스냅샷이 같다.
   - `test_index_recreated_when_schema_version_changes`: 인덱스 행을 지우고 user_version을 바꾼 뒤 다시 열면, 파일에서 원래 상태로 복구된다.
   - `test_other_user_sees_nothing`: 다른 user_id로는 조회 결과가 비고, 쓰기는 거부된다.
   - `test_files_are_the_source`: 장, 이전 버전, decisions.md, issues.md가 사람이 읽을 수 있는 형태로 디스크에 있다.
+  - `test_numbers_are_never_reused`: md에서 I3·D2를 지운 뒤 새로 추가하면 I4·D3이 나오고, reindex 뒤에도 [1, 2, 4]가 유지된다.
 - 한계: 결정·미해결 번호 매기기는 프로세스 안의 락에만 보호된다. CLI와 서버가 동시에 쓰면 번호가 충돌할 수 있다(P0에서는 허용).
 
 > 대안을 버린 이유: SQLite를 원본으로 두면 사람이 고친 파일이 반영되지 않고, 인덱스가 없으면 검색을 붙일 곳이 없다. 그래서 "파일이 원본, SQLite는 버려도 되는 인덱스"로 정했다.

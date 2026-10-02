@@ -4,9 +4,9 @@
 
 ## 진행상황
 
-- 현재 단계: 1단계(뼈대) 완료. 2단계(book_import)는 아직 시작하지 않았다.
-- 다음 할 일: fixtures가 들어오면 docx 구조를 조사한 뒤 book_import를 구현한다.
-- 대기 사항: fixtures 투입과 Claude Desktop 연결 확인(사용자). 상세는 status.md에만 적는다.
+- 현재 단계: 1단계 완료와 검토 반영(수정 1·2)이 끝났다. book_read/write는 미리 들어왔다. 2단계는 fixtures를 기다리는 중이다.
+- 다음 할 일: fixtures가 들어오면 docx 구조를 조사하고 book_import를 구현한다. 리포트와 매핑표를 낸 뒤 멈추고 사용자 확인을 기다린다.
+- 대기 사항: fixtures 투입, Desktop 재시작 후 연결 확인(사용자). 상세는 status.md에만 적는다.
 
 ## 개요
 
@@ -54,15 +54,19 @@
 
 ## 스택
 
-- Python 3.12, uv, pytest. (uv 위치: `%APPDATA%\Python\Python313\Scripts\uv.exe`, PATH에 없음)
-- MCP 공식 Python SDK **2.x** (`mcp>=2.2`). 1.x와 API가 다르다.
-  - `from mcp.server.mcpserver import MCPServer` (`FastMCP`는 없어졌다). `MCPServer(name=, instructions=)`, `@server.tool(name=, description=)`.
+- Python 3.12, uv, pytest. (uv 위치: `%APPDATA%\Python\Python313\Scripts\uv.exe`, PATH에 없음. 이 경로를 그대로 쓰기로 했다. README "uv가 PATH에 없을 때")
+- MCP 공식 Python SDK **2.x** (`mcp>=2.2`, 2.2.0 기준으로 진행). 1.x와 API가 다르다.
+  - `from mcp.server.mcpserver import MCPServer` (`FastMCP`는 없어졌다).
+  - instructions는 생성자에서만 받는다. 그래서 `Tool.from_function(fn, name=, description=, structured_output=False)`로 도구 목록을 먼저 만들고, `MCPServer(name=, instructions=, tools=)`로 서버를 만든다.
+  - JSON을 돌려주는 도구도 `structured_output=False`로 두고 텍스트 한 블록에 담는다. `structuredContent`에 같은 내용이 중복되는 것을 막기 위해서다.
+  - 예상한 실패는 `mcp.server.mcpserver.exceptions.ToolError`로 올린다. 그러면 결과가 `is_error=True`가 되고 메시지가 모델에 전달된다.
+  - Bash 도구의 heredoc에서는 `\\`가 `\`로 줄어든다. 백슬래시가 들어간 소스는 Edit/Write 도구로 고친다(`docs/troubleshooting/bash-heredoc-backslash.md`).
   - `server.run("stdio")` / `server.run("streamable-http", host=, port=)`.
   - 동기 도구 함수는 워커 스레드에서 실행된다 → `LocalStore`는 `check_same_thread=False` + RLock을 쓴다.
   - 테스트: `async with mcp.Client(server) as c: await c.call_tool(...)`로 in-process 연결. `c.instructions`로 instructions를 확인한다.
 - SQLite + FTS5(키워드 검색). 벡터는 BLOB으로 저장하고 브루트포스 코사인으로 계산한다(P0 규모인 수만 청크까지 충분하다). 키워드와 벡터 결과는 RRF로 합친다. 한국어 고유명사와 학자 이름 때문에 키워드 검색은 뺄 수 없다.
   - 한국어 토큰화(2글자 이름 "갤러", "헨릭"): trigram은 3글자 미만을 못 찾는다. 4단계에서 결정한다(후보: 한글 어절은 문자 bigram, 나머지는 단어 단위로 사전 토큰화한 뒤 FTS5 unicode61에 넣기).
-- docx 읽기: python-docx + `word/comments.xml` 직접 파싱(코멘트와 앵커 위치). 대안은 mammoth. docx 쓰기: pandoc(md→docx), 시스템에 pandoc이 없으면 `pypandoc_binary`를 쓴다.
+- docx 읽기: python-docx + `word/comments.xml` 직접 파싱(코멘트와 앵커 위치). 대안은 mammoth. docx 쓰기: pandoc(md→docx). 이 PC에는 pandoc이 없으므로 `pypandoc_binary`(pandoc 내장 휠)를 쓰기로 확정했다.
 - PDF 텍스트: pymupdf. docx가 없을 때 폴백으로 원고 PDF도 받는다. 이때 코멘트는 `메모 포함[C` 패턴으로 추출한다.
 - 임베딩: 다국어 모델(Voyage 또는 OpenAI 계열). 제공자는 환경변수로 바꾼다.
 
@@ -78,11 +82,12 @@
 ## 데이터 모델 (모든 테이블에 user_id가 있다)
 
 - users(id), projects(id, user_id, title)
-- parts(user_id, project_id, number, title) — *추가*: 완료 기준의 "부 8개"를 위해 둔다.
-- chapters(id, user_id, project_id, number, title, status, part, path, char_count, unverified_cite_count, version, note, updated_at)
+- parts(user_id, project_id, number, title) — *추가(승인됨)*: 완료 기준의 "부 8개"를 위해 둔다. book_outline은 부 제목 아래에 장을 묶어 보여 준다.
+- chapters(id, user_id, project_id, number, title, status, part_number, path, char_count, unverified_cite_count, version, last_note, updated_at)
 - chapter_versions(id, user_id, chapter_id, version, path, note, created_at) — 보관된 **이전** 본문들
 - decisions(user_id, project_id, id, text, created_at) — id는 프로젝트별 일련번호 `D{n}`
 - issues(user_id, project_id, id, text, status: open|closed, origin: import_comment|user|agent, chapter_number?, created_at, closed_note?) — id는 프로젝트별 일련번호 `I{n}`
+  - **한 번 준 번호는 절대 재사용하거나 다시 매기지 않는다.** 마지막 번호는 project.json의 `last_decision_id`/`last_issue_id`에 둔다.
 - refs(id, user_id, key, aliases json, bib json, status: unverified|verified, has_fulltext, file_path?, created_at)
   - key는 첫 저자 성(소문자 영문) + 연도다. 예: `daeschler2006`, `galor2022`. 한글 표기(갤러, 다이아몬드 등)는 aliases에 넣는다.
 - ref_passages(id, user_id, ref_id, text, reason, locator?)
@@ -96,7 +101,7 @@
 data/users/<user_id>/shelf/casper/<id>.json                       # ideas
 data/users/<user_id>/shelf/melchior/<key>/{bib.json, passages.json, full.txt}
 data/users/<user_id>/shelf/balthasar/<id>.json                    # style
-data/users/<user_id>/projects/<project_id>/project.json           # title, created_at, parts
+data/users/<user_id>/projects/<project_id>/project.json           # title, created_at, parts, last_*_id
 data/users/<user_id>/projects/<project_id>/book/ch-01.md … ch-35.md
 data/users/<user_id>/projects/<project_id>/{decisions.md, issues.md, versions/, original/}
 data/index.sqlite
@@ -105,15 +110,16 @@ data/index.sqlite
 ### 파일 형식
 
 - `ch-NN.md`: 앞머리(front matter) 다음에 본문이 온다. 장 제목은 앞머리에만 두고 본문에는 넣지 않는다(export할 때 `# 제N장 제목`을 붙인다).
-  - **메타는 서버가 관리하고, 도구는 본문만 주고받는다.** 호출자가 앞머리를 붙여 보내도 서버가 버린다(`docs/decisions/front-matter-boundary.md`).
+  - **앞머리(front matter)는 도구 경계를 넘지 않는다.** 메타는 서버가 관리한다. 읽기는 본문(content)과 메타 필드를 따로 주고, 쓰기는 본문만 받는다. 호출자가 앞머리를 붙여 보내면 벗겨 내고 응답 warnings에 경고를 넣는다(`docs/decisions/front-matter-boundary.md`).
+  - 앞머리에는 **현재 상태만** 둔다. 이력은 versions/에만 남긴다.
   ```
   ---
   title: 물고기의 결심
   status: draft
-  part: 1
+  part_number: 1
   version: 3
   updated_at: 2026-10-03T02:40:00.123Z
-  note: 2절 도입부 재작성
+  last_note: 2절 도입부 재작성
   ---
 
   본문…
@@ -125,15 +131,16 @@ data/index.sqlite
 ### 규칙
 
 - **현재 프로젝트**: 도구에 project_id가 없으면 그 사용자의 가장 최근에 갱신된 프로젝트를 쓴다.
-- **최근 변경**은 현재 장 머리(version·note)와 chapter_versions를 합쳐 시각 내림차순으로 정렬한 것이다.
+  - 그래서 book_outline 응답 첫 줄에는 항상 `프로젝트: <제목> (<id>)`를 쓴다. 사용자에게 프로젝트가 2개 이상이면 그 사실과 다른 프로젝트 목록을 한 줄 덧붙인다.
+- **최근 변경**은 현재 장 머리(version·last_note)와 chapter_versions를 합쳐 시각 내림차순으로 정렬한 것이다.
 - 장 파일을 사람이 직접 고쳤다면 `magus reindex`로 인덱스를 갱신한다.
 
 ## MCP 도구 (이름 고정)
 
 ### 책 (`magus/book/`)
 - `book_outline(project_id?)` → 제목, 장 목록(번호·제목·상태·글자수·미확인 인용 수), 최근 결정 10개, 열린 미해결, 최근 변경 5개를 돌려준다. **3,000 토큰 이하**로 자른다. 미해결은 예산 안에서 최대한 싣고, 넘치는 건수는 "외 N건"으로 표시한다(장별 미해결은 book_read_chapter 메타에서 볼 수 있다). 모든 원고 작업은 이 도구로 시작한다.
-- `book_read_chapter(number)` → markdown 본문과 메타(버전, 미확인 인용 목록, 그 장의 열린 미해결).
-- `book_write_chapter(number, content, note)` → 이전 본문을 versions/에 저장하고 새 본문을 기록한 뒤 ref_check를 자동 실행한다. 응답에 미확인 인용 목록을 담는다. 없는 번호면 새 장을 만든다.
+- `book_read_chapter(number, project_id?)` → JSON을 돌려준다. `content`(본문 markdown만), `title`, `status`, `part_number`, `version`, `last_note`, `unverified_cites`(4단계 전에는 null, 곧 미검사), `open_issues`(그 장의 열린 미해결). *(1단계 검토 반영으로 미리 구현)*
+- `book_write_chapter(number, content, note, title?, status?, project_id?)` → content는 본문만 받는다. 이전 본문을 versions/에 저장하고 새 본문을 기록한 뒤 ref_check를 자동 실행하며(4단계), 응답에 미확인 인용 목록을 담는다. 없는 번호면 새 장을 만든다. front matter가 붙어 오면 벗겨 내고 `warnings`에 경고를 넣는다. 빈 본문은 거부한다. *(미리 구현, ref_check 연결만 4단계)*
 - `book_decide(text)` / `book_issue_add(text, chapter_number?)` / `book_issue_close(id, note?)`
 - `book_import(path)` → "제N장"(공백 변형 허용)과 "제N부" 제목으로 원고를 나눈다.
   - 코멘트는 issues(origin=import_comment)로 넣고, 앵커가 속한 장 번호를 기록한다.
@@ -162,7 +169,9 @@ data/index.sqlite
 
 ## 서버 instructions
 
-6절 문구는 `src/magus/instructions.py`에 **그대로** 들어 있다. 고치지 않는다.
+6절의 규칙 문장은 `src/magus/instructions.py`의 `RULES`에 **원문 그대로** 들어 있다. 고치지 않는다.
+- **instructions는 등록된 도구만 언급한다.** `build_instructions(등록된 도구 이름)`은 규칙 문장에 나오는 도구(`book_|ref_|idea_|style_` 이름)가 모두 등록된 규칙만 넣고, 번호는 다시 매긴다. 도구가 모두 등록되면 6절 원문과 똑같아진다(`tests/test_instructions.py`).
+- 새 도구를 추가하면 그 도구가 필요한 규칙이 자동으로 instructions에 들어간다. 따로 손댈 것은 없다.
 
 ## 작업 순서 (단계마다 pytest 통과 + Claude Desktop 확인 방법을 보고한다)
 

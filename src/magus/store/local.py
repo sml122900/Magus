@@ -14,7 +14,7 @@ import secrets
 import shutil
 import sqlite3
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
@@ -23,6 +23,7 @@ from magus.ids import safe_id, utcnow
 from magus.store import formats
 from magus.store.base import (
     Change,
+    Chapter,
     ChapterMeta,
     Decision,
     Issue,
@@ -105,9 +106,14 @@ class LocalStore:
         if project_id:
             sql, args = sql + " AND id = ?", [*args, project_id]
         row = self._db.execute(sql + " ORDER BY updated_at DESC, created_at DESC LIMIT 1", args).fetchone()
-        if not row:
-            return None
-        return Project(row["id"], row["user_id"], row["title"], row["created_at"], row["updated_at"])
+        return _project(row) if row else None
+
+    @_locked
+    def list_projects(self, user_id: str) -> list[Project]:
+        rows = self._db.execute(
+            "SELECT * FROM projects WHERE user_id = ? ORDER BY updated_at DESC, created_at DESC", (user_id,)
+        )
+        return [_project(r) for r in rows]
 
     @_locked
     def set_parts(self, user_id: str, project_id: str, parts: list[Part]) -> None:
@@ -138,6 +144,17 @@ class LocalStore:
         return [_chapter_meta(r) for r in rows]
 
     @_locked
+    def read_chapter(self, user_id: str, project_id: str, number: int) -> Chapter | None:
+        row = self._db.execute(
+            "SELECT * FROM chapters WHERE user_id = ? AND project_id = ? AND number = ?",
+            (user_id, project_id, number),
+        ).fetchone()
+        if not row:
+            return None
+        _, body = formats.parse_chapter((self.root / row["path"]).read_text(encoding="utf-8"))
+        return Chapter(_chapter_meta(row), body)
+
+    @_locked
     def write_chapter(
         self,
         user_id: str,
@@ -148,12 +165,12 @@ class LocalStore:
         *,
         title: str | None = None,
         status: str | None = None,
-        part: int | None = None,
+        part_number: int | None = None,
     ) -> ChapterMeta:
         if number < 0:
             raise ValueError("장 번호는 0 이상")
         # 메타는 서버가 관리한다. 호출자가 front matter를 붙여 보내도 버리고 본문만 쓴다.
-        _, content = formats.parse_chapter(content)
+        content, _ = formats.strip_front_matter(content)
         pdir = self._require_project(user_id, project_id)
         path = pdir / "book" / f"ch-{number:02d}.md"
         old: dict[str, str] | None = None
@@ -169,10 +186,10 @@ class LocalStore:
         meta = {
             "title": title or prev.get("title") or f"제{number}장",
             "status": status or prev.get("status") or "draft",
-            "part": part if part is not None else _int(prev.get("part")),
+            "part_number": part_number if part_number is not None else _int(prev.get("part_number")),
             "version": _int(prev.get("version"), 1) + 1 if old is not None else 1,
             "updated_at": now,
-            "note": note,
+            "last_note": note,
         }
         _write_text(path, formats.dump_chapter(meta, content))
         with self._db:
@@ -187,7 +204,7 @@ class LocalStore:
     def recent_changes(self, user_id: str, project_id: str, limit: int = 5) -> list[Change]:
         rows = self._db.execute(
             """
-            SELECT number, version, note, updated_at AS at
+            SELECT number, version, last_note AS note, updated_at AS at
               FROM chapters WHERE user_id = ? AND project_id = ?
             UNION ALL
             SELECT c.number, v.version, v.note, v.created_at
@@ -208,7 +225,7 @@ class LocalStore:
             raise ValueError("결정 내용이 비어 있다")
         path = self._require_project(user_id, project_id) / "decisions.md"
         decisions = formats.parse_decisions(_read_text(path))
-        decision = Decision(max((d.id for d in decisions), default=0) + 1, text.strip(), utcnow())
+        decision = Decision(self._next_id(path.parent, "decision", (d.id for d in decisions)), text.strip(), utcnow())
         _write_text(path, formats.dump_decisions([*decisions, decision]))
         with self._db:
             self._index_decisions(user_id, project_id, [decision])
@@ -238,7 +255,7 @@ class LocalStore:
         path = self._require_project(user_id, project_id) / "issues.md"
         issues = formats.parse_issues(_read_text(path))
         issue = Issue(
-            id=max((i.id for i in issues), default=0) + 1,
+            id=self._next_id(path.parent, "issue", (i.id for i in issues)),
             text=text.strip(),
             status="open",
             origin=origin,
@@ -263,6 +280,16 @@ class LocalStore:
             Issue(r["id"], r["text"], r["status"], r["origin"], r["chapter_number"], r["created_at"], r["closed_note"])
             for r in rows
         ]
+
+    def _next_id(self, pdir: Path, kind: str, existing: Iterable[int]) -> int:
+        """한 번 준 번호는 다시 쓰지 않는다. 사람이 md에서 항목을 지워도 project.json에 마지막 번호가 남는다."""
+        path = pdir / "project.json"
+        data = _read_json(path)
+        key = f"last_{kind}_id"
+        new_id = max(int(data.get(key, 0)), max(existing, default=0)) + 1
+        data[key] = new_id
+        _write_json(path, data)
+        return new_id
 
     # ---- 인덱스 ----------------------------------------------------------------------
 
@@ -335,12 +362,13 @@ class LocalStore:
         return self._db.execute(
             """
             INSERT INTO chapters
-                (user_id, project_id, number, title, status, part, path, char_count, version, note, updated_at)
+                (user_id, project_id, number, title, status, part_number, path, char_count, version, last_note,
+                 updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (user_id, project_id, number) DO UPDATE SET
-                title = excluded.title, status = excluded.status, part = excluded.part,
+                title = excluded.title, status = excluded.status, part_number = excluded.part_number,
                 path = excluded.path, char_count = excluded.char_count, version = excluded.version,
-                note = excluded.note, updated_at = excluded.updated_at
+                last_note = excluded.last_note, updated_at = excluded.updated_at
             RETURNING id
             """,
             (
@@ -349,11 +377,11 @@ class LocalStore:
                 number,
                 meta.get("title") or f"제{number}장",
                 meta.get("status") or "draft",
-                _int(meta.get("part")),
+                _int(meta.get("part_number")),
                 self._rel(path),
                 len(body),
                 _int(meta.get("version"), 1),
-                meta.get("note", ""),
+                meta.get("last_note", ""),
                 meta.get("updated_at") or _mtime(path),
             ),
         ).fetchone()[0]
@@ -365,7 +393,7 @@ class LocalStore:
         self._db.execute(
             "INSERT OR REPLACE INTO chapter_versions (user_id, chapter_id, version, path, note, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, chapter_id, int(m.group(2)), self._rel(path), meta.get("note", ""),
+            (user_id, chapter_id, int(m.group(2)), self._rel(path), meta.get("last_note", ""),
              meta.get("updated_at") or _mtime(path)),
         )
 
@@ -421,15 +449,19 @@ def _int(value: str | None, default: int | None = None) -> int | None:
         return default
 
 
+def _project(r: sqlite3.Row) -> Project:
+    return Project(r["id"], r["user_id"], r["title"], r["created_at"], r["updated_at"])
+
+
 def _chapter_meta(r: sqlite3.Row) -> ChapterMeta:
     return ChapterMeta(
         number=r["number"],
         title=r["title"],
         status=r["status"],
-        part=r["part"],
+        part_number=r["part_number"],
         char_count=r["char_count"],
         unverified_cite_count=r["unverified_cite_count"],
         version=r["version"],
-        note=r["note"],
+        last_note=r["last_note"],
         updated_at=r["updated_at"],
     )

@@ -20,6 +20,12 @@ def dump_chapter(meta: dict[str, object], body: str) -> str:
     return "---\n" + "\n".join(lines) + "\n---\n\n" + body.strip() + "\n"
 
 
+def strip_front_matter(text: str) -> tuple[str, bool]:
+    """(본문, front matter가 있었는지). 도구 경계에서 호출자가 보낸 front matter를 벗겨 낼 때 쓴다."""
+    m = _FM.match(text)
+    return (text[m.end() :].strip(), True) if m else (text.strip(), False)
+
+
 def parse_chapter(text: str) -> tuple[dict[str, str], str]:
     m = _FM.match(text)
     if not m:

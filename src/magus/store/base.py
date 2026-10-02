@@ -33,12 +33,18 @@ class ChapterMeta:
     number: int
     title: str
     status: str
-    part: int | None
+    part_number: int | None
     char_count: int
     unverified_cite_count: int
     version: int
-    note: str
+    last_note: str
     updated_at: str
+
+
+@dataclass(frozen=True)
+class Chapter:
+    meta: ChapterMeta
+    content: str  # 본문만. front matter는 담지 않는다.
 
 
 @dataclass(frozen=True)
@@ -75,11 +81,15 @@ class Store(Protocol):
     def get_project(self, user_id: str, project_id: str | None = None) -> Project | None:
         """project_id가 None이면 그 사용자의 가장 최근에 갱신된 프로젝트를 돌려준다."""
         ...
+    def list_projects(self, user_id: str) -> list[Project]:
+        """최근 갱신순."""
+        ...
     def set_parts(self, user_id: str, project_id: str, parts: list[Part]) -> None: ...
     def list_parts(self, user_id: str, project_id: str) -> list[Part]: ...
 
     # 장
     def list_chapters(self, user_id: str, project_id: str) -> list[ChapterMeta]: ...
+    def read_chapter(self, user_id: str, project_id: str, number: int) -> Chapter | None: ...
     def write_chapter(
         self,
         user_id: str,
@@ -90,14 +100,17 @@ class Store(Protocol):
         *,
         title: str | None = None,
         status: str | None = None,
-        part: int | None = None,
+        part_number: int | None = None,
     ) -> ChapterMeta:
-        """이전 본문을 versions/에 보관한 뒤 새 본문을 쓴다. 없는 번호면 새 장을 만든다."""
+        """이전 본문을 versions/에 보관한 뒤 새 본문을 쓴다. 없는 번호면 새 장을 만든다.
+        content는 본문만이다. front matter가 붙어 오면 벗겨 내고, 메타는 인자로만 바꾼다."""
         ...
     def recent_changes(self, user_id: str, project_id: str, limit: int = 5) -> list[Change]: ...
 
     # 결정·미해결
-    def add_decision(self, user_id: str, project_id: str, text: str) -> Decision: ...
+    def add_decision(self, user_id: str, project_id: str, text: str) -> Decision:
+        """번호(D{n})는 프로젝트별 일련번호이고, 한 번 준 번호는 다시 쓰지 않는다. add_issue도 같다."""
+        ...
     def list_decisions(self, user_id: str, project_id: str, limit: int | None = None) -> list[Decision]:
         """최신순."""
         ...

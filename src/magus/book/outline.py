@@ -11,6 +11,7 @@ from magus.store import Store
 
 TOKEN_BUDGET = 3000
 _MARGIN = 100  # 섹션 구분자와 추정 오차를 위한 여유분
+_OTHER_PROJECTS_SHOWN = 5
 
 
 def estimate_tokens(text: str) -> int:
@@ -54,19 +55,27 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
     changes = store.recent_changes(user_id, project.id, limit=5)
     issues_per_chapter = Counter(i.chapter_number for i in issues if i.chapter_number is not None)
 
-    header = (
-        f"# {project.title}\n"
-        f"project_id: {project.id} · {len(chapters)}장 · {len(parts)}부 · "
-        f"{sum(c.char_count for c in chapters):,}자 · "
+    # 첫 줄은 항상 어느 프로젝트인지 밝힌다. project_id를 생략하면 최근 프로젝트가 골라지기 때문이다.
+    header_lines = [f"프로젝트: {project.title} ({project.id})"]
+    others = [p for p in store.list_projects(user_id) if p.id != project.id]
+    if others:
+        listed = ", ".join(f"{_clip(p.title, 20)}({p.id})" for p in others[:_OTHER_PROJECTS_SHOWN])
+        more = f" 외 {len(others) - _OTHER_PROJECTS_SHOWN}개" if len(others) > _OTHER_PROJECTS_SHOWN else ""
+        header_lines.append(
+            f"이 사용자의 프로젝트는 {len(others) + 1}개다. 다른 프로젝트: {listed}{more} (project_id로 지정)"
+        )
+    header_lines.append(
+        f"{len(chapters)}장 · {len(parts)}부 · {sum(c.char_count for c in chapters):,}자 · "
         f"미확인 인용 {sum(c.unverified_cite_count for c in chapters)} · 열린 미해결 {len(issues)}"
     )
+    header = "\n".join(header_lines)
 
     toc_items: list[str] = []
     current_part: int | None = None
     for c in chapters:
-        if c.part is not None and c.part != current_part:
-            toc_items.append(f"### 제{c.part}부 {parts.get(c.part, '')}".rstrip())
-        current_part = c.part
+        if c.part_number is not None and c.part_number != current_part:
+            toc_items.append(f"### 제{c.part_number}부 {parts.get(c.part_number, '')}".rstrip())
+        current_part = c.part_number
         line = f"- {c.number}. {_clip(c.title, 40)} · {c.status} · {c.char_count:,}자 · 미확인 {c.unverified_cite_count}"
         if issues_per_chapter[c.number]:
             line += f" · 미해결 {issues_per_chapter[c.number]}"

@@ -23,7 +23,7 @@ def seed_demo(store: Store, user_id: str) -> tuple[Project, bool]:
     project = store.create_project(user_id, "데모: 물에서 뭍으로", project_id=DEMO_PROJECT_ID)
     store.set_parts(user_id, project.id, [Part(1, "물가"), Part(2, "뭍")])
     for number, part, title, body in _CHAPTERS:
-        store.write_chapter(user_id, project.id, number, body, "데모 초안", title=title, part=part)
+        store.write_chapter(user_id, project.id, number, body, "데모 초안", title=title, part_number=part)
     store.write_chapter(
         user_id, project.id, 2, _CHAPTERS[1][3] + "\n\n목은 머리를 돌리는 자유였다.", "2장 끝에 한 문장 추가"
     )
