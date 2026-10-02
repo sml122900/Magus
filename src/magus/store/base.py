@@ -113,6 +113,18 @@ class Idea:
 
 
 @dataclass(frozen=True)
+class StyleEntry:
+    """Balthasar의 문체 표본. passage는 원문 구절, reason은 왜 좋은지, tags는 {호흡, 시점, 열기, 장치, 어미, 톤}."""
+
+    id: str
+    passage: str
+    reason: str
+    tags: dict[str, Any] = field(default_factory=dict)
+    work: str | None = None
+    created_at: str = ""
+
+
+@dataclass(frozen=True)
 class Chunk:
     """검색 단위. owner_type/owner_id로 원본(ref·idea·style)을 가리킨다."""
 
@@ -239,6 +251,13 @@ class Store(Protocol):
         ...
     def get_ideas(self, user_id: str, ids: list[str]) -> dict[str, Idea]: ...
     def list_ideas(self, user_id: str, author: Author | None = None) -> list[Idea]: ...
+
+    # 문체 (Balthasar) — 사람 소유
+    def add_style(self, user_id: str, entry: StyleEntry) -> StyleEntry:
+        """reason + tags만 색인·임베딩한다(balthasar.style.search_text). passage는 색인하지 않는다."""
+        ...
+    def get_styles(self, user_id: str, ids: list[str]) -> dict[str, StyleEntry]: ...
+    def list_styles(self, user_id: str) -> list[StyleEntry]: ...
 
     # 검색 청크 (모든 책장 공용)
     def search_fts(self, user_id: str, lanes: list[Lane], match: str, limit: int) -> list[Chunk]: ...

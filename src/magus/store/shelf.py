@@ -18,8 +18,9 @@ from typing import Any
 
 import numpy as np
 
+from magus.balthasar.style import search_text as style_search_text
 from magus.ids import safe_id, utcnow
-from magus.store.base import Author, Chunk, Idea, Lane, Passage, Ref, RefStatus
+from magus.store.base import Author, Chunk, Idea, Lane, Passage, Ref, RefStatus, StyleEntry
 from magus.store.fileio import locked, read_json, read_text, write_json, write_text
 from magus.textindex import chunk_text, index_text
 
@@ -176,11 +177,49 @@ class ShelfMixin:
             sql, args = sql + " AND author = ?", [*args, author]
         return [_idea(r) for r in self._db.execute(sql + " ORDER BY id", args)]
 
+    # ---- Balthasar: 문체 -------------------------------------------------------------
+
+    def _balthasar_dir(self, user_id: str) -> Path:
+        return self._user_dir(user_id) / "shelf" / "balthasar"
+
+    @locked
+    def add_style(self, user_id: str, entry: StyleEntry) -> StyleEntry:
+        safe_id(entry.id, "style id")
+        entry = replace(entry, created_at=entry.created_at or utcnow())
+        write_json(self._balthasar_dir(user_id) / f"{entry.id}.json", asdict(entry))
+        with self._db:
+            self._index_style(user_id, entry)
+        return entry
+
+    def _index_style(self, user_id: str, entry: StyleEntry) -> None:
+        self._db.execute(
+            "INSERT OR REPLACE INTO style_entries (id, user_id, passage, reason, work, tags, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (entry.id, user_id, entry.passage, entry.reason, entry.work, json.dumps(entry.tags, ensure_ascii=False),
+             entry.created_at),
+        )
+        # 문체 검색의 대상은 reason + tags다. passage를 색인하면 문체가 아니라 주제가 검색된다.
+        self._replace_chunks(user_id, "style", entry.id, "style", [style_search_text(entry.reason, entry.tags)])
+
+    @locked
+    def get_styles(self, user_id: str, ids: list[str]) -> dict[str, StyleEntry]:
+        if not ids:
+            return {}
+        marks = ",".join("?" * len(ids))
+        rows = self._db.execute(f"SELECT * FROM style_entries WHERE user_id = ? AND id IN ({marks})", (user_id, *ids))
+        return {r["id"]: _style(r) for r in rows}
+
+    @locked
+    def list_styles(self, user_id: str) -> list[StyleEntry]:
+        return [_style(r) for r in self._db.execute("SELECT * FROM style_entries WHERE user_id = ? ORDER BY id", (user_id,))]
+
     def _reindex_shelf(self, user_id: str) -> None:
         for bib in sorted(self._melchior_dir(user_id).glob("*/bib.json")):
             self._index_ref(user_id, bib.parent)
         for path in sorted(self._casper_dir(user_id).glob("*.json")):
             self._index_idea(user_id, Idea(**read_json(path)))
+        for path in sorted(self._balthasar_dir(user_id).glob("*.json")):
+            self._index_style(user_id, StyleEntry(**read_json(path)))
 
     # ---- 검색 청크 -------------------------------------------------------------------
 
@@ -255,6 +294,13 @@ class ShelfMixin:
                 "UPDATE chunks SET embedding = ? WHERE id = ? AND user_id = ?",
                 [(np.asarray(v, dtype=np.float32).tobytes(), cid, user_id) for cid, v in vectors.items()],
             )
+
+
+def _style(r: sqlite3.Row) -> StyleEntry:
+    return StyleEntry(
+        id=r["id"], passage=r["passage"], reason=r["reason"], tags=json.loads(r["tags"]), work=r["work"],
+        created_at=r["created_at"],
+    )
 
 
 def _idea(r: sqlite3.Row) -> Idea:

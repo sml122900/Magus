@@ -11,6 +11,7 @@ from magus.store.base import (
     Project,
     Ref,
     Store,
+    StyleEntry,
 )
 from magus.store.local import LocalStore
 
@@ -28,4 +29,5 @@ __all__ = [
     "Project",
     "Ref",
     "Store",
+    "StyleEntry",
 ]

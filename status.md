@@ -1,7 +1,7 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-03 05:15 KST — **야간 자율 작업 중**(사용자 부재, 아침 보고 예정)
+> 마지막 갱신: 2026-10-03 05:25 KST — **야간 자율 작업 중**(사용자 부재, 아침 보고 예정)
 
 ## 0. 아침 보고
 
@@ -10,12 +10,14 @@
 ## 1. 지금 바로 할 일
 
 - **야간 자율 작업 지시를 수행 중이다**(질문하지 않음, 단계마다 커밋과 태그, 2→7단계).
-- 다음 할 일: **6단계** style_add / style_search(tags 스키마 검증, reason+tags만 임베딩·색인 대상).
-- 그 뒤 7단계. 끝나면 "0. 아침 보고"를 채운다.
+- 다음 할 일: **7단계**
+  - 하이브리드 검색 정리(FTS5 + 벡터 RRF, EMBEDDINGS=none이면 FTS만), provider 스텁(voyage/openai, 실제 호출 없음).
+  - instructions 전체 확인, README 완성, demo 재생성.
+  - 그다음 아침 보고. 끝나면 "0. 아침 보고"를 채운다.
 
 ## 2. 현재 단계
 
-**5단계 완료**(태그 `step5`, 합성 fixture). 6단계를 진행 중이다.
+**6단계 완료**(태그 `step6`). 7단계를 진행 중이다.
 
 ## 3. 단계별 체크리스트
 
@@ -35,7 +37,8 @@
   - 산출물: `src/magus/melchior/{check,refs}.py`, `src/magus/search.py`, `tests/test_refs.py`. 장별 집계는 `data/synthetic-fixtures/step4-refcheck-report.md`와 일지에 있다.
 - [x] **5단계** idea_add / idea_add_conversation / idea_search — 2026-10-03, 태그 `step5`, **합성 fixture**
   - 산출물: `src/magus/casper/{conversation,tools}.py`, `tests/test_casper.py`, CLI `magus conversation`. 합성 기록에서 me 96 / ai 96.
-- [ ] **6단계** style_*
+- [x] **6단계** style_add / style_search — 2026-10-03, 태그 `step6`
+  - 산출물: `src/magus/balthasar/{style,tools}.py`, `tests/test_balthasar.py`. instructions 6개 규칙이 모두 활성화됐다(원문과 같음).
 - [ ] **7단계** 하이브리드 검색, provider 스텁, instructions 전체 확인, README, demo 재생성
 
 ## 4. 검토 대기 결정
@@ -118,6 +121,13 @@
     - 선택: 저장하지 않고 리포트만 한다.
     - 대안: author=me로 저장한다.
     - 이유: 누가 말했는지 모르는 글을 사용자의 주장으로 저장하면 안 된다.
+23. **tags 검증**
+    - 선택: 여섯 키를 모두 필수로 한다(장치만 빈 목록 허용). 모르는 키는 거부한다.
+    - 대안: 일부 키 생략 허용.
+    - 이유: instructions 6번이 "태그를 먼저 추출해 함께 넘긴다"고 정했고, 빈 칸이 있으면 검색 품질이 떨어진다.
+24. **FTS 색인도 reason + tags만**
+    - 스펙은 임베딩 대상만 정했다. FTS도 같은 기준으로 맞췄다.
+    - 이유: 키워드 검색에서도 구절의 주제어가 섞이면 문체가 아니라 주제가 검색된다.
 11. **합성 fixture 위치**
     - 선택: `data/synthetic-fixtures/`(gitignore). 생성기는 `src/magus/synthetic.py`.
     - 대안: `fixtures/`에 둔다.
@@ -153,7 +163,8 @@
 - 4단계 완료(게이트, 추출기 보강 3건, 이슈 ↔ refs 연결). 합성 원고 미확인 인용 합계 9건(1장 8, 4장 1).
 - 결과: 7장·3부, 목차 줄 11개 제거, 코멘트 13건(citation 8 / general 5, ref_key 75%), refs 30건(실패 3, 충돌 1).
 - 5단계 완료(대화 분리 세 형식, 합성 96/96).
-- 테스트 101개 통과.
+- 6단계 완료(문체, 주제어로는 안 찾히는 것까지 테스트).
+- 테스트 105개 통과.
 
 ## 7. 알려진 문제
 
