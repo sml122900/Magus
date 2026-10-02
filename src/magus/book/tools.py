@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Literal
 
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 
+from magus.book.importer import import_manuscript
 from magus.book.outline import build_outline
 from magus.store import Issue, Project, Store
 from magus.store.base import ChapterStatus
@@ -132,7 +134,37 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
             head += f" — 앞 {limit}건만 표시. 조건을 좁히거나 limit을 늘리세요(최대 {ISSUE_LIST_MAX})."
         return "\n".join([head, *(_issue_line(i) for i in issues[:limit])])
 
+    def book_import(
+        path: str, project_id: str | None = None, title: str | None = None, replace: bool = False
+    ) -> str:
+        try:
+            report = import_manuscript(
+                store, current_user(), Path(path).expanduser(), project_id=project_id, title=title, replace=replace
+            )
+        except (ValueError, FileNotFoundError) as e:
+            raise ToolError(str(e)) from e
+        return "\n\n".join(
+            [
+                report.summary(),
+                "### ch-NN.md ↔ 장 제목",
+                report.mapping_table(),
+                f"코멘트 분류 전체 표와 이 리포트는 {report.files['report']}에 있다. 원본 사본: {report.files['original']}",
+            ]
+        )
+
     return [
+        Tool.from_function(
+            book_import,
+            name="book_import",
+            description=(
+                "원고 파일(docx, 없으면 pdf)의 로컬 경로를 받아 새 프로젝트로 임포트한다. '제N부'·'제N장' 제목으로 장을 나누고, "
+                "Word 코멘트는 미해결(import_comment, kind=citation|general)로, 참고문헌은 refs(unverified)로 넣는다. "
+                "그림·표·수식은 [그림 N]·[표 N]·[수식] 자리표시자로 남기고 원본은 original/에 복사한다. "
+                "같은 project_id가 이미 있으면 replace=true일 때만 기존 것을 휴지통으로 옮기고 다시 만든다. "
+                "리포트(장·부 수, 분할 못 한 구간, 코멘트 분류, 참고문헌 파싱)와 장 매핑표를 돌려준다."
+            ),
+            structured_output=False,
+        ),
         Tool.from_function(
             book_outline,
             name="book_outline",

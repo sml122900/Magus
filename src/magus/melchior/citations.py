@@ -39,10 +39,11 @@ class Citation:
 
 
 def make_ref_key(author: str, year: str) -> str:
-    if re.fullmatch(_HANGUL, author):
-        return f"{author}{year}"
+    """한글이 들어 있으면 한글만 남기고(공백 제거), 아니면 발음 부호를 떼고 소문자 영문만 남긴다."""
+    if re.search(r"[가-힣]", author):
+        return re.sub(r"[^가-힣]", "", author) + year.lower()
     ascii_name = unicodedata.normalize("NFKD", author).encode("ascii", "ignore").decode().lower()
-    return re.sub(r"[^a-z]", "", ascii_name) + year
+    return (re.sub(r"[^a-z]", "", ascii_name) or "anon") + year.lower()
 
 
 def find_citations(text: str, *, bare: bool = False) -> list[Citation]:

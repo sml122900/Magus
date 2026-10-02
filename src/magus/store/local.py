@@ -5,22 +5,25 @@
 
 from __future__ import annotations
 
-import functools
-import json
 import logging
-import os
 import re
 import secrets
 import shutil
 import sqlite3
 import threading
-from collections.abc import Callable, Iterable
-from datetime import UTC, datetime
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, TypeVar
 
 from magus.ids import safe_id, utcnow
 from magus.store import formats
+from magus.store.fileio import locked as _locked
+from magus.store.fileio import mtime as _mtime
+from magus.store.fileio import read_json as _read_json
+from magus.store.fileio import read_text as _read_text
+from magus.store.fileio import to_int as _int
+from magus.store.fileio import write_json as _write_json
+from magus.store.fileio import write_text as _write_text
+from magus.store.shelf import ShelfMixin
 from magus.store.base import (
     CHAPTER_STATUSES,
     Change,
@@ -42,20 +45,7 @@ log = logging.getLogger("magus.store")
 _CHAPTER_FILE = re.compile(r"ch-(\d+)\.md")
 _VERSION_FILE = re.compile(r"ch-(\d+)\.v(\d+)\.md")
 
-F = TypeVar("F", bound=Callable[..., Any])
-
-
-def _locked(fn: F) -> F:
-    # MCPServer는 동기 도구를 워커 스레드에서 돌린다. 파일+인덱스 갱신을 한 덩어리로 묶는다.
-    @functools.wraps(fn)
-    def wrapper(self: LocalStore, *args: Any, **kwargs: Any) -> Any:
-        with self._lock:
-            return fn(self, *args, **kwargs)
-
-    return wrapper  # type: ignore[return-value]
-
-
-class LocalStore:
+class LocalStore(ShelfMixin):
     def __init__(self, data_dir: Path):
         self.root = Path(data_dir)
         self.root.mkdir(parents=True, exist_ok=True)
@@ -117,6 +107,26 @@ class LocalStore:
             "SELECT * FROM projects WHERE user_id = ? ORDER BY updated_at DESC, created_at DESC", (user_id,)
         )
         return [_project(r) for r in rows]
+
+    @_locked
+    def archive_project(self, user_id: str, project_id: str) -> str:
+        pdir = self._require_project(user_id, project_id)
+        target = self._user_dir(user_id) / "trash" / f"{project_id}-{utcnow().replace(':', '').replace('.', '')}"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(pdir), str(target))
+        with self._db:
+            for table in ("parts", "decisions", "issues"):
+                self._db.execute(f"DELETE FROM {table} WHERE user_id = ? AND project_id = ?", (user_id, project_id))
+            self._db.execute("DELETE FROM chapters WHERE user_id = ? AND project_id = ?", (user_id, project_id))
+            self._db.execute("DELETE FROM projects WHERE user_id = ? AND id = ?", (user_id, project_id))
+        return self._rel(target)
+
+    @_locked
+    def save_original(self, user_id: str, project_id: str, filename: str, data: bytes) -> str:
+        path = self._require_project(user_id, project_id) / "original" / Path(filename).name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return self._rel(path)
 
     @_locked
     def set_parts(self, user_id: str, project_id: str, parts: list[Part]) -> None:
@@ -330,6 +340,7 @@ class LocalStore:
                 db.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (udir.name,))
                 for project_json in sorted((udir / "projects").glob("*/project.json")):
                     self._reindex_project(udir.name, project_json.parent)
+                self._reindex_shelf(udir.name)
         db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _reindex_project(self, user_id: str, pdir: Path) -> None:
@@ -437,40 +448,6 @@ class LocalStore:
                 for i in issues
             ],
         )
-
-
-# ---- 파일 유틸 -------------------------------------------------------------------------
-
-
-def _read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8") if path.exists() else ""
-
-
-def _write_text(path: Path, text: str) -> None:
-    # 원본 파일이 반쯤 쓰인 채로 남지 않도록 임시 파일에 쓴 뒤 교체한다.
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8", newline="\n")
-    os.replace(tmp, path)
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _write_json(path: Path, data: dict[str, Any]) -> None:
-    _write_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
-
-
-def _mtime(path: Path) -> str:
-    return datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def _int(value: str | None, default: int | None = None) -> int | None:
-    try:
-        return int(value) if value not in (None, "") else default
-    except ValueError:
-        return default
 
 
 def _project(r: sqlite3.Row) -> Project:

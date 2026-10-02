@@ -1,10 +1,11 @@
-"""magus 명령. serve(Claude Desktop이 띄움), seed-demo, reindex."""
+"""magus 명령. serve(Claude Desktop이 띄움), import, synth, seed-demo, reindex."""
 
 from __future__ import annotations
 
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from magus.config import Settings
 from magus.store import LocalStore
@@ -15,12 +16,27 @@ def main(argv: list[str] | None = None) -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
     serve = sub.add_parser("serve", help="MCP 서버 실행")
     serve.add_argument("--transport", choices=["stdio", "http"], default="stdio")
+    imp = sub.add_parser("import", help="원고(docx/pdf)를 새 프로젝트로 임포트하고 전체 리포트를 출력")
+    imp.add_argument("path", type=Path)
+    imp.add_argument("--project-id")
+    imp.add_argument("--title")
+    imp.add_argument("--replace", action="store_true", help="같은 project_id가 있으면 휴지통으로 옮기고 다시 만든다")
+    imp.add_argument("--synthetic", action="store_true", help="리포트에 '합성 fixture'라고 표시")
+    synth = sub.add_parser("synth", help="합성 fixture(원고 docx·pdf, 대화 기록 md)를 만든다")
+    synth.add_argument("folder", type=Path)
     sub.add_parser("seed-demo", help="1단계 확인용 가짜 프로젝트 생성")
     sub.add_parser("reindex", help="원본 파일에서 index.sqlite 재생성")
     args = parser.parse_args(argv)
 
     # stdio 전송에서 stdout은 MCP 프로토콜 전용이다. 로그는 반드시 stderr로 보낸다.
     logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    if args.cmd == "synth":
+        from magus.synthetic import write_all
+
+        for name, path in write_all(args.folder).items():
+            print(f"{name}: {path}")
+        return
+
     settings = Settings.from_env()
     store = LocalStore(settings.data_dir)
     log = logging.getLogger("magus")
@@ -35,6 +51,19 @@ def main(argv: list[str] | None = None) -> None:
             transports.run_stdio(server)
         else:
             transports.run_http(server)
+    elif args.cmd == "import":
+        from magus.book.importer import import_manuscript
+
+        report = import_manuscript(
+            store,
+            settings.user_id,
+            args.path,
+            project_id=args.project_id,
+            title=args.title,
+            replace=args.replace,
+            synthetic=args.synthetic,
+        )
+        print(report.full())
     elif args.cmd == "seed-demo":
         from magus.book.demo import seed_demo
         from magus.book.outline import build_outline

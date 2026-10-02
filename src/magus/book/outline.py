@@ -106,7 +106,10 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
     toc, used = _fit("## 목차", toc_items or ["- (장 없음)"], remaining, lambda n: f"- … 외 {n}줄")
     remaining -= used
     open_issues, used = _fit(
-        issue_head, issue_items or ["- (없음)"], remaining, lambda n: f"- … 외 {n}건 — book_issues로 조회"
+        issue_head,
+        issue_items or ([] if from_comments else ["- (없음)"]),
+        remaining,
+        lambda n: f"- … 외 {n}건 — book_issues로 조회",
     )
     remaining -= used
     decided, used = _fit("## 최근 결정", decision_items or ["- (없음)"], remaining, lambda n: f"- … 외 {n}건")

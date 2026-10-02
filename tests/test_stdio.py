@@ -1,4 +1,4 @@
-"""Claude Desktop과 같은 경로: 하위 프로세스 + stdio + 한글."""
+"""Claude Desktop과 같은 경로: 하위 프로세스 + stdio + 한글. 단계마다 새 도구를 여기서 한 번씩 부른다."""
 
 from __future__ import annotations
 
@@ -11,14 +11,21 @@ from mcp import Client, StdioServerParameters
 
 from magus.book.demo import seed_demo
 from magus.store import LocalStore
+from magus.synthetic import build_manuscript_docx
 
 pytestmark = pytest.mark.anyio
 
 
-async def test_stdio_subprocess(data_dir: Path):
+def _text(result) -> str:
+    assert not result.is_error, result.content[0].text if result.content else result
+    return "".join(block.text for block in result.content)
+
+
+async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
     store = LocalStore(data_dir)
     seed_demo(store, "alice")
     store.close()
+    manuscript = build_manuscript_docx(tmp_path / "닿으려는_종_합성.docx")
     params = StdioServerParameters(
         command=sys.executable,
         args=["-m", "magus", "serve"],
@@ -26,7 +33,12 @@ async def test_stdio_subprocess(data_dir: Path):
     )
     async with Client(params) as client:
         assert client.server_info.name == "Magus"
-        result = await client.call_tool("book_outline", {})
-        text = "".join(block.text for block in result.content)
-        assert text.startswith("프로젝트: 데모: 물에서 뭍으로 (demo)")
-        assert "물가의 망설임" in text
+        outline = _text(await client.call_tool("book_outline", {}))
+        assert outline.startswith("프로젝트: 데모: 물에서 뭍으로 (demo)")
+        assert "물가의 망설임" in outline
+
+        # 2단계
+        imported = _text(await client.call_tool("book_import", {"path": str(manuscript), "project_id": "synth"}))
+        assert "장 7개 · 부 3개" in imported and "| ch-04.md | 닿으려는 손 | 2 |" in imported
+        bib = _text(await client.call_tool("ref_import_bibliography", {"text": "Zimmer, C. (1998). At the water's edge. Free Press."}))
+        assert "이미 있음 1건" in bib
