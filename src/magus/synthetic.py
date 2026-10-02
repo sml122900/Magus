@@ -178,9 +178,69 @@ def build_manuscript_pdf(path: Path) -> Path:
     return path
 
 
+_TOPICS = [
+    ("물가", "물고기가 뭍으로 올라온 건 용기가 아니라 궁지였다"),
+    ("폐", "폐는 육지를 위한 발명이 아니라 물속 산소 부족의 해법이었다"),
+    ("손가락", "손가락은 걷기보다 물풀을 헤치려고 먼저 생겼을 것이다"),
+    ("고래", "고래의 귀환은 진화가 앞으로만 가지 않는다는 증거다"),
+    ("협력", "인류의 협력은 문화가 쌓인 결과다"),
+    ("문체", "문장은 짧게, 장면으로 열고 싶다"),
+    ("인용", "읽지 않은 책은 인용하지 않겠다"),
+    ("서문", "서문은 독자에게 지도를 건네는 자리다"),
+    ("목차", "목차는 물에서 뭍으로, 다시 물로 가는 순환이어야 한다"),
+    ("결론", "결론은 닿지 않았다는 고백으로 끝내고 싶다"),
+    ("진화", "진화는 목적이 아니라 우연의 누적이다"),
+    ("닿음", "이 책의 축은 닿으려는 몸짓이다"),
+]
+
+
+def conversation_full_record(pairs: int = 96) -> str:
+    """형식 (a) **사용자:** / **Claude:** — 완료 기준(me 96, ai 96) 확인용 합성 기록."""
+    out = ["# 대화 전체 기록 (합성)", "", "아래는 여러 대화를 이어 붙인 합성 기록이다.", ""]
+    for n in range(pairs):
+        if n % 12 == 0:
+            out += ["---", "", f"## 대화 {n // 12 + 1}", ""]
+        topic, opinion = _TOPICS[n % len(_TOPICS)]
+        user_marker = "**사용자:**" if n % 5 else "**사용자**:"  # 콜론 위치 변형
+        out += [
+            f"{user_marker} [{n + 1}] {topic}에 대해 생각해 봤는데, {opinion}.",
+            "",
+            f"**Claude:** [{n + 1}] {topic}에 대한 그 관점은 흥미롭습니다. 다른 해석도 가능합니다.",
+            "",
+            f"예를 들어 {topic}을(를) 환경의 압력으로 볼 수도 있습니다.",
+            "",
+        ]
+    return "\n".join(out)
+
+
+def conversation_qa(pairs: int = 10) -> str:
+    """형식 (b) 질문: / 답변:"""
+    out = []
+    for n in range(pairs):
+        topic, opinion = _TOPICS[n % len(_TOPICS)]
+        out += [f"질문: {topic} 장을 어떻게 시작할까? 나는 {opinion}고 본다.", f"답변: {topic} 장은 한 장면으로 여는 것을 권합니다.", ""]
+    return "\n".join(out)
+
+
+def conversation_quote_summary(pairs: int = 8) -> str:
+    """형식 (c) > 인용 뒤 **Claude 요지**"""
+    out = ["# 메모에서 옮긴 대화 (합성)", ""]
+    for n in range(pairs):
+        topic, opinion = _TOPICS[n % len(_TOPICS)]
+        out += [f"> {opinion}.", f"> ({topic}에 대한 메모)", "", f"**Claude 요지** 사용자는 {topic}을(를) 책의 중요한 고리로 본다.", ""]
+    return "\n".join(out)
+
+
 def write_all(folder: Path) -> dict[str, Path]:
     folder.mkdir(parents=True, exist_ok=True)
-    return {
+    paths = {
         "manuscript_docx": build_manuscript_docx(folder / MANUSCRIPT_NAME),
         "manuscript_pdf": build_manuscript_pdf(folder / "닿으려는_종_합성.pdf"),
+        "conversation_a": folder / "대화_전체_기록.md",
+        "conversation_b": folder / "대화_질문답변.md",
+        "conversation_c": folder / "대화_인용요지.md",
     }
+    paths["conversation_a"].write_text(conversation_full_record(), encoding="utf-8")
+    paths["conversation_b"].write_text(conversation_qa(), encoding="utf-8")
+    paths["conversation_c"].write_text(conversation_quote_summary(), encoding="utf-8")
+    return paths

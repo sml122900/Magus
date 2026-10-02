@@ -1,7 +1,7 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-03 05:00 KST — **야간 자율 작업 중**(사용자 부재, 아침 보고 예정)
+> 마지막 갱신: 2026-10-03 05:15 KST — **야간 자율 작업 중**(사용자 부재, 아침 보고 예정)
 
 ## 0. 아침 보고
 
@@ -10,12 +10,12 @@
 ## 1. 지금 바로 할 일
 
 - **야간 자율 작업 지시를 수행 중이다**(질문하지 않음, 단계마다 커밋과 태그, 2→7단계).
-- 다음 할 일: **5단계** idea_add / idea_add_conversation(세 형식, 합성 96쌍 기록) / idea_search.
-- 그 뒤 6 → 7단계. 끝나면 "0. 아침 보고"를 채운다.
+- 다음 할 일: **6단계** style_add / style_search(tags 스키마 검증, reason+tags만 임베딩·색인 대상).
+- 그 뒤 7단계. 끝나면 "0. 아침 보고"를 채운다.
 
 ## 2. 현재 단계
 
-**4단계 완료**(태그 `step4`, 합성 fixture). 5단계를 진행 중이다.
+**5단계 완료**(태그 `step5`, 합성 fixture). 6단계를 진행 중이다.
 
 ## 3. 단계별 체크리스트
 
@@ -33,7 +33,8 @@
   - 산출물: `src/magus/book/export.py`, `tests/test_book_tools.py`. 도구 4개가 추가돼 instructions 4번 규칙이 활성화됐다.
 - [x] **4단계** ref_add / ref_search / ref_check + 게이트, 추출기 보강, citation 이슈 ↔ refs 연결 — 2026-10-03, 태그 `step4`, **합성 fixture**
   - 산출물: `src/magus/melchior/{check,refs}.py`, `src/magus/search.py`, `tests/test_refs.py`. 장별 집계는 `data/synthetic-fixtures/step4-refcheck-report.md`와 일지에 있다.
-- [ ] **5단계** idea_*
+- [x] **5단계** idea_add / idea_add_conversation / idea_search — 2026-10-03, 태그 `step5`, **합성 fixture**
+  - 산출물: `src/magus/casper/{conversation,tools}.py`, `tests/test_casper.py`, CLI `magus conversation`. 합성 기록에서 me 96 / ai 96.
 - [ ] **6단계** style_*
 - [ ] **7단계** 하이브리드 검색, provider 스텁, instructions 전체 확인, README, demo 재생성
 
@@ -106,6 +107,17 @@
     - 선택: 한글 저자 key는 조사를 뗀 것을 대표로, 원형을 첫 후보로 둔다.
     - 대안: 조사를 떼지 않는다.
     - 이유: "갤러는(2022)"을 alias로 해석하면서도 "카를로" 같은 이름을 망가뜨리지 않는다.
+20. **idea_add_conversation이 path도 받는다**
+    - 대안: markdown 본문만 받는다(스펙).
+    - 이유: 실제 기록은 매우 길어서 도구 인자로 붙여 넣기 어렵다.
+21. **연속된 AI 발화**
+    - 선택: 합치지 않고 둘 다 같은 사용자 발화를 부모로 삼는다. 리포트에 참고로 남긴다.
+    - 대안: 하나로 합친다.
+    - 이유: 원본 구조와 개수 검증을 보존한다.
+22. **분리 실패 구간**(서문 본문, 빈 마커, 고아 AI 발화)
+    - 선택: 저장하지 않고 리포트만 한다.
+    - 대안: author=me로 저장한다.
+    - 이유: 누가 말했는지 모르는 글을 사용자의 주장으로 저장하면 안 된다.
 11. **합성 fixture 위치**
     - 선택: `data/synthetic-fixtures/`(gitignore). 생성기는 `src/magus/synthetic.py`.
     - 대안: `fixtures/`에 둔다.
@@ -140,7 +152,8 @@
 - 2단계 완료(합성 fixture). 3단계 완료(export 왕복 테스트: 장 제목과 장별 단락 수 일치).
 - 4단계 완료(게이트, 추출기 보강 3건, 이슈 ↔ refs 연결). 합성 원고 미확인 인용 합계 9건(1장 8, 4장 1).
 - 결과: 7장·3부, 목차 줄 11개 제거, 코멘트 13건(citation 8 / general 5, ref_key 75%), refs 30건(실패 3, 충돌 1).
-- 테스트 95개 통과.
+- 5단계 완료(대화 분리 세 형식, 합성 96/96).
+- 테스트 101개 통과.
 
 ## 7. 알려진 문제
 

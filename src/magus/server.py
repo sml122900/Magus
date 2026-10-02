@@ -5,6 +5,7 @@ from __future__ import annotations
 from mcp.server.mcpserver import MCPServer
 
 from magus.book.tools import build_tools as book_tools
+from magus.casper.tools import build_tools as casper_tools
 from magus.config import Settings
 from magus.instructions import build_instructions
 from magus.melchior.check import refresh_cite_counts
@@ -22,6 +23,10 @@ def build_server(settings: Settings, store: Store, embedder: Embedder | None = N
 
     # 장별 미확인 인용 수는 파생값이라 인덱스를 다시 만든 뒤에는 0이다. 시작할 때 한 번 맞춘다.
     refresh_cite_counts(store, settings.user_id)
-    tools = [*book_tools(store, current_user), *melchior_tools(store, current_user, embedder)]
+    tools = [
+        *book_tools(store, current_user),
+        *melchior_tools(store, current_user, embedder),
+        *casper_tools(store, current_user, embedder),
+    ]
     # instructions는 실제로 등록된 도구만 언급하도록 도구 목록에서 조립한다.
     return MCPServer(name=SERVER_NAME, instructions=build_instructions(t.name for t in tools), tools=tools)

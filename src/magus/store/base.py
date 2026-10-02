@@ -95,6 +95,23 @@ class Ref:
     created_at: str = ""
 
 
+IdeaKind = Literal["thought", "ai", "article", "conversation", "tv", "other"]
+Author = Literal["me", "ai"]
+
+
+@dataclass(frozen=True)
+class Idea:
+    """Casper의 생각 한 조각. author=me가 사용자의 말, ai가 AI의 말이다."""
+
+    id: str
+    text: str
+    kind: IdeaKind
+    author: Author
+    origin: str | None = None
+    parent_id: str | None = None
+    created_at: str = ""
+
+
 @dataclass(frozen=True)
 class Chunk:
     """검색 단위. owner_type/owner_id로 원본(ref·idea·style)을 가리킨다."""
@@ -215,6 +232,13 @@ class Store(Protocol):
     ) -> Ref:
         """bib.json을 쓰고 인덱스·청크를 갱신한다. passages/full_text가 None이면 기존 것을 그대로 둔다."""
         ...
+
+    # 영감 (Casper) — 사람 소유
+    def add_ideas(self, user_id: str, ideas: list[Idea]) -> list[Idea]:
+        """한 번에 여러 개를 쓴다(대화 기록 한 편). 각자 shelf/casper/<id>.json이 된다."""
+        ...
+    def get_ideas(self, user_id: str, ids: list[str]) -> dict[str, Idea]: ...
+    def list_ideas(self, user_id: str, author: Author | None = None) -> list[Idea]: ...
 
     # 검색 청크 (모든 책장 공용)
     def search_fts(self, user_id: str, lanes: list[Lane], match: str, limit: int) -> list[Chunk]: ...

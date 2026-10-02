@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 import threading
 from datetime import UTC, datetime, timedelta
 
@@ -28,6 +29,11 @@ def utcnow() -> str:
         now = now.replace(microsecond=now.microsecond // 1000 * 1000)
         _last = now
     return now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def new_id() -> str:
+    """책장 항목(아이디어·문체) id. 시간순으로 정렬되고 파일 이름으로 쓸 수 있다. 예: 20261002193152383-a1b2c3"""
+    return re.sub(r"\D", "", utcnow()) + "-" + secrets.token_hex(3)
 
 
 def local_time(iso: str, fmt: str = "%m-%d %H:%M") -> str:

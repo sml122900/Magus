@@ -22,6 +22,9 @@ def main(argv: list[str] | None = None) -> None:
     imp.add_argument("--title")
     imp.add_argument("--replace", action="store_true", help="같은 project_id가 있으면 휴지통으로 옮기고 다시 만든다")
     imp.add_argument("--synthetic", action="store_true", help="리포트에 '합성 fixture'라고 표시")
+    convo = sub.add_parser("conversation", help="대화 기록 md를 영감 책장(Casper)에 넣고 리포트를 출력")
+    convo.add_argument("path", type=Path)
+    convo.add_argument("--origin")
     synth = sub.add_parser("synth", help="합성 fixture(원고 docx·pdf, 대화 기록 md)를 만든다")
     synth.add_argument("folder", type=Path)
     sub.add_parser("seed-demo", help="1단계 확인용 가짜 프로젝트 생성")
@@ -64,6 +67,13 @@ def main(argv: list[str] | None = None) -> None:
             synthetic=args.synthetic,
         )
         print(report.full())
+    elif args.cmd == "conversation":
+        from magus.casper.tools import add_conversation
+
+        report, ideas = add_conversation(
+            store, settings.user_id, args.path.read_text(encoding="utf-8"), args.origin or args.path.stem
+        )
+        print(f"{args.path.name}: {report}\n저장 {len(ideas)}건")
     elif args.cmd == "seed-demo":
         from magus.book.demo import seed_demo
         from magus.book.outline import build_outline

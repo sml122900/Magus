@@ -12,14 +12,14 @@ import json
 import re
 import sqlite3
 import threading
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from magus.ids import utcnow
-from magus.store.base import Chunk, Lane, Passage, Ref, RefStatus
+from magus.ids import safe_id, utcnow
+from magus.store.base import Author, Chunk, Idea, Lane, Passage, Ref, RefStatus
 from magus.store.fileio import locked, read_json, read_text, write_json, write_text
 from magus.textindex import chunk_text, index_text
 
@@ -134,9 +134,53 @@ class ShelfMixin:
         self._replace_chunks(user_id, "ref", record["key"], "ref_picked", [p["text"] for p in passages])
         self._replace_chunks(user_id, "ref", record["key"], "ref_full", chunk_text(full) if full.strip() else [])
 
+    # ---- Casper: 영감 ----------------------------------------------------------------
+
+    def _casper_dir(self, user_id: str) -> Path:
+        return self._user_dir(user_id) / "shelf" / "casper"
+
+    @locked
+    def add_ideas(self, user_id: str, ideas: list[Idea]) -> list[Idea]:
+        stored = []
+        for idea in ideas:
+            safe_id(idea.id, "idea id")
+            idea = replace(idea, created_at=idea.created_at or utcnow())
+            write_json(self._casper_dir(user_id) / f"{idea.id}.json", asdict(idea))
+            stored.append(idea)
+        with self._db:
+            for idea in stored:
+                self._index_idea(user_id, idea)
+        return stored
+
+    def _index_idea(self, user_id: str, idea: Idea) -> None:
+        self._db.execute(
+            "INSERT OR REPLACE INTO ideas (id, user_id, text, kind, origin, author, parent_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (idea.id, user_id, idea.text, idea.kind, idea.origin, idea.author, idea.parent_id, idea.created_at),
+        )
+        lane: Lane = "idea_me" if idea.author == "me" else "idea_ai"
+        self._replace_chunks(user_id, "idea", idea.id, lane, chunk_text(idea.text))
+
+    @locked
+    def get_ideas(self, user_id: str, ids: list[str]) -> dict[str, Idea]:
+        if not ids:
+            return {}
+        marks = ",".join("?" * len(ids))
+        rows = self._db.execute(f"SELECT * FROM ideas WHERE user_id = ? AND id IN ({marks})", (user_id, *ids))
+        return {r["id"]: _idea(r) for r in rows}
+
+    @locked
+    def list_ideas(self, user_id: str, author: Author | None = None) -> list[Idea]:
+        sql, args = "SELECT * FROM ideas WHERE user_id = ?", [user_id]
+        if author:
+            sql, args = sql + " AND author = ?", [*args, author]
+        return [_idea(r) for r in self._db.execute(sql + " ORDER BY id", args)]
+
     def _reindex_shelf(self, user_id: str) -> None:
         for bib in sorted(self._melchior_dir(user_id).glob("*/bib.json")):
             self._index_ref(user_id, bib.parent)
+        for path in sorted(self._casper_dir(user_id).glob("*.json")):
+            self._index_idea(user_id, Idea(**read_json(path)))
 
     # ---- 검색 청크 -------------------------------------------------------------------
 
@@ -211,6 +255,13 @@ class ShelfMixin:
                 "UPDATE chunks SET embedding = ? WHERE id = ? AND user_id = ?",
                 [(np.asarray(v, dtype=np.float32).tobytes(), cid, user_id) for cid, v in vectors.items()],
             )
+
+
+def _idea(r: sqlite3.Row) -> Idea:
+    return Idea(
+        id=r["id"], text=r["text"], kind=r["kind"], author=r["author"], origin=r["origin"], parent_id=r["parent_id"],
+        created_at=r["created_at"],
+    )
 
 
 def _ref(r: sqlite3.Row) -> Ref:
