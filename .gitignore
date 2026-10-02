@@ -1,0 +1,15 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Magus: 원본 데이터와 실제 원고는 리포에 넣지 않는다
+data/
+fixtures/
+.pytest_cache/
