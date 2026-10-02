@@ -12,6 +12,7 @@ import shutil
 import sqlite3
 import threading
 from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
 
 from magus.ids import safe_id, utcnow
@@ -289,6 +290,27 @@ class LocalStore(ShelfMixin):
             self._index_issues(user_id, project_id, [issue])
             self._touch(user_id, project_id, issue.created_at)
         return issue
+
+    @_locked
+    def close_issue(self, user_id: str, project_id: str, issue_id: int, note: str | None = None) -> Issue | None:
+        path = self._require_project(user_id, project_id) / "issues.md"
+        issues = formats.parse_issues(_read_text(path))
+        target = next((i for i in issues if i.id == issue_id), None)
+        if target is None:
+            return None
+        closed = replace(target, status="closed", closed_note=(note or "").strip() or target.closed_note)
+        _write_text(path, formats.dump_issues([closed if i.id == issue_id else i for i in issues]))
+        with self._db:
+            self._index_issues(user_id, project_id, [closed])
+            self._touch(user_id, project_id, utcnow())
+        return closed
+
+    @_locked
+    def save_export(self, user_id: str, project_id: str, filename: str, data: bytes) -> str:
+        path = self._require_project(user_id, project_id) / "exports" / Path(filename).name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return str(path.resolve())
 
     @_locked
     def list_issues(

@@ -42,3 +42,10 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
         assert "장 7개 · 부 3개" in imported and "| ch-04.md | 닿으려는 손 | 2 |" in imported
         bib = _text(await client.call_tool("ref_import_bibliography", {"text": "Zimmer, C. (1998). At the water's edge. Free Press."}))
         assert "이미 있음 1건" in bib
+
+        # 3단계
+        assert _text(await client.call_tool("book_decide", {"text": "결정", "project_id": "synth"})).startswith("D1")
+        assert _text(await client.call_tool("book_issue_add", {"text": "열린 문제", "project_id": "synth"})).startswith("I14")
+        assert _text(await client.call_tool("book_issue_close", {"id": "I14", "project_id": "synth"})) == "I14 닫음"
+        exported = _text(await client.call_tool("book_export", {"project_id": "synth"}))
+        assert Path(exported.splitlines()[0].removeprefix("docx를 만들었다: ")).exists()

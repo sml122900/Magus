@@ -1,7 +1,7 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-03 04:30 KST — **야간 자율 작업 중**(사용자 부재, 아침 보고 예정)
+> 마지막 갱신: 2026-10-03 04:40 KST — **야간 자율 작업 중**(사용자 부재, 아침 보고 예정)
 
 ## 0. 아침 보고
 
@@ -10,12 +10,15 @@
 ## 1. 지금 바로 할 일
 
 - **야간 자율 작업 지시를 수행 중이다**(질문하지 않음, 단계마다 커밋과 태그, 2→7단계).
-- 다음 할 일: **3단계** book_decide / book_issue_add / book_issue_close / book_export(pypandoc_binary). export한 docx를 다시 열어 장 제목과 단락 수가 맞는지 테스트한다.
-- 그 뒤 4 → 5 → 6 → 7단계. 끝나면 "0. 아침 보고"를 채운다.
+- 다음 할 일: **4단계**
+  - ref_add / ref_search / ref_check와 write 게이트.
+  - 추출기 한계 3건 보강.
+  - citation 이슈를 refs와 연결(ref_id).
+- 그 뒤 5 → 6 → 7단계. 끝나면 "0. 아침 보고"를 채운다.
 
 ## 2. 현재 단계
 
-**2단계 완료**(태그 `step2`, 합성 fixture). 3단계를 진행 중이다.
+**3단계 완료**(태그 `step3`). 4단계를 진행 중이다.
 
 ## 3. 단계별 체크리스트
 
@@ -29,7 +32,8 @@
     - `tests/test_{import,bibliography}.py`
   - 도구: `book_import`, `ref_import_bibliography`. CLI: `magus import`, `magus synth`.
   - 리포트: `docs/daily/2026-10-03.md` "야간 자율 작업" 절, `data/synthetic-fixtures/step2-import-report.md`, `data/users/default/projects/synth/original/import-report.md`
-- [ ] **3단계** book_decide / book_issue_add / book_issue_close / book_export
+- [x] **3단계** book_decide / book_issue_add / book_issue_close / book_export — 2026-10-03, 태그 `step3`
+  - 산출물: `src/magus/book/export.py`, `tests/test_book_tools.py`. 도구 4개가 추가돼 instructions 4번 규칙이 활성화됐다.
 - [ ] **4단계** ref_add / ref_search / ref_check + 게이트, 추출기 보강, citation 이슈 ↔ refs 연결
 - [ ] **5단계** idea_*
 - [ ] **6단계** style_*
@@ -79,6 +83,16 @@
     - 선택: 한글은 2글자 bigram, 라틴 문자는 소문자 단어로 사전 토큰화한 뒤 FTS5 unicode61에 넣는다.
     - 대안: trigram.
     - 이유: 2글자 이름("갤러")을 찾을 수 있어야 한다.
+12. **book_export의 path**
+    - 선택: 파일 이름만 받는다(디렉터리는 버림). 저장 위치는 `projects/<id>/exports/`.
+    - 대안: 임의 절대 경로.
+    - 이유: SaaS 전환 때 서버 파일 시스템을 노출하지 않으려는 것이다.
+13. **book_issue_add의 origin 인자**
+    - 선택: user|agent, 기본값 user.
+    - 대안: 항상 agent.
+    - 이유: Claude가 사용자 요청으로 남긴 것과 스스로 발견한 것을 outline에서 구분한다.
+14. **export 제목 단계**
+    - 선택: 부는 Heading 1, 장은 Heading 2, 장 안 소제목은 Heading 3. 부가 없으면 장이 Heading 1이다. 문서 제목은 pandoc 메타데이터로 넣는다.
 11. **합성 fixture 위치**
     - 선택: `data/synthetic-fixtures/`(gitignore). 생성기는 `src/magus/synthetic.py`.
     - 대안: `fixtures/`에 둔다.
@@ -110,9 +124,9 @@
 ## 6. 마지막 세션 요약
 
 **2026-10-03 야간**
-- 2단계 완료(합성 fixture).
+- 2단계 완료(합성 fixture). 3단계 완료(export 왕복 테스트: 장 제목과 장별 단락 수 일치).
 - 결과: 7장·3부, 목차 줄 11개 제거, 코멘트 13건(citation 8 / general 5, ref_key 75%), refs 30건(실패 3, 충돌 1).
-- 테스트 77개 통과.
+- 테스트 81개 통과.
 
 ## 7. 알려진 문제
 

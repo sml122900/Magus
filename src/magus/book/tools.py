@@ -14,6 +14,7 @@ from typing import Any, Literal
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 
+from magus.book.export import export_docx
 from magus.book.importer import import_manuscript
 from magus.book.outline import build_outline
 from magus.store import Issue, Project, Store
@@ -134,6 +135,45 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
             head += f" — 앞 {limit}건만 표시. 조건을 좁히거나 limit을 늘리세요(최대 {ISSUE_LIST_MAX})."
         return "\n".join([head, *(_issue_line(i) for i in issues[:limit])])
 
+    def book_decide(text: str, project_id: str | None = None) -> str:
+        project = resolve_project(project_id)
+        try:
+            d = store.add_decision(current_user(), project.id, text)
+        except ValueError as e:
+            raise ToolError(str(e)) from e
+        return f"D{d.id} 기록함 ({project.id}): {one_line(d.text)[:120]}"
+
+    def book_issue_add(
+        text: str,
+        chapter_number: int | None = None,
+        origin: Literal["user", "agent"] = "user",
+        project_id: str | None = None,
+    ) -> str:
+        project = resolve_project(project_id)
+        if chapter_number is not None and store.read_chapter(current_user(), project.id, chapter_number) is None:
+            raise ToolError(f"{chapter_number}장이 없습니다.")
+        try:
+            issue = store.add_issue(current_user(), project.id, text, origin=origin, chapter_number=chapter_number)
+        except ValueError as e:
+            raise ToolError(str(e)) from e
+        where = f" · {chapter_number}장" if chapter_number is not None else ""
+        return f"I{issue.id} 열림 ({project.id}{where} · {origin}): {one_line(issue.text)[:120]}"
+
+    def book_issue_close(id: str, note: str | None = None, project_id: str | None = None) -> str:
+        project = resolve_project(project_id)
+        number = id.strip().upper().removeprefix("I")
+        if not number.isdigit():
+            raise ToolError(f"이슈 번호 형식이 아닙니다: {id!r} (예: I3 또는 3)")
+        issue = store.close_issue(current_user(), project.id, int(number), note)
+        if issue is None:
+            raise ToolError(f"I{number}이 없습니다. book_issues로 번호를 확인하세요.")
+        return f"I{issue.id} 닫음" + (f": {one_line(issue.closed_note)}" if issue.closed_note else "")
+
+    def book_export(path: str | None = None, project_id: str | None = None) -> str:
+        project = resolve_project(project_id)
+        location = export_docx(store, current_user(), project, path)
+        return f"docx를 만들었다: {location}\n(코멘트·그림은 복원하지 않는다. 자리표시자 [그림 N]·[표 N]·[수식]이 그대로 남는다.)"
+
     def book_import(
         path: str, project_id: str | None = None, title: str | None = None, replace: bool = False
     ) -> str:
@@ -153,6 +193,36 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
         )
 
     return [
+        Tool.from_function(
+            book_decide,
+            name="book_decide",
+            description="책에 대한 결정을 기록한다(D번호, 다시 쓰지 않는 일련번호). 결정은 decisions.md에 쌓이고 outline에 최근 10개가 보인다.",
+            structured_output=False,
+        ),
+        Tool.from_function(
+            book_issue_add,
+            name="book_issue_add",
+            description=(
+                "열린 문제(미해결)를 남긴다. chapter_number로 장을 지정할 수 있다. "
+                "사용자가 남기라고 한 것이면 origin=user, 에이전트가 스스로 발견한 것이면 origin=agent."
+            ),
+            structured_output=False,
+        ),
+        Tool.from_function(
+            book_issue_close,
+            name="book_issue_close",
+            description="미해결을 닫는다. id는 'I3' 또는 '3'. note에 어떻게 해결했는지 쓴다. 번호는 닫아도 다시 쓰지 않는다.",
+            structured_output=False,
+        ),
+        Tool.from_function(
+            book_export,
+            name="book_export",
+            description=(
+                "장들을 차례대로 합쳐 docx를 만들고 파일 위치를 돌려준다. path는 파일 이름만 쓴다(프로젝트 exports/ 아래 저장). "
+                "코멘트·그림은 복원하지 않는다."
+            ),
+            structured_output=False,
+        ),
         Tool.from_function(
             book_import,
             name="book_import",

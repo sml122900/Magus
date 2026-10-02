@@ -173,6 +173,12 @@ class Store(Protocol):
         kind: IssueKind = "general",
         ref_key: str | None = None,
     ) -> Issue: ...
+    def close_issue(self, user_id: str, project_id: str, issue_id: int, note: str | None = None) -> Issue | None:
+        """없는 번호면 None. 이미 닫힌 이슈는 note만 갱신한다."""
+        ...
+    def save_export(self, user_id: str, project_id: str, filename: str, data: bytes) -> str:
+        """exports/<filename>에 저장하고 위치를 돌려준다(P0: 절대 경로, P1: 내려받기 URL)."""
+        ...
     def list_issues(
         self,
         user_id: str,
