@@ -103,3 +103,26 @@ def test_outline_names_special_chapters_and_comment_kinds(store: LocalStore):
     text = build_outline(store, "alice", p.id)
     assert "- 부록 3 v1 " in text and "- 93장 v1" not in text
     assert "- 코멘트 유래 미해결 3건(citation 1 · fact 2) — book_issues(kind)로 조회" in text
+
+
+def test_outline_header_counts_unique_docs_across_book(store: LocalStore):
+    # 머리줄은 책 전체 고유 미확인 문헌 수다(장별 합이 아님). 저자 보고서 1절의 문헌 수와 같아야 한다.
+    from magus.melchior.bibliography import import_bibliography
+    from magus.melchior.check import refresh_cite_counts
+    from magus.melchior.report import build_cite_report
+
+    p = store.create_project("alice", "책", project_id="b")
+    store.write_chapter("alice", p.id, 0, "(Clack, 2012) 서장", "x", label="서장")
+    store.write_chapter("alice", p.id, 1, "Clack(2012)와 (Hu et al., 2023)", "x")
+    store.write_chapter("alice", p.id, 2, "Clack(2012) 다시, 그리고 Nobody(2001).", "x")
+    for n in (91, 92, 93):
+        store.write_chapter("alice", p.id, n, "부록", "x", label=f"부록 {n - 90}")
+    store.write_chapter("alice", p.id, 90, "맺음", "x", label="맺음")
+    import_bibliography(store, "alice", "Clack, J. A. (2012). Gaining ground. Press.\nHu, W. et al. (2023). Bottleneck. Science.")
+    refresh_cite_counts(store, "alice")
+    text = build_outline(store, "alice", p.id)
+    header = text.splitlines()[1]
+    assert header.startswith("2장 + 서장·맺음·부록 1~3 · 0부 · ")
+    assert "미확인 문헌 3편" in header  # clack2012(세 장) · hu2023 · nobody2001. 장별 합이면 5
+    report = build_cite_report(store, "alice", p.id)
+    assert len(report.of("unverified", "unknown")) == 3

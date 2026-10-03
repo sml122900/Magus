@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import math
+import re
 from collections import Counter
 from collections.abc import Callable
 
 from magus.ids import local_time
-from magus.store import Store
+from magus.store import ChapterMeta, Store
 
 TOKEN_BUDGET = 3000
 _MARGIN = 100  # 섹션 구분자와 추정 오차를 위한 여유분
@@ -18,6 +19,18 @@ def estimate_tokens(text: str) -> int:
     """보수적으로 추정한다. 한글 등 비ASCII 문자는 1자를 1토큰, ASCII는 3자를 1토큰으로 센다(실제 토큰 수는 이보다 적다)."""
     non_ascii = sum(1 for ch in text if ord(ch) > 127)
     return non_ascii + math.ceil((len(text) - non_ascii) / 3)
+
+
+def _chapter_count(chapters: list[ChapterMeta]) -> str:
+    """'35장 + 서장·맺음·부록 1~3'. 번호 없는 장은 이름으로 적고, 부록은 이어지면 범위로 묶는다."""
+    named = [c.label for c in chapters if c.label]
+    appendix = sorted(int(m.group(1)) for label in named if (m := re.fullmatch(r"부록\s*(\d+)", label)))
+    others = [label for label in named if not re.fullmatch(r"부록\s*\d+", label)]
+    if appendix:
+        contiguous = len(appendix) > 1 and appendix == list(range(appendix[0], appendix[-1] + 1))
+        others.append(f"부록 {appendix[0]}~{appendix[-1]}" if contiguous else "부록 " + "·".join(map(str, appendix)))
+    numbered = f"{len(chapters) - len(named)}장"
+    return f"{numbered} + {'·'.join(others)}" if others else numbered
 
 
 def _clip(text: str, limit: int) -> str:
@@ -68,9 +81,11 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
         header_lines.append(
             f"이 사용자의 프로젝트는 {len(others) + 1}개다. 다른 프로젝트: {listed}{more} (project_id로 지정)"
         )
+    # 미확인 문헌은 책 전체 고유 수다(여러 장에 나오는 문헌은 한 번). 장별 수는 각 장 줄에만 싣는다.
+    unique_unverified = len({key for c in chapters for key in c.unverified_cite_keys})
     header_lines.append(
-        f"{len(chapters)}장 · {len(parts)}부 · {sum(c.char_count for c in chapters):,}자 · "
-        f"미확인 인용(장별 합) {sum(c.unverified_cite_count for c in chapters)} · 열린 미해결 {len(issues)}"
+        f"{_chapter_count(chapters)} · {len(parts)}부 · {sum(c.char_count for c in chapters):,}자 · "
+        f"미확인 문헌 {unique_unverified}편 · 열린 미해결 {len(issues)}"
     )
     header = "\n".join(header_lines)
 

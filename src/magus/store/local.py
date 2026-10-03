@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import secrets
@@ -339,11 +340,12 @@ class LocalStore(ShelfMixin):
             self._index_issues(user_id, project_id, [i for i in issues if i.id in ref_ids])
 
     @_locked
-    def set_cite_counts(self, user_id: str, project_id: str, counts: dict[int, int]) -> None:
+    def set_unverified_cites(self, user_id: str, project_id: str, cites: dict[int, list[str]]) -> None:
         with self._db:
             self._db.executemany(
-                "UPDATE chapters SET unverified_cite_count = ? WHERE user_id = ? AND project_id = ? AND number = ?",
-                [(count, user_id, project_id, number) for number, count in counts.items()],
+                "UPDATE chapters SET unverified_cite_count = ?, unverified_cite_keys = ?"
+                " WHERE user_id = ? AND project_id = ? AND number = ?",
+                [(len(keys), json.dumps(sorted(keys)), user_id, project_id, number) for number, keys in cites.items()],
             )
 
     @_locked
@@ -530,4 +532,5 @@ def _chapter_meta(r: sqlite3.Row) -> ChapterMeta:
         last_note=r["last_note"],
         updated_at=r["updated_at"],
         label=r["label"],
+        unverified_cite_keys=tuple(json.loads(r["unverified_cite_keys"])),
     )

@@ -83,26 +83,31 @@ Microsoft Store판은 `%LOCALAPPDATA%\Packages\Claude_…\LocalCache\Roaming\Cla
    magus INFO user_id=default data_dir=C:\project_2026\Magus\data files_root=C:\project_2026\Magus embeddings=none
    ```
 
-### 2. 시험 문장 세 개
+### 2. 시험 문장 네 개
 
-셋 다 읽기만 하고 원고는 바꾸지 않습니다. 기대 결과는 2026-10-03 실원고 임포트 기준입니다.
+넷 다 읽기만 하고 원고는 바꾸지 않습니다. 기대 결과는 2026-10-03 실원고 임포트 기준입니다.
 
 | 말하기 | 불리는 도구 | 기대 결과 |
 |---|---|---|
-| "Magus로 책 지도를 보여 줘" | `book_outline` | 첫 줄 `프로젝트: 닿으려는 종 (book)`<br>둘째 줄 `40장 · 8부 · 249,065자 · 미확인 인용(장별 합) 355 · 열린 미해결 86`<br>미해결 절 `코멘트 유래 미해결 86건(citation 44 · fact 39 · general 3)` |
-| "35장의 인용을 점검해 줘" | `ref_check(35)` | `verified: []`, `unique_unchecked: 9`<br>하야시·후닝·케인스·김성은·크레머·모리스·넌에 `matched_by: 음역 추정`<br>케인스(1930)는 `음역 추정·연도 a/b 모호` |
+| "Magus의 book_outline을 호출해 줘" | `book_outline` | 첫 줄 `프로젝트: 닿으려는 종 (book)`<br>둘째 줄 `35장 + 서장·맺음·부록 1~3 · 8부 · 249,065자 · 미확인 문헌 296편 · 열린 미해결 86`<br>미해결 절 `코멘트 유래 미해결 86건(citation 44 · fact 39 · general 3)` |
+| "제12장 인용 중 확인 안 된 것 알려줘" | `ref_check(12)` 한 번 | `unverified` 28편, `unique_unchecked: 28`, `verified: []`<br>문헌마다 문단 번호가 붙는다. 예: marchetti1994 `paragraphs: [16, 41]`, pachecocobos2019 `[28, 29]` |
+| "제31장 읽고 세 문장으로 요약해 줘" | `book_read_chapter(31)` 한 번 | 제목 `대치동은 왜 아이를 줄이나`, 3,386자, 미확인 문헌 8편, 열린 미해결 1건(I78)<br>책 전체나 다른 장을 요구하지 않아야 한다. 본문에 "제13장에서 보았듯"이 있어도 13장을 읽지 않는다<br>규칙 1에 따라 `book_outline`을 먼저 부르는 것은 괜찮다 |
 | "사실·수치 확인 요청만 보여 줘" | `book_issues(kind="fact")` | `미해결 39건 (status=open, kind=fact)`<br>첫 항목 `I3 · open · 1장 · import_comment · fact · 확인 필요: 폐가 부레보다…` |
 
-"미확인 인용(장별 합) 355"는 장마다 센 고유 문헌 수를 더한 값입니다.
-여러 장에 걸친 문헌을 한 번만 세면 296편입니다(`magus cite-report`, 저자 보고서의 수).
+"미확인 문헌 296편"은 책 전체에서 한 번씩 센 고유 문헌 수입니다. 저자 보고서 1절의 "문헌 296편"과 같은 숫자입니다.
+장마다 센 수는 목차의 각 장 줄(`미확인인용 n`)에만 있습니다.
 
 도구가 불리지 않거나 오류가 나면 로그 끝부분을 보세요.
 
 ### 3. 문헌 등록 시연 (`ref_add`)
 
-1. 논문 PDF를 `C:\project_2026\Magus\fixtures\papers\`에 둡니다(폴더가 없으면 만듭니다). 예: `kremer1993.pdf`.
-2. Desktop 새 대화에서 이렇게 말합니다.
-   > fixtures/papers/kremer1993.pdf를 문헌으로 등록해 줘. 쓸 부분은 "…", 이유는 35장 크레머 문단의 근거.
+**논문 PDF는 `C:\project_2026\Magus\fixtures\papers\`에 둡니다.** 이 폴더는 git에 올라가지 않습니다(`fixtures/`는 .gitignore).
+
+1. 논문 PDF를 `fixtures\papers\`에 둡니다. 예: `kremer1993.pdf`.
+2. Desktop 새 대화에서 이 문장을 그대로 씁니다(`<파일명>`, `「…」`, `…`만 바꿉니다).
+   > fixtures/papers/<파일명>.pdf를 문헌으로 등록해 줘. 쓸 부분은 「…」, 이유는 …
+
+   기대 결과: 해당 key가 verified로 바뀌고, 그 문헌이 나오는 장 목록이 나옵니다(아래 4번).
 3. Claude가 다음과 같이 `ref_add`를 부릅니다.
    ```
    ref_add(bib={}, passages=[{text: "쓸 부분", reason: "이유"}], file_path="fixtures/papers/kremer1993.pdf")

@@ -62,7 +62,11 @@ class CheckResult:
     @property
     def unchecked_count(self) -> int:
         """장 목록의 '미확인인용' 숫자: verified가 아닌 고유 문헌 수(unverified + unknown). uncertain은 따로 센다."""
-        return sum(1 for g in self.groups if g.status in ("unverified", "unknown"))
+        return len(self.unchecked_keys)
+
+    @property
+    def unchecked_keys(self) -> list[str]:
+        return [g.key for g in self.groups if g.status in ("unverified", "unknown")]
 
     def unverified_cites(self) -> list[dict[str, object]]:
         return [{**g.as_dict(), "status": g.status} for g in self.groups if g.status != "verified"]
@@ -170,7 +174,7 @@ def check_chapter(store: Store, user_id: str, project_id: str, number: int, reso
     if chapter is None:
         return None
     result = check_text(store, user_id, chapter.content, resolver, terms_of(store, user_id, project_id))
-    store.set_cite_counts(user_id, project_id, {number: result.unchecked_count})
+    store.set_unverified_cites(user_id, project_id, {number: result.unchecked_keys})
     return result
 
 
@@ -179,12 +183,12 @@ def refresh_cite_counts(store: Store, user_id: str) -> None:
     resolver = Resolver(store, user_id)
     for project in store.list_projects(user_id):
         terms = terms_of(store, user_id, project.id)
-        counts = {}
+        cites = {}
         for meta in store.list_chapters(user_id, project.id):
             chapter = store.read_chapter(user_id, project.id, meta.number)
             if chapter is not None:
-                counts[meta.number] = check_text(store, user_id, chapter.content, resolver, terms).unchecked_count
-        store.set_cite_counts(user_id, project.id, counts)
+                cites[meta.number] = check_text(store, user_id, chapter.content, resolver, terms).unchecked_keys
+        store.set_unverified_cites(user_id, project.id, cites)
 
 
 def _issue_lookup(ref_key: str) -> tuple[list[str], str | None, str | None]:

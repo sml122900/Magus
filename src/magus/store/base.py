@@ -47,6 +47,7 @@ class ChapterMeta:
     last_note: str
     updated_at: str
     label: str | None = None  # 번호 없는 장의 표시 이름(서장·맺음·부록 N). 없으면 "제N장"
+    unverified_cite_keys: tuple[str, ...] = ()  # 파생값. 장 사이 합집합이 책 전체 고유 미확인 문헌이다
 
     @property
     def display(self) -> str:
@@ -225,8 +226,8 @@ class Store(Protocol):
     def set_issue_refs(self, user_id: str, project_id: str, ref_ids: dict[int, str | None]) -> None:
         """citation 이슈의 ref_id를 한 번에 기록한다(issues.md를 한 번만 다시 쓴다)."""
         ...
-    def set_cite_counts(self, user_id: str, project_id: str, counts: dict[int, int]) -> None:
-        """장별 미확인 인용 수. 본문과 refs로 계산되는 파생값이라 인덱스에만 둔다."""
+    def set_unverified_cites(self, user_id: str, project_id: str, cites: dict[int, list[str]]) -> None:
+        """장별 미확인 문헌 key(수는 그 길이). 본문과 refs로 계산되는 파생값이라 인덱스에만 둔다."""
         ...
     def save_export(self, user_id: str, project_id: str, filename: str, data: bytes) -> str:
         """exports/<filename>에 저장하고 위치를 돌려준다(P0: 절대 경로, P1: 내려받기 URL)."""

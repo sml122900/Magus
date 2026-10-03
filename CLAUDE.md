@@ -4,9 +4,9 @@
 
 ## 진행상황
 
-- 현재 단계: P0 완료 + 저자용 첫 보고서(태그 `p0-report1`). 코멘트 kind 3분할, 비인용 용어, ref_add 상대 경로까지 마쳤다.
-- 다음 할 일: 저자의 답(연도 불일치·음역 추정·Acemoglu)을 반영하고, Desktop 실사용에서 문제가 나오면 재현 테스트부터 만든다.
-- 대기 사항: 보고서 답변, Desktop 재시작 후 "첫 실행 확인", fixtures/papers/ 논문 PDF, 검토 대기 결정(사용자). 상세는 status.md에만 적는다.
+- 현재 단계: P0 완료 + 저자용 첫 보고서(태그 `p0-report1`) + 마무리 보완(outline 고유 문헌 수, README 시험 문장 4개, fixtures/papers/).
+- 다음 할 일: **사용자의 Desktop 테스트 결과가 올 때까지 새 기능을 만들지 않는다.** 결과가 오면 문제마다 재현 테스트부터 만든다.
+- 대기 사항: Desktop 테스트 결과, 보고서 답변, 검토 대기 결정(사용자). 상세는 status.md에만 적는다.
 
 ## 개요
 
@@ -45,6 +45,8 @@
 - **누가 말했는지 보존한다.** Casper는 사용자 발화(`author=me`)와 AI 발화(`author=ai`)를 구분해 저장하고, 검색에서는 me를 먼저 보여 준다.
 - **원본은 사람이 읽을 수 있는 파일(markdown/json)이다. SQLite는 인덱스일 뿐이다.** 인덱스는 언제든 파일에서 다시 만들 수 있어야 한다(`magus reindex`). 파일에 없는 정보를 SQLite에만 두지 않는다. 예외는 계산으로 얻는 값(char_count, unverified_cite_count, chunks)이다.
 - **프로젝트 폴더 밖의 파일은 사용자가 경로를 명시해 지시했을 때만 읽는다.** 필요한 파일이 없으면 status.md에 "대기: 무엇을, 누가"로 기록하고 멈춘다. 다른 폴더를 뒤져 찾아오지 않는다.
+  - "프로젝트 폴더 밖"에는 환경이 알려 준 경로(대화 기록 파일, 홈 폴더, Downloads)도 포함된다. 사용자가 이 세션에서 경로를 직접 적었을 때만 읽는다.
+- **지시문의 참조를 찾지 못하면 밖에서 찾거나 추측하지 않는다.** status.md에 "불명: …"으로 적고, 내 판단으로 진행한 뒤 보고한다(예: "위 세 가지 테스트 프롬프트"가 메시지에 없을 때).
 - **합성·테스트 데이터는 `default` 사용자에 넣지 않는다.** default는 실제 저자의 책장이다. 데모 문체 표본이 저자의 취향으로, 가짜 서지가 진짜 서지로 섞인다. 데모는 `USER_ID=demo`, 합성은 `USER_ID=synthetic`을 쓴다. CLI는 default에 `seed-demo`와 `import --synthetic`을 거부한다.
 - **SaaS 준비**
   - 모든 레코드(모든 테이블의 모든 행)에 `user_id`가 있고, 모든 쿼리는 `user_id`로 필터한다.
@@ -107,6 +109,7 @@
   - `ref_key`: citation 코멘트에서 뽑은 저자·연도 후보(`daeschler2006`, 한글이면 조사를 뗀 `갤러2022`). 코멘트 본문에 없으면 앵커 원문에서 찾고, 그래도 없으면 null이다. 추출기는 `magus/melchior/citations.py`이고, ref_check도 이것을 쓴다.
   - `ref_id`: ref_key를 refs(key 또는 aliases)에서 해석한 **정식 ref key**(예: `갤러2022` ⇒ `galor2022`). refs 행 id는 재생성되면 바뀌므로 key를 쓴다. 임포트, ref_add, ref_import_bibliography 뒤에 다시 계산한다.
 - chapters.unverified_cite_count: verified가 아닌 **고유 문헌 수**(unverified + unknown, uncertain 제외). 출현 횟수가 아니다(사용자 결정 #17 변경). 파생값이라 인덱스에만 두고, 서버 시작·`magus reindex`·refs 변경·장 쓰기 때 다시 계산한다.
+  - chapters.unverified_cite_keys(JSON): 같은 때 함께 계산하는 그 장의 미확인 문헌 key 목록이다. outline은 장 사이 합집합으로 책 전체 고유 수를 낸다(SCHEMA_VERSION 7).
   - **한 번 준 번호는 절대 재사용하거나 다시 매기지 않는다.** 마지막 번호는 project.json의 `last_decision_id`/`last_issue_id`에 둔다.
 - refs(id, user_id, key, aliases json, bib json, status: unverified|verified, has_fulltext, file_path?, created_at)
   - key는 첫 저자 성(소문자 영문) + 연도다. 예: `daeschler2006`, `galor2022`. 한글 표기(갤러, 다이아몬드 등)는 aliases에 넣는다.
@@ -164,8 +167,9 @@ data/synthetic-fixtures/                                          # magus synth 
 ### 책 (`magus/book/`)
 - `book_outline(project_id?)` → **3,000 토큰 이하**. 모든 원고 작업은 이 도구로 시작한다.
   - 첫 줄은 `프로젝트: 제목 (id)`다. 프로젝트가 2개 이상이면 안내 줄을 붙인다.
+  - 집계 줄: `35장 + 서장·맺음·부록 1~3 · 8부 · N자 · 미확인 문헌 N편 · 열린 미해결 N`. 미확인 문헌은 **책 전체 고유 수**(여러 장에 나오는 문헌은 한 번)이고 저자 보고서 1절의 문헌 수와 같다. 장별 수는 각 장 줄에만 싣는다.
   - 장 목록은 부 제목 아래에 묶고, 각 줄에는 집계만 싣는다: `제N장 제목 · 상태 · N자 · 미해결 n · 미확인인용 n`. 장별 미해결 수에는 코멘트 유래까지 모두 센다.
-  - 미해결 전문은 origin이 `user`·`agent`인 것만 싣는다. `import_comment`는 `코멘트 유래 미해결 N건 — book_issues로 조회` 한 줄로만 보인다.
+  - 미해결 전문은 origin이 `user`·`agent`인 것만 싣는다. `import_comment`는 `코멘트 유래 미해결 N건(citation · fact · general 수) — book_issues(kind)로 조회` 한 줄로만 보인다.
   - 최근 결정 10개, 최근 변경 5개도 싣는다.
   - 예산 배분 순서는 머리 → 목차 → 직접 남긴 미해결 → 결정 → 변경이다. 넘치는 것은 "외 N건"으로 접는다.
 - `book_issues(status=open|closed|all, chapter_number?, origin?, kind?, limit=50, project_id?)` → 미해결 목록(조회 전용). 한 줄에 `I번호 · 상태 · 장 · origin · kind(→ref_key) · 내용(300자)`를 담는다. limit 최대 200. *(사용자 요청으로 추가된 도구)*
