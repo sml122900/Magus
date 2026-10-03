@@ -22,6 +22,7 @@ _YEAR = r"(?:1[5-9]|20)\d{2}[a-z]?"
 _APA = re.compile(rf"^(?P<authors>[^()]+?)\s*[,.]?\s*\(\s*(?P<year>{_YEAR})(?:\s*[,/][^)]*)?\s*\)\s*[.,]?\s*(?P<rest>.*)$")
 _ANY_YEAR = re.compile(rf"(?<!\d)(?P<year>{_YEAR})(?![\d])")
 _AUTHOR_SPLIT = re.compile(r"\s*(?:,|&|·|、|\band\b|\s외\b|\s등\b)\s*")
+_READING = re.compile(r"^(?P<name>[一-鿿㐀-䶿]{1,10})\s*\((?P<reading>[가-힣 ]{2,20})\)")
 _BRACKETED_TITLE = re.compile(r"^[『《「“\"](?P<title>[^』》」”\"]+)[』》」”\"]")
 
 
@@ -64,6 +65,10 @@ def parse_bib_line(line: str) -> dict[str, Any] | None:
     if m := _TRANSLATION.search(text):
         translation = m.group("body").strip()
         text = (text[: m.start()] + text[m.end() :]).strip()
+    reading = None
+    if m := _READING.match(text):  # 田代和生(다시로 가즈이). (1981). … — 한자 이름 뒤의 한글 읽기
+        reading = m.group("reading").strip()
+        text = m.group("name") + text[m.end() :]
     if m := _APA.match(text):
         authors, year, rest = m.group("authors").strip(" ,."), m.group("year"), m.group("rest")
         title, container = _title_and_rest(rest)
@@ -80,7 +85,7 @@ def parse_bib_line(line: str) -> dict[str, Any] | None:
     else:
         return None
     first = first_author(authors)
-    if not first or not re.search(r"[A-Za-z가-힣]", first):
+    if not first or not re.search(r"[A-Za-z가-힣一-鿿]", first):
         return None
     bib: dict[str, Any] = {
         "authors": authors,
@@ -94,6 +99,8 @@ def parse_bib_line(line: str) -> dict[str, Any] | None:
         bib["parse"] = "approx"
     if translation:
         bib["translation"] = translation
+    if reading:
+        bib["reading"] = reading
     return bib
 
 
@@ -106,7 +113,9 @@ def ref_from_bib(bib: dict[str, Any]) -> Ref:
         if re.fullmatch(r"[가-힣]{1,8}", surname):
             years = [bib["year"], *(y.group("year") for y in _ANY_YEAR.finditer(tr))]
             aliases = [f"{surname}{y}" for y in dict.fromkeys(years)]
-    return Ref(key=key, status="unverified", bib=bib, aliases=tuple(aliases))
+    if reading := bib.get("reading"):  # 한자 이름의 한글 읽기: 성(첫 낱말)과 전체를 aliases로
+        aliases += [f"{reading.split()[0]}{bib['year']}", f"{reading.replace(' ', '')}{bib['year']}"]
+    return Ref(key=key, status="unverified", bib=bib, aliases=tuple(dict.fromkeys(aliases)))
 
 
 def import_bibliography(store: Store, user_id: str, text: str) -> BibReport:

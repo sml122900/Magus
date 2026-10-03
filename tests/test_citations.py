@@ -58,8 +58,10 @@ def test_multiple_citations_in_one_parenthesis():
 def test_korean_particle_is_stripped_but_original_kept_as_candidate():
     [c] = find_citations("갤러는(2022) 이것을 넓힌다.")
     assert c.key == "갤러2022" and c.lookup_keys == ("갤러는2022", "갤러2022")
-    [c] = find_citations("카를로(2010)는")  # 이름이 조사처럼 끝나도 원형이 첫 후보다
-    assert c.lookup_keys == ("카를로2010", "카를2010")
+    [c] = find_citations("카를로(2010)는")  # 이름 끝에 흔한 글자(로·은·만)는 조사로 보지 않는다
+    assert c.lookup_keys == ("카를로2010",)
+    [c] = find_citations("김성은·테르틸트·염민철(2024)")  # 실원고: '김성은'이 '김성'으로 잘리던 문제
+    assert c.key == "김성은2024"
 
 
 def test_korean_non_author_words_are_ignored():
@@ -81,3 +83,29 @@ def test_year_suffix_is_part_of_key():
 )
 def test_seoji_false_positive(comment, kind):
     assert classify_comment(comment)[0] == kind
+
+
+# 실원고(닿으려는 종)에서 확인한 표기들
+@pytest.mark.parametrize(
+    ("text", "keys"),
+    [
+        ("(Araújo et al., 2022)", ["araujo2022"]),
+        ("(Myrskylä, Kohler & Billari, 2009)", ["myrskyla2009"]),
+        ("(Huerta-Sánchez et al., 2014)", ["huertasanchez2014"]),
+        ("(de Vries, 1984)", ["devries1984"]),
+        ("(Bolt & van Zanden, 2024)", ["bolt2024"]),
+        ("(della Paolera & Taylor, 2003)", ["dellapaolera2003"]),
+        ("(Ibn Khaldun, 1967)", ["ibnkhaldun1967"]),
+        ("(Korea JoongAng Daily, 2025a)", ["koreajoongangdaily2025a"]),
+        ("(田代和生, 1981)", ["田代和生1981"]),
+        ("(1990년 국제달러, Maddison, 2001)", ["maddison2001"]),
+        ("(경향신문, 2013)", ["경향신문2013"]),
+        ("셰 등(2019)", ["셰2019"]),
+        ("넌·첸(2011)", ["넌2011"]),
+        ("애쓰모글루와 로빈슨(2012)", ["애쓰모글루2012"]),
+        ("모스크바 회사(1555), 합계출산율(2023), 곡물법 반대 동맹(1838)", []),
+        ("(예: 한국의 1913~1950년)", []),
+    ],
+)
+def test_real_manuscript_forms(text, keys):
+    assert [c.key for c in find_citations(text)] == keys

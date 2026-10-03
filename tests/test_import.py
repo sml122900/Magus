@@ -105,14 +105,36 @@ def test_outline_of_imported_project(store: LocalStore, report):
     assert "### 제2부 뭍" in text and "- 제4장 닿으려는 손 · draft" in text
 
 
-def test_pdf_fallback(store: LocalStore, tmp_path: Path):
+def test_pdf_fallback_word_layout(store: LocalStore, tmp_path: Path):
+    """실원고(Word '메모 포함' PDF)의 레이아웃을 흉내 낸 합성 PDF: 줄 단위 텍스트, 반복 머리말·쪽번호, 들여쓰기,
+    단어 중간 줄바꿈, 오른쪽 말풍선, 내어쓰기 참고문헌, 그림, 서장."""
     pdf = build_manuscript_pdf(tmp_path / "원고.pdf")
     report = import_manuscript(store, "alice", pdf, project_id="frompdf")
-    assert "코멘트는 PDF 텍스트에서 추출" in report.summary()
-    assert [(c.number, c.title) for c in store.list_chapters("alice", "frompdf")] == [(1, "물가의 망설임"), (2, "목이 생긴 날")]
+    assert "코멘트는 PDF 텍스트" in report.summary()
+    chapters = store.list_chapters("alice", "frompdf")
+    assert [(c.number, c.display, c.title, c.part_number) for c in chapters] == [
+        (0, "서장", "물가에서", None),  # 번호 없는 장
+        (1, "제1장", "물가의 망설임", 1),
+        (2, "제2장", "목이 생긴 날", 1),
+    ]
+    ch1 = store.read_chapter("alice", "frompdf", 1).content
+    # 단어 중간 줄바꿈을 공백 없이 잇고, 머리말·쪽번호·말풍선은 본문에 없다
+    assert "물고기가 있었다(Daeschler, Shubin & Jenkins, 2006)." in ch1
+    assert "닿으려는 종" not in ch1 and "메모 포함" not in ch1 and "논지 요약" not in ch1
+    assert "## 1.1 물고기는 왜 뭍으로 올라왔나" in ch1 and "[그림 1]" in ch1
     issues = store.list_issues("alice", "frompdf")
-    assert [(i.chapter_number, i.kind) for i in issues] == [(1, "citation"), (2, "general")]
-    assert "메모 포함" not in store.read_chapter("alice", "frompdf", 1).content
+    assert [(i.chapter_number, i.kind, i.ref_key) for i in issues] == [
+        (0, "citation", "마셜2015"),  # 여러 줄 말풍선을 이어 붙임
+        (1, "citation", "daeschler2006"),
+        (2, "general", None),
+    ]
+    assert issues[1].ref_id == "daeschler2006"
+    refs = {r.key: r for r in store.list_refs("alice")}
+    assert {"clack2012", "daeschler2006", "nunn2011", "田代和生1981"} <= set(refs)  # 내어쓰기 항목을 한 줄로 이음
+    assert {"diamond1997", "galor2022", "keynes1930"} <= set(refs)  # 이어지는 한 줄짜리 항목을 하나씩 가름
+    assert len(refs) == 7
+    assert set(refs["田代和生1981"].aliases) == {"다시로1981", "다시로가즈이1981"}
+    assert report.bib.failed == []
 
 
 def test_rejects_unknown_format_and_headless(store: LocalStore, tmp_path: Path):

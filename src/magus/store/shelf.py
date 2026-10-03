@@ -24,12 +24,12 @@ from magus.store.base import Author, Chunk, Idea, Lane, Passage, Ref, RefStatus,
 from magus.store.fileio import locked, read_json, read_text, write_json, write_text
 from magus.textindex import chunk_text, index_text
 
-_REF_KEY = re.compile(r"[a-z0-9가-힣][a-z0-9가-힣_-]{0,79}")
+_REF_KEY = re.compile(r"[a-z0-9가-힣一-鿿㐀-䶿][a-z0-9가-힣一-鿿㐀-䶿_-]{0,79}")
 
 
 def safe_ref_key(key: str) -> str:
     if not _REF_KEY.fullmatch(key):
-        raise ValueError(f"ref key={key!r}: 소문자 영문·숫자·한글·_·-, 80자 이하")
+        raise ValueError(f"ref key={key!r}: 소문자 영문·숫자·한글·한자·_·-, 80자 이하")
     return key
 
 

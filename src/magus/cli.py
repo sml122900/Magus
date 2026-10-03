@@ -10,6 +10,8 @@ from pathlib import Path
 from magus.config import Settings
 from magus.store import LocalStore
 
+DEFAULT_USER = "default"
+
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="magus", description="Magus 집필 RAG MCP 서버")
@@ -25,6 +27,9 @@ def main(argv: list[str] | None = None) -> None:
     convo = sub.add_parser("conversation", help="대화 기록 md를 영감 책장(Casper)에 넣고 리포트를 출력")
     convo.add_argument("path", type=Path)
     convo.add_argument("--origin")
+    cite = sub.add_parser("cite-report", help="책 전체 인용 집계(미확인 문헌 순위, 참고문헌 누락·미인용)")
+    cite.add_argument("--project-id", required=True)
+    cite.add_argument("--top", type=int, default=20)
     synth = sub.add_parser("synth", help="합성 fixture(원고 docx·pdf, 대화 기록 md)를 만든다")
     synth.add_argument("folder", type=Path)
     sub.add_parser("seed-demo", help="1단계 확인용 가짜 프로젝트 생성")
@@ -41,6 +46,9 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     settings = Settings.from_env()
+    if settings.user_id == DEFAULT_USER and (args.cmd == "seed-demo" or (args.cmd == "import" and args.synthetic)):
+        # 합성·테스트 데이터는 default 사용자(실제 저자의 책장)에 넣지 않는다. 데모 책장이 저자의 취향으로 검색된다.
+        parser.exit(2, "합성·데모 데이터는 default 사용자에 넣지 않습니다. USER_ID=demo 또는 USER_ID=synthetic로 실행하세요.\n")
     store = LocalStore(settings.data_dir)
     log = logging.getLogger("magus")
     log.info("user_id=%s data_dir=%s embeddings=%s", settings.user_id, settings.data_dir, settings.embeddings)
@@ -68,6 +76,10 @@ def main(argv: list[str] | None = None) -> None:
             synthetic=args.synthetic,
         )
         print(report.full())
+    elif args.cmd == "cite-report":
+        from magus.melchior.report import build_cite_report
+
+        print(build_cite_report(store, settings.user_id, args.project_id).render(args.top))
     elif args.cmd == "conversation":
         from magus.casper.tools import add_conversation
 

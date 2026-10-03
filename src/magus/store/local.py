@@ -184,6 +184,7 @@ class LocalStore(ShelfMixin):
         title: str | None = None,
         status: ChapterStatus | None = None,
         part_number: int | None = None,
+        label: str | None = None,
     ) -> ChapterMeta:
         if number < 0:
             raise ValueError("장 번호는 0 이상")
@@ -206,6 +207,7 @@ class LocalStore(ShelfMixin):
         prev = old or {}
         now = utcnow()
         meta = {
+            "label": label or prev.get("label"),
             "title": title or prev.get("title") or f"제{number}장",
             "status": status or prev.get("status") or "draft",
             "part_number": part_number if part_number is not None else _int(prev.get("part_number")),
@@ -443,19 +445,20 @@ class LocalStore(ShelfMixin):
         return self._db.execute(
             """
             INSERT INTO chapters
-                (user_id, project_id, number, title, status, part_number, path, char_count, version, last_note,
+                (user_id, project_id, number, label, title, status, part_number, path, char_count, version, last_note,
                  updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (user_id, project_id, number) DO UPDATE SET
-                title = excluded.title, status = excluded.status, part_number = excluded.part_number,
-                path = excluded.path, char_count = excluded.char_count, version = excluded.version,
-                last_note = excluded.last_note, updated_at = excluded.updated_at
+                label = excluded.label, title = excluded.title, status = excluded.status,
+                part_number = excluded.part_number, path = excluded.path, char_count = excluded.char_count,
+                version = excluded.version, last_note = excluded.last_note, updated_at = excluded.updated_at
             RETURNING id
             """,
             (
                 user_id,
                 project_id,
                 number,
+                meta.get("label") or None,
                 meta.get("title") or f"제{number}장",
                 meta.get("status") or "draft",
                 _int(meta.get("part_number")),
@@ -512,4 +515,5 @@ def _chapter_meta(r: sqlite3.Row) -> ChapterMeta:
         version=r["version"],
         last_note=r["last_note"],
         updated_at=r["updated_at"],
+        label=r["label"],
     )

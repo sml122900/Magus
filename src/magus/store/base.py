@@ -44,6 +44,11 @@ class ChapterMeta:
     version: int
     last_note: str
     updated_at: str
+    label: str | None = None  # 번호 없는 장의 표시 이름(서장·맺음·부록 N). 없으면 "제N장"
+
+    @property
+    def display(self) -> str:
+        return self.label or f"제{self.number}장"
 
 
 @dataclass(frozen=True)
@@ -182,6 +187,7 @@ class Store(Protocol):
         title: str | None = None,
         status: ChapterStatus | None = None,
         part_number: int | None = None,
+        label: str | None = None,
     ) -> ChapterMeta:
         """이전 본문을 versions/에 보관한 뒤 새 본문을 쓴다. 없는 번호면 새 장을 만든다.
         content는 본문만이다. front matter가 붙어 오면 벗겨 내고, 메타는 인자로만 바꾼다.

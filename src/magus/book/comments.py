@@ -1,30 +1,42 @@
-"""원고 코멘트 → 미해결 분류. book_import(2단계)가 코멘트를 이슈로 만들 때 쓴다."""
+"""원고 코멘트 → 미해결 분류. book_import가 코멘트를 이슈로 만들 때 쓴다.
+
+citation으로 보는 표현: "확인 필요", "인용 확인 필요", "서지", "원문 대조"와 그 실제 변형
+("확인필요", "확인할 필요", "원문과 대조해", "원문으로 대조해" — 실원고 코멘트에서 확인).
+"""
 
 from __future__ import annotations
 
 import re
 
-from magus.melchior.citations import find_citations
+from magus.melchior.citations import Citation, find_citations
 from magus.store.base import IssueKind
 
-# 이 표현이 들어 있으면 출처 확인 코멘트로 본다. 공백 차이("확인필요")는 무시한다.
 CITATION_MARKERS = ("확인 필요", "인용 확인 필요", "서지", "원문 대조")
-_SQUEEZED_MARKERS = tuple(re.sub(r"\s+", "", m) for m in CITATION_MARKERS if m != "서지")
-# "서지"는 다른 낱말 속("일어서지", "세우지 않았어서지")에 흔히 들어 있다.
-# 앞에 한글이 없고, 뒤가 한글이 아니거나 서지 관련 낱말일 때만 인정한다.
+_MARKER = re.compile(
+    r"확인\s*(?:할|이)?\s*필요"  # 확인 필요 · 확인필요 · 확인할 필요 · 인용 확인 필요
+    r"|원문\s*(?:과|으로|을|의\s*표현을)?\s*대조"  # 원문 대조 · 원문과 대조해 · 원문으로 대조해
+)
+# "서지"는 다른 낱말 속("일어서지")에 흔히 들어 있다. 앞에 한글이 없고, 뒤가 한글이 아니거나 서지 관련 낱말일 때만 인정한다.
 _SEOJI = re.compile(r"(?<![가-힣])서지(?:(?![가-힣])|(?=정보|사항|확인|누락|오류|표기|데이터|학))")
+COMMENT_ANCHOR_SPLIT = "\n— 원문: "
 
 
 def is_citation_comment(text: str) -> bool:
-    squeezed = re.sub(r"\s+", "", text)
-    return any(marker in squeezed for marker in _SQUEEZED_MARKERS) or bool(_SEOJI.search(text))
+    return bool(_MARKER.search(text) or _SEOJI.search(text))
+
+
+def comment_citation(text: str, anchor: str | None = None) -> Citation | None:
+    """코멘트가 가리키는 인용. 코멘트 본문에서 먼저 찾고, 없으면 앵커(코멘트가 달린 원문)에서 찾는다.
+    앵커에서는 서로 다른 인용이 하나뿐일 때만 쓴다. 앵커가 문단 전체라 인용이 여럿이면 어느 것인지 알 수 없다."""
+    if cites := find_citations(text, bare=True):
+        return cites[0]
+    cites = find_citations(anchor or "", bare=True)
+    return cites[0] if len({c.key for c in cites}) == 1 else None
 
 
 def classify_comment(text: str, anchor: str | None = None) -> tuple[IssueKind, str | None]:
-    """(kind, ref_key 후보). ref_key는 코멘트 본문에서 먼저 찾고, 없으면 코멘트가 달린 원문(anchor)에서 찾는다."""
+    """(kind, ref_key 후보)."""
     if not is_citation_comment(text):
         return "general", None
-    for source in (text, anchor or ""):
-        if cites := find_citations(source, bare=True):
-            return "citation", cites[0].key
-    return "citation", None
+    cite = comment_citation(text, anchor)
+    return "citation", cite.key if cite else None

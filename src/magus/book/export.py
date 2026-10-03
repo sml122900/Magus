@@ -31,7 +31,7 @@ def assemble_markdown(store: Store, user_id: str, project: Project) -> str:
         chapter = store.read_chapter(user_id, project.id, c.number)
         body = chapter.content if chapter else ""
         body = _HEADING.sub(lambda m: "#" * (len(m.group(1)) + level - 1) + " ", body)
-        out += [f"{'#' * level} 제{c.number}장 {c.title}", body]
+        out += [f"{'#' * level} {c.display} {c.title}", body]
     return "\n\n".join(out) + "\n"
 
 

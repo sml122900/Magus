@@ -39,7 +39,7 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
 
         # 2단계
         imported = _text(await client.call_tool("book_import", {"path": str(manuscript), "project_id": "synth"}))
-        assert "장 7개 · 부 3개" in imported and "| ch-04.md | 닿으려는 손 | 2 |" in imported
+        assert "장 7개(" in imported and "· 부 3개" in imported and "| ch-04.md | 제4장 | 닿으려는 손 | 2 |" in imported
         bib = _text(await client.call_tool("ref_import_bibliography", {"text": "Zimmer, C. (1998). At the water's edge. Free Press."}))
         assert "이미 있음 1건" in bib
 

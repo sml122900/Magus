@@ -4,9 +4,9 @@
 
 ## 진행상황
 
-- 현재 단계: 1~7단계 구현 완료(태그 `step1`~`step7`). 야간 자율 작업으로 진행했고, 2·4·5단계는 **합성 fixture로만** 검증했다.
-- 다음 할 일: 실제 fixtures로 2·4·5단계를 다시 돌려 완료 기준(35±2장·8부·코멘트 80건 이상·refs 200건 이상, 대화 96/96)을 확인하고 파서를 보정한다.
-- 대기 사항: fixtures 투입, 아침 보고의 검토 대기 결정 확인(사용자). 상세는 status.md에만 적는다.
+- 현재 단계: P0 실데이터 검증 완료(태그 `p0-realdata`). 실원고 PDF와 실대화 4종으로 완료 기준을 모두 충족했다.
+- 다음 할 일: 사용자가 집계 리포트로 문헌 확인(ref_add)을 시작하고, Desktop 실사용에서 문제가 나오면 재현 테스트부터 만든다.
+- 대기 사항: 검토 대기 결정(status.md 4절) 확인, Desktop 재시작 후 실사용(사용자). 상세는 status.md에만 적는다.
 
 ## 개요
 
@@ -44,6 +44,7 @@
 - **인용 게이트**: refs에 `status=verified`로 있는 출처만 인용할 수 있다. 없는 출처는 본문에 `[출처 필요: 주장 요약]`으로 남긴다. 쓰기를 막지는 않는다. 표시하고 집계만 하며, 판단은 사용자가 한다.
 - **누가 말했는지 보존한다.** Casper는 사용자 발화(`author=me`)와 AI 발화(`author=ai`)를 구분해 저장하고, 검색에서는 me를 먼저 보여 준다.
 - **원본은 사람이 읽을 수 있는 파일(markdown/json)이다. SQLite는 인덱스일 뿐이다.** 인덱스는 언제든 파일에서 다시 만들 수 있어야 한다(`magus reindex`). 파일에 없는 정보를 SQLite에만 두지 않는다. 예외는 계산으로 얻는 값(char_count, unverified_cite_count, chunks)이다.
+- **합성·테스트 데이터는 `default` 사용자에 넣지 않는다.** default는 실제 저자의 책장이다. 데모 문체 표본이 저자의 취향으로, 가짜 서지가 진짜 서지로 섞인다. 데모는 `USER_ID=demo`, 합성은 `USER_ID=synthetic`을 쓴다. CLI는 default에 `seed-demo`와 `import --synthetic`을 거부한다.
 - **SaaS 준비**
   - 모든 레코드(모든 테이블의 모든 행)에 `user_id`가 있고, 모든 쿼리는 `user_id`로 필터한다.
   - P0는 단일 사용자(환경변수 `USER_ID`)다. 그래도 코드 어디에서도 단일 사용자를 가정하지 않는다. Store 메서드는 항상 `user_id`를 인자로 받는다. 서버 코어에서 user_id를 정하는 곳은 `current_user()` 한 군데뿐이다(P1에서는 인증 컨텍스트로 바꾼다).
@@ -68,7 +69,11 @@
   - **한국어 토큰화(확정)**: 한글·한자·가나 연속열은 2글자 bigram, 라틴 문자와 숫자는 소문자 단어로 사전 토큰화해 FTS5 unicode61에 넣는다. 질의도 같은 방식으로 쪼개 OR로 묶는다(`magus/textindex.py`). 2글자 이름("갤러")도 찾는다.
   - 임베딩은 파생값이다. 인덱스를 다시 만들면 비고, 검색할 때 `embed_missing`이 채운다. 임베딩 호출이 실패하면 FTS로 계속한다.
 - docx 읽기: zip 안의 XML을 lxml로 직접 걷는다(`magus/book/docx_reader.py`). 코멘트 범위·sdt·삭제분·필드 코드를 정확히 다루기 위해서다. python-docx는 합성 fixture 생성과 export 검증에만 쓴다. docx 쓰기: `pypandoc_binary`(pandoc 3.9 내장).
-- PDF 텍스트: pymupdf(`import pymupdf`). docx가 없을 때 폴백으로 원고 PDF도 받는다. 이때 코멘트는 `메모 포함[C n]` 블록에서 추출한다.
+- PDF 텍스트: pymupdf(`import pymupdf`). docx가 없을 때 폴백으로 원고 PDF도 받는다. **실원고가 이 경우다**(Word '메모 포함' 마크업 PDF). `magus/book/pdf_reader.py`는 레이아웃으로 구조를 되살린다.
+  - 반복 머리말·쪽번호를 빼고, 오른쪽 68% 단은 말풍선 `메모 포함[Cn]`(여러 줄)으로 본다.
+  - 줄 끝 공백이 없으면 이어 붙인다(한국어 줄바꿈). 들여쓰기·내어쓰기·줄 간격으로 문단을 가른다(내어쓰기 서식은 글자 크기별로 판별).
+  - 글자 크기로 제목 단계를 정하고, 같은 높이 조각은 한 줄로 합친다. 앵커는 말풍선 높이의 문단이다.
+  - 표는 칸 구분 없이 문단으로 들어온다.
 - 임베딩: `magus/embeddings.py`. Voyage(기본 모델 voyage-3.5)와 OpenAI(text-embedding-3-small)를 표준 라이브러리 HTTP로 부른다. 모델은 `EMBEDDINGS_MODEL`로 바꾼다. 키가 없으면 경고를 남기고 FTS만 쓴다.
 
 ## 설정 (환경변수)
@@ -85,7 +90,8 @@
 
 - users(id), projects(id, user_id, title)
 - parts(user_id, project_id, number, title) — *추가(승인됨)*: 완료 기준의 "부 8개"를 위해 둔다. book_outline은 부 제목 아래에 장을 묶어 보여 준다.
-- chapters(id, user_id, project_id, number, title, status, part_number, path, char_count, unverified_cite_count, version, last_note, updated_at)
+- chapters(id, user_id, project_id, number, label?, title, status, part_number, path, char_count, unverified_cite_count, version, last_note, updated_at)
+  - **번호 없는 장**: 서장·프롤로그 = 0, 맺음·에필로그·나가며 = 90, 부록 N = 90+N. `label`(서장·맺음·부록 N)을 앞머리와 인덱스에 두고, outline·export·read에서 "제N장" 대신 보여 준다. 부에 속하지 않는다.
   - **status 값은 `draft` | `revising` | `done` 중 하나다.** 쓸 때 그 밖의 값이 오면 거부한다(Store는 ValueError, 도구는 스키마 enum으로 막는다).
 - chapter_versions(id, user_id, chapter_id, version, path, note, created_at) — 보관된 **이전** 본문들
 - decisions(user_id, project_id, id, text, created_at) — id는 프로젝트별 일련번호 `D{n}`
@@ -93,7 +99,7 @@
   - `kind`: 임포트할 때 코멘트 본문에 "확인 필요", "인용 확인 필요", "원문 대조"가 들어 있으면(공백 차이는 무시), 또는 독립된 낱말 "서지"가 있으면(앞뒤 문맥으로 판정, "일어서지"는 아님) `citation`, 아니면 `general`이다. 직접 남긴 이슈는 `general`이 기본값이다.
   - `ref_key`: citation 코멘트에서 뽑은 저자·연도 후보(`daeschler2006`, 한글이면 조사를 뗀 `갤러2022`). 코멘트 본문에 없으면 앵커 원문에서 찾고, 그래도 없으면 null이다. 추출기는 `magus/melchior/citations.py`이고, ref_check도 이것을 쓴다.
   - `ref_id`: ref_key를 refs(key 또는 aliases)에서 해석한 **정식 ref key**(예: `갤러2022` ⇒ `galor2022`). refs 행 id는 재생성되면 바뀌므로 key를 쓴다. 임포트, ref_add, ref_import_bibliography 뒤에 다시 계산한다.
-- chapters.unverified_cite_count: verified가 아닌 인용의 **출현 수**(unverified + unknown). 파생값이라 인덱스에만 두고, 서버 시작·`magus reindex`·refs 변경·장 쓰기 때 다시 계산한다.
+- chapters.unverified_cite_count: verified가 아닌 **고유 문헌 수**(unverified + unknown, uncertain 제외). 출현 횟수가 아니다(사용자 결정 #17 변경). 파생값이라 인덱스에만 두고, 서버 시작·`magus reindex`·refs 변경·장 쓰기 때 다시 계산한다.
   - **한 번 준 번호는 절대 재사용하거나 다시 매기지 않는다.** 마지막 번호는 project.json의 `last_decision_id`/`last_issue_id`에 둔다.
 - refs(id, user_id, key, aliases json, bib json, status: unverified|verified, has_fulltext, file_path?, created_at)
   - key는 첫 저자 성(소문자 영문) + 연도다. 예: `daeschler2006`, `galor2022`. 한글 표기(갤러, 다이아몬드 등)는 aliases에 넣는다.
@@ -163,7 +169,11 @@ data/synthetic-fixtures/                                          # magus synth 
 - `book_issue_add(text, chapter_number?, origin=user|agent, project_id?)` → 없는 장 번호는 거부한다.
 - `book_issue_close(id="I3"|"3", note?, project_id?)`
 - `book_import(path, project_id?, title?, replace=false)` → 로컬 docx(없으면 pdf)를 새 프로젝트로 만든다(`magus/book/importer.py`).
-  - 제목: "제N장"·"제N부"(공백·콜론·대시 변형 허용, 제목이 다음 줄에 와도 됨). 같은 장 번호가 여러 번 나오면(목차) 본문이 가장 긴 것이 진짜다. 첫 제목 앞의 글은 `original/unsplit.md`에 둔다.
+  - 제목: "제N장"·"제N부"(공백·콜론·대시 변형 허용, 제목이 다음 줄에 와도 됨)와 번호 없는 장(서장·맺음·부록 N, 제목 서식이 있을 때만).
+  - 같은 장 번호가 여러 번 나오면(목차) 제목 서식이 있는 것, 그다음 본문이 가장 긴 것이 진짜다.
+  - 첫 제목 앞의 글(표지·목차)과 부 서문은 `original/unsplit.md`에 둔다(목차 점선은 줄임). 장 안의 절·소절은 `##`·`###`이다.
+  - 코멘트 표현: "확인 필요"(확인필요·확인할 필요), "인용 확인 필요", "서지"(문맥 판정), "원문 대조"(원문과·으로 대조).
+  - key를 앵커에서 가져오는 것은 앵커 문단에 서로 다른 인용이 하나뿐일 때만이다.
   - 코멘트는 issues(origin=import_comment)로 넣고, 앵커 블록이 속한 장 번호를 기록한다. `classify_comment(코멘트, 앵커 원문)`으로 kind와 ref_key를 붙이고, 본문에 "— 원문: “앵커 120자”"를 덧붙인다.
   - 참고문헌 섹션은 import_bibliography로 넘긴다. 그다음 citation 이슈를 refs와 연결한다.
   - 그림·표·수식은 자리표시자(`[그림 N]`, `[표 N]`, `[수식]`)로 남긴다. 원본은 **무엇보다 먼저** original/에 복사한다.
@@ -181,13 +191,20 @@ data/synthetic-fixtures/                                          # magus synth 
   - bib은 `{key}` 또는 `{authors|author, year, title…}`이다. 같은 key나 alias가 unverified로 있으면 verified로 올리고 bib·aliases·발췌를 합친다.
   - 전문은 txt/md/pdf/docx 파일이나 full_text로 받는다. 발췌는 ref_picked 레인, 전문은 ref_full 레인으로 청킹한다.
 - `ref_search(query, scope=picked|full|both(기본), k=8)` → 하이브리드 검색. picked 결과를 먼저 보여 주고, full 결과에는 "발췌되지 않은 부분 → ref_add로 발췌 추가"라고 표시한다.
-- `ref_check(chapter_number, project_id?)` → JSON: verified / unverified / unknown(refs에 없음) 세 목록(key·count·cited_as)과 needs_source.
-  - 인용 패턴: `(Daeschler, Shubin & Jenkins, 2006)`, `Clack(2012)`, `Hu et al.(2023)`, `갤러(2022)`, `(헨릭, 2016)`, 괄호 안 다중 인용 `(A, 2012; B, 2023)`, 조사 붙은 한글 저자 `갤러는(2022)`(원형 → 조사 뗀 것 순서로 해석).
+- `ref_check(chapter_number, project_id?)` → JSON: verified / unverified / unknown(refs에 없음) / uncertain(한글 표기인데 refs와 못 이음: 인명이면 aliases 필요, 지명·사건이면 무시) 목록과 `unique_unchecked`, `needs_source`.
+  - 문헌마다 `count`(출현), `cited_as`, `paragraphs`(장 본문의 문단 번호), `matched_by`(alias·음역 추정·연도 a/b 모호)를 담는다.
+  - 인용 패턴: `(Daeschler, Shubin & Jenkins, 2006)`, `Clack(2012)`, `Hu et al.(2023)`, `갤러(2022)`, `(헨릭, 2016)`. 실원고에서 추가로 확인한 것은 다음과 같다.
+    - 괄호 안 다중 인용, 설명 뒤 인용 `(1990년 국제달러, Maddison, 2001)`, 연도 범위 `(Toynbee, 1934–1961)`
+    - 발음 부호·소문자 접두어·여러 단어 저자(Prüfer, de Vries, Ibn Khaldun), 한자 저자(田代和生)
+    - 한글 공저자 `넌·첸(2011)`, 한 글자 성 `셰 등(2019)`, 띄어 쓴 일본 이름 `다시로 가즈이(1981)`
+  - 해석: key → aliases → 공저자로 동명 판별 → 연도 a/b → (한글만) 같은 연도 안 음역 추정(`magus/melchior/translit.py`). 지명·사건 접미사와 일반명사는 저자로 보지 않는다.
+- 책 전체 집계는 CLI `magus cite-report --project-id <id>`로 낸다(`magus/melchior/report.py`).
+  - 내용: 고유 미확인 수, 많이 인용된 순위, 참고문헌에 없는 인용(+같은 저자 다른 연도 힌트), uncertain, 추정 연결, 미인용 항목.
 
 ### 영감 — Casper (`magus/casper/`)
 - `idea_add(text, kind, origin?)` → author=me로 저장한다.
 - `idea_add_conversation(markdown? | path?, origin?)` → 화자 마커로 발화를 나눈다(`magus/casper/conversation.py`). 로컬 .md path도 받는다(긴 기록용).
-  - 지원 마커(한 파일 안 혼용 가능): `**사용자:**`/`**Claude:**`(변형: `**사용자**:`, 나/User, ChatGPT/AI), `질문:`/`답변:`, `> 인용 블록` 뒤의 `**Claude 요지**`.
+  - 지원 마커(한 파일 안 혼용 가능): `**사용자:**`/`**Claude:**`(변형: `**사용자**:`, 나/User, ChatGPT/AI), `질문:`/`답변:`(괄호 설명 허용: `**답변(수정된 평가):**`), 제목형 `## 질문 N` / `### 답변`, `> 인용 블록` 뒤의 `**Claude 요지**`. 사용자 발화 전체가 인용 블록이면 `>`를 뗀다.
   - 사용자 발화 하나는 ideas(author=me, kind=conversation)가 되고, 바로 뒤의 AI 발화는 ideas(author=ai, parent_id=그 사용자 발화)가 된다. 대화 사이 구분 제목(`## 대화 N`, `---`)은 발화에서 떼어 낸다.
   - 리포트: me N건, ai N건, 분리 실패 구간(서문 본문, 빈 마커, 고아 AI 발화. 저장하지 않는다).
 - `idea_search(query, author=me|ai|all, k=10)` → 기본값은 me다. all이면 me를 먼저 정렬한다. ai 결과에는 응답한 사용자 발화를 함께 보여 준다.
@@ -234,12 +251,15 @@ magus conversation <md> [--origin …]      # 대화 기록 → Casper
 magus synth <폴더>                        # 합성 fixture 만들기
 magus seed-demo                           # 데모 프로젝트 + 책장 표본
 magus reindex                             # 파일 → index.sqlite 재생성 + 파생값 재계산
+magus cite-report --project-id book       # 책 전체 인용 집계(확인 순서)
 ```
 
 ## fixtures
 
 `fixtures/`에는 원고 docx 1개(파일명에 "닿으려는_종")와 대화 기록 md 3개(그중 하나는 `대화_전체_기록.md`)를 둔다. 실제 원고이므로 리포에 커밋하지 않는다(.gitignore). 읽기만 한다.
-- 실파일이 없을 때는 `magus synth data/synthetic-fixtures`로 합성 fixture를 만들어 쓴다(`src/magus/synthetic.py`). 합성으로 돌린 리포트에는 "합성 fixture"라고 표시한다.
+- 실제 내용: 원고 `261002-닿으려는_종_전면개정_그림추가.pdf`(PDF, 297쪽, docx 없음), `대화_전체_기록.md`, `대화기록_닿으려는종.md`, `도시_유전자_민주주의_대화.md`, `사피엔스_총균쇠_대화.md`. 원본은 사용자의 Downloads에 있고, fixtures는 사본이다.
+- 실데이터는 default 사용자의 `book` 프로젝트다. 리포트 사본은 `data/realdata/`에 있다.
+- 실파일이 없을 때는 `USER_ID=synthetic magus synth data/synthetic-fixtures`로 합성 fixture를 만들어 쓴다(`src/magus/synthetic.py`). 합성 PDF는 실원고 레이아웃을 흉내 낸다. 합성으로 돌린 리포트에는 "합성 fixture"라고 표시한다.
 
 ## 문서화 규약
 
