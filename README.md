@@ -206,6 +206,17 @@ magus reindex                                   # 원본 파일로 인덱스를 
 
 `magus`는 `.venv\Scripts\magus.exe`입니다. 콘솔에서 한글이 깨지면 `PYTHONIOENCODING=utf-8`을 붙이세요.
 
+### 원격(HTTP) 모드 — P1 진행 중
+
+```
+magus serve --transport http --port 8000        # http://127.0.0.1:8000/mcp (streamable-http, stateless, JSON 응답)
+npx -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8000/mcp --transport http --method tools/list
+```
+
+- 지금은 인증이 없습니다. 그래서 루프백(127.0.0.1)에만 열리고, `--host 0.0.0.0`은 거부됩니다. 인증은 P1 2단계에서 붙입니다.
+- `/healthz`는 상태 확인용입니다(인증 없음, 내용 없음).
+- 서버 로그에는 도구 이름·user_id·소요 시간·결과만 남습니다. 원고 본문·발췌·생각은 남지 않습니다. 오류 메시지와 예외도 종류와 위치만 남깁니다.
+
 ### fixtures로 확인하기
 
 ```

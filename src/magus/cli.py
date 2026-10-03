@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sys
+import os
 from pathlib import Path
 
 from magus.config import Settings
+from magus.logsafe import setup_logging
 from magus.store import LocalStore
 
 DEFAULT_USER = "default"
@@ -18,6 +19,8 @@ def main(argv: list[str] | None = None) -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
     serve = sub.add_parser("serve", help="MCP 서버 실행")
     serve.add_argument("--transport", choices=["stdio", "http"], default="stdio")
+    serve.add_argument("--host", default="127.0.0.1", help="http: 바인드 주소(인증 없이는 루프백만)")
+    serve.add_argument("--port", type=int, default=int(os.environ.get("PORT") or 8000), help="http: 포트(기본 $PORT 또는 8000)")
     imp = sub.add_parser("import", help="원고(docx/pdf)를 새 프로젝트로 임포트하고 전체 리포트를 출력")
     imp.add_argument("path", type=Path)
     imp.add_argument("--project-id")
@@ -47,8 +50,8 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("reindex", help="원본 파일에서 index.sqlite 재생성")
     args = parser.parse_args(argv)
 
-    # stdio 전송에서 stdout은 MCP 프로토콜 전용이다. 로그는 반드시 stderr로 보낸다.
-    logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    # stdio 전송에서 stdout은 MCP 프로토콜 전용이다. 로그는 반드시 stderr로 보낸다. 내용은 로그에 남기지 않는다(logsafe).
+    setup_logging()
     if args.cmd == "synth":
         from magus.synthetic import write_all
 
@@ -72,11 +75,15 @@ def main(argv: list[str] | None = None) -> None:
         from magus.embeddings import get_embedder
         from magus.server import build_server
 
+        if args.transport == "http" and not transports.is_loopback(args.host):
+            # 인증 없는 HTTP를 바깥에 열지 않는다. 원격 공개는 인증(2단계)이 켜진 뒤에만.
+            parser.exit(2, f"인증 없이 {args.host}에 열 수 없습니다. 루프백(127.0.0.1)으로 실행하세요.\n")
         server = build_server(settings, store, get_embedder(settings))
         if args.transport == "stdio":
             transports.run_stdio(server)
         else:
-            transports.run_http(server)
+            log.info("streamable-http: http://%s:%d%s (stateless, 인증 없음 — 로컬 전용)", args.host, args.port, transports.MCP_PATH)
+            transports.run_http(server, args.host, args.port)
     elif args.cmd == "import":
         from magus.book.importer import import_manuscript
 

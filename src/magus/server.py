@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from mcp.server.mcpserver import MCPServer
 
+from magus.audit import ToolCallLog
 from magus.balthasar.tools import build_tools as balthasar_tools
 from magus.book.tools import build_tools as book_tools
 from magus.casper.tools import build_tools as casper_tools
@@ -31,4 +32,9 @@ def build_server(settings: Settings, store: Store, embedder: Embedder | None = N
         *balthasar_tools(store, current_user, embedder),
     ]
     # instructions는 실제로 등록된 도구만 언급하도록 도구 목록에서 조립한다.
-    return MCPServer(name=SERVER_NAME, instructions=build_instructions(t.name for t in tools), tools=tools)
+    return MCPServer(
+        name=SERVER_NAME,
+        instructions=build_instructions(t.name for t in tools),
+        tools=tools,
+        middleware=[ToolCallLog(current_user)],  # 도구 이름·user_id·소요 시간·결과만 기록(본문 없음)
+    )

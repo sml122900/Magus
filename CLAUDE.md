@@ -4,9 +4,9 @@
 
 ## 진행상황
 
-- 현재 단계: P0 완료 + 저자용 첫 보고서(태그 `p0-report1`) + 마무리 보완(outline 고유 문헌 수, README 시험 문장 4개, fixtures/papers/).
-- 다음 할 일: **사용자의 Desktop 테스트 결과가 올 때까지 새 기능을 만들지 않는다.** 결과가 오면 문제마다 재현 테스트부터 만든다.
-- 대기 사항: Desktop 테스트 결과, 보고서 답변, 검토 대기 결정(사용자). 상세는 status.md에만 적는다.
+- 현재 단계: **P1(원격 MCP 서비스) 진행 중.** 1단계(HTTP 전송) 완료(태그 `p1-step1`). P0는 `p0-report1`과 그 뒤 결정 반영 커밋까지.
+- 다음 할 일: 2단계(인증 서비스 연동). 인증 서비스와 호스팅은 조사 결과로 결정 문서를 쓰고 하나를 고른다.
+- 대기 사항: 계정·도메인·키처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), P0 Desktop 테스트 결과, 보고서 답변. 상세는 status.md에만 적는다.
 
 ## 개요
 
@@ -260,12 +260,59 @@ data/index.sqlite
 - EMBEDDINGS=none에서 모든 도구가 동작한다.
 - 모든 쿼리가 user_id로 필터된다(다른 user_id로 호출하면 결과가 비어 있다).
 
+## P1: 원격 MCP 서비스 (2026-10-03 킥오프)
+
+**목표**: 사용자와 아버지가 각자의 Claude(웹·Desktop·모바일)에서 커넥터 URL 하나로 Magus를 쓴다. 설치는 없다. 데이터는 사용자별로 격리되고 매일 백업된다.
+
+**하지 않는 것**: 자체 OAuth 서버, 결제, 다중 조직, 공개 가입(허용 목록만). stdio 모드는 없애지 않는다(로컬 개발용).
+
+**아키텍처**
+- 전송: streamable-http, **stateless + JSON 응답**(`magus/transports.py: http_app`). 엔드포인트 `/mcp`, 상태 확인 `/healthz`(인증 없음). 서버 코어(build_server)는 그대로 쓴다.
+- 인증: MCP용 OAuth를 지원하는 **관리형** 인증 서비스를 쓴다(`docs/decisions/auth-provider.md`).
+  - Magus는 리소스 서버만 한다: Protected Resource Metadata를 내고, 액세스 토큰(JWT 서명·만료·issuer·audience)을 검증하고, `sub` → user_id를 매핑한다.
+  - 허용 목록(`ALLOWED_USERS`)에 없는 sub는 거부한다.
+- 사용자: `current_user()`가 HTTP에서는 토큰의 sub로, stdio에서는 `USER_ID`로 user_id를 정한다. 두 모드를 가르는 분기는 `current_user()` 밖으로 새지 않는다.
+- 파일
+  - 사용자별 받은함 `data/users/<user_id>/inbox/`. 업로드 페이지로만 들어온다.
+  - 경로 인자(book_import, ref_add, idea_add_conversation)는 받은함의 파일 이름을 받는다. 새 도구 `files_list()`로 받은함을 본다.
+  - book_export는 exports/에 만들고, 로그인이 필요하고 만료가 있는 다운로드 URL을 돌려준다.
+- 웹: 같은 프로세스에서 서빙하는 최소 페이지 4개(로그인, 받은함, 원고, 인용 체크리스트). 디자인은 P1 범위가 아니다.
+- 저장: 파일 + SQLite를 유지한다(Store 인터페이스 뒤. Postgres는 P2).
+- 호스팅: 영구 디스크가 있는 단일 인스턴스(Fly.io / Railway / VPS 중 비교해 결정). HTTPS는 플랫폼이나 Caddy가 맡는다. 서버리스는 쓰지 않는다.
+- 백업: 매일 data/ 전체를 객체 스토리지에 스냅샷하고 30일 보관한다. 복구 절차를 문서화하고 실제로 한 번 복구해 본다.
+- **로그**: 도구 이름, user_id, 소요 시간, 결과만 남긴다(`magus/audit.py`). 본문·발췌·원고 내용은 절대 남기지 않는다.
+  - SDK의 도구 실패 메시지와 예외 traceback은 `magus/logsafe.py`가 핸들러에서 거른다. 예외는 종류·위치만 남긴다.
+  - ERROR는 알림 콜백으로 보낸다(10분에 한 번).
+  - 테스트로 고정한다: `tests/test_http.py`, `tests/test_logsafe.py`.
+- 한도: 사용자별 저장 용량, 업로드 파일 크기, 요청 크기에 상한을 둔다. 넘으면 명확한 오류를 낸다.
+- 비밀: API 키·시크릿은 환경변수로만 받는다. 저장소에는 `.env.example`만 둔다.
+- 안전장치: 인증이 꺼진 HTTP는 루프백(127.0.0.1)에만 열린다(`magus serve --transport http --host 0.0.0.0`은 거부).
+
+**작업 순서**(단계마다 테스트·status.md·커밋·태그 `p1-stepN`)
+1. HTTP 전송, 인증 없이 로컬 실행 → MCP Inspector로 도구 호출 확인.
+2. 인증 서비스 연동: 토큰 검증, sub→user_id, 허용 목록. 잘못된 토큰·만료·허용 목록 밖 거부 테스트.
+3. 받은함 + files_list + 경로 인자 전환. 로컬 경로를 받던 테스트를 받은함 기준으로 바꾼다.
+4. 웹 페이지 4개. 업로드 → 임포트 → 체크리스트까지 브라우저로 한 바퀴 돈다.
+5. 배포 + 도메인 + HTTPS + 백업 + 복구 테스트 + 알림.
+6. Claude.ai 커넥터 등록 → 웹·모바일에서 book_outline, idea_add, ref_search를 실행한다. `docs/connect-claude.md`(사용자용·아버지용).
+7. 아버지 온보딩 체크리스트: 커넥터 등록, docx 업로드·임포트, 첫 세션 대본(책 지도 → 제12장 인용 점검 → 논문 1편 등록).
+
+**완료 기준**
+- 사용자 계정으로 웹·모바일 Claude에서 모든 도구가 동작한다.
+- 다른 계정의 토큰으로는 그 사용자 데이터만 보인다(격리 테스트).
+- 업로드한 docx가 임포트되어 35장·8부·코멘트 86·refs 297이 나온다.
+- 백업에서 복구한 인스턴스가 같은 outline을 돌려준다.
+- 로그에 원고 본문이 한 글자도 없다(테스트로 고정).
+- stdio 모드 테스트가 여전히 전부 통과한다.
+
 ## 개발 명령
 
 ```
 uv sync                                   # 의존성 (Desktop이 magus.exe를 실행 중이면 실패 → uv pip install)
 .venv/Scripts/python -m pytest -q         # 테스트
 magus serve                               # stdio 서버 (Claude Desktop이 띄움)
+magus serve --transport http [--port 8000] # streamable-http(stateless) http://127.0.0.1:8000/mcp, 인증 전에는 루프백만
+npx -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8000/mcp --transport http --method tools/list   # MCP Inspector(CLI)
 magus import <docx|pdf> --project-id <id> [--replace] [--synthetic]
 magus conversation <md> [--origin …]      # 대화 기록 → Casper
 magus synth <폴더>                        # 합성 fixture 만들기

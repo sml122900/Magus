@@ -1,50 +1,68 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-03 16:00 KST — 검토 대기 결정 35건 확정·보완 반영(태그 없음). 사용자 Desktop 테스트 결과를 기다린다.
+> 마지막 갱신: 2026-10-03 17:05 KST — P1 1단계(HTTP 전송) 완료, 태그 `p1-step1`.
 
-## 0. 최근 보고 (검토 결정 35건 반영)
+## 0. 최근 보고 (P1 1단계)
 
-- **35건을 모두 확정했다.** 승인 25건은 그대로 두었다. 보완 10건(#5 #6 #11 #24 #28 #29 #31 #33 #36 #43)은 고친 뒤 확정했다.
-- 실데이터에 미친 영향(재임포트 후)
-  - 코멘트: citation 44 · fact **40** · general **2**. I46 `선하이정(1835)`이 fact로 바뀌었다(#36).
-  - 미확인 문헌: **297편**(이전 296). 35장 `케인스(1930)`을 이제 1930a에 잇지 않고, 후보 둘을 보이는 문헌 1편으로 따로 센다(#31).
-  - 참고문헌: 중복 서지 0건, 기존 서지와 다름 0건(#5·#6).
-  - outline 머리줄: `… · 미확인 문헌 297편 · 미연결 0 · 열린 미해결 86`(#29).
-- 저자 보고서(`docs/reports/2026-10-03-인용-점검.{md,docx}`)를 생성기로 다시 만들었다. outline과 1절 수를 맞추려는 것이다.
-  - 바뀐 곳은 세 줄이다: 1절 296→297편, 5절 39→40건, 16장에 I46 추가.
-  - 이전 판은 `git show p0-report1:docs/reports/2026-10-03-인용-점검.md`에 있다.
+- **P1 킥오프**(원격 MCP 서비스). 스펙은 CLAUDE.md "P1" 절에 있다.
+  - P0의 "Desktop 테스트 결과 대기"는 사용자의 P1 지시로 넘어갔다. 그 결과는 아직 받지 못했다.
+- **1단계 완료**: streamable-http(stateless + JSON 응답), `/mcp` · `/healthz`.
+  - 하위 프로세스 서버에서 18개 도구를 모두 HTTP로 불렀다(`tests/test_http.py`).
+  - MCP Inspector(CLI, npx)로 tools/list 18개와 tools/call 3건(book_outline, ref_check, style_search)을 확인했다(임시 폴더의 demo 사용자).
+- 로그 원칙을 코드와 테스트로 고정했다
+  - `magus/audit.py`: 도구 호출마다 이름·user_id·ms·결과만 남긴다.
+  - `magus/logsafe.py`: SDK의 도구 실패 메시지와 예외 traceback에서 내용을 지운다. 예외는 종류·위치만 남기고, ERROR는 알림 콜백으로 보낸다(10분에 한 번).
+  - 테스트는 본문·발췌·생각·구절 표식이 서버 로그에 한 글자도 없는지 본다.
+- 인증이 꺼진 HTTP는 루프백에만 열린다(`--host 0.0.0.0` 거부).
+- 조사 두 건을 백그라운드로 돌렸다.
+  - 호스팅·백업·알림: 끝났다. 5단계 결정 문서에 쓴다.
+  - 인증 서비스: 진행 중이다. 2단계 결정 문서(`docs/decisions/auth-provider.md`)에 쓴다.
 
 ## 1. 지금 바로 할 일
 
-- **대기: 사용자 Desktop 테스트 결과(사용자).** 결과가 올 때까지 새 기능을 만들지 않는다.
-  - 사용자가 할 일: Desktop을 완전히 종료한 뒤 다시 실행한다. README "첫 실행 확인"의 시험 문장 네 개와 ref_add 시연을 해 본다. PDF는 `fixtures/papers/`에 둔다.
-- 대기: 저자 보고서 답변(사용자). 답이 오면 음역 추정·a/b는 `magus alias <key> <표기>`로 넣는다.
-- 결과가 오면: 문제마다 재현 테스트부터 만들고 고친다.
+- **2단계: 인증 서비스 연동.** 조사 결과로 `docs/decisions/auth-provider.md`(PAR, 비교표)를 쓰고 하나를 고른다.
+  - 토큰 검증(JWKS 서명·exp·iss·aud), sub→user_id, `ALLOWED_USERS`를 넣는다.
+  - 잘못된 토큰·만료·허용 목록 밖 거부를 테스트한다. 테스트는 로컬 RSA 키와 가짜 JWKS로 한다(외부 호출 없음).
+- 대기(사용자): 인증 서비스 계정, 호스팅 계정, 도메인, 객체 스토리지 키, 알림 채널. 실제 연결은 사용자 계정이 있어야 한다. 그 전까지 코드와 문서를 준비한다.
+- 불명
+  - 완료 기준의 "refs 297": 실데이터 refs는 299건이다(파싱 실패 raw 1, acemoglu2001-2 포함). 297은 고유 미확인 문헌 수다. 판단: "refs 299, 미확인 문헌 297"로 검증한다.
+  - 완료 기준의 "업로드한 docx": 실원고는 PDF만 있다(docx 없음). 판단: docx가 올 때까지 PDF로 검증한다. 대기: 원고 docx(사용자).
 
 ## 2. 현재 단계
 
-**P0 완료 + 첫 보고서 + 마무리 보완 + 검토 결정 반영**(`step1`~`step7`, `p0-realdata`, `p0-report1`, 이후 커밋은 태그 없음). 사용자 Desktop 테스트를 기다린다.
+**P1 진행 중 — 1단계 완료**(`p1-step1`). P0는 `step1`~`step7`, `p0-realdata`, `p0-report1`과 그 뒤 결정 반영 커밋까지 끝났다.
 
 ## 3. 단계별 체크리스트
 
-- [x] 1~7단계 — 2026-10-03, `step1`~`step7`
-- [x] 실데이터 검증·보정 — 2026-10-03, `p0-realdata`
-- [x] P0 마무리 — 2026-10-03, `p0-report1`
-- [x] P0 마무리 보완 — 2026-10-03(outline 고유 수, README 시험 문장, fixtures/papers/)
-- [x] **검토 결정 35건 반영** — 2026-10-03, 태그 없음
-  - `src/magus/melchior/bibliography.py`(중복 서지, 기존 서지와 다름)
-  - `src/magus/book/comments.py`(#36 fact)
-  - `src/magus/melchior/check.py`(a/b 후보, uncertain key), `src/magus/store/*`(uncertain_cite_keys, SCHEMA_VERSION 8, 문체 fts_extra)
-  - `src/magus/melchior/refs.py`(add_alias), `src/magus/cli.py`(`magus alias`), `src/magus/book/outline.py`(미연결)
-  - `src/magus/melchior/{report,author_report}.py`(후보 표시)
-  - `tests/fixtures/synthetic/`(합성 fixture 커밋, .gitignore를 `/fixtures/`로)
-  - 테스트: test_bibliography·test_balthasar·test_cli·test_outline·test_server·test_import·test_realdata_shapes 추가분
-- [ ] Desktop 실사용 피드백 반영(사용자 대기)
+- [x] P0 1~7단계 — `step1`~`step7`, 실데이터 `p0-realdata`, 첫 보고서 `p0-report1`, 결정 44건 확정(2026-10-03)
+- [x] **P1 1단계 HTTP 전송** — 2026-10-03, `p1-step1`
+  - `src/magus/transports.py`(http_app·run_http), `src/magus/audit.py`, `src/magus/logsafe.py`, `src/magus/cli.py`(`--host`·`--port`, 루프백 가드)
+  - `tests/test_http.py`, `tests/test_logsafe.py`
+- [ ] P1 2단계 인증(토큰 검증·sub→user_id·허용 목록)
+- [ ] P1 3단계 받은함 + files_list + 경로 인자 전환
+- [ ] P1 4단계 웹 페이지 4개
+- [ ] P1 5단계 배포·도메인·HTTPS·백업·복구 테스트·알림
+- [ ] P1 6단계 Claude.ai 커넥터 등록, `docs/connect-claude.md`
+- [ ] P1 7단계 아버지 온보딩 체크리스트
 
 ## 4. 검토 대기 결정
 
-**없음.** #1~#44 모두 확정됐다.
+**P1에서 새로 고른 것** (선택 / 대안 / 이유)
+
+45. **HTTP는 stateless + JSON 응답**(`stateless_http=True, json_response=True`)
+    - 대안: 세션 유지 + SSE 스트림.
+    - 이유: 지시가 "세션은 상태 없이"다. 재시작·재배포에도 클라이언트 세션이 끊기지 않고, 프록시의 스트림 시간 제한(예: Railway 5분 무데이터, Cloudflare 125초)에 걸리지 않는다. 서버→클라이언트 알림은 쓰지 않는다.
+46. **로그 거르기는 핸들러 단 필터**(`logsafe.RedactingFilter`)에서 한다
+    - 대안: SDK 로거 레벨을 올려 끈다.
+    - 이유: 끄면 장애 원인(예외 종류·위치)까지 사라진다. 메시지만 지우고 위치는 남긴다. uvicorn 로그도 `log_config=None`으로 같은 핸들러를 거친다.
+47. **인증 없는 HTTP는 루프백에만 연다**
+    - 대안: 경고만 낸다.
+    - 이유: 실수로 0.0.0.0에 열면 누구나 default 사용자의 원고를 읽는다.
+48. **감사 로그의 오류는 "ToolError"로만 적는다**(예외 종류는 logsafe 로그에 따로 남는다)
+    - 이유: SDK가 예외를 결과(isError)로 바꾼 뒤라 미들웨어에서는 둘을 가를 수 없다.
+
+**P0 결정**: #1~#44 모두 확정됐다.
 
 **확정 기록**
 - 2026-10-03 오전 답변: #1, #15, #16, #17(고유 문헌 수로 변경), #20, #22, #25.
@@ -71,6 +89,7 @@
 - **uv** 0.12.22: `C:\Users\이성민\AppData\Roaming\Python\Python313\Scripts\uv.exe` (PATH에 없음). Desktop이 `magus.exe`를 실행 중이면 `uv sync`나 `uv add`가 실패한다. 그때는 `uv add --no-sync`와 `uv pip install`을 쓴다.
 - **Python** 3.12(.venv). **MCP SDK** mcp 2.2.0.
 - **의존성**: python-docx 1.2.0, pymupdf 1.28.2, pypandoc-binary 1.17(pandoc 3.9), numpy 2.5.3, lxml. ruff 0.16(개발용, `--select F,B`로 점검).
+- **Node** v22.23.2(fnm). MCP Inspector는 `npx -y @modelcontextprotocol/inspector --cli …`로 쓴다.
 - **SQLite** 3.49.1. 인덱스 `SCHEMA_VERSION=8`. 버전이 바뀌면 처음 열 때 자동으로 다시 만들고, 서버가 시작할 때 파생값을 다시 계산한다.
 - **Claude Desktop**
   - 설정: `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json`(USER_ID=default, DATA_DIR=C:\project_2026\Magus\data → FILES_DIR 기본 C:\project_2026\Magus)
@@ -96,17 +115,17 @@
   ```
 - **git**
   - master에 바로 커밋하고, 단계가 끝나면 태그를 단다. 실험은 브랜치에서 하고 squash merge한다.
-  - 태그: `step1`~`step7`, `p0-realdata`, `p0-report1`. 그 뒤 커밋 두 개(마무리 보완, 결정 반영)에는 태그를 달지 않았다(지시).
+  - 태그: `step1`~`step7`, `p0-realdata`, `p0-report1`, `p1-step1`. P0 뒤 커밋 두 개(마무리 보완, 결정 반영)에는 태그를 달지 않았다(지시).
   - `/fixtures/`(루트)와 `data/`는 gitignore. `tests/fixtures/`와 `docs/reports/`는 커밋한다.
 
 ## 6. 마지막 세션 요약
 
-**2026-10-03 오후(15:15~16:00)**
-- 검토 결정 35건 답변을 반영했다. 승인은 25건이고, 보완 10건은 고친 뒤 확정했다.
-- 참고문헌 리포트에 중복 서지와 기존 서지와 다른 점을 넣었다. a/b 모호는 잇지 않고 후보로 보인다. 미연결을 표시하고, `magus alias`와 문체 work 색인을 넣었다. 비인용 용어만 걸린 확인 요청은 fact로 바꿨고, 합성 fixture를 커밋했다.
-- 실원고를 다시 임포트하고 cite-report와 저자 보고서를 다시 만들었다(297편, fact 40).
-- 테스트 157개 통과, ruff(F·B) 통과. 커밋했다(태그 없음).
-- 남긴 것: Desktop 테스트 결과 대기. 그때까지 새 기능을 만들지 않는다.
+**2026-10-03 저녁(16:30~17:05)** — P1 킥오프, 1단계
+- CLAUDE.md에 P1 절(목표·비목표·아키텍처·순서·완료 기준)을 넣었다.
+- streamable-http 전송, 도구 호출 감사 로그, 로그 거르기, 루프백 가드를 만들었다.
+- HTTP로 18개 도구를 확인했다(pytest + MCP Inspector CLI).
+- 테스트 161개 통과, ruff(F·B) 통과. `p1-step1` 태그.
+- 남긴 것: 인증 서비스 조사 결과 대기(백그라운드). 호스팅 조사 결과는 받았다.
 
 ## 7. 알려진 문제 — 실원고에서 아직 안 맞는 것
 
