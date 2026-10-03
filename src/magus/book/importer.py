@@ -26,11 +26,21 @@ from magus.store.formats import one_line
 _SEP = r"[\s:：.\-–—·]"
 _PART = re.compile(rf"^\s*제\s*(\d+)\s*부(?:{_SEP}+(.*?))?\s*$")
 _CHAPTER = re.compile(rf"^\s*제\s*(\d+)\s*장(?:{_SEP}+(.*?))?\s*$")
+# 번호 없는 장. 제목 서식이 있는 줄일 때만 인정한다(목차 줄·본문 문장과 구별). 번호: 서장 0, 맺음 90, 부록 N은 90+N.
+_SPECIAL = re.compile(rf"^\s*(?P<label>서장|프롤로그|맺음말?|에필로그|나가며|부록\s*(?P<n>\d+))(?:{_SEP}+(?P<title>.*?))?\s*$")
 _BIB = re.compile(r"^\s*(참\s*고\s*문\s*헌|참고\s*자료|references|bibliography|works cited)\s*$", re.I)
-_TOC_TAIL = re.compile(r"(?:\t|\.{2,}|…+|·{2,})\s*\d+\s*$")
+_TOC_TAIL = re.compile(r"\s*(?:\t|\.{2,}|…+|·{2,})[\s.…·]*\d*\s*$")  # 목차의 점선(쪽번호는 없어도 됨)
 _SENTENCE_END = re.compile(r"[.!?。]$|다\.?$")
 MAX_HEADING_LEN = 80
 MAX_TITLE_LINE_LEN = 60
+FRONT_NUMBER = 0
+BACK_NUMBER = 90  # 맺음. 부록 N은 90+N. 본문 장(1~89) 사이에 새 장을 넣을 자리를 남긴다.
+
+
+def special_number(label: str, appendix: str | None) -> int:
+    if appendix:
+        return BACK_NUMBER + int(appendix)
+    return FRONT_NUMBER if label in ("서장", "프롤로그") else BACK_NUMBER
 
 
 @dataclass
@@ -41,6 +51,8 @@ class Head:
     title: str = ""
     title_index: int | None = None  # 제목이 다음 줄에 있었으면 그 블록
     body_chars: int = 0
+    styled: bool = False  # 제목 서식(docx 제목 스타일, PDF 큰 글씨)이 있는 줄인가
+    label: str | None = None  # 번호 없는 장의 표시 이름(서장, 맺음, 부록 1)
 
     @property
     def body_start(self) -> int:
@@ -53,6 +65,11 @@ class ChapterPlan:
     title: str
     part_number: int | None
     blocks: list[Block]
+    label: str | None = None
+    level: int = 1  # 장 제목의 단계
+
+    def markdown(self) -> str:
+        return blocks_to_markdown(self.blocks, self.level)
 
 
 @dataclass
@@ -73,12 +90,17 @@ def _heads(blocks: list[Block]) -> list[Head]:
         text = _TOC_TAIL.sub("", b.text).strip()
         if not text or len(text) > MAX_HEADING_LEN:
             continue
+        styled = b.heading_level is not None
         if m := _PART.match(text):
-            heads.append(Head(i, "part", int(m.group(1)), (m.group(2) or "").strip()))
+            heads.append(Head(i, "part", int(m.group(1)), (m.group(2) or "").strip(), styled=styled))
         elif m := _CHAPTER.match(text):
-            heads.append(Head(i, "chapter", int(m.group(1)), (m.group(2) or "").strip()))
+            heads.append(Head(i, "chapter", int(m.group(1)), (m.group(2) or "").strip(), styled=styled))
+        elif styled and (m := _SPECIAL.match(text)):
+            label = re.sub(r"\s+", " ", m.group("label"))
+            number = special_number(label, m.group("n"))
+            heads.append(Head(i, "chapter", number, (m.group("title") or "").strip(), styled=True, label=label))
         elif _BIB.match(text):
-            heads.append(Head(i, "bib"))
+            heads.append(Head(i, "bib", styled=styled))
     head_index = {h.index for h in heads}
     for h in heads:
         nxt = h.index + 1
@@ -97,8 +119,9 @@ def split_manuscript(blocks: list[Block]) -> Split:
     heads = _heads(blocks)
     best: dict[int, Head] = {}
     for h in (h for h in heads if h.kind == "chapter"):
-        # 목차 줄은 뒤따르는 본문이 없다. 본문이 가장 긴 것(같으면 나중 것)을 진짜 장 제목으로 본다.
-        if h.number not in best or h.body_chars >= best[h.number].body_chars:
+        # 목차 줄은 서식이 없고 뒤따르는 본문도 없다. 제목 서식이 있는 것을 먼저, 그다음 본문이 가장 긴 것
+        # (같으면 나중 것)을 진짜 장 제목으로 본다. 본문 문장 "제12장 참조." 같은 짧은 줄이 이기지 않게 하려는 것이다.
+        if h.number not in best or (h.styled, h.body_chars) >= (best[h.number].styled, best[h.number].body_chars):
             best[h.number] = h
     real_chapters = {id(h) for h in best.values()}
     real_parts: dict[int, Head] = {}
@@ -129,14 +152,18 @@ def split_manuscript(blocks: list[Block]) -> Split:
             split.parts.append(Part(h.number, h.title))
             split.unsplit += [b for b in region if b.text.strip()]  # 부 제목과 첫 장 사이의 글(부 서문)
         elif h.kind == "chapter":
-            split.chapters.append(ChapterPlan(h.number, h.title or f"제{h.number}장", part, region))
+            title = h.title or h.label or f"제{h.number}장"
+            # 서장·맺음·부록은 어느 부에도 속하지 않는다
+            level = blocks[h.index].heading_level or 1
+            split.chapters.append(ChapterPlan(h.number, title, None if h.label else part, region, h.label, level))
         else:
             split.bib_blocks = region
     split.chapters.sort(key=lambda c: c.number)
     return split
 
 
-def blocks_to_markdown(blocks: list[Block]) -> str:
+def blocks_to_markdown(blocks: list[Block], chapter_level: int = 1) -> str:
+    """chapter_level: 장 제목의 단계(docx Heading 2면 2, PDF 큰 글씨면 1). 장 안의 절은 그보다 한 단계 아래 = ##."""
     out = []
     for b in blocks:
         text = b.text.strip()
@@ -145,7 +172,8 @@ def blocks_to_markdown(blocks: list[Block]) -> str:
         if b.kind == "table":
             out.append(text)
         elif b.heading_level is not None:
-            out.append(f"## {text}")
+            depth = b.heading_level - chapter_level + 1
+            out.append(f"{'#' * max(2, min(depth, 4))} {text}")
         elif b.is_list:
             out.append(f"- {text}")
         else:
@@ -159,7 +187,7 @@ class ImportReport:
     title: str
     source: str
     synthetic: bool
-    chapters: list[tuple[int, str, int | None, int, int]]  # 번호, 제목, 부, 글자수, 코멘트 수
+    chapters: list[tuple[int, str | None, str, int | None, int, int]]  # 번호, 표시 이름, 제목, 부, 글자수, 코멘트 수
     parts: list[Part]
     discarded: list[str]
     gaps: list[int]
@@ -183,7 +211,9 @@ class ImportReport:
         lines = [
             f"## 임포트 리포트 — {self.title} ({self.project_id})" + (" · 합성 fixture" if self.synthetic else ""),
             f"- 원본: {self.source}" + "".join(f" · {n}" for n in self.notes),
-            f"- 장 {len(self.chapters)}개 · 부 {len(self.parts)}개 · 그림 {self.figures} · 표 {self.tables} · 수식 {self.equations}",
+            f"- 장 {len(self.chapters)}개(번호 장 {sum(1 for c in self.chapters if not c[1])}"
+            f" + 서장·맺음·부록 {sum(1 for c in self.chapters if c[1])}) · 부 {len(self.parts)}개"
+            f" · 그림 {self.figures} · 표 {self.tables} · 수식 {self.equations}",
             f"- 분할 못 한 구간: {self.unsplit_chars:,}자 (original/unsplit.md) — {self.unsplit_preview}",
             f"- 목차 등으로 판단해 버린 제목 줄: {len(self.discarded)}개"
             + (f" — {', '.join(self.discarded[:8])}" + (" …" if len(self.discarded) > 8 else "") if self.discarded else ""),
@@ -197,10 +227,10 @@ class ImportReport:
         return "\n".join(lines)
 
     def mapping_table(self) -> str:
-        rows = ["| 파일 | 장 제목 | 부 | 글자수 | 코멘트 |", "|---|---|---|---:|---:|"]
+        rows = ["| 파일 | 장 | 제목 | 부 | 글자수 | 코멘트 |", "|---|---|---|---|---:|---:|"]
         rows += [
-            f"| ch-{n:02d}.md | {title} | {part if part is not None else '-'} | {chars:,} | {comments} |"
-            for n, title, part, chars, comments in self.chapters
+            f"| ch-{n:02d}.md | {label or f'제{n}장'} | {title} | {part if part is not None else '-'} | {chars:,} | {comments} |"
+            for n, label, title, part, chars, comments in self.chapters
         ]
         return "\n".join(rows)
 
@@ -253,14 +283,22 @@ def import_manuscript(
     store.set_parts(user_id, project.id, split.parts)
     empty: list[int] = []
     for ch in split.chapters:
-        body = blocks_to_markdown(ch.blocks)
+        body = ch.markdown()
         if not body:
             empty.append(ch.number)
             body = "[본문 없음: 임포트 때 이 장 제목 아래에서 글을 찾지 못했다]"
         store.write_chapter(
-            user_id, project.id, ch.number, body, f"임포트: {path.name}", title=ch.title, part_number=ch.part_number
+            user_id,
+            project.id,
+            ch.number,
+            body,
+            f"임포트: {path.name}",
+            title=ch.title,
+            part_number=ch.part_number,
+            label=ch.label,
         )
-    unsplit_md = blocks_to_markdown(split.unsplit)
+    # 장 밖의 글(표지·목차·부 서문). 목차의 점선은 줄여서 보관한다.
+    unsplit_md = re.sub(r"\s*[.…·]{4,}\s*", " … ", blocks_to_markdown(split.unsplit))
     files["unsplit"] = store.save_original(user_id, project.id, "unsplit.md", unsplit_md.encode("utf-8"))
 
     comment_counts: Counter = Counter()
@@ -283,7 +321,7 @@ def import_manuscript(
 
     bib_report = import_bibliography(store, user_id, "\n".join(b.text for b in split.bib_blocks if b.kind == "para"))
     after_refs_changed(store, user_id)  # 장별 미확인 인용 수, citation 이슈 → refs 연결(ref_id)
-    numbers = [c.number for c in split.chapters]
+    numbers = [c.number for c in split.chapters if not c.label]  # 서장(0)·맺음(90)·부록(9N)은 빼고 본다
     gaps = sorted(set(range(1, max(numbers) + 1)) - set(numbers)) if numbers else []
     report = ImportReport(
         project_id=project.id,
@@ -291,7 +329,7 @@ def import_manuscript(
         source=f"{path.name} ({manuscript.source})",
         synthetic=synthetic,
         chapters=[
-            (ch.number, ch.title, ch.part_number, len(blocks_to_markdown(ch.blocks)), comment_counts[ch.number])
+            (ch.number, ch.label, ch.title, ch.part_number, len(ch.markdown()), comment_counts[ch.number])
             for ch in split.chapters
         ],
         parts=split.parts,

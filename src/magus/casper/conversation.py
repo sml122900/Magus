@@ -17,9 +17,13 @@ from typing import Literal
 
 _USER = re.compile(r"^\s*\*\*\s*(?:사용자|나|User|Me|Human)\s*[:：]?\s*\*\*\s*[:：]?\s*", re.I)
 _AI = re.compile(r"^\s*\*\*\s*(?:Claude|ChatGPT|GPT|AI|Assistant|어시스턴트)\s*[:：]?\s*\*\*\s*[:：]?\s*", re.I)
-_QUESTION = re.compile(r"^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*질문\s*[:：]\s*(?:\*\*)?\s*")
-_ANSWER = re.compile(r"^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*답변\s*[:：]\s*(?:\*\*)?\s*")
+# "답변(수정된 평가):"처럼 마커 뒤에 괄호 설명이 붙기도 한다(실대화 기록에서 확인)
+_QUESTION = re.compile(r"^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*질문\s*(?:\([^)]{0,30}\))?\s*[:：]\s*(?:\*\*)?\s*")
+_ANSWER = re.compile(r"^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*답변\s*(?:\([^)]{0,30}\))?\s*[:：]\s*(?:\*\*)?\s*")
 _SUMMARY = re.compile(r"^\s*\*\*\s*Claude\s*요지\s*[:：]?\s*\*\*\s*[:：]?\s*")
+# 제목 줄 자체가 마커인 형식: "## 질문 1" 다음 줄부터 질문(흔히 > 인용), "### 답변" 다음 줄부터 답변
+_QUESTION_HEADING = re.compile(r"^\s*#{1,6}\s*질문(?:\s*\d+)?\s*[:：]?\s*$")
+_ANSWER_HEADING = re.compile(r"^\s*#{1,6}\s*답변(?:\s*\d+)?\s*[:：]?\s*$")
 _QUOTE = re.compile(r"^\s*>\s?")
 _SEPARATOR = re.compile(r"^\s*(?:#{1,6}\s.*|-{3,}|\*{3,}|_{3,})\s*$")
 
@@ -64,11 +68,25 @@ def _clean(lines: list[str]) -> str:
     return "\n".join(lines).strip()
 
 
+def _all_quoted(lines: list[str]) -> bool:
+    """사용자 발화 전체가 > 인용 블록이면(제목형 '## 질문' 아래) 인용 표시를 뗀다."""
+    content = [line for line in lines if line.strip() and not _SEPARATOR.match(line)]
+    return bool(content) and all(_QUOTE.match(line) for line in content)
+
+
 def split_conversation(markdown: str) -> ConversationSplit:
     lines = markdown.splitlines()
     marks: list[tuple[int, str, int]] = []  # (줄, 화자 또는 'quote', 마커 뒤 시작 열)
     for i, line in enumerate(lines):
-        for pattern, speaker in ((_SUMMARY, "ai"), (_USER, "me"), (_AI, "ai"), (_QUESTION, "me"), (_ANSWER, "ai")):
+        for pattern, speaker in (
+            (_SUMMARY, "ai"),
+            (_USER, "me"),
+            (_AI, "ai"),
+            (_QUESTION_HEADING, "me"),
+            (_ANSWER_HEADING, "ai"),
+            (_QUESTION, "me"),
+            (_ANSWER, "ai"),
+        ):
             if m := pattern.match(line):
                 marks.append((i, speaker, m.end()))
                 if pattern is _SUMMARY:
@@ -92,8 +110,8 @@ def split_conversation(markdown: str) -> ConversationSplit:
     for n, (start, kind, col) in enumerate(marks):
         end = marks[n + 1][0] if n + 1 < len(marks) else len(lines)
         body = [lines[start][col:], *lines[start + 1 : end]]
-        if kind == "quote":
-            body = [_QUOTE.sub("", line) for line in lines[start:end]]
+        if kind == "quote" or (kind == "me" and _all_quoted(body)):
+            body = [_QUOTE.sub("", line) for line in body]
         text = _clean(body)
         if not text:
             split.failures.append((start + 1, f"(빈 {'사용자' if kind != 'ai' else 'AI'} 발화)"))

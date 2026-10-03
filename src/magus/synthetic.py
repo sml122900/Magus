@@ -152,27 +152,76 @@ def build_manuscript_docx(path: Path) -> Path:
     return path
 
 
+# (x, 글자 크기, 줄 간격, 글) — Word가 '메모 포함' 마크업으로 내보낸 PDF의 레이아웃을 흉내 낸다(실원고에서 잰 값).
+_BODY, _H1, _H2, _PART, _PART_TITLE, _BIB = 7.9, 12.7, 10.1, 11.2, 16.4, 6.7
+_PDF_PAGES: list[list[tuple[float, float, float, str]]] = [
+    [  # 목차: 점선만 있고 쪽번호는 없다
+        (49, 11.9, 27, "목차"),
+        (49, _BODY, 14, "서장  물가에서 ............................................"),
+        (49, _BODY, 14, "제1장  물가의 망설임 ......................................"),
+        (49, _BODY, 14, "제2장  목이 생긴 날 ......................................."),
+        (49, _BODY, 30, "참고문헌 ..................................................."),
+    ],
+    [
+        (49, _H1, 40, "서장  물가에서"),
+        (56, _BODY, 21.5, "이 책은 물에서 뭍으로 간 생물들의 이야기다. 모든 장은 하나의 장면으로 시작"),
+        (49, _BODY, 30, "한다. 마셜(2015)의 말처럼 땅은 조건이다."),
+        (208, _PART, 27, "제1부"),
+        (206, _PART_TITLE, 52, "기원"),
+        (49, _H1, 40, "제1 장  물가의 망설임"),
+        (56, _BODY, 21.5, "데본기 얕은 물가에서 지느러미로 바닥을 짚는 물고기가 있었"),
+        (49, _BODY, 30, "다(Daeschler, Shubin & Jenkins, 2006)."),
+        (56, _BODY, 21.5, "Clack(2012)은 이 전이를 길게 다룬다. 여러 연구가 같은 방향을 가리킨다(Clack, "),
+        (49, _BODY, 35, "2012; Hu et al., 2023)."),
+        (49, _H2, 25, "1.1 물고기는 왜 뭍으로 올라왔나"),
+        (56, _BODY, 21.5, "제2장에서 다시 보겠지만, 숨은 비용이었다."),
+    ],
+    [
+        (49, _H1, 40, "제2 장  목이 생긴 날"),
+        (56, _BODY, 21.5, "아가미덮개가 사라지고 목이 생겼다. 넌·첸(2011)은 다른 맥락에서 비슷한 질문"),
+        (49, _BODY, 30, "을 던진다."),
+        (49, _H1, 40, "참고문헌"),
+        (49, _BIB, 14, "Clack, J. A. (2012). Gaining ground: The origin and evolution of tetrapods"),
+        (67, _BIB, 21, "(2nd ed.). Indiana University Press."),
+        (49, _BIB, 14, "Daeschler, E. B., Shubin, N. H., & Jenkins, F. A. (2006). A Devonian"),
+        (67, _BIB, 21, "tetrapod-like fish. Nature, 440, 757–763."),
+        (49, _BIB, 14, "Nunn, N., & Qian, N. (2011). The potato's contribution to population and"),
+        (67, _BIB, 21, "urbanization. Quarterly Journal of Economics, 126(2), 593–650."),
+        # 한 줄짜리 항목이 이어지면 줄 간격으로는 항목을 못 가른다(실원고에서 300건이 190건으로 합쳐짐)
+        (49, _BIB, 21, "Diamond, J. (1997). Guns, germs, and steel. W. W. Norton."),
+        (49, _BIB, 21, "Galor, O. (2022). The journey of humanity. Dutton."),
+        (49, _BIB, 21, "Keynes, J. M. (1930). Economic possibilities for our grandchildren."),
+        (49, _BIB, 21, "田代和生(다시로 가즈이). (1981). 『近世日朝通交貿易史』. 創文社."),
+    ],
+]
+# (쪽, 본문에서 앵커가 될 줄의 번호, 말풍선 줄들)
+_PDF_BALLOONS = [
+    (1, 2, ["메모 포함[C1]: 인용 확인 ", "필요: 마셜(2015)의 논지 ", "요약."]),
+    (1, 7, ["메모 포함[C2]: 확인 필요: ", "Daeschler et al.(2006) ", "서지."]),
+    (2, 1, ["메모 포함[C3]: 이 문단은 너무 길다"]),
+]
+
+
 def build_manuscript_pdf(path: Path) -> Path:
-    """PDF 폴백 확인용. Word가 말풍선을 '메모 포함[C1]: …'로 내보낸 모양을 흉내 낸다."""
-    lines = [
-        "닿으려는 종",
-        "제1부 기원",
-        "제1장 물가의 망설임",
-        "데본기 얕은 물가에서 지느러미로 바닥을 짚는 물고기가 있었다(Daeschler, Shubin & Jenkins, 2006).",
-        "메모 포함[C1]: 확인 필요",
-        "Clack(2012)은 이 전이를 길게 다룬다.",
-        "제2장 목이 생긴 날",
-        "아가미덮개가 사라지고 목이 생겼다.",
-        "메모 포함[C2]: 이 문단은 너무 길다",
-        "참고문헌",
-        "Clack, J. A. (2012). Gaining ground. Indiana University Press.",
-    ]
+    """PDF 폴백 확인용 합성 원고. 줄마다 따로 된 텍스트, 반복 머리말·쪽번호, 첫 줄 들여쓰기, 단어 중간 줄바꿈,
+    오른쪽 단 말풍선(메모 포함[Cn]), 내어쓰기 참고문헌, 그림 하나를 넣는다."""
     doc = pymupdf.open()
-    page = doc.new_page()
-    y = 60
-    for line in lines:
-        page.insert_text((50, y), line, fontname="korea", fontsize=10)
-        y += 30  # 줄마다 별도 블록이 되도록 간격을 둔다
+    for pno, lines in enumerate(_PDF_PAGES):
+        page = doc.new_page(width=595.32, height=841.92)
+        page.insert_text((364, 140), "닿으려는 종", fontname="korea", fontsize=6.0)
+        page.insert_text((219, 705), str(pno + 1), fontname="korea", fontsize=6.7)
+        y, line_y = 170.0, []
+        for x, size, gap, text in lines:
+            page.insert_text((x, y), text, fontname="korea", fontsize=size)
+            line_y.append(y)
+            y += gap
+        if pno == 1:  # 그림 하나(본문 단, 1장 끝)
+            page.insert_image(pymupdf.Rect(60, y + 10, 160, y + 80), stream=_png())
+        for bpage, anchor, balloon in _PDF_BALLOONS:
+            if bpage == pno:
+                by = line_y[anchor]
+                for n, text in enumerate(balloon):
+                    page.insert_text((422, by + n * 11.5), text, fontname="korea", fontsize=_BIB)
     path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(path))
     return path

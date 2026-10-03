@@ -76,9 +76,11 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
     for c in chapters:
         if c.part_number is not None and c.part_number != current_part:
             toc_items.append(f"### 제{c.part_number}부 {parts.get(c.part_number, '')}".rstrip())
+        elif c.part_number is None and current_part is not None:
+            toc_items.append("### (부 밖)")  # 부가 끝난 뒤의 맺음·부록
         current_part = c.part_number
         toc_items.append(
-            f"- 제{c.number}장 {_clip(c.title, 24)} · {c.status} · {c.char_count:,}자 · "
+            f"- {c.display} {_clip(c.title, 24)} · {c.status} · {c.char_count:,}자 · "
             f"미해결 {issues_per_chapter[c.number]} · 미확인인용 {c.unverified_cite_count}"
         )
 

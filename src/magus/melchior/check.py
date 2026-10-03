@@ -1,35 +1,51 @@
-"""인용 게이트. 본문에서 인용을 뽑아 refs와 대조한다: verified / unverified / unknown(refs에 아예 없음).
+"""인용 게이트. 본문에서 인용을 뽑아 refs와 대조한다.
+
+결과 네 갈래: verified / unverified(refs에 있으나 미확인) / unknown(refs에 없음) /
+uncertain(한글 표기인데 refs와 이어지지 않음 — 인명이면 aliases가 필요하고, 지명·사건이면 무시해도 된다).
+해석 순서: key → aliases → (한글 표기만) 같은 연도 문헌과 음역 추정.
 
 쓰기를 막지 않는다. 표시하고 집계할 뿐이고, 판단은 사용자가 한다.
-- book_write_chapter가 쓴 뒤에 자동으로 돌고, 장별 미확인 인용 수(unverified + unknown 출현 수)를 인덱스에 기록한다.
-- refs가 바뀌면(ref_add, ref_import_bibliography, book_import) 사용자의 모든 장 집계와 citation 이슈 연결을 다시 계산한다.
+- 장별 미확인 인용 수 = verified가 아닌 **고유 문헌 수**(unverified + unknown, uncertain 제외). 파생값이다.
+- 각 문헌의 출현 위치(장 본문의 문단 번호)와 표기를 함께 준다.
 """
 
 from __future__ import annotations
 
+import bisect
 import re
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from magus.melchior.citations import find_citations, make_ref_key, strip_particle
+from magus.melchior.citations import Citation, find_citations, make_ref_key, strip_particle
+from magus.melchior.translit import best_match
 from magus.store import Ref, Store
 
 NEEDS_SOURCE = re.compile(r"\[출처 필요[:：][^\]]*\]")
+STATUS_ORDER = {"unknown": 0, "unverified": 1, "uncertain": 2, "verified": 3}
 
 
 @dataclass
 class CiteGroup:
     key: str
-    status: str  # verified | unverified | unknown
-    cited_as: list[str] = field(default_factory=list)
+    status: str  # verified | unverified | unknown | uncertain
     title: str = ""
+    matched_by: str = ""  # "" | "alias" | "음역 추정"
+    occurrences: list[tuple[int, str]] = field(default_factory=list)  # (문단 번호, 표기)
 
     @property
     def count(self) -> int:
-        return len(self.cited_as)
+        return len(self.occurrences)
 
     def as_dict(self) -> dict[str, object]:
-        out: dict[str, object] = {"key": self.key, "count": self.count, "cited_as": sorted(set(self.cited_as))}
+        out: dict[str, object] = {
+            "key": self.key,
+            "count": self.count,
+            "cited_as": sorted({c for _, c in self.occurrences}),
+            "paragraphs": sorted({p for p, _ in self.occurrences}),
+        }
+        if self.matched_by:
+            out["matched_by"] = self.matched_by
         if self.title:
             out["title"] = self.title[:80]
         return out
@@ -45,8 +61,8 @@ class CheckResult:
 
     @property
     def unchecked_count(self) -> int:
-        """장 목록의 '미확인인용' 숫자: verified가 아닌 인용의 출현 수."""
-        return sum(g.count for g in self.groups if g.status != "verified")
+        """장 목록의 '미확인인용' 숫자: verified가 아닌 고유 문헌 수(unverified + unknown). uncertain은 따로 센다."""
+        return sum(1 for g in self.groups if g.status in ("unverified", "unknown"))
 
     def unverified_cites(self) -> list[dict[str, object]]:
         return [{**g.as_dict(), "status": g.status} for g in self.groups if g.status != "verified"]
@@ -56,65 +72,139 @@ class CheckResult:
             "verified": [g.as_dict() for g in self.of("verified")],
             "unverified": [g.as_dict() for g in self.of("unverified")],
             "unknown": [g.as_dict() for g in self.of("unknown")],
+            "uncertain": [g.as_dict() for g in self.of("uncertain")],
             "needs_source": self.needs_source,
+            "unique_unchecked": self.unchecked_count,
         }
 
 
-def resolve_keys(store: Store, user_id: str, keys: tuple[str, ...] | list[str]) -> Ref | None:
-    for key in keys:
-        if ref := store.resolve_ref(user_id, key):
+class Resolver:
+    """인용 → ref. 한 번의 검사(또는 일괄 집계) 동안 연도별 문헌 목록을 한 번만 읽는다."""
+
+    def __init__(self, store: Store, user_id: str):
+        self.store, self.user_id = store, user_id
+        self._by_year: dict[str, list[tuple[str, str]]] | None = None
+
+    def _years(self) -> dict[str, list[tuple[str, str]]]:
+        """네 자리 연도 → (key, 영문 성). 1930a·1930b는 1930으로 묶는다."""
+        if self._by_year is None:
+            self._by_year = defaultdict(list)
+            for ref in self.store.list_refs(self.user_id):
+                year, surname = str(ref.bib.get("year", ""))[:4], str(ref.bib.get("first_author", ""))
+                if year.isdigit() and surname and not re.search(r"[가-힣一-鿿]", surname):
+                    self._by_year[year].append((ref.key, surname))
+        return self._by_year
+
+    def resolve(
+        self,
+        keys: tuple[str, ...] | list[str],
+        hangul: str | None = None,
+        year: str | None = None,
+        coauthors: tuple[str, ...] = (),
+    ) -> tuple[Ref | None, str]:
+        for key in keys:
+            if ref := self.store.resolve_ref(self.user_id, key):
+                return self._disambiguate(ref, coauthors), ("" if ref.key == key else "alias")
+        for key in keys:  # Keynes(1930)인데 참고문헌에는 1930a·1930b만 있는 경우
+            if re.search(r"\d$", key) and (ref := self.store.get_ref(self.user_id, key + "a")):
+                return ref, "연도 a/b 모호"
+        if hangul and year:
+            candidates = self._years().get(year[:4], [])
+            bases = {re.sub(r"(\d{4})[a-z]$", r"\1", k): s for k, s in candidates}
+            if base := best_match(hangul, list(bases.items())):
+                variants = sorted(k for k, _ in candidates if re.sub(r"(\d{4})[a-z]$", r"\1", k) == base)
+                how = "음역 추정" if len(variants) == 1 else "음역 추정·연도 a/b 모호"
+                return self.store.get_ref(self.user_id, variants[0]), how
+        return None, ""
+
+
+    def _disambiguate(self, ref: Ref, coauthors: tuple[str, ...]) -> Ref:
+        """같은 첫 저자·연도 문헌(acemoglu2001, acemoglu2001-2)이 있으면 인용의 공저자 이름으로 가린다."""
+        base = re.sub(r"-\d+$", "", ref.key)
+        siblings = [r for r in (self.store.get_ref(self.user_id, f"{base}-{n}") for n in range(2, 10)) if r]
+        if not siblings or not coauthors:
             return ref
-    return None
+        candidates = [r for r in (self.store.get_ref(self.user_id, base), *siblings) if r]
+        folded = [_fold(c) for c in coauthors]
+        matches = [r for r in candidates if all(c in _fold(str(r.bib.get("authors", ""))) for c in folded)]
+        return matches[0] if len(matches) == 1 else ref
 
 
-def check_text(store: Store, user_id: str, text: str) -> CheckResult:
+def _fold(text: str) -> str:
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
+
+
+def _paragraph_starts(text: str) -> list[int]:
+    return [0, *(m.end() for m in re.finditer(r"\n\s*\n", text))]
+
+
+def check_text(store: Store, user_id: str, text: str, resolver: Resolver | None = None) -> CheckResult:
+    resolver = resolver or Resolver(store, user_id)
+    starts = _paragraph_starts(text)
     groups: dict[str, CiteGroup] = {}
     for c in find_citations(text):
-        ref = resolve_keys(store, user_id, c.lookup_keys)
-        key = ref.key if ref else c.key
-        group = groups.setdefault(
-            key,
-            CiteGroup(key, ref.status if ref else "unknown", title=str(ref.bib.get("title", "")) if ref else ""),
-        )
-        group.cited_as.append(f"{c.author}({c.year})")
-    order = {"unknown": 0, "unverified": 1, "verified": 2}
-    return CheckResult(sorted(groups.values(), key=lambda g: (order[g.status], g.key)), len(NEEDS_SOURCE.findall(text)))
+        ref, how = resolver.resolve(c.lookup_keys, c.author if c.hangul else None, c.year, c.coauthors)
+        if ref:
+            key, status = ref.key, ref.status
+        else:
+            key, status = c.key, ("uncertain" if c.hangul else "unknown")
+        group = groups.setdefault(key, CiteGroup(key, status, str(ref.bib.get("title", "")) if ref else "", how))
+        group.occurrences.append((bisect.bisect_right(starts, c.start), _surface(c)))
+    ordered = sorted(groups.values(), key=lambda g: (STATUS_ORDER[g.status], -g.count, g.key))
+    return CheckResult(ordered, len(NEEDS_SOURCE.findall(text)))
 
 
-def check_chapter(store: Store, user_id: str, project_id: str, number: int) -> CheckResult | None:
+def _surface(c: Citation) -> str:
+    return f"{c.author}({c.year})"
+
+
+def check_chapter(store: Store, user_id: str, project_id: str, number: int, resolver: Resolver | None = None) -> CheckResult | None:
     chapter = store.read_chapter(user_id, project_id, number)
     if chapter is None:
         return None
-    result = check_text(store, user_id, chapter.content)
+    result = check_text(store, user_id, chapter.content, resolver)
     store.set_cite_counts(user_id, project_id, {number: result.unchecked_count})
     return result
 
 
 def refresh_cite_counts(store: Store, user_id: str) -> None:
     """refs가 바뀐 뒤나 인덱스를 다시 만든 뒤에 사용자의 모든 장 집계를 다시 계산한다."""
+    resolver = Resolver(store, user_id)
     for project in store.list_projects(user_id):
         counts = {}
         for meta in store.list_chapters(user_id, project.id):
             chapter = store.read_chapter(user_id, project.id, meta.number)
             if chapter is not None:
-                counts[meta.number] = check_text(store, user_id, chapter.content).unchecked_count
+                counts[meta.number] = check_text(store, user_id, chapter.content, resolver).unchecked_count
         store.set_cite_counts(user_id, project.id, counts)
 
 
-def _issue_lookup_keys(ref_key: str) -> list[str]:
+def _issue_lookup(ref_key: str) -> tuple[list[str], str | None, str | None]:
     m = re.fullmatch(r"(?P<name>.*?)(?P<year>(?:1[5-9]|20)\d{2}[a-z]?)", ref_key)
     if not m or not re.search(r"[가-힣]", m.group("name")):
-        return [ref_key]
-    return list(dict.fromkeys([ref_key, make_ref_key(strip_particle(m.group("name")), m.group("year"))]))
+        return [ref_key], None, None
+    name, year = m.group("name"), m.group("year")
+    return list(dict.fromkeys([ref_key, make_ref_key(strip_particle(name), year)])), name, year
 
 
 def link_citation_issues(store: Store, user_id: str) -> int:
-    """citation 이슈의 ref_key를 refs에서 해석해 ref_id(정식 key)로 기록한다. 바뀐 이슈 수를 돌려준다."""
+    """citation 이슈를 refs에서 해석해 ref_id(정식 key)로 기록한다. 바뀐 이슈 수를 돌려준다.
+    코멘트 문장에서 인용을 다시 뽑아 후보 전체(원형·조사 뗀 것·앞 낱말과 붙인 것·공저자)로 찾고, 문장에서 못 뽑으면
+    저장된 ref_key로 찾는다(사람이 issues.md에 직접 적은 경우)."""
+    from magus.book.comments import COMMENT_ANCHOR_SPLIT
+
+    resolver = Resolver(store, user_id)
     changed = 0
     for project in store.list_projects(user_id):
         updates: dict[int, str | None] = {}
         for issue in store.list_issues(user_id, project.id, None, kind="citation"):
-            ref = resolve_keys(store, user_id, _issue_lookup_keys(issue.ref_key)) if issue.ref_key else None
+            comment = issue.text.partition(COMMENT_ANCHOR_SPLIT)[0]  # 이슈에 남은 앵커는 120자로 잘려 있다
+            ref = None
+            if cite := next(iter(find_citations(comment, bare=True)), None):
+                ref, _ = resolver.resolve(cite.lookup_keys, cite.author if cite.hangul else None, cite.year, cite.coauthors)
+            elif issue.ref_key:
+                keys, hangul, year = _issue_lookup(issue.ref_key)
+                ref, _ = resolver.resolve(keys, hangul, year)
             new = ref.key if ref else None
             if new != issue.ref_id:
                 updates[issue.id] = new
@@ -130,10 +220,11 @@ def after_refs_changed(store: Store, user_id: str) -> int:
 
 def chapters_citing(store: Store, user_id: str, key: str) -> dict[str, list[int]]:
     """이 ref를 인용하는 장들(프로젝트별). ref_add 응답에서 영향받는 장을 알려 줄 때 쓴다."""
+    resolver = Resolver(store, user_id)
     out: dict[str, list[int]] = defaultdict(list)
     for project in store.list_projects(user_id):
         for meta in store.list_chapters(user_id, project.id):
             chapter = store.read_chapter(user_id, project.id, meta.number)
-            if chapter and any(g.key == key for g in check_text(store, user_id, chapter.content).groups):
+            if chapter and any(g.key == key for g in check_text(store, user_id, chapter.content, resolver).groups):
                 out[project.id].append(meta.number)
     return dict(out)

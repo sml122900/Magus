@@ -76,6 +76,7 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
             {
                 "project_id": project.id,
                 "number": m.number,
+                "label": m.display,
                 "title": m.title,
                 "status": m.status,
                 "part_number": m.part_number,

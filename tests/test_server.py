@@ -61,7 +61,10 @@ async def test_read_returns_body_and_meta_separately(settings: Settings, store: 
         assert (ch["title"], ch["status"], ch["part_number"], ch["version"]) == ("목이 생긴 날", "draft", 1, 2)
         assert ch["last_note"] == "2장 끝에 한 문장 추가"
         # 4단계부터 인용 게이트가 돈다: 데모 책장에는 refs가 없으므로 Clack(2012)은 unknown
-        assert ch["unverified_cites"] == [{"key": "clack2012", "count": 1, "cited_as": ["Clack(2012)"], "status": "unknown"}]
+        assert ch["unverified_cites"] == [
+            {"key": "clack2012", "count": 1, "cited_as": ["Clack(2012)"], "paragraphs": [1], "status": "unknown"}
+        ]
+        assert ch["label"] == "제2장"
         assert ch["needs_source"] == 0
         assert (await _call(client, "book_read_chapter", {"number": 1}))["open_issues"] == ["I1 Daeschler 2006 원문 확인 필요"]
         missing = await client.call_tool("book_read_chapter", {"number": 99})
