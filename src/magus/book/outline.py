@@ -82,10 +82,12 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
             f"이 사용자의 프로젝트는 {len(others) + 1}개다. 다른 프로젝트: {listed}{more} (project_id로 지정)"
         )
     # 미확인 문헌은 책 전체 고유 수다(여러 장에 나오는 문헌은 한 번). 장별 수는 각 장 줄에만 싣는다.
+    # 미연결(한글 표기인데 refs와 잇지 못한 것)은 미확인 수에 넣지 않지만 숨기지 않는다(ref_check의 uncertain 목록).
     unique_unverified = len({key for c in chapters for key in c.unverified_cite_keys})
+    unlinked = len({key for c in chapters for key in c.uncertain_cite_keys})
     header_lines.append(
         f"{_chapter_count(chapters)} · {len(parts)}부 · {sum(c.char_count for c in chapters):,}자 · "
-        f"미확인 문헌 {unique_unverified}편 · 열린 미해결 {len(issues)}"
+        f"미확인 문헌 {unique_unverified}편 · 미연결 {unlinked} · 열린 미해결 {len(issues)}"
     )
     header = "\n".join(header_lines)
 

@@ -78,11 +78,22 @@ def test_year_range_and_ab_ambiguity(store: LocalStore):
         store, "alice",
         "Keynes, J. M. (1930a). A treatise on money. Macmillan.\nKeynes, J. M. (1930b). Economic possibilities. Nation.",
     )
-    groups = {g.key: g for g in check_text(store, "alice", "(Keynes, 1930b) Keynes(1930) 케인스(1930)").groups}
+    result = check_text(store, "alice", "(Keynes, 1930b) Keynes(1930) 케인스(1930)")
+    groups = {g.key: g for g in result.groups}
     assert groups["keynes1930b"].matched_by == ""
-    assert groups["keynes1930a"].count == 2  # 접미사 없는 인용은 첫 항목으로 잇되 모호 표시
+    # 접미사 없는 인용은 어느 쪽에도 잇지 않는다(사용자 결정 #31). 후보 둘을 함께 보이고, 한 문헌으로 센다
+    ambiguous = groups["keynes1930a/b"]
+    assert (ambiguous.status, ambiguous.count, ambiguous.title) == ("unverified", 2, "")
+    assert [k for k, _ in ambiguous.candidates] == ["keynes1930a", "keynes1930b"]
+    assert "keynes1930a" not in groups and result.unchecked_count == 2
+    assert ambiguous.as_dict()["candidates"][0] == {"key": "keynes1930a", "title": "A treatise on money"}
     assert {g.matched_by for g in check_text(store, "alice", "Keynes(1930)").groups} == {"연도 a/b 모호"}
     assert {g.matched_by for g in check_text(store, "alice", "케인스(1930)").groups} == {"음역 추정·연도 a/b 모호"}
+    # 사용자가 확정하면(magus alias) 그 문헌으로 바로 잇는다
+    from magus.melchior.refs import add_alias
+
+    add_alias(store, "alice", "keynes1930b", "케인스(1930)")
+    assert {g.key: g.matched_by for g in check_text(store, "alice", "케인스(1930)").groups} == {"keynes1930b": "alias"}
 
 
 def test_cite_report(store: LocalStore):
@@ -114,10 +125,10 @@ def test_three_kinds_and_non_citation_terms():
     assert classify_comment("인용 확인 필요: Wiessner(2014)의 대화 비율.") == ("citation", "wiessner2014")
     assert classify_comment("확인 필요: 칙술루브 충돌체의 크기 추정.") == ("fact", None)
     assert classify_comment("검토 메모: 근거 연구를 인용하면 단단해집니다.") == ("general", None)
-    # 비인용 용어만 걸린 확인 요청은 general(사용자 결정, 실원고 I46)
+    # 비인용 용어만 걸린 확인 요청도 확인 요청이다: fact(사용자 결정 #36, 실원고 I46)
     i46 = "확인 필요: 쯔궁 선하이정(1835)의 깊이와 쓰촨 소금의 진출 경위."
     assert classify_comment(i46)[0] == "citation"  # 용어 목록이 없으면 지명이 인용처럼 잡힌다
-    assert classify_comment(i46, exclude=terms) == ("general", None)
+    assert classify_comment(i46, exclude=terms) == ("fact", None)
     assert find_citations("마닐라(1571)와 모스크바 회사(1555), Clack(2012)", exclude=terms)[0].key == "clack2012"
     assert len(find_citations("마닐라(1571)와 모스크바 회사(1555), Clack(2012)", exclude=terms)) == 1
 
@@ -135,4 +146,4 @@ def test_terms_file_and_reimport_keeps_terms(store: LocalStore, tmp_path):
     import_manuscript(store, "alice", pdf, project_id="b", replace=True)
     assert store.get_non_citation_terms("alice", "b") == ["넌", "마셜"]  # 다시 임포트해도 유지
     issues = store.list_issues("alice", "b")
-    assert issues[0].kind == "general"  # "인용 확인 필요: 마셜(2015)" — 마셜이 비인용 용어가 되면 general
+    assert issues[0].kind == "fact"  # "인용 확인 필요: 마셜(2015)" — 마셜이 비인용 용어가 되어도 확인 요청이다

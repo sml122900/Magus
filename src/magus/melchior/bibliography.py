@@ -33,15 +33,40 @@ class BibReport:
     existing: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
     collisions: list[str] = field(default_factory=list)
+    duplicates: list[str] = field(default_factory=list)  # 같은 문헌(저자·연도·제목)이 목록에 두 번: 원고 오류일 수 있다
+    differs: list[str] = field(default_factory=list)  # 이미 있는 key인데 새 목록의 제목·연도가 다름(갱신하지 않음)
 
     def render(self) -> str:
         out = [
             f"참고문헌 {self.lines}줄 → 새 refs {len(self.created)}건(unverified), 이미 있음 {len(self.existing)}건, "
-            f"파싱 실패 {len(self.failed)}줄, key 충돌 {len(self.collisions)}건"
+            f"파싱 실패 {len(self.failed)}줄, key 충돌 {len(self.collisions)}건, 중복 서지 {len(self.duplicates)}건, "
+            f"기존 서지와 다름 {len(self.differs)}건"
         ]
         out += [f"- 파싱 실패: {line[:100]}" for line in self.failed]
         out += [f"- key 충돌: {c}" for c in self.collisions]
+        out += [f"- 중복 서지(목록에 두 번): {d}" for d in self.duplicates]
+        out += [f"- 기존 서지와 다름(갱신하지 않음): {d}" for d in self.differs]
         return "\n".join(out)
+
+
+def _norm(text: object) -> str:
+    return re.sub(r"[\W_]+", " ", str(text or "").lower()).strip()
+
+
+def _identity(ref: Ref) -> tuple[str, ...]:
+    """같은 문헌인지 가리는 값: 원문 줄이 같거나, 첫 저자·연도·제목이 같으면 같은 문헌이다."""
+    if "first_author" not in ref.bib:
+        return ("raw", _norm(ref.bib.get("raw")))
+    return (_norm(ref.bib.get("first_author")), str(ref.bib.get("year", "")), _norm(ref.bib.get("title")))
+
+
+def _differences(old: Ref, new: Ref) -> list[str]:
+    out = []
+    for name, label in (("title", "제목"), ("year", "연도")):
+        before, after = old.bib.get(name), new.bib.get(name)
+        if before and after and _norm(before) != _norm(after):
+            out.append(f"{label} '{str(before)[:50]}' → 새 목록 '{str(after)[:50]}'")
+    return out
 
 
 def first_author(authors: str) -> str:
@@ -121,6 +146,7 @@ def ref_from_bib(bib: dict[str, Any]) -> Ref:
 def import_bibliography(store: Store, user_id: str, text: str) -> BibReport:
     report = BibReport()
     seen: set[str] = set()
+    identities: dict[tuple[str, ...], str] = {}
     for line in (raw.strip() for raw in text.splitlines()):
         if not line or _HEADING.match(line):
             continue
@@ -131,6 +157,8 @@ def import_bibliography(store: Store, user_id: str, text: str) -> BibReport:
             ref = Ref(key="raw-" + hashlib.sha1(line.encode()).hexdigest()[:8], status="unverified", bib={"raw": line})
         else:
             ref = ref_from_bib(bib)
+        if (same := identities.get(_identity(ref))) is not None:
+            report.duplicates.append(f"{same} = {line[:70]}")
         if ref.key in seen:  # 같은 목록 안에서 key가 겹치면(예: 같은 성·연도) 뒤의 것에 -2, -3을 붙인다
             n = 2
             while f"{ref.key}-{n}" in seen:
@@ -138,8 +166,11 @@ def import_bibliography(store: Store, user_id: str, text: str) -> BibReport:
             report.collisions.append(f"{ref.key} → {ref.key}-{n}: {line[:60]}")
             ref = Ref(key=f"{ref.key}-{n}", status=ref.status, bib=ref.bib, aliases=ref.aliases)
         seen.add(ref.key)
-        if store.get_ref(user_id, ref.key):
+        identities.setdefault(_identity(ref), ref.key)
+        if existing := store.get_ref(user_id, ref.key):
             report.existing.append(ref.key)
+            if diff := _differences(existing, ref):
+                report.differs.append(f"{ref.key}: {'; '.join(diff)}")
             continue
         store.put_ref(user_id, ref)
         report.created.append(ref.key)

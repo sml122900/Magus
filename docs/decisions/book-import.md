@@ -49,7 +49,7 @@
 
 ## Result
 
-- 합성 원고 기준(`tests/test_import.py`, `data/synthetic-fixtures/step2-import-report.md`)
+- 합성 원고 기준(`tests/test_import.py`, `tests/fixtures/synthetic/step2-import-report.md`)
   - 장 7개, 부 3개를 찾았다. 목차 줄 11개를 정확히 버렸다. 빠진 번호와 본문 없는 장은 없다.
   - 코멘트 13개가 이슈 13건이 됐다: citation 8, general 5. ref_key 후보는 citation 8건 중 6건(75%)에서 찾았다. 장 밖 코멘트는 머리말 1건, 참고문헌 1건이다.
   - 참고문헌 30줄 → refs 30건(unverified). 파싱 실패 3줄은 raw로 보관했고, key 충돌 1건(hu2023 → hu2023-2)이 있었다.

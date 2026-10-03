@@ -149,3 +149,13 @@ def test_rejects_unknown_format_and_headless(store: LocalStore, tmp_path: Path):
     doc.save(str(tmp_path / "plain.docx"))
     with pytest.raises(ValueError, match="제N장"):
         import_manuscript(store, "alice", tmp_path / "plain.docx")
+
+
+def test_committed_synthetic_fixtures_import(store: LocalStore):
+    # 합성 fixture는 tests/fixtures/synthetic/에 커밋해 둔다(사용자 결정 #11). 생성기와 같은 결과여야 한다.
+    folder = Path(__file__).parent / "fixtures" / "synthetic"
+    docx = import_manuscript(store, "alice", folder / "닿으려는_종_합성.docx", project_id="docx", synthetic=True)
+    assert len(store.list_chapters("alice", "docx")) == 7 and len(store.list_parts("alice", "docx")) == 3
+    assert "합성 fixture" in docx.summary()
+    import_manuscript(store, "alice", folder / "닿으려는_종_합성.pdf", project_id="pdf", synthetic=True)
+    assert [c.display for c in store.list_chapters("alice", "pdf")] == ["서장", "제1장", "제2장"]

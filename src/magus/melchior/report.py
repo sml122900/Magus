@@ -27,6 +27,7 @@ class DocStat:
     cited_as: set[str] = field(default_factory=set)
     inferred: set[str] = field(default_factory=set)  # 음역 추정·연도 모호로 이은 표기("모리스(2010)")
     hint: str = ""  # unknown일 때: 같은 저자의 다른 연도 항목
+    candidates: list[str] = field(default_factory=list)  # 연도 a/b 모호: 잇지 않은 후보 key
 
 
 @dataclass
@@ -75,9 +76,10 @@ class CiteReport:
             f"- {d.key} ×{d.count} — {', '.join(d.chapters)} — {', '.join(sorted(d.cited_as))}"
             for d in sorted(self.of("uncertain"), key=lambda d: (-d.count, d.key))
         ] or ["- 없음"]
-        lines += ["", "#### 추정으로 이은 것 (음역 추정·연도 a/b 모호 — 맞는지 확인 필요)", ""]
+        lines += ["", "#### 추정으로 이은 것과 모호해서 잇지 않은 것 (맞는지 확인 필요, 확정하면 magus alias)", ""]
         lines += [
-            f"- {', '.join(sorted(d.inferred))} ⇒ {d.key} — {d.title[:50]}"
+            f"- {', '.join(sorted(d.inferred))} ⇒ "
+            + (f"잇지 않음, 후보 {' / '.join(d.candidates)}" if d.candidates else f"{d.key} — {d.title[:50]}")
             for d in sorted(self.docs.values(), key=lambda d: d.key) if d.inferred
         ] or ["- 없음"]
         lines += ["", f"#### 참고문헌에는 있지만 본문에서 인용되지 않은 항목 ({len(self.uncited)}건)", ""]
@@ -102,7 +104,7 @@ def build_cite_report(store: Store, user_id: str, project_id: str) -> CiteReport
              sum(g.count for g in result.groups if g.status in ("unverified", "unknown")), result.needs_source)
         )
         for g in result.groups:
-            doc = docs.setdefault(g.key, DocStat(g.key, g.status, g.title))
+            doc = docs.setdefault(g.key, DocStat(g.key, g.status, g.title, candidates=[k for k, _ in g.candidates]))
             doc.count += g.count
             doc.chapters.append(str(meta.number) if meta.label is None else meta.display)
             doc.cited_as.update(c for _, c in g.occurrences)
@@ -113,7 +115,7 @@ def build_cite_report(store: Store, user_id: str, project_id: str) -> CiteReport
         if doc.status == "unknown" and (name := re.sub(r"\d{4}[a-z]?(-\d+)?$", "", doc.key)):
             similar = [r.key for r in refs if re.sub(r"\d{4}[a-z]?(-\d+)?$", "", r.key) == name]
             doc.hint = ", ".join(similar[:4])
-    cited = set(docs)
+    cited = set(docs) | {k for d in docs.values() for k in d.candidates}
     uncited = [
         (ref.key, str(ref.bib.get("raw", "")))
         for ref in refs

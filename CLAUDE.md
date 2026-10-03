@@ -103,13 +103,14 @@
   - `kind`: 임포트할 때 코멘트로 정한다. 직접 남긴 이슈는 `general`이 기본값이다.
     - 출처 확인 코멘트: 본문에 "확인 필요", "인용 확인 필요", "원문 대조"가 들어 있거나(공백 차이와 실제 변형 허용), 독립된 낱말 "서지"가 있는 것("일어서지"는 아님).
     - `citation`: 출처 확인 코멘트이고 문헌이 지목된 것(코멘트 본문, 또는 서로 다른 인용이 하나뿐인 앵커에서 저자·연도를 찾음).
-    - `fact`: 출처 확인 코멘트지만 문헌이 없는 것(사실·수치 확인 요청).
-    - `general`: 그 외. 인용처럼 보인 것이 모두 비인용 용어면 출처 확인 코멘트여도 general이다(I46 `선하이정(1835)`).
+    - `fact`: 출처 확인 코멘트지만 문헌이 없는 것(사실·수치 확인 요청). 인용처럼 보인 것이 모두 비인용 용어여도 fact다("확인 필요"가 붙어 있으면 무엇이든 확인 요청이다. 사용자 결정 #36, I46 `선하이정(1835)`).
+    - `general`: 확인 요청이 아닌 코멘트(작업 안내, 검토 메모 등).
   - **비인용 용어**: 프로젝트별 `book/non_citation_terms.txt`(한 줄에 하나, `#` 주석). 연도 앞에 오는 지명·사건·기관(마닐라(1571), 모스크바 회사(1555))을 인용 추출 전체(ref_check, 집계, 이슈 연결, 코멘트 분류)에서 뺀다. 여러 낱말 용어는 저자 앞 글과 이어서 본다. `--replace` 재임포트 때 새 프로젝트로 옮긴다. CLI `magus terms`로 고친다.
   - `ref_key`: citation 코멘트에서 뽑은 저자·연도 후보(`daeschler2006`, 한글이면 조사를 뗀 `갤러2022`). 코멘트 본문에 없으면 앵커 원문에서 찾고, 그래도 없으면 null이다. 추출기는 `magus/melchior/citations.py`이고, ref_check도 이것을 쓴다.
   - `ref_id`: ref_key를 refs(key 또는 aliases)에서 해석한 **정식 ref key**(예: `갤러2022` ⇒ `galor2022`). refs 행 id는 재생성되면 바뀌므로 key를 쓴다. 임포트, ref_add, ref_import_bibliography 뒤에 다시 계산한다.
 - chapters.unverified_cite_count: verified가 아닌 **고유 문헌 수**(unverified + unknown, uncertain 제외). 출현 횟수가 아니다(사용자 결정 #17 변경). 파생값이라 인덱스에만 두고, 서버 시작·`magus reindex`·refs 변경·장 쓰기 때 다시 계산한다.
-  - chapters.unverified_cite_keys(JSON): 같은 때 함께 계산하는 그 장의 미확인 문헌 key 목록이다. outline은 장 사이 합집합으로 책 전체 고유 수를 낸다(SCHEMA_VERSION 7).
+  - chapters.unverified_cite_keys / uncertain_cite_keys(JSON): 같은 때 함께 계산하는 그 장의 미확인 문헌 key와 미연결 한글 표기 key다. outline은 장 사이 합집합으로 책 전체 고유 수를 낸다(SCHEMA_VERSION 8).
+  - 이 캐시는 refs가 바뀌면(ref_add, ref_import_bibliography, `magus alias`, `magus terms`) 그 자리에서 사용자의 모든 장을 다시 계산한다(실원고 40장 0.3초). ref_add 직후 outline 수가 줄어드는지 테스트로 고정했다(사용자 결정 #43).
   - **한 번 준 번호는 절대 재사용하거나 다시 매기지 않는다.** 마지막 번호는 project.json의 `last_decision_id`/`last_issue_id`에 둔다.
 - refs(id, user_id, key, aliases json, bib json, status: unverified|verified, has_fulltext, file_path?, created_at)
   - key는 첫 저자 성(소문자 영문) + 연도다. 예: `daeschler2006`, `galor2022`. 한글 표기(갤러, 다이아몬드 등)는 aliases에 넣는다.
@@ -131,7 +132,6 @@ data/users/<user_id>/projects/<project_id>/original/{원고 사본, unsplit.md, 
 data/users/<user_id>/projects/<project_id>/exports/*.docx       # book_export
 data/users/<user_id>/trash/<project_id>-<시각>/                   # book_import replace=True로 밀려난 프로젝트
 data/index.sqlite
-data/synthetic-fixtures/                                          # magus synth (합성 원고·대화)
 ```
 
 ### 파일 형식
@@ -167,7 +167,8 @@ data/synthetic-fixtures/                                          # magus synth 
 ### 책 (`magus/book/`)
 - `book_outline(project_id?)` → **3,000 토큰 이하**. 모든 원고 작업은 이 도구로 시작한다.
   - 첫 줄은 `프로젝트: 제목 (id)`다. 프로젝트가 2개 이상이면 안내 줄을 붙인다.
-  - 집계 줄: `35장 + 서장·맺음·부록 1~3 · 8부 · N자 · 미확인 문헌 N편 · 열린 미해결 N`. 미확인 문헌은 **책 전체 고유 수**(여러 장에 나오는 문헌은 한 번)이고 저자 보고서 1절의 문헌 수와 같다. 장별 수는 각 장 줄에만 싣는다.
+  - 집계 줄: `35장 + 서장·맺음·부록 1~3 · 8부 · N자 · 미확인 문헌 N편 · 미연결 N · 열린 미해결 N`. 미확인 문헌은 **책 전체 고유 수**(여러 장에 나오는 문헌은 한 번)이고 저자 보고서 1절의 문헌 수와 같다. 장별 수는 각 장 줄에만 싣는다.
+  - 미연결(uncertain: 한글 표기인데 refs와 못 이음)은 미확인 수에 넣지 않지만 숨기지 않는다. 머리줄에 따로 세고, ref_check에는 별도 목록(`uncertain`, `unique_uncertain`)으로 준다(사용자 결정 #29).
   - 장 목록은 부 제목 아래에 묶고, 각 줄에는 집계만 싣는다: `제N장 제목 · 상태 · N자 · 미해결 n · 미확인인용 n`. 장별 미해결 수에는 코멘트 유래까지 모두 센다.
   - 미해결 전문은 origin이 `user`·`agent`인 것만 싣는다. `import_comment`는 `코멘트 유래 미해결 N건(citation · fact · general 수) — book_issues(kind)로 조회` 한 줄로만 보인다.
   - 최근 결정 10개, 최근 변경 5개도 싣는다.
@@ -196,7 +197,9 @@ data/synthetic-fixtures/                                          # magus synth 
 - `ref_import_bibliography(text)` → 줄 단위로 저자·연도·제목을 파싱하고 key를 만든다(`magus/melchior/bibliography.py`). status는 unverified다.
   - 지원: APA, 국문 『』, 연도 후치형(근사), 연도 접미사 2012a.
   - `[국역: 이름 성, …, 연도]` 꼬리가 있으면 한글 성 + 원서·번역서 연도를 aliases에 넣는다.
-  - 파싱하지 못한 줄은 key `raw-<해시>`, bib.raw로 보관한다. 같은 목록 안 key 충돌은 `-2`를 붙인다. 이미 있는 key는 건드리지 않는다.
+  - 파싱하지 못한 줄은 key `raw-<해시>`, bib.raw로 보관한다. 같은 목록 안 key 충돌은 `-2`를 붙인다.
+  - 같은 문헌(첫 저자·연도·제목, 또는 같은 원문 줄)이 목록에 두 번이면 "중복 서지"로 따로 리포트한다. 원고 오류일 수 있다(사용자 결정 #5).
+  - 이미 있는 key는 건드리지 않는다. 새 목록의 제목·연도가 기존과 다르면 "기존 서지와 다름"으로 리포트만 한다(갱신하지 않음, 사용자 결정 #6).
 - `ref_add(bib, passages: [{text, reason, locator?}], file_path? | full_text?, aliases?)` → status=verified로 넣는다.
   - **발췌가 하나 이상 있어야 받는다.**
   - bib은 `{key}` 또는 `{authors|author, year, title…}`이다. 같은 key나 alias가 unverified로 있으면 verified로 올리고 bib·aliases·발췌를 합친다.
@@ -205,6 +208,8 @@ data/synthetic-fixtures/                                          # magus synth 
 - `ref_search(query, scope=picked|full|both(기본), k=8)` → 하이브리드 검색. picked 결과를 먼저 보여 주고, full 결과에는 "발췌되지 않은 부분 → ref_add로 발췌 추가"라고 표시한다.
 - `ref_check(chapter_number, project_id?)` → JSON: verified / unverified / unknown(refs에 없음) / uncertain(한글 표기인데 refs와 못 이음: 인명이면 aliases 필요, 지명·사건이면 무시) 목록과 `unique_unchecked`, `needs_source`.
   - 문헌마다 `count`(출현), `cited_as`, `paragraphs`(장 본문의 문단 번호), `matched_by`(alias·음역 추정·연도 a/b 모호)를 담는다.
+  - **연도 a/b가 모호하면 잇지 않는다**(사용자 결정 #31). `Keynes(1930)`·`케인스(1930)`인데 참고문헌에 1930a·1930b만 있으면, key `keynes1930a/b`·상태 unverified·`candidates`(후보 key와 제목)로 보이고 한 문헌으로 센다. 이슈의 ref_id도 비워 둔다.
+  - **추정은 저장하지 않는다**(음역 추정·a/b 모호, 결정 #28·#31). 저자가 확정하면 CLI `magus alias <key> <표기>`로 aliases에 넣는다(예: `magus alias keynes1930b "케인스(1930)"` → `케인스1930`). 연도를 빼고 적으면 문헌 연도(a/b는 뗌)를 붙인다.
   - 인용 패턴: `(Daeschler, Shubin & Jenkins, 2006)`, `Clack(2012)`, `Hu et al.(2023)`, `갤러(2022)`, `(헨릭, 2016)`. 실원고에서 추가로 확인한 것은 다음과 같다.
     - 괄호 안 다중 인용, 설명 뒤 인용 `(1990년 국제달러, Maddison, 2001)`, 연도 범위 `(Toynbee, 1934–1961)`
     - 발음 부호·소문자 접두어·여러 단어 저자(Prüfer, de Vries, Ibn Khaldun), 한자 저자(田代和生)
@@ -225,7 +230,7 @@ data/synthetic-fixtures/                                          # magus synth 
 - `idea_search(query, author=me|ai|all, k=10)` → 기본값은 me다. all이면 me를 먼저 정렬한다. ai 결과에는 응답한 사용자 발화를 함께 보여 준다.
 
 ### 문체 — Balthasar (`magus/balthasar/`)
-- `style_add(passage, reason, work?, tags)` → tags 스키마는 `{호흡, 시점, 열기, 장치: [], 어미, 톤}`이다. 여섯 키가 모두 필요하고(장치만 빈 목록 허용), 모르는 키는 거부한다. 태그는 호출자(Claude)가 추출해 넘기고, 서버는 검증만 한다. **임베딩 대상과 FTS 색인 대상 모두 reason + tags를 이은 문자열이지 passage가 아니다**(구절을 색인하면 문체가 아니라 주제가 검색된다. 테스트로 고정).
+- `style_add(passage, reason, work?, tags)` → tags 스키마는 `{호흡, 시점, 열기, 장치: [], 어미, 톤}`이다. 여섯 키가 모두 필요하고(장치만 빈 목록 허용), 모르는 키는 거부한다. 태그는 호출자(Claude)가 추출해 넘기고, 서버는 검증만 한다. **임베딩 대상과 FTS 색인 대상 모두 reason + tags를 이은 문자열이지 passage가 아니다**(구절을 색인하면 문체가 아니라 주제가 검색된다. 테스트로 고정). 키워드 색인에는 work(출전)도 더한다("유홍준 그 문장", 사용자 결정 #24). 임베딩 대상에는 넣지 않는다.
 - `style_search(query, k=5)` → passage, reason, tags를 돌려준다.
 
 ## 서버 instructions
@@ -269,6 +274,7 @@ magus reindex                             # 파일 → index.sqlite 재생성 + 
 magus cite-report --project-id book       # 책 전체 인용 집계(확인 순서)
 magus author-report --project-id book --out docs/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + docx)
 magus terms --project-id book [--add …] [--remove …]                         # 비인용 용어 보기·고치기
+magus alias <key> <표기>                                                      # 저자가 확정한 표기를 aliases에(예: keynes1930b "케인스(1930)")
 .venv/Scripts/python -m ruff check --select F,B src tests                    # 린트(pyflakes·bugbear)
 ```
 
@@ -277,7 +283,7 @@ magus terms --project-id book [--add …] [--remove …]                        
 `fixtures/`에는 원고 docx 1개(파일명에 "닿으려는_종")와 대화 기록 md 3개(그중 하나는 `대화_전체_기록.md`)를 둔다. 실제 원고이므로 리포에 커밋하지 않는다(.gitignore). 읽기만 한다.
 - 실제 내용: 원고 `261002-닿으려는_종_전면개정_그림추가.pdf`(PDF, 297쪽, docx 없음), `대화_전체_기록.md`, `대화기록_닿으려는종.md`, `도시_유전자_민주주의_대화.md`, `사피엔스_총균쇠_대화.md`. 원본은 사용자의 Downloads에 있고, fixtures는 사본이다.
 - 실데이터는 default 사용자의 `book` 프로젝트다. 리포트 사본은 `data/realdata/`에 있다.
-- 실파일이 없을 때는 `USER_ID=synthetic magus synth data/synthetic-fixtures`로 합성 fixture를 만들어 쓴다(`src/magus/synthetic.py`). 합성 PDF는 실원고 레이아웃을 흉내 낸다. 합성으로 돌린 리포트에는 "합성 fixture"라고 표시한다.
+- 합성 fixture는 `tests/fixtures/synthetic/`에 **커밋해 둔다**(사용자 결정 #11: 비밀이 아니고 재현성이 더 중요하다). `magus synth tests/fixtures/synthetic`로 다시 만든다(`src/magus/synthetic.py`). 실데이터(루트 `fixtures/`, gitignore)와는 계속 분리한다. 합성 PDF는 실원고 레이아웃을 흉내 낸다. 합성으로 돌린 리포트에는 "합성 fixture"라고 표시한다. 합성 데이터를 임포트할 때는 `USER_ID=synthetic`을 쓴다.
 
 ## 문서화 규약
 

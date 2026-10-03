@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,25 @@ def derive_key(bib: dict[str, Any]) -> str:
     if not author or not _YEAR.fullmatch(year):
         raise ValueError("bib에 key가 없으면 저자(authors 또는 author)와 네 자리 연도(year)가 필요하다")
     return make_ref_key(author, year)
+
+
+def add_alias(store: Store, user_id: str, key: str, surface: str) -> tuple[Ref, str]:
+    """사용자가 확정한 본문 표기를 문헌의 aliases에 넣는다(`magus alias`). 음역 추정은 저장하지 않으므로 이 길로만 들어간다.
+    '케인스(1930)'·'케인스 1930'·'케인스' → '케인스1930'. 연도가 없으면 문헌의 연도를 쓴다(1930a의 a는 뗀다:
+    본문 인용에는 보통 a/b가 없다)."""
+    ref = store.get_ref(user_id, key)
+    if ref is None:
+        raise ValueError(f"문헌 {key!r}가 없다")
+    year = m.group() if (m := _YEAR.search(surface)) else str(ref.bib.get("year", ""))[:4]
+    name = re.sub(r"[\s(),]+", "", _YEAR.sub("", surface))
+    if not name or not _YEAR.fullmatch(year):
+        raise ValueError(f"표기 {surface!r}에서 이름과 연도를 알 수 없다. 예: 케인스(1930)")
+    alias = make_ref_key(name, year)
+    if (other := store.resolve_ref(user_id, alias)) and other.key != ref.key:
+        raise ValueError(f"{alias}는 이미 {other.key}에 이어져 있다")
+    if alias == ref.key or alias in ref.aliases:
+        return ref, alias
+    return store.put_ref(user_id, replace(ref, aliases=(*ref.aliases, alias))), alias
 
 
 def _norm(text: str) -> str:

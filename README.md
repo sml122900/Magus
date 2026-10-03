@@ -89,13 +89,16 @@ Microsoft Store판은 `%LOCALAPPDATA%\Packages\Claude_…\LocalCache\Roaming\Cla
 
 | 말하기 | 불리는 도구 | 기대 결과 |
 |---|---|---|
-| "Magus의 book_outline을 호출해 줘" | `book_outline` | 첫 줄 `프로젝트: 닿으려는 종 (book)`<br>둘째 줄 `35장 + 서장·맺음·부록 1~3 · 8부 · 249,065자 · 미확인 문헌 296편 · 열린 미해결 86`<br>미해결 절 `코멘트 유래 미해결 86건(citation 44 · fact 39 · general 3)` |
+| "Magus의 book_outline을 호출해 줘" | `book_outline` | 첫 줄 `프로젝트: 닿으려는 종 (book)`<br>둘째 줄 `35장 + 서장·맺음·부록 1~3 · 8부 · 249,065자 · 미확인 문헌 297편 · 미연결 0 · 열린 미해결 86`<br>미해결 절 `코멘트 유래 미해결 86건(citation 44 · fact 40 · general 2)` |
 | "제12장 인용 중 확인 안 된 것 알려줘" | `ref_check(12)` 한 번 | `unverified` 28편, `unique_unchecked: 28`, `verified: []`<br>문헌마다 문단 번호가 붙는다. 예: marchetti1994 `paragraphs: [16, 41]`, pachecocobos2019 `[28, 29]` |
 | "제31장 읽고 세 문장으로 요약해 줘" | `book_read_chapter(31)` 한 번 | 제목 `대치동은 왜 아이를 줄이나`, 3,386자, 미확인 문헌 8편, 열린 미해결 1건(I78)<br>책 전체나 다른 장을 요구하지 않아야 한다. 본문에 "제13장에서 보았듯"이 있어도 13장을 읽지 않는다<br>규칙 1에 따라 `book_outline`을 먼저 부르는 것은 괜찮다 |
-| "사실·수치 확인 요청만 보여 줘" | `book_issues(kind="fact")` | `미해결 39건 (status=open, kind=fact)`<br>첫 항목 `I3 · open · 1장 · import_comment · fact · 확인 필요: 폐가 부레보다…` |
+| "사실·수치 확인 요청만 보여 줘" | `book_issues(kind="fact")` | `미해결 40건 (status=open, kind=fact)`<br>첫 항목 `I3 · open · 1장 · import_comment · fact · 확인 필요: 폐가 부레보다…` |
 
-"미확인 문헌 296편"은 책 전체에서 한 번씩 센 고유 문헌 수입니다. 저자 보고서 1절의 "문헌 296편"과 같은 숫자입니다.
+"미확인 문헌 297편"은 책 전체에서 한 번씩 센 고유 문헌 수입니다. 저자 보고서 1절의 "문헌 297편"과 같은 숫자입니다.
 장마다 센 수는 목차의 각 장 줄(`미확인인용 n`)에만 있습니다.
+"미연결"은 한글 표기인데 참고문헌과 잇지 못한 것입니다. 미확인 수에는 넣지 않지만 숨기지 않습니다(`ref_check`의 `uncertain` 목록).
+35장의 `케인스(1930)`처럼 연도 a/b가 모호한 인용은 어느 쪽에도 잇지 않고 후보 둘을 함께 보입니다(`candidates`).
+확정하면 `magus alias keynes1930b "케인스(1930)"`로 넣습니다.
 
 도구가 불리지 않거나 오류가 나면 로그 끝부분을 보세요.
 
@@ -195,7 +198,8 @@ magus conversation fixtures/대화_전체_기록.md     # 대화 기록 → 영�
 magus cite-report --project-id book             # 책 전체 인용 집계(개발자용)
 magus author-report --project-id book --out docs/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + 같은 이름 docx)
 magus terms --project-id book --add 마닐라 "모스크바 회사"   # 인용으로 보지 않을 낱말(지명·사건). 인자 없으면 목록
-magus synth data/synthetic-fixtures             # 합성 원고·대화 기록 만들기(실파일이 없을 때)
+magus alias hayashi2016 "하야시(2016)"          # 저자가 확정한 본문 표기를 문헌에 잇는다(음역 추정·a/b 모호 확정)
+magus synth tests/fixtures/synthetic            # 합성 원고·대화 기록 다시 만들기(커밋돼 있음, 실데이터와 분리)
 magus seed-demo                                 # 데모 프로젝트와 책장 표본
 magus reindex                                   # 원본 파일로 인덱스를 다시 만듭니다(파일을 직접 고친 뒤)
 ```

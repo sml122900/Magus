@@ -126,3 +126,15 @@ def test_outline_header_counts_unique_docs_across_book(store: LocalStore):
     assert "미확인 문헌 3편" in header  # clack2012(세 장) · hu2023 · nobody2001. 장별 합이면 5
     report = build_cite_report(store, "alice", p.id)
     assert len(report.of("unverified", "unknown")) == 3
+
+
+def test_outline_shows_unlinked_hangul_names(store: LocalStore):
+    # 미연결(한글 표기인데 refs와 못 이음)은 미확인 수에서 빼지만 머리줄에 따로 보인다(사용자 결정 #29)
+    from magus.melchior.check import check_chapter
+
+    p = store.create_project("alice", "책", project_id="b")
+    store.write_chapter("alice", p.id, 1, "아무개(2001)와 누군가(2002), Clack(2012)", "x")
+    result = check_chapter(store, "alice", p.id, 1)
+    assert result.as_dict()["unique_uncertain"] == 2 and len(result.as_dict()["uncertain"]) == 2
+    header = build_outline(store, "alice", p.id).splitlines()[1]
+    assert "미확인 문헌 1편 · 미연결 2 · " in header

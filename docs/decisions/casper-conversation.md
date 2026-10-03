@@ -35,7 +35,7 @@
 
 ## Result
 
-- 합성 기록(`data/synthetic-fixtures/step5-conversation-report.md`)
+- 합성 기록(`tests/fixtures/synthetic/step5-conversation-report.md`)
   - (a) `대화_전체_기록.md`: **me 96건, ai 96건**. 모든 ai에 parent_id가 있고, 서문 1개는 분리 실패로 리포트됐다.
   - (b) 질문/답변: 10/10.
   - (c) 인용/요지: 8/8.

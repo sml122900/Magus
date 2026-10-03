@@ -43,7 +43,7 @@
 ## Result
 
 - 완료 기준을 테스트로 고정했다(`test_completion_criteria_ref_check_and_promotion`). 1장 ref_check에서 daeschler2006과 clack2012가 unverified로 잡히고, ref_add 뒤 다시 돌리면 daeschler2006이 verified로 옮겨 간다.
-- 합성 원고의 7개 장 전체 ref_check 결과(`data/synthetic-fixtures/step4-refcheck-report.md`)
+- 합성 원고의 7개 장 전체 ref_check 결과(`tests/fixtures/synthetic/step4-refcheck-report.md`)
   - 1장: 인용 8건이 모두 unverified다(갤러는(2022)·갤러(2022) → galor2022 ×2, 다중 인용의 clack2012 ×2, hu2023 ×2).
   - 4장: `다이아몬드(1997)`가 aliases를 통해 diamond1997로 해석됐다.
   - 3장: `[출처 필요]` 1건.

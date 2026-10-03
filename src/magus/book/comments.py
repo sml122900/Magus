@@ -2,9 +2,9 @@
 
 kind
 - citation: 출처 확인 코멘트이고 문헌이 지목된 것(코멘트 본문이나, 인용이 하나뿐인 앵커에서 저자·연도를 찾음)
-- fact: 출처 확인 코멘트지만 문헌이 지목되지 않은 것(사실·수치 확인 요청)
-- general: 그 외. 출처 확인 표현이 있어도, 인용처럼 보인 것이 모두 프로젝트의 비인용 용어(지명·사건)이면
-  general이다(사용자 결정: I46 "선하이정(1835)의 깊이" → general).
+- fact: 출처 확인 코멘트지만 문헌이 지목되지 않은 것(사실·수치 확인 요청). 인용처럼 보인 것이 모두 프로젝트의
+  비인용 용어(지명·사건)여도 fact다. "확인 필요"가 붙어 있으면 무엇이든 확인 요청이다(사용자 결정 #36: I46 → fact).
+- general: 확인 요청이 아닌 코멘트(작업 안내, 검토 메모 등).
 
 출처 확인 표현: "확인 필요", "인용 확인 필요", "서지", "원문 대조"와 그 실제 변형
 ("확인필요", "확인할 필요", "원문과 대조해", "원문으로 대조해" — 실원고 코멘트에서 확인).
@@ -49,6 +49,4 @@ def classify_comment(
         return "general", None
     if cite := comment_citation(text, anchor, exclude):
         return "citation", cite.key
-    if exclude and find_citations(text, bare=True):
-        return "general", None  # 인용처럼 보인 것이 모두 비인용 용어였다
     return "fact", None

@@ -62,3 +62,22 @@ def test_shelf_files_are_the_source(store: LocalStore, data_dir):
     assert store.list_refs("alice") == before
     assert store.resolve_ref("alice", "갤러2023").key == "galor2022"
     assert store.resolve_ref("bob", "갤러2023") is None
+
+
+def test_duplicate_entries_and_differences_are_reported(store: LocalStore):
+    # 같은 문헌이 목록에 두 번 → "중복 서지"(원고 오류일 수 있다). key는 여전히 -2로 받는다(사용자 결정 #5).
+    first = import_bibliography(
+        store, "alice",
+        "Clack, J. A. (2012). Gaining ground. Indiana University Press.\n"
+        "Clack, J. A. (2012). Gaining Ground. Indiana University Press.\n"
+        "Acemoglu, D., & Zilibotti, F. (2001). Productivity differences. QJE.\n"
+        "Acemoglu, D., Johnson, S., & Robinson, J. A. (2001). The colonial origins. AER.",
+    )
+    assert len(first.duplicates) == 1 and first.duplicates[0].startswith("clack2012 = Clack, J. A. (2012). Gaining Ground")
+    assert len(first.collisions) == 2  # clack2012-2(중복)와 acemoglu2001-2(다른 문헌) 모두 -2
+    assert "중복 서지 1건" in first.render()
+    # 다시 들여올 때 기존 key는 갱신하지 않고, 제목·연도가 다르면 차이를 리포트한다(사용자 결정 #6)
+    again = import_bibliography(store, "alice", "Clack, J. A. (2012). Gaining ground: The origin of tetrapods. IUP.")
+    assert again.existing == ["clack2012"] and again.created == []
+    assert again.differs == ["clack2012: 제목 'Gaining ground' → 새 목록 'Gaining ground: The origin of tetrapods'"]
+    assert store.get_ref("alice", "clack2012").bib["title"] == "Gaining ground"

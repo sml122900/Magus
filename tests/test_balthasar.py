@@ -90,3 +90,15 @@ async def test_all_instruction_rules_active(settings: Settings, store: LocalStor
 
     async with Client(build_server(settings, store)) as client:
         assert client.instructions == SPEC  # 도구가 모두 등록되면 6절 원문 그대로
+
+
+async def test_style_work_is_keyword_indexed_but_not_embedded(settings: Settings, store: LocalStore):
+    # "유홍준 그 문장"처럼 출전으로도 찾는다(사용자 결정 #24). 임베딩 대상(chunks.text)은 reason + tags 그대로다.
+    async with Client(build_server(settings, store)) as client:
+        await client.call_tool(
+            "style_add",
+            {"passage": "아는 만큼 보인다.", "reason": "짧은 단정이 글 전체를 연다", "tags": TAGS, "work": "유홍준, 나의 문화유산답사기"},
+        )
+        assert "아는 만큼 보인다" in _text(await client.call_tool("style_search", {"query": "유홍준"}))
+    [chunk_text] = [r[0] for r in store._db.execute("SELECT text FROM chunks WHERE lane = 'style'")]
+    assert "유홍준" not in chunk_text and "짧은 단정" in chunk_text

@@ -148,3 +148,22 @@ async def test_other_user_gets_empty_result(settings: Settings, store: LocalStor
         assert (await client.call_tool("book_read_chapter", {"number": 1, "project_id": "demo"})).is_error
         assert (await client.call_tool("book_write_chapter", {"number": 1, "content": "x", "note": "y", "project_id": "demo"})).is_error
         assert (await client.call_tool("book_issues", {"project_id": "demo"})).is_error
+
+
+async def test_ref_add_updates_outline_count_immediately(settings: Settings, store: LocalStore):
+    # 장별 미확인 key는 파생값 캐시다. ref_add로 문헌이 verified가 되면 곧바로 다시 계산돼야 한다(사용자 결정 #43).
+    from magus.melchior.bibliography import import_bibliography
+    from magus.melchior.check import refresh_cite_counts
+
+    p = store.create_project("alice", "책", project_id="b")
+    store.write_chapter("alice", p.id, 1, "Clack(2012)와 (Hu et al., 2023)", "x")
+    store.write_chapter("alice", p.id, 2, "Clack(2012) 다시.", "x")
+    import_bibliography(store, "alice", "Clack, J. A. (2012). Gaining ground. Press.\nHu, W. (2023). Bottleneck. Science.")
+    refresh_cite_counts(store, "alice")
+    async with Client(build_server(settings, store)) as client:
+        assert "미확인 문헌 2편" in _text(await client.call_tool("book_outline", {}))
+        await client.call_tool("ref_add", {"bib": {"key": "clack2012"}, "passages": [{"text": "네발동물", "reason": "1장"}]})
+        outline = _text(await client.call_tool("book_outline", {}))
+    assert "미확인 문헌 1편" in outline
+    toc = [line for line in outline.splitlines() if line.startswith("- 제")]
+    assert toc[0].endswith("미확인인용 1") and toc[1].endswith("미확인인용 0")  # hu2023만 남음 / 2장은 0

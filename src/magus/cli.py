@@ -34,6 +34,9 @@ def main(argv: list[str] | None = None) -> None:
     author.add_argument("--project-id", required=True)
     author.add_argument("--out", type=Path, required=True, help="md 경로. 같은 이름의 .docx도 만든다")
     author.add_argument("--date", default=None)
+    alias = sub.add_parser("alias", help="사용자가 확정한 본문 표기를 문헌에 잇는다. 예: magus alias keynes1930b 케인스(1930)")
+    alias.add_argument("key", help="참고문헌의 key(예: hayashi2016)")
+    alias.add_argument("surface", help="본문 표기(예: 하야시(2016), 하야시)")
     terms = sub.add_parser("terms", help="프로젝트의 비인용 용어(지명·사건 등) 보기·추가·빼기")
     terms.add_argument("--project-id", required=True)
     terms.add_argument("--add", nargs="*", default=[])
@@ -100,6 +103,16 @@ def main(argv: list[str] | None = None) -> None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(text, encoding="utf-8", newline="\n")
         print(f"{args.out}\n{write_docx(text, args.out.with_suffix('.docx'))}")
+    elif args.cmd == "alias":
+        from magus.melchior.check import after_refs_changed
+        from magus.melchior.refs import add_alias
+
+        try:
+            ref, added = add_alias(store, settings.user_id, args.key, args.surface)
+        except ValueError as e:
+            parser.exit(2, f"{e}\n")
+        linked = after_refs_changed(store, settings.user_id)  # 장별 집계와 이슈 연결을 새 alias로 다시 계산
+        print(f"{ref.key} ← {added} · aliases: {', '.join(ref.aliases)} · citation 이슈 연결 변경 {linked}건")
     elif args.cmd == "terms":
         from magus.melchior.check import after_refs_changed
 

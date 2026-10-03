@@ -11,5 +11,5 @@ wheels/
 
 # Magus: 원본 데이터와 실제 원고는 리포에 넣지 않는다
 data/
-fixtures/
+/fixtures/
 .pytest_cache/

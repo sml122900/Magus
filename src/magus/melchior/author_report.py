@@ -139,6 +139,7 @@ def build_author_report(store: Store, user_id: str, project_id: str, date: str) 
     resolver, terms = Resolver(store, user_id), terms_of(store, user_id, project_id)
     inferred: dict[tuple[str, str], list[str]] = defaultdict(list)  # (표기, ref key) → 장
     same_author: dict[str, list[str]] = defaultdict(list)  # ref key → 장
+    ambiguous: dict[str, list[str]] = {}  # 연도 a/b 모호로 잇지 않은 것 → 후보 key
     texts: list[tuple[str, str]] = []
     for meta in store.list_chapters(user_id, project_id):
         chapter = store.read_chapter(user_id, project_id, meta.number)
@@ -149,6 +150,8 @@ def build_author_report(store: Store, user_id: str, project_id: str, date: str) 
             for _, surface in g.occurrences:
                 if g.matched_by not in ("", "alias"):
                     inferred[(surface, g.key)].append(meta.display)
+            if g.candidates:
+                ambiguous[g.key] = [k for k, _ in g.candidates]
             if re.search(r"-\d+$", g.key) or any(k.startswith(g.key + "-") for k in refs):
                 same_author[g.key].append(meta.display)
 
@@ -182,8 +185,9 @@ def build_author_report(store: Store, user_id: str, project_id: str, date: str) 
     lines += ["", "## 3. 답해 주실 질문", "본문의 한글 표기를 참고문헌의 영문 문헌으로 추정해 이었습니다. 맞는지 알려 주세요."]
     for (surface, key), chapters in sorted(inferred.items(), key=lambda kv: kv[0][1]):
         ref = refs.get(key)
-        if ref and re.search(r"\d{4}a$", key) and (sibling := refs.get(key[:-1] + "b")):
-            lines.append(f"- {chapters_text(chapters)} {surface}: {cite_label(ref)}, {cite_label(sibling)} 중 어느 것인가요?")
+        if key in ambiguous:
+            options = ", ".join(cite_label(refs.get(k), k) for k in ambiguous[key])
+            lines.append(f"- {chapters_text(chapters)} {surface}: {options} 중 어느 것인가요?")
         else:
             lines.append(f"- {chapters_text(chapters)} {surface} → {cite_label(ref, key)} 맞나요?")
     for base in sorted({re.sub(r"-\d+$", "", k) for k in same_author}):

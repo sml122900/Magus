@@ -199,7 +199,10 @@ class ShelfMixin:
              entry.created_at),
         )
         # 문체 검색의 대상은 reason + tags다. passage를 색인하면 문체가 아니라 주제가 검색된다.
-        self._replace_chunks(user_id, "style", entry.id, "style", [style_search_text(entry.reason, entry.tags)])
+        # work(출전)는 키워드 색인에만 더한다: "유홍준 그 문장"처럼 출전으로 찾는 경우가 있다(사용자 결정 #24).
+        self._replace_chunks(
+            user_id, "style", entry.id, "style", [style_search_text(entry.reason, entry.tags)], fts_extra=entry.work or ""
+        )
 
     @locked
     def get_styles(self, user_id: str, ids: list[str]) -> dict[str, StyleEntry]:
@@ -223,7 +226,10 @@ class ShelfMixin:
 
     # ---- 검색 청크 -------------------------------------------------------------------
 
-    def _replace_chunks(self, user_id: str, owner_type: str, owner_id: str, lane: Lane, texts: list[str]) -> None:
+    def _replace_chunks(
+        self, user_id: str, owner_type: str, owner_id: str, lane: Lane, texts: list[str], fts_extra: str = ""
+    ) -> None:
+        """fts_extra: 키워드 색인에만 더하는 글(임베딩 대상인 chunks.text에는 넣지 않는다). 문체 표본의 work(출전)."""
         old = [
             r[0]
             for r in self._db.execute(
@@ -240,7 +246,8 @@ class ShelfMixin:
                 "INSERT INTO chunks (user_id, owner_type, owner_id, lane, text) VALUES (?, ?, ?, ?, ?) RETURNING id",
                 (user_id, owner_type, owner_id, lane, text),
             ).fetchone()[0]
-            self._db.execute("INSERT INTO chunks_fts (rowid, tokens) VALUES (?, ?)", (chunk_id, index_text(text)))
+            tokens = index_text(f"{text}\n{fts_extra}" if fts_extra else text)
+            self._db.execute("INSERT INTO chunks_fts (rowid, tokens) VALUES (?, ?)", (chunk_id, tokens))
 
     @locked
     def search_fts(self, user_id: str, lanes: list[Lane], match: str, limit: int) -> list[Chunk]:

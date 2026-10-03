@@ -32,6 +32,7 @@ from magus.store.base import (
     Chapter,
     ChapterMeta,
     ChapterStatus,
+    CiteKeys,
     Decision,
     Issue,
     IssueKind,
@@ -340,12 +341,16 @@ class LocalStore(ShelfMixin):
             self._index_issues(user_id, project_id, [i for i in issues if i.id in ref_ids])
 
     @_locked
-    def set_unverified_cites(self, user_id: str, project_id: str, cites: dict[int, list[str]]) -> None:
+    def set_cite_keys(self, user_id: str, project_id: str, cites: dict[int, CiteKeys]) -> None:
         with self._db:
             self._db.executemany(
-                "UPDATE chapters SET unverified_cite_count = ?, unverified_cite_keys = ?"
+                "UPDATE chapters SET unverified_cite_count = ?, unverified_cite_keys = ?, uncertain_cite_keys = ?"
                 " WHERE user_id = ? AND project_id = ? AND number = ?",
-                [(len(keys), json.dumps(sorted(keys)), user_id, project_id, number) for number, keys in cites.items()],
+                [
+                    (len(k.unverified), json.dumps(sorted(k.unverified)), json.dumps(sorted(k.uncertain)),
+                     user_id, project_id, number)
+                    for number, k in cites.items()
+                ],
             )
 
     @_locked
@@ -533,4 +538,5 @@ def _chapter_meta(r: sqlite3.Row) -> ChapterMeta:
         updated_at=r["updated_at"],
         label=r["label"],
         unverified_cite_keys=tuple(json.loads(r["unverified_cite_keys"])),
+        uncertain_cite_keys=tuple(json.loads(r["uncertain_cite_keys"])),
     )
