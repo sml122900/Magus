@@ -14,6 +14,7 @@ import sqlite3
 import threading
 from collections.abc import Iterable
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 from magus.ids import safe_id, utcnow
@@ -34,6 +35,7 @@ from magus.store.base import (
     ChapterStatus,
     CiteKeys,
     Decision,
+    InboxFile,
     Issue,
     IssueKind,
     IssueOrigin,
@@ -353,6 +355,44 @@ class LocalStore(ShelfMixin):
                 ],
             )
 
+    def _inbox_dir(self, user_id: str) -> Path:
+        return self._user_dir(user_id) / "inbox"
+
+    def _inbox_file(self, user_id: str, name: str) -> Path:
+        path = self._inbox_dir(user_id) / name
+        if path.parent != self._inbox_dir(user_id) or name in ("", ".", ".."):
+            raise ValueError(f"받은함 파일 이름이 아니다: {name!r}")
+        return path
+
+    def list_inbox(self, user_id: str) -> list[InboxFile]:
+        folder = self._inbox_dir(user_id)
+        if not folder.is_dir():
+            return []
+        return [_inbox_entry(p) for p in sorted(folder.iterdir(), key=lambda p: p.name) if p.is_file()]
+
+    def put_inbox(self, user_id: str, name: str, data: bytes) -> InboxFile:
+        path = self._inbox_file(user_id, name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.part")
+        tmp.write_bytes(data)
+        tmp.replace(path)  # 받는 도중에 끊겨도 반쪽 파일이 받은함에 보이지 않는다
+        return _inbox_entry(path)
+
+    def delete_inbox(self, user_id: str, name: str) -> bool:
+        path = self._inbox_file(user_id, name)
+        if not path.is_file():
+            return False
+        path.unlink()
+        return True
+
+    def inbox_path(self, user_id: str, name: str) -> Path | None:
+        path = self._inbox_file(user_id, name)
+        return path if path.is_file() else None
+
+    def usage_bytes(self, user_id: str) -> int:
+        folder = self._user_dir(user_id)
+        return sum(p.stat().st_size for p in folder.rglob("*") if p.is_file()) if folder.is_dir() else 0
+
     @_locked
     def save_export(self, user_id: str, project_id: str, filename: str, data: bytes) -> str:
         path = self._require_project(user_id, project_id) / "exports" / Path(filename).name
@@ -519,6 +559,12 @@ class LocalStore(ShelfMixin):
                 for i in issues
             ],
         )
+
+
+def _inbox_entry(path: Path) -> InboxFile:
+    stat = path.stat()
+    modified = datetime.fromtimestamp(stat.st_mtime, tz=UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return InboxFile(path.name, stat.st_size, modified)
 
 
 def _project(r: sqlite3.Row) -> Project:

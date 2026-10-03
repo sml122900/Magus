@@ -129,7 +129,8 @@ async def test_every_tool_is_user_scoped(settings: Settings, store: LocalStore, 
         await client.call_tool("style_add", {"passage": "짧다.", "reason": "짧은 호흡", "tags": {"호흡": "짧음", "시점": "1인칭", "열기": "장면", "장치": [], "어미": "-다", "톤": "건조"}})
         await client.call_tool("ref_add", {"bib": {"authors": "Clack, J.", "year": "2012", "title": "Gaining ground"}, "passages": [{"text": "네발동물", "reason": "근거"}]})
     bob = dataclasses.replace(settings, user_id="bob")
-    empty_markers = ("없습니다", "결과 없음", "0건")
+    empty_markers = ("없습니다", "결과 없음", "0건", "비어 있다")
+    store.put_inbox(settings.user_id, "앨리스원고.docx", b"x")  # 받은함도 사용자별이다
     calls = {
         "book_outline": {},
         "book_read_chapter": {"number": 1, "project_id": "demo"},
@@ -139,7 +140,8 @@ async def test_every_tool_is_user_scoped(settings: Settings, store: LocalStore, 
         "book_issue_add": {"text": "x", "project_id": "demo"},
         "book_issue_close": {"id": "I1", "project_id": "demo"},
         "book_export": {"project_id": "demo"},
-        "book_import": {"path": str(tmp_path / "없는파일.docx")},
+        "book_import": {"path": "없는파일.docx"},
+        "files_list": {},
         "ref_check": {"chapter_number": 1, "project_id": "demo"},
         "ref_search": {"query": "네발동물"},
         "idea_search": {"query": "바다", "author": "all"},
@@ -147,11 +149,11 @@ async def test_every_tool_is_user_scoped(settings: Settings, store: LocalStore, 
     }
     async with Client(build_server(bob, store)) as client:
         names = {t.name for t in (await client.list_tools()).tools}
-        assert len(names) == 18
+        assert len(names) == 19
         for name, args in calls.items():
             result = await client.call_tool(name, args)
             text = result.content[0].text
             assert result.is_error or any(m in text for m in empty_markers), (name, text)
-            assert "앨리스" not in text and "네발동물”" not in text
+            assert "앨리스" not in text and "네발동물”" not in text, (name, text)
     # 쓰기 도구(ref_import_bibliography, ref_add, idea_*, style_add)는 bob 자신의 책장에만 쓴다
     assert store.list_refs("bob") == [] and store.list_ideas("bob") == [] and store.list_styles("bob") == []

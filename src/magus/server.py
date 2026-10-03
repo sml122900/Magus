@@ -12,6 +12,8 @@ from magus.balthasar.tools import build_tools as balthasar_tools
 from magus.book.tools import build_tools as book_tools
 from magus.casper.tools import build_tools as casper_tools
 from magus.config import Settings
+from magus.inbox import FileResolver
+from magus.inbox import build_tools as inbox_tools
 from magus.instructions import build_instructions
 from magus.melchior.check import refresh_cite_counts
 from magus.melchior.tools import build_tools as melchior_tools
@@ -22,9 +24,14 @@ SERVER_NAME = "Magus"
 
 
 def build_server(
-    settings: Settings, store: Store, embedder: Embedder | None = None, verifier: JwtVerifier | None = None
+    settings: Settings,
+    store: Store,
+    embedder: Embedder | None = None,
+    verifier: JwtVerifier | None = None,
+    local_files: bool = False,
 ) -> MCPServer:
-    """settings.auth가 있으면 원격(HTTP) 모드: 리소스 서버로서 토큰을 검증하고 sub로 user_id를 정한다."""
+    """settings.auth가 있으면 원격(HTTP) 모드: 리소스 서버로서 토큰을 검증하고 sub로 user_id를 정한다.
+    local_files: 파일 인자로 로컬 경로도 받는다(stdio 개발용만). 기본은 받은함 이름만."""
     auth = settings.auth
     if auth is not None and verifier is None:
         verifier = JwtVerifier(auth)
@@ -42,11 +49,13 @@ def build_server(
     # 장별 미확인 인용 수는 파생값이라 인덱스를 다시 만든 뒤에는 0이다. 시작할 때 한 번 맞춘다.
     for user_id in sorted(set(auth.allowed.values())) if auth else [settings.user_id]:
         refresh_cite_counts(store, user_id)
+    files = FileResolver(store, settings.files_root, local_paths=local_files)
     tools = [
-        *book_tools(store, current_user, settings.files_root),
-        *melchior_tools(store, current_user, embedder, settings.files_root),
-        *casper_tools(store, current_user, embedder, settings.files_root),
+        *book_tools(store, current_user, files),
+        *melchior_tools(store, current_user, embedder, files),
+        *casper_tools(store, current_user, embedder, files),
         *balthasar_tools(store, current_user, embedder),
+        *inbox_tools(store, current_user, settings.max_user_bytes),
     ]
     # instructions는 실제로 등록된 도구만 언급하도록 도구 목록에서 조립한다.
     return MCPServer(

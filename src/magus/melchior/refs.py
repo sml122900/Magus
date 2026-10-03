@@ -95,6 +95,7 @@ def add_ref(
     file_path: str | None = None,
     full_text: str | None = None,
     aliases: list[str] | None = None,
+    file_label: str | None = None,
 ) -> tuple[Ref, str | None, int]:
     """(저장된 ref, 이전 상태 또는 None, 새로 추가된 발췌 수)."""
     passages = [p for p in passages if p.text.strip()]
@@ -122,10 +123,10 @@ def add_ref(
             status="verified",
             bib={**existing.bib, **clean_bib},
             aliases=tuple(dict.fromkeys([*existing.aliases, *(aliases or [])])),
-            file_path=file_path or existing.file_path,
+            file_path=file_label or file_path or existing.file_path,
             created_at=existing.created_at,
         )
         stored = store.put_ref(user_id, ref, passages=[*old, *new], full_text=full_text)
         return stored, existing.status, len(new)
-    ref = Ref(key=key, status="verified", bib=clean_bib, aliases=tuple(aliases or ()), file_path=file_path)
+    ref = Ref(key=key, status="verified", bib=clean_bib, aliases=tuple(aliases or ()), file_path=file_label or file_path)
     return store.put_ref(user_id, ref, passages=passages, full_text=full_text), None, len(passages)

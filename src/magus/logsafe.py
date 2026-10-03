@@ -69,13 +69,29 @@ class RedactingFilter(logging.Filter):
             pass
 
 
+class _StderrHandler(logging.StreamHandler):
+    """쓸 때마다 지금의 sys.stderr에 쓴다(테스트처럼 stderr가 바뀌고 닫혀도 깨지지 않는다)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    @property  # type: ignore[override]
+    def stream(self):  # noqa: D401
+        return sys.stderr
+
+    @stream.setter
+    def stream(self, _value) -> None:
+        pass
+
+
 def setup_logging(alert: Callable[[str], None] | None = None, level: int = logging.INFO) -> logging.Handler:
-    """stderr 하나로 모은다(stdio 전송에서 stdout은 MCP 프로토콜 전용이다). uvicorn도 log_config=None으로 여기에 합친다."""
-    handler = logging.StreamHandler(sys.stderr)
+    """stderr 하나로 모은다(stdio 전송에서 stdout은 MCP 프로토콜 전용이다). uvicorn도 log_config=None으로 여기에 합친다.
+    여러 번 불러도 우리 핸들러는 하나만 둔다. 다른 핸들러(pytest 등)는 건드리지 않는다."""
+    handler = _StderrHandler()
     handler.setFormatter(logging.Formatter(FORMAT))
     handler.addFilter(RedactingFilter(alert))
     root = logging.getLogger()
-    for old in list(root.handlers):
+    for old in [h for h in root.handlers if isinstance(h, _StderrHandler)]:
         root.removeHandler(old)
     root.addHandler(handler)
     root.setLevel(level)

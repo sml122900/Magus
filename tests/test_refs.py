@@ -96,11 +96,11 @@ async def test_citation_issues_link_to_refs(settings: Settings, imported: LocalS
 
 
 async def test_ref_add_new_with_fulltext_and_search(settings: Settings, imported: LocalStore, tmp_path: Path):
-    full = tmp_path / "zimmer.txt"
-    full.write_text(
+    # 전문 파일은 받은함 이름으로 가리킨다(원격 모드와 같다)
+    imported.put_inbox(
+        settings.user_id, "zimmer.txt",
         "고래의 조상은 뭍에서 다시 물로 돌아갔다.\n\n파키케투스는 귀뼈의 모양으로 고래 계통임을 드러낸다.\n\n"
-        "물가의 포유류는 수백만 년에 걸쳐 다리를 잃었다.",
-        encoding="utf-8",
+        "물가의 포유류는 수백만 년에 걸쳐 다리를 잃었다.".encode(),
     )
     async with Client(build_server(settings, imported)) as client:
         added = _text(
@@ -109,12 +109,13 @@ async def test_ref_add_new_with_fulltext_and_search(settings: Settings, imported
                 {
                     "bib": {"authors": "Zimmer, C.", "year": "1998", "title": "At the water's edge"},
                     "passages": [{"text": "고래의 조상은 뭍에서 다시 물로 돌아갔다.", "reason": "6장 도입"}],
-                    "file_path": str(full),
+                    "file_path": "zimmer.txt",
                     "aliases": ["짐머1998"],
                 },
             )
         )
         assert added.startswith("zimmer1998: unverified → verified") and "전문 있음" in added
+        assert imported.get_ref(settings.user_id, "zimmer1998").file_path == "inbox/zimmer.txt"
         found = _text(await client.call_tool("ref_search", {"query": "고래 조상 물로", "scope": "both"}))
         lines = found.splitlines()
         assert lines[1].startswith("1. zimmer1998 (verified)") and lines[1].endswith("[발췌]")

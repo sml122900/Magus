@@ -50,10 +50,9 @@ def test_failures_are_reported():
 
 
 async def test_completion_criterion_and_search(settings: Settings, store: LocalStore, tmp_path: Path):
-    record = tmp_path / "대화_전체_기록.md"
-    record.write_text(conversation_full_record(), encoding="utf-8")
+    store.put_inbox(settings.user_id, "대화_전체_기록.md", conversation_full_record().encode())  # 받은함 이름으로
     async with Client(build_server(settings, store)) as client:
-        report = _text(await client.call_tool("idea_add_conversation", {"path": str(record)}))
+        report = _text(await client.call_tool("idea_add_conversation", {"path": "대화_전체_기록.md"}))
         assert report.startswith("me 96건, ai 96건, 분리 실패 구간 1개")
         ideas = store.list_ideas(settings.user_id)
         me = {i.id for i in ideas if i.author == "me"}

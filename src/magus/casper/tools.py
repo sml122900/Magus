@@ -7,7 +7,6 @@ ai에 parent_id(응답한 사용자 발화)를 단다. 검색은 기본 me만, a
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 from typing import Literal
 
 from mcp.server.mcpserver.exceptions import ToolError
@@ -15,7 +14,7 @@ from mcp.server.mcpserver.tools import Tool
 
 from magus.casper.conversation import split_conversation
 from magus.ids import local_time, new_id
-from magus.paths import resolve_input
+from magus.inbox import FileResolver, ResolveFile
 from magus.search import Embedder, hybrid_search
 from magus.store import Idea, Store
 from magus.store.base import IdeaKind, Lane
@@ -46,8 +45,10 @@ def search_ideas(
 
 
 def build_tools(
-    store: Store, current_user: Callable[[], str], embedder: Embedder | None = None, files_root: Path | None = None
+    store: Store, current_user: Callable[[], str], embedder: Embedder | None = None, files: ResolveFile | None = None
 ) -> list[Tool]:
+    resolve_file = files or FileResolver(store)
+
     def idea_add(
         text: str,
         kind: Literal["thought", "ai", "article", "conversation", "tv", "other"],
@@ -64,8 +65,8 @@ def build_tools(
             raise ToolError("markdown(대화 기록 본문)과 path(로컬 .md 파일) 중 하나만 준다")
         if path:
             try:
-                file = resolve_input(path, files_root)
-            except FileNotFoundError as e:
+                file = resolve_file(current_user(), path)[0]
+            except (FileNotFoundError, ValueError) as e:
                 raise ToolError(str(e)) from e
             markdown, origin = file.read_text(encoding="utf-8"), origin or file.stem
         report, ideas = add_conversation(store, current_user(), markdown or "", origin)
@@ -103,7 +104,7 @@ def build_tools(
             idea_add_conversation,
             name="idea_add_conversation",
             description=(
-                "대화 기록 markdown을 발화 단위로 나눠 저장한다. markdown 본문 또는 로컬 .md 파일 path 중 하나를 준다. "
+                "대화 기록 markdown을 발화 단위로 나눠 저장한다. markdown 본문 또는 받은함의 .md 파일 이름(path, files_list로 확인) 중 하나를 준다. "
                 "마커: **사용자:**/**Claude:**, 질문:/답변:, '> 인용' 뒤의 **Claude 요지**. "
                 "사용자 발화 → author=me, 바로 뒤 AI 발화 → author=ai(parent_id=그 사용자 발화). "
                 "리포트: me N건, ai N건, 분리 실패 구간."

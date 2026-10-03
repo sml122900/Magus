@@ -41,6 +41,9 @@ def main(argv: list[str] | None = None) -> None:
     alias = sub.add_parser("alias", help="사용자가 확정한 본문 표기를 문헌에 잇는다. 예: magus alias keynes1930b 케인스(1930)")
     alias.add_argument("key", help="참고문헌의 key(예: hayashi2016)")
     alias.add_argument("surface", help="본문 표기(예: 하야시(2016), 하야시)")
+    inbox = sub.add_parser("inbox", help="받은함 보기·넣기·지우기(로컬 개발용. 원격에서는 웹 업로드)")
+    inbox.add_argument("--add", nargs="*", type=Path, default=[])
+    inbox.add_argument("--remove", nargs="*", default=[])
     terms = sub.add_parser("terms", help="프로젝트의 비인용 용어(지명·사건 등) 보기·추가·빼기")
     terms.add_argument("--project-id", required=True)
     terms.add_argument("--add", nargs="*", default=[])
@@ -84,13 +87,13 @@ def main(argv: list[str] | None = None) -> None:
             # 인증 없는 HTTP를 바깥에 열지 않는다. 원격 공개는 인증(AUTH_ISSUER 등)이 켜졌을 때만.
             parser.exit(2, f"인증 없이 {args.host}에 열 수 없습니다. 루프백(127.0.0.1)으로 실행하거나 AUTH_ISSUER를 설정하세요.\n")
         verifier = JwtVerifier(settings.auth) if settings.auth else None
-        server = build_server(settings, store, get_embedder(settings), verifier)
+        server = build_server(settings, store, get_embedder(settings), verifier, local_files=args.transport == "stdio")
         if args.transport == "stdio":
             transports.run_stdio(server)
         else:
             mode = f"인증: {settings.auth.issuer}, 허용 {len(settings.auth.allowed)}명" if settings.auth else "인증 없음 — 로컬 전용"
             log.info("streamable-http: http://%s:%d%s (stateless, %s)", args.host, args.port, transports.MCP_PATH, mode)
-            transports.run_http(server, args.host, args.port, verifier)
+            transports.run_http(server, args.host, args.port, verifier, settings.max_request_bytes)
     elif args.cmd == "import":
         from magus.book.importer import import_manuscript
 
@@ -117,6 +120,18 @@ def main(argv: list[str] | None = None) -> None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(text, encoding="utf-8", newline="\n")
         print(f"{args.out}\n{write_docx(text, args.out.with_suffix('.docx'))}")
+    elif args.cmd == "inbox":
+        from magus.inbox import describe, save_upload
+
+        try:
+            for path in args.add:
+                save_upload(store, settings.user_id, path.name, path.read_bytes(), settings.max_upload_bytes, settings.max_user_bytes)
+            for name in args.remove:
+                if not store.delete_inbox(settings.user_id, name):
+                    print(f"없음: {name}")
+        except (ValueError, OSError) as e:
+            parser.exit(2, f"{e}\n")
+        print(describe(store.list_inbox(settings.user_id), store.usage_bytes(settings.user_id), settings.max_user_bytes))
     elif args.cmd == "alias":
         from magus.melchior.check import after_refs_changed
         from magus.melchior.refs import add_alias

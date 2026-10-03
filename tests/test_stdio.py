@@ -22,10 +22,11 @@ def _text(result) -> str:
 
 
 async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
+    manuscript = build_manuscript_docx(tmp_path / "닿으려는_종_합성.docx")
     store = LocalStore(data_dir)
     seed_demo(store, "alice")
+    store.put_inbox("alice", manuscript.name, manuscript.read_bytes())  # 원고는 받은함 이름으로 가리킨다
     store.close()
-    manuscript = build_manuscript_docx(tmp_path / "닿으려는_종_합성.docx")
     params = StdioServerParameters(
         command=sys.executable,
         args=["-m", "magus", "serve"],
@@ -38,7 +39,7 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
         assert "물가의 망설임" in outline
 
         # 2단계
-        imported = _text(await client.call_tool("book_import", {"path": str(manuscript), "project_id": "synth"}))
+        imported = _text(await client.call_tool("book_import", {"path": manuscript.name, "project_id": "synth"}))
         assert "장 7개(" in imported and "· 부 3개" in imported and "| ch-04.md | 제4장 | 닿으려는 손 | 2 |" in imported
         bib = _text(await client.call_tool("ref_import_bibliography", {"text": "Zimmer, C. (1998). At the water's edge. Free Press."}))
         assert "이미 있음 1건" in bib
@@ -79,7 +80,8 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
 
 
 async def test_relative_file_path_from_other_cwd(data_dir: Path, tmp_path: Path):
-    """Desktop은 서버를 어느 작업 폴더에서 띄울지 정하지 않는다. 상대 경로는 DATA_DIR의 부모(프로젝트 폴더) 기준이어야 한다.
+    """로컬(stdio) 개발용 대체 경로: 받은함에 없으면 로컬 경로도 받는다. 원격(HTTP)에서는 받지 않는다(test_http, test_inbox).
+    Desktop은 서버를 어느 작업 폴더에서 띄울지 정하지 않는다. 상대 경로는 DATA_DIR의 부모(프로젝트 폴더) 기준이어야 한다.
     README '첫 실행 확인'의 시연: "fixtures/papers/<파일>.pdf를 문헌으로 등록해 줘. 쓸 부분은 ~, 이유는 ~"."""
     import pymupdf
 

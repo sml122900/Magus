@@ -11,6 +11,7 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -147,7 +148,7 @@ def _text(result) -> str:
     return "".join(block.text for block in result.content)
 
 
-async def test_remote_auth_rejects_and_isolates_users(keys, auth_server):
+async def test_remote_auth_rejects_and_isolates_users(keys, auth_server, data_dir: Path):
     good, evil, _ = keys
     base, log_path = auth_server
     mcp_url, aud = f"{base}/mcp", f"{base}/mcp"
@@ -165,12 +166,18 @@ async def test_remote_auth_rejects_and_isolates_users(keys, auth_server):
     assert status == 403 and "허용 목록" in json.loads(body)["error_description"]
 
     alice, bob = _token(good, aud=aud), _token(good, aud=aud, sub="sub-bob")
+    inbox = data_dir / "users" / "alice" / "inbox"
+    inbox.mkdir(parents=True)
+    shutil.copy(FIXTURES / "닿으려는_종_합성.docx", inbox / "원고.docx")
     async with _client(mcp_url, alice) as c:
-        _text(await c.call_tool("book_import", {"path": str(FIXTURES / "닿으려는_종_합성.docx"), "project_id": "synth"}))
+        assert "원고.docx" in _text(await c.call_tool("files_list", {}))
+        _text(await c.call_tool("book_import", {"path": "원고.docx", "project_id": "synth"}))
         assert _text(await c.call_tool("book_outline", {})).startswith("프로젝트: 닿으려는 종 (합성) (synth)")
         _text(await c.call_tool("idea_add", {"text": "앨리스의 생각", "kind": "thought"}))
     async with _client(mcp_url, bob) as c:  # 다른 계정: 앨리스의 원고·생각이 보이지 않는다
         assert _text(await c.call_tool("book_outline", {})).startswith("프로젝트가 없습니다")
+        assert "받은함이 비어 있다" in _text(await c.call_tool("files_list", {}))  # 받은함도 사용자별
+        assert (await c.call_tool("book_import", {"path": "원고.docx", "project_id": "x"})).is_error
         assert _text(await c.call_tool("idea_search", {"query": "앨리스의 생각"})).endswith("결과 없음")
         assert (await c.call_tool("book_read_chapter", {"number": 1, "project_id": "synth"})).is_error
 

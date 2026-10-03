@@ -4,8 +4,8 @@
 
 ## 진행상황
 
-- 현재 단계: **P1(원격 MCP 서비스) 진행 중.** 1단계 HTTP 전송(`p1-step1`), 2단계 인증(`p1-step2`, WorkOS AuthKit 선택, 실제 연결은 사용자 계정 대기) 완료.
-- 다음 할 일: 3단계(받은함 + files_list + 경로 인자 전환).
+- 현재 단계: **P1(원격 MCP 서비스) 진행 중.** 1단계 HTTP 전송(`p1-step1`), 2단계 인증(`p1-step2`, WorkOS AuthKit, 실제 연결은 사용자 계정 대기), 3단계 받은함(`p1-step3`) 완료.
+- 다음 할 일: 4단계(웹 페이지 4개: 로그인, 받은함, 원고, 인용 체크리스트).
 - 대기 사항: 계정·도메인·키처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), P0 Desktop 테스트 결과, 보고서 답변. 상세는 status.md에만 적는다.
 
 ## 개요
@@ -93,6 +93,9 @@
 | `AUTH_AUDIENCE` | `PUBLIC_URL/mcp` | 받아들일 토큰 aud(쉼표로 여럿) |
 | `ALLOWED_USERS` | — | `sub=user_id` 쉼표 목록. 여기 없는 sub는 403. 공개 가입은 없다 |
 | `PORT` | 8000 | `magus serve --transport http`의 기본 포트 |
+| `MAX_UPLOAD_MB` | 50 | 받은함 업로드 한 개 한도 |
+| `MAX_USER_MB` | 1000 | 사용자별 저장 용량(사용자 폴더 전체) |
+| `MAX_REQUEST_MB` | 2 | MCP 요청 본문 한도(넘으면 413) |
 | `VOYAGE_API_KEY` / `OPENAI_API_KEY` | — | 해당 제공자를 쓸 때만 |
 | `EMBEDDINGS_MODEL` | 제공자 기본값 | 임베딩 모델 이름 |
 
@@ -137,6 +140,7 @@ data/users/<user_id>/projects/<project_id>/{decisions.md, issues.md, versions/}
 data/users/<user_id>/projects/<project_id>/original/{원고 사본, unsplit.md, import-report.md}
 data/users/<user_id>/projects/<project_id>/exports/*.docx       # book_export
 data/users/<user_id>/trash/<project_id>-<시각>/                   # book_import replace=True로 밀려난 프로젝트
+data/users/<user_id>/inbox/                                       # 받은함(업로드한 원고·논문·대화 기록). 도구는 파일 이름으로 가리킨다
 data/index.sqlite
 ```
 
@@ -169,6 +173,17 @@ data/index.sqlite
 - 장 파일을 사람이 직접 고쳤다면 `magus reindex`로 인덱스를 갱신한다.
 
 ## MCP 도구 (이름 고정)
+
+### 받은함 (`magus/inbox.py`) — P1
+- `files_list()` → 받은함 목록(이름·크기·올린 시각·쓰임)과 사용량/한도. *(P1에서 추가된 도구, 모두 19개)*
+- 파일 인자(book_import의 path, ref_add의 file_path, idea_add_conversation의 path)는 **받은함 파일 이름**을 받는다.
+  - 원격(HTTP)에서는 이름만 받는다. 경로를 주면 "받은함에 없다" 오류다(서버 파일을 읽지 못하게).
+  - 로컬(stdio) 개발용으로는 받은함에 없으면 로컬 경로(절대 또는 FILES_DIR 기준)도 받는다.
+  - 이 차이는 `FileResolver` 한 곳에만 있다(`build_server(local_files=)`, CLI가 stdio일 때만 True).
+- 파일 이름: 폴더 구분자·`..`·숨김·제어 문자·예약 이름을 거부하고, 200바이트 이하. 형식은 .docx .pdf .md .txt만 받는다.
+- 업로드(`save_upload`)는 한도를 지킨다: 한 개 `MAX_UPLOAD_MB`, 사용자 폴더 전체 `MAX_USER_MB`. 넘으면 무엇이 얼마인지 밝힌 오류를 낸다.
+- ref_add가 받은함 파일을 쓰면 refs의 file_path에는 `inbox/<이름>`을 남긴다.
+- 로컬 개발: `magus inbox [--add 파일…] [--remove 이름…]`. 원격에서는 웹 업로드(4단계)로만 들어온다.
 
 ### 책 (`magus/book/`)
 - `book_outline(project_id?)` → **3,000 토큰 이하**. 모든 원고 작업은 이 도구로 시작한다.
@@ -329,6 +344,7 @@ magus cite-report --project-id book       # 책 전체 인용 집계(확인 순�
 magus author-report --project-id book --out docs/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + docx)
 magus terms --project-id book [--add …] [--remove …]                         # 비인용 용어 보기·고치기
 magus alias <key> <표기>                                                      # 저자가 확정한 표기를 aliases에(예: keynes1930b "케인스(1930)")
+magus inbox [--add 파일…] [--remove 이름…]                                    # 받은함(로컬 개발용, 원격은 웹 업로드)
 .venv/Scripts/python -m ruff check --select F,B src tests                    # 린트(pyflakes·bugbear)
 ```
 

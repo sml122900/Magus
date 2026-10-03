@@ -7,6 +7,7 @@ P0 구현은 LocalStore(사람이 읽는 파일이 원본, SQLite는 인덱스)�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal, NamedTuple, Protocol
 
 IssueStatus = Literal["open", "closed"]
@@ -33,6 +34,15 @@ class Project:
 class Part:
     number: int
     title: str
+
+
+@dataclass(frozen=True)
+class InboxFile:
+    """받은함 파일. modified는 UTC ISO 8601."""
+
+    name: str
+    size: int
+    modified: str
 
 
 class CiteKeys(NamedTuple):
@@ -165,6 +175,21 @@ class Change:
 class Store(Protocol):
     def list_users(self) -> list[str]:
         """운영용(재생성 뒤 파생값 재계산). 도구에서는 쓰지 않는다."""
+        ...
+
+    # 받은함 — 사람 소유. 원격 모드에서 파일은 업로드로만 들어오고, 도구는 이름으로 가리킨다.
+    def list_inbox(self, user_id: str) -> list[InboxFile]:
+        """이름순."""
+        ...
+    def put_inbox(self, user_id: str, name: str, data: bytes) -> InboxFile:
+        """같은 이름이면 덮어쓴다. name은 magus.inbox.safe_filename을 거친 것이어야 한다."""
+        ...
+    def delete_inbox(self, user_id: str, name: str) -> bool: ...
+    def inbox_path(self, user_id: str, name: str) -> Path | None:
+        """읽기용 로컬 경로(P1: 디스크 파일 그대로, P2: 객체 스토리지에서 받은 임시 파일). 없으면 None."""
+        ...
+    def usage_bytes(self, user_id: str) -> int:
+        """사용자 폴더 전체(원고·책장·받은함·휴지통) 크기. 저장 용량 한도에 쓴다."""
         ...
 
     # 프로젝트

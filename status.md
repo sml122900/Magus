@@ -1,30 +1,29 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-03 17:40 KST — P1 2단계(인증) 완료, 태그 `p1-step2`. 실제 WorkOS 연결은 사용자 계정 대기.
+> 마지막 갱신: 2026-10-03 18:20 KST — P1 3단계(받은함) 완료, 태그 `p1-step3`.
 
-## 0. 최근 보고 (P1 2단계)
+## 0. 최근 보고 (P1 3단계)
 
-- **인증 서비스: WorkOS AuthKit**(`docs/decisions/auth-provider.md`, 비교표 8개 서비스, 차선 Descope).
-  - CIMD(Claude 권장 등록 방식)를 기본으로 지원하고, `aud` = MCP URL이고, JWKS로 검증한다.
-  - 2명이면 무료이고, 호스팅 한국어 로그인(Google·이메일 코드·패스키)이 있다.
-  - 위험: claude.ai 로그인 실패·토큰 갱신 문제 보고가 있다. 6단계에서 웹·Desktop·모바일 갱신까지 확인한다.
-- **Magus 쪽 구현은 서비스에 묶이지 않는다**(`magus/auth.py`).
-  - JWKS 서명·exp·iss·aud를 검증하고, sub를 `ALLOWED_USERS`로 user_id에 매핑한다.
-  - 무효 토큰은 401(+ resource_metadata), 유효하지만 목록 밖은 403이다.
-  - PRM(`/.well-known/oauth-protected-resource/mcp`)의 resource는 커넥터 URL과 같다.
-  - `current_user()` 안에서만 로컬·원격이 갈린다.
-- 테스트 `tests/test_auth.py`(로컬 RSA 키 + 로컬 HTTP JWKS)
-  - 거부를 확인했다: 만료, 다른 issuer, 다른 aud, 위조 서명, 모르는 kid, HS256, 허용 목록 밖.
-  - **격리를 확인했다**: 앨리스가 임포트한 원고와 생각이 밥의 토큰으로는 보이지 않는다.
-- `.env.example`을 두고, `.env`는 gitignore에 넣었다. 의존성에 `pyjwt[crypto]`, `uvicorn`, `starlette`를 명시했다.
+- **받은함** `data/users/<user_id>/inbox/`와 새 도구 **`files_list()`**(도구 19개).
+- **경로 인자 전환**: book_import·ref_add·idea_add_conversation은 받은함 **파일 이름**을 받는다.
+  - 원격(HTTP)에서는 이름만 받는다. 서버 경로를 주면 "받은함에 없다" 오류다. 테스트로 확인했다.
+  - 로컬(stdio)은 개발용으로 로컬 경로도 받는다. 이 차이는 `FileResolver` 한 곳에만 있다.
+- **파일 이름 안전성**: `../`, 폴더 구분자, 숨김, 예약 이름(CON 등), 허용하지 않는 형식(.exe 등)을 거부한다. 형식은 docx·pdf·md·txt만 받는다.
+- **한도**(넘으면 무엇이 얼마인지 밝힌 오류)
+  - 업로드 한 개 `MAX_UPLOAD_MB`(기본 50), 사용자 폴더 전체 `MAX_USER_MB`(기본 1000)
+  - MCP 요청 본문 `MAX_REQUEST_MB`(기본 2, 넘으면 413)
+- 로컬 개발용 CLI `magus inbox --add/--remove`.
+- 테스트를 받은함 기준으로 바꿨다: test_refs·test_casper·test_http·test_auth·test_stdio(원고), test_search(도구 19개, 받은함 격리).
+  - 로컬 경로 대체는 test_stdio의 ref_add 시연 하나로만 확인한다.
+- 고친 것: CLI 테스트가 `setup_logging()`으로 pytest의 stderr에 묶인 핸들러를 남겨 "Logging error"가 났다. 핸들러가 쓸 때마다 sys.stderr를 찾게 하고, 우리 핸들러만 교체한다.
 
 ## 1. 지금 바로 할 일
 
-- **3단계: 받은함 + files_list + 경로 인자 전환.**
-  - 받은함은 `data/users/<user_id>/inbox/`이다.
-  - 원격 모드에서 book_import·ref_add·idea_add_conversation의 경로 인자는 받은함 파일 이름만 받는다.
-  - 로컬 경로를 받던 테스트를 받은함 기준으로 바꾼다.
+- **4단계: 웹 페이지 4개**(로그인, 받은함 업로드·목록·삭제, 원고 임포트·내보내기 다운로드, 인용 체크리스트). 같은 프로세스(Starlette)에서 내보낸다.
+  - 로그인은 WorkOS AuthKit(OAuth 인가 코드 + PKCE)으로 하고, 세션은 서명한 쿠키에 둔다.
+  - book_export는 로그인이 필요하고 만료가 있는 다운로드 URL을 돌려준다.
+  - 실제 로그인 화면은 계정이 있어야 보인다. 테스트는 가짜 인증 서버로 한다.
 - 대기(사용자). 실제 연결은 계정이 있어야 하고, 그 전까지 코드와 문서를 준비한다.
   - WorkOS 계정과 AuthKit 설정, 두 사람의 `user_…` id(→ `ALLOWED_USERS`)
   - 호스팅 계정과 도메인
@@ -36,7 +35,7 @@
 
 ## 2. 현재 단계
 
-**P1 진행 중 — 2단계 완료**(`p1-step1`, `p1-step2`). P0는 `step1`~`step7`, `p0-realdata`, `p0-report1`과 그 뒤 결정 반영 커밋까지 끝났다.
+**P1 진행 중 — 3단계 완료**(`p1-step1`~`p1-step3`). P0는 `step1`~`step7`, `p0-realdata`, `p0-report1`과 그 뒤 결정 반영 커밋까지 끝났다.
 
 ## 3. 단계별 체크리스트
 
@@ -46,7 +45,9 @@
 - [x] **P1 2단계 인증** — 2026-10-03, `p1-step2`(코드·테스트. 실제 WorkOS 연결은 대기)
   - `src/magus/auth.py`, `src/magus/server.py`(current_user·AuthSettings), `src/magus/config.py`(auth), `tests/test_auth.py`
   - `docs/decisions/auth-provider.md`, `.env.example`
-- [ ] P1 3단계 받은함 + files_list + 경로 인자 전환
+- [x] **P1 3단계 받은함** — 2026-10-03, `p1-step3`
+  - `src/magus/inbox.py`(safe_filename·save_upload·FileResolver·files_list), `src/magus/store/{base,local}.py`(받은함 메서드·usage_bytes), `src/magus/config.py`(한도), `src/magus/cli.py`(`magus inbox`)
+  - `tests/test_inbox.py`, test_http(요청 한도 413·경로 거부), 기존 테스트의 받은함 전환
 - [ ] P1 4단계 웹 페이지 4개
 - [ ] P1 5단계 배포·도메인·HTTPS·백업·복구 테스트·알림
 - [ ] P1 6단계 Claude.ai 커넥터 등록, `docs/connect-claude.md`
@@ -78,6 +79,14 @@
     - 이유: 서비스마다 aud를 리소스 URL·클라이언트 id 등 다르게 넣는다. 설정으로 맞춘다.
 52. **로그에 sub를 남기지 않는다**(거부할 때 sha256 앞 10자만)
     - 이유: sub는 외부 계정 식별자다. 허용 목록에 넣을 id는 WorkOS 화면에서 확인한다.
+53. **로컬(stdio)에서는 받은함에 없으면 로컬 경로도 받는다**(원격은 이름만)
+    - 대안: 모든 모드에서 받은함 이름만 받는다.
+    - 이유: P0의 Desktop 사용(README "첫 실행 확인"의 fixtures/papers 시연)을 깨지 않는다. 원격에서 경로를 받으면 서버 파일을 읽힐 수 있어 막는다. 분기는 FileResolver 한 곳에 있다.
+54. **한도 기본값: 업로드 50MB, 사용자 1,000MB, 요청 2MB**
+    - 근거: 실원고 PDF 6.7MB, 실사용자 폴더 53MB(재임포트 휴지통 포함), 가장 긴 장 약 2만 자(60KB).
+    - 저장 용량은 사용자 폴더 전체(휴지통 포함)로 센다. 업로드할 때만 검사한다.
+55. **받은함은 SQLite에 색인하지 않는다**(폴더를 그대로 읽는다)
+    - 이유: 파일이 진실이고 목록이 짧다. P2(객체 스토리지)에서는 Store 구현이 목록을 준다.
 
 **P0 결정**: #1~#44 모두 확정됐다.
 
@@ -132,17 +141,17 @@
   ```
 - **git**
   - master에 바로 커밋하고, 단계가 끝나면 태그를 단다. 실험은 브랜치에서 하고 squash merge한다.
-  - 태그: `step1`~`step7`, `p0-realdata`, `p0-report1`, `p1-step1`, `p1-step2`. P0 뒤 커밋 두 개(마무리 보완, 결정 반영)에는 태그를 달지 않았다(지시).
+  - 태그: `step1`~`step7`, `p0-realdata`, `p0-report1`, `p1-step1`~`p1-step3`. P0 뒤 커밋 두 개(마무리 보완, 결정 반영)에는 태그를 달지 않았다(지시).
   - `/fixtures/`(루트)와 `data/`는 gitignore. `tests/fixtures/`와 `docs/reports/`는 커밋한다.
 
 ## 6. 마지막 세션 요약
 
-**2026-10-03 저녁(16:30~17:40)** — P1 킥오프, 1·2단계
-- 1단계: streamable-http(stateless + JSON), 감사 로그, 로그 거르기, 루프백 가드, 18개 도구 HTTP 확인(pytest + MCP Inspector). `p1-step1`.
-- 2단계: 인증 서비스 조사·결정(WorkOS AuthKit), JWT 검증·허용 목록·403 문·PRM, 격리 테스트. `p1-step2`.
-- 조사 두 건(인증, 호스팅·백업·알림)은 백그라운드 에이전트로 돌렸다. 호스팅 결과는 5단계 결정 문서에 쓴다.
-- 테스트 164개 통과, ruff(F·B) 통과.
-- 남긴 것: 3단계부터. 계정이 필요한 일은 대기.
+**2026-10-03 저녁(16:30~18:20)** — P1 킥오프, 1~3단계
+- 1단계: streamable-http(stateless + JSON), 감사 로그, 로그 거르기, 루프백 가드. 18개 도구를 HTTP로 확인했다(pytest + MCP Inspector). `p1-step1`.
+- 2단계: 인증 서비스 결정(WorkOS AuthKit), JWT 검증·허용 목록·403 문·PRM, 격리 테스트. `p1-step2`.
+- 3단계: 받은함·files_list·경로 인자 전환·한도·`magus inbox`. `p1-step3`.
+- 테스트 179개 통과, ruff(F·B) 통과.
+- 남긴 것: 4단계(웹)부터. 계정이 필요한 일은 대기.
 
 ## 7. 알려진 문제 — 실원고에서 아직 안 맞는 것
 

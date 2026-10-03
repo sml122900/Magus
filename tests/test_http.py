@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -18,7 +21,7 @@ pytestmark = pytest.mark.anyio
 
 FIXTURES = Path(__file__).parent / "fixtures" / "synthetic"
 TOOLS = {
-    "book_outline", "book_issues", "book_read_chapter", "book_write_chapter", "book_decide", "book_issue_add",
+    "files_list", "book_outline", "book_issues", "book_read_chapter", "book_write_chapter", "book_decide", "book_issue_add",
     "book_issue_close", "book_import", "book_export", "ref_import_bibliography", "ref_add", "ref_search", "ref_check",
     "idea_add", "idea_add_conversation", "idea_search", "style_add", "style_search",
 }
@@ -69,14 +72,18 @@ def _text(result) -> str:
     return "".join(block.text for block in result.content)
 
 
-async def test_all_tools_over_http_and_log_has_no_content(http_server):
+async def test_all_tools_over_http_and_log_has_no_content(http_server, data_dir: Path):
     url, log_path = http_server
+    inbox = data_dir / "users" / "alice" / "inbox"  # 원격에서는 웹 업로드가 넣는다. 여기서는 파일로 바로 둔다
+    inbox.mkdir(parents=True)
+    shutil.copy(FIXTURES / "닿으려는_종_합성.docx", inbox / "원고.docx")
     tags = {"호흡": "짧음", "시점": "1인칭", "열기": "장면", "장치": ["반복"], "어미": "-다", "톤": "건조"}
     async with Client(url) as client:
         assert client.server_info.name == "Magus"
         assert {t.name for t in (await client.list_tools()).tools} == TOOLS
         calls = [
-            ("book_import", {"path": str(FIXTURES / "닿으려는_종_합성.docx"), "project_id": "synth"}),
+            ("files_list", {}),
+            ("book_import", {"path": "원고.docx", "project_id": "synth"}),
             ("book_outline", {}),
             ("book_issues", {"limit": 3}),
             ("book_read_chapter", {"number": 1}),
@@ -100,11 +107,14 @@ async def test_all_tools_over_http_and_log_has_no_content(http_server):
             _text(await client.call_tool(name, args))
         assert "clack2012 (verified)" in _text(await client.call_tool("ref_search", {"query": "라마바"}))
         assert (await client.call_tool("book_read_chapter", {"number": 99})).is_error
+        # 원격에서는 서버의 파일 경로를 받지 않는다(받은함 이름만)
+        escaped = await client.call_tool("book_import", {"path": str(FIXTURES / "닿으려는_종_합성.docx"), "project_id": "x"})
+        assert escaped.is_error and "받은함에" in escaped.content[0].text
     time.sleep(0.3)
     log = log_path.read_text(encoding="utf-8")
     lines = [line for line in log.splitlines() if "magus.audit" in line]
-    assert len(lines) == len(calls) + 2 and all(" user=alice " in line for line in lines)
-    assert "tool=book_read_chapter user=alice" in lines[-1] and "status=error error=ToolError" in lines[-1]
+    assert len(lines) == len(calls) + 3 and all(" user=alice " in line for line in lines)
+    assert "tool=book_read_chapter user=alice" in lines[-2] and "status=error error=ToolError" in lines[-2]
     for secret in SECRET:
         assert secret not in log  # 본문·발췌·생각·구절은 로그에 없다
 
@@ -116,3 +126,14 @@ def test_refuses_public_bind_without_auth(data_dir: Path):
         capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     assert proc.returncode == 2 and "인증 없이" in proc.stderr
+
+
+def test_request_size_limit(http_server):
+    # MCP 요청 본문 상한(MAX_REQUEST_MB, 기본 2MB). 넘으면 명확한 오류로 거절한다
+    url, _ = http_server
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                       "params": {"name": "idea_add", "arguments": {"text": "가" * 1_100_000, "kind": "thought"}}}).encode()
+    request = urllib.request.Request(url, body, {"content-type": "application/json", "accept": "application/json, text/event-stream"})
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(request, timeout=20)
+    assert e.value.code == 413

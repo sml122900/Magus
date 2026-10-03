@@ -150,7 +150,7 @@ PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버
 
 같은 일을 명령줄로도 할 수 있습니다(아래 "명령").
 
-## 도구 (18개)
+## 도구 (19개)
 
 | 도구 | 하는 일 |
 |---|---|
@@ -159,7 +159,8 @@ PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버
 | `book_write_chapter(number, content, note, title?, status?)` | 장 하나를 저장합니다. 이전본은 versions/에 남고, 쓴 뒤 인용 게이트 결과를 돌려줍니다. |
 | `book_issues(status, chapter_number?, origin?, kind?, limit)` | 미해결 목록(조회 전용). |
 | `book_decide(text)` · `book_issue_add(text, chapter_number?, origin)` · `book_issue_close(id, note?)` | 결정과 열린 문제를 기록합니다. 번호는 다시 쓰지 않습니다. |
-| `book_import(path, project_id?, title?, replace?)` | docx(또는 pdf) 원고를 장 단위로 나눕니다. 코멘트는 미해결, 참고문헌은 refs가 됩니다. |
+| `files_list()` | 받은함(올린 파일) 목록과 사용량. 파일 인자에는 여기 나온 이름만 줍니다. |
+| `book_import(path, project_id?, title?, replace?)` | 받은함의 docx(또는 pdf) 원고를 장 단위로 나눕니다. 코멘트는 미해결, 참고문헌은 refs가 됩니다. |
 | `book_export(path?)` | 장을 합쳐 docx로 만듭니다. |
 | `ref_import_bibliography(text)` | 참고문헌 목록을 refs(unverified)로 넣습니다. |
 | `ref_add(bib, passages, file_path?/full_text?, aliases?)` | 읽은 문헌을 발췌와 함께 verified로 넣습니다. 저자·연도 없이 파일만 주면 첫머리의 제목으로 참고문헌에서 찾습니다. |
@@ -189,6 +190,9 @@ PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버
 | `AUTH_AUDIENCE` | `PUBLIC_URL/mcp` | 받아들일 토큰 aud(쉼표로 여럿) |
 | `ALLOWED_USERS` | — | `sub=user_id` 쉼표 목록. 여기 없는 sub는 403. 공개 가입은 없다 |
 | `PORT` | 8000 | `magus serve --transport http`의 기본 포트 |
+| `MAX_UPLOAD_MB` | 50 | 받은함 업로드 한 개 한도 |
+| `MAX_USER_MB` | 1000 | 사용자별 저장 용량(사용자 폴더 전체) |
+| `MAX_REQUEST_MB` | 2 | MCP 요청 본문 한도(넘으면 413) |
 
 원격 모드 변수의 예시는 `.env.example`에 있습니다. 비밀은 환경변수로만 넣고 `.env`는 커밋하지 않습니다.
 
@@ -207,6 +211,7 @@ magus cite-report --project-id book             # 책 전체 인용 집계(개�
 magus author-report --project-id book --out docs/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + 같은 이름 docx)
 magus terms --project-id book --add 마닐라 "모스크바 회사"   # 인용으로 보지 않을 낱말(지명·사건). 인자 없으면 목록
 magus alias hayashi2016 "하야시(2016)"          # 저자가 확정한 본문 표기를 문헌에 잇는다(음역 추정·a/b 모호 확정)
+magus inbox --add <파일>                         # 받은함에 넣기(로컬 개발용). --remove <이름>, 인자 없으면 목록
 magus synth tests/fixtures/synthetic            # 합성 원고·대화 기록 다시 만들기(커밋돼 있음, 실데이터와 분리)
 magus seed-demo                                 # 데모 프로젝트와 책장 표본
 magus reindex                                   # 원본 파일로 인덱스를 다시 만듭니다(파일을 직접 고친 뒤)
@@ -226,6 +231,9 @@ npx -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8000/mcp --transpo
   - 토큰이 없거나 무효하면 401이고, 허용 목록 밖이면 403입니다.
   - 인증 서버 위치는 `/.well-known/oauth-protected-resource/mcp`로 알립니다.
 - `/healthz`는 상태 확인용입니다(인증 없음, 내용 없음).
+- 파일은 받은함(`data/users/<id>/inbox/`)에 두고 도구에는 **이름만** 줍니다(`files_list()`로 확인).
+  - 원격에서는 로컬 경로를 받지 않습니다. 로컬(stdio, Desktop)에서는 받은함에 없으면 로컬 경로도 받습니다.
+- 한도: 업로드 한 개 `MAX_UPLOAD_MB`, 사용자별 `MAX_USER_MB`, 요청 본문 `MAX_REQUEST_MB`(넘으면 413).
 - 서버 로그에는 도구 이름·user_id·소요 시간·결과만 남습니다. 원고 본문·발췌·생각은 남지 않습니다. 오류 메시지와 예외도 종류와 위치만 남깁니다.
 
 ### fixtures로 확인하기
