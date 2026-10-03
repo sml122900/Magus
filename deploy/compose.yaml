@@ -1,0 +1,55 @@
+# Magus 운영 구성(P1): 단일 VPS, Docker Compose.
+#   magus  — MCP(/mcp) + 웹 페이지, 데이터는 ./data(호스트 폴더, 백업 대상)
+#   caddy  — HTTPS(Let's Encrypt 자동) → magus:8000
+#   backup — restic으로 ./data를 객체 스토리지(Cloudflare R2)에 매일 스냅샷, 30일 보관(호스트 cron이 부른다)
+# 사용법은 docs/deploy.md. 비밀은 deploy/.env(커밋하지 않음)에 둔다.
+name: magus
+
+services:
+  magus:
+    build: ..
+    image: magus:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [magus]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      MAGUS_DOMAIN: ${MAGUS_DOMAIN:?deploy/.env에 MAGUS_DOMAIN을 넣으세요}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  backup:
+    image: restic/restic:latest   # 운영에서는 버전을 고정한다(docs/deploy.md)
+    profiles: [backup]
+    env_file: .env
+    volumes:
+      - ./data:/data:ro
+      - ./backup.sh:/backup.sh:ro
+    entrypoint: ["/bin/sh", "/backup.sh"]
+
+  restore:
+    image: restic/restic:latest
+    profiles: [backup]
+    env_file: .env
+    volumes:
+      - ./restore:/restore
+    entrypoint: ["restic"]
+    command: ["restore", "latest", "--host", "magus", "--target", "/restore"]
+
+volumes:
+  caddy-data:
+  caddy-config:

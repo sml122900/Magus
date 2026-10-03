@@ -1,0 +1,15 @@
+# HTTPS는 Caddy가 Let's Encrypt로 자동 발급·갱신한다(80·443 포트가 열려 있고 도메인 A 레코드가 이 서버를 가리켜야 한다).
+{$MAGUS_DOMAIN} {
+	encode gzip
+	reverse_proxy magus:8000
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+	log {
+		# 접근 로그는 남기지 않는다(주소에 내려받기 토큰이 들어 있다). 오류만 Caddy 기본 로그로.
+		output discard
+	}
+}

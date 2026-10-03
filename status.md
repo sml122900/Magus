@@ -1,42 +1,44 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-03 19:10 KST — P1 4단계(웹 페이지) 완료, 태그 `p1-step4`.
+> 마지막 갱신: 2026-10-03 19:50 KST — P1 5단계 **준비 완료**(배포 파일·백업·로컬 복구 훈련·알림). 실제 배포는 사용자 계정 대기. 태그 없음.
 
-## 0. 최근 보고 (P1 4단계)
+## 0. 최근 보고 (P1 5단계 준비)
 
-- **웹 페이지 4개**(`magus/web.py`, MCP와 같은 프로세스): `/login`, `/inbox`(업로드·목록·삭제), `/book`(임포트·docx 내보내기), `/checklist`(문헌 신호등 + 장별 집계), `/download/{token}`.
-- **로그인**
-  - 원격: WorkOS에 OAuth 인가 코드 + PKCE(S256) + `resource=PUBLIC_URL/mcp`로 로그인한다. 토큰은 MCP와 같은 검증기로 보고, 허용 목록 밖은 403이다.
-  - 로컬(루프백, 인증 없음): `USER_ID`로 바로 로그인한다.
-- 세션: HMAC 서명 쿠키(12시간, HttpOnly, SameSite=Lax, https면 Secure)이고, 모든 POST는 CSRF를 확인한다. 원격 모드는 `SESSION_SECRET`(32자 이상)이 없으면 시작을 거부한다.
-- **book_export**(HTTP): 서명·만료(24시간) 내려받기 링크를 돌려준다. 같은 사용자로 로그인해야 받는다. 다른 사용자는 403, 위조·만료는 410이다.
-- **브라우저로 한 바퀴 확인**(Claude in Chrome, 로컬 서버, 임시 폴더 demo 사용자, 합성 원고)
-  - 받은함 업로드 → 원고 임포트(장 7·부 3·코멘트 13) → 인용 체크리스트(🟡 미확인 6, 장별 표)까지 갔다.
-  - 그 과정에서 작은 파일이 "0.0 MB"로 보여 KB 표시로 고쳤다.
-- 테스트 `tests/test_web.py`
-  - 로컬 한 바퀴(+ CSRF 거부, 형식 거부, 링크 위조·로그인 필요)
-  - 가짜 인증 서버로 원격 OAuth 로그인: PKCE·resource 확인, 앨리스/밥 받은함 격리, 남의 링크 403, carol 403
-  - 서명 토큰 용도·만료, SESSION_SECRET 필수
+- **호스팅 결정**(`docs/decisions/hosting.md`): Vultr 서울 VPS $5 + Docker Compose + Caddy(자동 HTTPS). 백업은 restic → Cloudflare R2(무료 10GB 안, 30일), 알림은 텔레그램 + healthchecks.io. 예상 월 $5 + 도메인.
+- **배포 파일**
+  - `Dockerfile`(비root uid 10001, healthz 헬스체크)
+  - `deploy/compose.yaml`(magus·caddy·backup·restore), `deploy/Caddyfile`(접근 로그 끔: 주소에 내려받기 토큰이 있다)
+  - `deploy/backup.sh`(index 제외·30일·부분 check·healthchecks 핑), `deploy/restore-test.sh`, `deploy/.env.example`
+  - 운영 절차 `docs/deploy.md`
+- **로컬 검증(Docker)**
+  - 이미지 빌드. 원격 모드 컨테이너: `/healthz` ok, PRM resource 맞음, 토큰 없이 401, uid 10001, healthy.
+  - **복구 훈련**: 실데이터 사본 53.4MB → 운영 `backup.sh`(restic 공식 이미지, 로컬 저장소) 34초·스냅샷 50.3MiB → `restic restore` 2,396개 → 컨테이너에서 reindex → default/book **outline 66줄 같음**. 사본·저장소·이미지는 지웠다.
+- **알림**: `magus/alerts.py`(텔레그램 또는 웹훅, 백그라운드 전송), logsafe의 ERROR와 연결했다. `magus alert-test`.
+- 새 CLI: `magus outline`(복구 비교용), `magus alert-test`.
+- 6단계 문서 초안 `docs/connect-claude.md`(사용자용·아버지용, 배포 후 실제 화면으로 고친다).
+- 테스트 188개 통과(알림 3, 복구 1 추가).
 
 ## 1. 지금 바로 할 일
 
-- **5단계: 배포·도메인·HTTPS·백업·복구 테스트·알림.** 계정이 없어도 할 수 있는 것부터 한다.
-  - 호스팅 결정 문서: 조사 결과, 추천은 Vultr 서울 VPS + Docker Compose + Caddy.
-  - Dockerfile·compose·Caddyfile, 백업 스크립트(restic → R2, 30일), 복구 절차, 알림(웹훅)을 만든다.
-  - 복구 테스트는 로컬 restic 저장소로 먼저 해 본다.
-- 대기(사용자). 실제 연결은 계정이 있어야 하고, 그 전까지 코드와 문서를 준비한다.
-  - WorkOS 계정과 AuthKit 설정, 두 사람의 `user_…` id(→ `ALLOWED_USERS`)
-  - 호스팅 계정과 도메인
-  - 객체 스토리지 키
-  - 알림 채널
+- **대기(사용자): 계정과 도메인.** 이것이 있어야 5단계를 끝내고 6·7단계로 간다. 목록은 `docs/deploy.md` 0절에 있다.
+  - Vultr 서울 서버
+  - 도메인 A 레코드(Cloudflare면 프록시 끔)
+  - WorkOS AuthKit: 초대 2명, 웹 클라이언트(리다이렉트 `/auth/callback`)
+  - Cloudflare R2 버킷과 토큰(수명 주기 규칙 없음)
+  - 텔레그램 봇과 chat id, healthchecks.io 체크
+- 계정이 생기면 내가 할 일(사용자가 서버 접속 정보를 주거나 직접 따라 한다)
+  - `docs/deploy.md` 1~4절대로 배포한다.
+  - `alert-test`로 알림을 받아 본다.
+  - 첫 백업을 돌리고, `restore-test.sh default father`로 서버에서 복구 시험을 한다. 결과는 deploy.md 기록 표에 적는다.
+  - 그다음 `p1-step5` 태그를 단다.
 - 불명
   - 완료 기준의 "refs 297": 실데이터 refs는 299건이다(파싱 실패 raw 1, acemoglu2001-2 포함). 297은 고유 미확인 문헌 수다. 판단: "refs 299, 미확인 문헌 297"로 검증한다.
   - 완료 기준의 "업로드한 docx": 실원고는 PDF만 있다(docx 없음). 판단: docx가 올 때까지 PDF로 검증한다. 대기: 원고 docx(사용자).
 
 ## 2. 현재 단계
 
-**P1 진행 중 — 4단계 완료**(`p1-step1`~`p1-step4`). P0는 `step1`~`step7`, `p0-realdata`, `p0-report1`과 그 뒤 결정 반영 커밋까지 끝났다.
+**P1 진행 중 — 4단계 완료, 5단계 준비 완료(계정 대기)**(`p1-step1`~`p1-step4`). P0는 `step1`~`step7`, `p0-realdata`, `p0-report1`과 그 뒤 결정 반영 커밋까지 끝났다.
 
 ## 3. 단계별 체크리스트
 
@@ -52,8 +54,10 @@
 - [x] **P1 4단계 웹 페이지** — 2026-10-03, `p1-step4`
   - `src/magus/web.py`, `src/magus/signing.py`, `src/magus/store/{base,local}.py`(export_path), `src/magus/book/tools.py`(내려받기 링크), `src/magus/cli.py`(웹 등록)
   - `tests/test_web.py`, 브라우저 확인(Claude in Chrome)
-- [ ] P1 5단계 배포·도메인·HTTPS·백업·복구 테스트·알림
-- [ ] P1 6단계 Claude.ai 커넥터 등록, `docs/connect-claude.md`
+- [ ] P1 5단계 배포·도메인·HTTPS·백업·복구 테스트·알림 — **준비 완료**(2026-10-03, 태그 없음), 실제 배포는 계정 대기
+  - `Dockerfile`, `.dockerignore`, `.gitattributes`, `deploy/{compose.yaml,Caddyfile,backup.sh,restore-test.sh,.env.example}`, `src/magus/alerts.py`, `src/magus/cli.py`(outline·alert-test)
+  - `docs/decisions/hosting.md`, `docs/deploy.md`, `tests/test_alerts.py`, `tests/test_restore.py`
+- [ ] P1 6단계 Claude.ai 커넥터 등록, `docs/connect-claude.md`(초안만 있음)
 - [ ] P1 7단계 아버지 온보딩 체크리스트
 
 ## 4. 검토 대기 결정
@@ -103,6 +107,17 @@
     - 이유: 링크가 대화 기록에 남는다. 링크만으로 원고가 새면 안 된다.
 60. **로컬 HTTP의 웹은 USER_ID로 자동 로그인**(루프백 전용이라)
     - 이유: 개발 중 브라우저로 한 바퀴 돌려 보려면 인증 서버 없이도 돼야 한다.
+61. **호스팅은 Vultr 서울 VPS + Docker Compose + Caddy**(`docs/decisions/hosting.md`)
+    - 대안: Fly.io(도쿄, 볼륨이 머신 하나에 묶임), Railway(싱가포르, 요청 시간 제한), Lightsail(차선), Oracle 무료(회수 위험).
+    - 이유: 서울이라 지연이 가장 작고, 디스크 제약·프록시 시간 제한이 없고, $5다.
+62. **백업은 restic → R2, index.sqlite 제외, 30일, 매번 1/30 읽기 검사**
+    - 대안: tar + 수명 주기 규칙(30개 전체 사본), rclone 동기화.
+    - 이유: 암호화·중복 제거로 무료 10GB 안에 든다. 인덱스는 다시 만들 수 있어 실행 중인 DB의 일관성 문제가 없다. restic 저장소에는 수명 주기 규칙을 걸면 안 된다.
+63. **알림은 텔레그램(서버 오류) + healthchecks.io(백업 누락)**
+    - 대안: 이메일(Resend), Slack·Discord 웹훅(코드는 웹훅도 지원한다).
+    - 이유: 휴대폰으로 바로 오고 무료다. 백업 누락은 "안 온 것"을 알아야 해서 데드맨 스위치가 맞다.
+64. **Caddy 접근 로그는 끈다**
+    - 이유: 내려받기 링크 토큰이 주소에 들어 있다. 앱의 감사 로그(도구·사용자·시간)로 충분하다.
 
 **P0 결정**: #1~#44 모두 확정됐다.
 
@@ -162,11 +177,11 @@
 
 ## 6. 마지막 세션 요약
 
-**2026-10-03 저녁(16:30~19:10)** — P1 킥오프, 1~4단계
-- 1단계 HTTP 전송(`p1-step1`), 2단계 인증(`p1-step2`), 3단계 받은함(`p1-step3`), 4단계 웹(`p1-step4`).
-- 브라우저(Claude in Chrome)로 업로드 → 임포트 → 체크리스트를 확인했다.
-- 테스트 184개 통과, ruff(F·B) 통과.
-- 남긴 것: 5단계(배포)부터. 계정·도메인이 필요한 일은 대기.
+**2026-10-03 저녁(16:30~19:50)** — P1 킥오프, 1~4단계 완료, 5단계 준비
+- 1단계 HTTP 전송(`p1-step1`), 2단계 인증(`p1-step2`), 3단계 받은함(`p1-step3`), 4단계 웹(`p1-step4`, 브라우저 확인).
+- 5단계 준비: 호스팅 결정, Dockerfile·compose·Caddy·restic 백업·복구 스크립트, 알림, 운영 문서. Docker로 이미지·원격 모드를 점검하고 로컬 복구 훈련을 했다(outline 같음).
+- 테스트 188개 통과, ruff(F·B) 통과.
+- 남긴 것: 계정·도메인 대기(5단계 마무리 → 6·7단계).
 
 ## 7. 알려진 문제 — 실원고에서 아직 안 맞는 것
 
@@ -180,4 +195,6 @@
 - **참고문헌 파싱 실패 1**: `張楠(장남). (명대). 『神峰通考』`(숫자 연도 없음, raw로 보관, 그대로 둠).
 - **Desktop 실사용 미검증**: 서버 쪽 경로 흐름은 테스트와 리허설로 확인했지만 Desktop에서 실제로 부른 기록은 아직 없다. 시험 문장 3(제31장 요약)은 Claude가 다른 장을 더 읽지 않는지 보는 것이라 Desktop에서만 확인할 수 있다.
 - **보고서 쪽수**: Word·LibreOffice가 없어 글자폭으로 추정했다(약 2.3쪽). Word에서 열어 확인이 필요하다.
+- **원격 미검증(계정 대기)**: 실제 WorkOS 로그인(웹·Claude 커넥터·토큰 갱신), Caddy 인증서 발급, R2 백업, 서버 위 복구 시험, 텔레그램 수신.
+- **웹 업로드 크기**: Starlette는 multipart 파일을 디스크로 받으므로, 큰 요청은 `Content-Length`로만 미리 거른다(파일 한도 × 20 + 1MB). 청크 전송(길이 없음)은 다 받은 뒤 파일별 한도로 거른다.
 - 이전부터 있던 것: 번호 충돌 가능성(멀티 프로세스), 직접 수정 뒤 reindex 필요, 토큰 추정 휴리스틱, 임베딩 API 실제 호출 미검증.

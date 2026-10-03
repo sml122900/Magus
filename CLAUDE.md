@@ -4,8 +4,8 @@
 
 ## 진행상황
 
-- 현재 단계: **P1(원격 MCP 서비스) 진행 중.** 1단계 HTTP 전송(`p1-step1`), 2단계 인증(`p1-step2`, WorkOS AuthKit, 실제 연결은 사용자 계정 대기), 3단계 받은함(`p1-step3`), 4단계 웹(`p1-step4`) 완료.
-- 다음 할 일: 5단계(배포·도메인·HTTPS·백업·복구 테스트·알림). 계정·도메인은 사용자가 만든다. 그 전까지 배포 파일과 절차를 준비한다.
+- 현재 단계: **P1(원격 MCP 서비스) 진행 중.** 1단계 HTTP 전송(`p1-step1`), 2단계 인증(`p1-step2`, WorkOS AuthKit, 실제 연결은 사용자 계정 대기), 3단계 받은함(`p1-step3`), 4단계 웹(`p1-step4`) 완료. 5단계는 **준비 완료**(배포 파일·백업·복구 훈련·알림, 태그 없음).
+- 다음 할 일: **대기 — 사용자가 계정(Vultr·도메인·WorkOS·R2·텔레그램·healthchecks)을 만들면** docs/deploy.md대로 배포하고 서버에서 복구 시험을 한다. 그다음 6·7단계.
 - 대기 사항: 계정·도메인·키처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), P0 Desktop 테스트 결과, 보고서 답변. 상세는 status.md에만 적는다.
 
 ## 개요
@@ -308,8 +308,11 @@ data/index.sqlite
   - 세션은 HMAC 서명 쿠키(HttpOnly, SameSite=Lax, https면 Secure, 12시간)다. 모든 POST는 CSRF 토큰을 확인한다(`magus/signing.py`).
   - 내려받기: book_export(원격·HTTP)는 서명·만료(24시간) 링크를 돌려준다. 링크만으로는 받을 수 없고, 같은 사용자로 로그인해 있어야 한다.
 - 저장: 파일 + SQLite를 유지한다(Store 인터페이스 뒤. Postgres는 P2).
-- 호스팅: 영구 디스크가 있는 단일 인스턴스(Fly.io / Railway / VPS 중 비교해 결정). HTTPS는 플랫폼이나 Caddy가 맡는다. 서버리스는 쓰지 않는다.
-- 백업: 매일 data/ 전체를 객체 스토리지에 스냅샷하고 30일 보관한다. 복구 절차를 문서화하고 실제로 한 번 복구해 본다.
+- 호스팅: **Vultr 서울 VPS($5) + Docker Compose + Caddy(자동 HTTPS)**(`docs/decisions/hosting.md`). 서버리스는 쓰지 않는다.
+  - 이미지: `Dockerfile`(python:3.12-slim, uv, 비root uid 10001, /data 볼륨, healthz 헬스체크). 구성: `deploy/compose.yaml`(magus·caddy·backup·restore).
+- 백업: 매일 04:00 restic → Cloudflare R2(`deploy/backup.sh`). `index.sqlite`는 빼고(재생성), `forget --keep-daily 30 --prune`, `check --read-data-subset=1/30`. R2 버킷에 수명 주기 규칙은 걸지 않는다.
+  - 복구: `docs/deploy.md` 5절. 정기 시험은 `deploy/restore-test.sh <사용자…>`(복구본 reindex 뒤 outline 비교). 로컬 훈련 결과와 기록 표도 그 문서에 있다.
+- 알림: `magus/alerts.py`(텔레그램 `ALERT_TELEGRAM_*` 또는 웹훅 `ALERT_WEBHOOK_URL`). logsafe의 ERROR를 받아 백그라운드로 보낸다. 백업 누락은 healthchecks.io(`HEALTHCHECK_URL`)가 알린다. 시험은 `magus alert-test`.
 - **로그**: 도구 이름, user_id, 소요 시간, 결과만 남긴다(`magus/audit.py`). 본문·발췌·원고 내용은 절대 남기지 않는다.
   - SDK의 도구 실패 메시지와 예외 traceback은 `magus/logsafe.py`가 핸들러에서 거른다. 예외는 종류·위치만 남긴다.
   - ERROR는 알림 콜백으로 보낸다(10분에 한 번).
@@ -353,6 +356,9 @@ magus author-report --project-id book --out docs/reports/<날짜>-인용-점검.
 magus terms --project-id book [--add …] [--remove …]                         # 비인용 용어 보기·고치기
 magus alias <key> <표기>                                                      # 저자가 확정한 표기를 aliases에(예: keynes1930b "케인스(1930)")
 magus inbox [--add 파일…] [--remove 이름…]                                    # 받은함(로컬 개발용, 원격은 웹 업로드)
+magus outline [--project-id …]                                               # book_outline과 같은 출력(USER_ID). 복구 확인용
+magus alert-test                                                             # 운영자 알림 채널 시험
+docker compose -f deploy/compose.yaml …                                      # 운영(docs/deploy.md)
 .venv/Scripts/python -m ruff check --select F,B src tests                    # 린트(pyflakes·bugbear)
 ```
 

@@ -18,3 +18,8 @@ data/
 .env
 .env.*
 !.env.example
+
+# 복구 훈련·운영 폴더(실데이터 사본이 들어간다)
+.drill/
+deploy/data/
+deploy/restore/

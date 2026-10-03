@@ -236,6 +236,7 @@ npx -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8000/mcp --transpo
 - 파일은 받은함(`data/users/<id>/inbox/`)에 두고 도구에는 **이름만** 줍니다(`files_list()`로 확인).
   - 원격에서는 로컬 경로를 받지 않습니다. 로컬(stdio, Desktop)에서는 받은함에 없으면 로컬 경로도 받습니다.
 - 한도: 업로드 한 개 `MAX_UPLOAD_MB`, 사용자별 `MAX_USER_MB`, 요청 본문 `MAX_REQUEST_MB`(넘으면 413).
+- 운영(배포·백업·복구·알림)은 [docs/deploy.md](docs/deploy.md)에 있습니다. 구성은 Docker Compose(magus + Caddy + restic)입니다.
 - 웹 페이지(같은 주소): `/login`, `/inbox`(받은함 업로드·삭제), `/book`(임포트·docx 내보내기), `/checklist`(인용 신호등).
   - 로컬에서는 `http://127.0.0.1:8000/login`이 `USER_ID`로 바로 로그인합니다.
   - 원격에서는 WorkOS로 로그인합니다(`WEB_CLIENT_ID`, `SESSION_SECRET`).

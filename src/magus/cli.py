@@ -52,10 +52,23 @@ def main(argv: list[str] | None = None) -> None:
     synth.add_argument("folder", type=Path)
     sub.add_parser("seed-demo", help="1단계 확인용 가짜 프로젝트 생성")
     sub.add_parser("reindex", help="원본 파일에서 index.sqlite 재생성")
+    outline = sub.add_parser("outline", help="book_outline과 같은 출력(USER_ID 사용자). 복구 확인에 쓴다")
+    outline.add_argument("--project-id")
+    sub.add_parser("alert-test", help="운영자 알림 채널로 시험 메시지를 보낸다")
     args = parser.parse_args(argv)
 
     # stdio 전송에서 stdout은 MCP 프로토콜 전용이다. 로그는 반드시 stderr로 보낸다. 내용은 로그에 남기지 않는다(logsafe).
-    setup_logging()
+    # ERROR는 운영자 알림(ALERT_*)으로도 간다. 설정이 없으면 알림은 꺼져 있다.
+    from magus.alerts import sender
+
+    alert = sender(os.environ)
+    setup_logging(alert)
+    if args.cmd == "alert-test":
+        if alert is None:
+            parser.exit(2, "알림 설정이 없습니다(ALERT_TELEGRAM_BOT_TOKEN+ALERT_TELEGRAM_CHAT_ID 또는 ALERT_WEBHOOK_URL).\n")
+        alert.deliver("[Magus] 알림 시험: 이 메시지가 보이면 오류 알림이 동작합니다.")  # type: ignore[attr-defined]
+        print("보냈습니다(전송 실패는 조용히 버리므로, 메신저에서 도착했는지 확인하세요).")
+        return
     if args.cmd == "synth":
         from magus.synthetic import write_all
 
@@ -176,6 +189,12 @@ def main(argv: list[str] | None = None) -> None:
             seed_demo_shelf(store, settings.user_id)
         print(f"{'생성' if created else '이미 있음'}: {project.id} ({project.title})\n")
         print(build_outline(store, settings.user_id, project.id))
+    elif args.cmd == "outline":
+        from magus.book.outline import build_outline
+        from magus.melchior.check import refresh_cite_counts
+
+        refresh_cite_counts(store, settings.user_id)  # 파생값(장별 미확인)을 맞춘 뒤 서버와 같은 출력
+        print(build_outline(store, settings.user_id, args.project_id))
     elif args.cmd == "reindex":
         from magus.melchior.check import after_refs_changed
 
