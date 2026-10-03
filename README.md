@@ -183,6 +183,14 @@ PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버
 | `EMBEDDINGS` | `none` | `none` \| `voyage` \| `openai` |
 | `VOYAGE_API_KEY` / `OPENAI_API_KEY` | — | 임베딩 제공자를 쓸 때만 필요합니다 |
 | `EMBEDDINGS_MODEL` | voyage-3.5 / text-embedding-3-small | 임베딩 모델 |
+| `PUBLIC_URL` | — | 원격 모드: 바깥에서 보이는 주소. 커넥터 URL과 PRM의 resource = `PUBLIC_URL/mcp` |
+| `AUTH_ISSUER` | — | 원격 모드: 인증 서버 issuer(WorkOS AuthKit). 있으면 HTTP에서 토큰 검증을 켠다 |
+| `AUTH_JWKS_URL` | issuer 메타데이터의 jwks_uri | 서명 키 주소 |
+| `AUTH_AUDIENCE` | `PUBLIC_URL/mcp` | 받아들일 토큰 aud(쉼표로 여럿) |
+| `ALLOWED_USERS` | — | `sub=user_id` 쉼표 목록. 여기 없는 sub는 403. 공개 가입은 없다 |
+| `PORT` | 8000 | `magus serve --transport http`의 기본 포트 |
+
+원격 모드 변수의 예시는 `.env.example`에 있습니다. 비밀은 환경변수로만 넣고 `.env`는 커밋하지 않습니다.
 
 임베딩을 켜면 검색이 키워드(FTS)와 뜻(벡터)을 함께 씁니다.
 꺼져 있거나 키가 없거나 API 호출이 실패하면 키워드 검색만으로 동작합니다.
@@ -213,7 +221,10 @@ magus serve --transport http --port 8000        # http://127.0.0.1:8000/mcp (str
 npx -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8000/mcp --transport http --method tools/list
 ```
 
-- 지금은 인증이 없습니다. 그래서 루프백(127.0.0.1)에만 열리고, `--host 0.0.0.0`은 거부됩니다. 인증은 P1 2단계에서 붙입니다.
+- `AUTH_ISSUER`가 없으면 인증이 없습니다. 그래서 루프백(127.0.0.1)에만 열리고, `--host 0.0.0.0`은 거부됩니다.
+- `AUTH_ISSUER`·`PUBLIC_URL`·`ALLOWED_USERS`를 넣으면 토큰을 검증합니다(WorkOS AuthKit, `docs/decisions/auth-provider.md`).
+  - 토큰이 없거나 무효하면 401이고, 허용 목록 밖이면 403입니다.
+  - 인증 서버 위치는 `/.well-known/oauth-protected-resource/mcp`로 알립니다.
 - `/healthz`는 상태 확인용입니다(인증 없음, 내용 없음).
 - 서버 로그에는 도구 이름·user_id·소요 시간·결과만 남습니다. 원고 본문·발췌·생각은 남지 않습니다. 오류 메시지와 예외도 종류와 위치만 남깁니다.
 

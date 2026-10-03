@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 
 from magus.audit import ToolCallLog
+from magus.auth import USER_ID_CLAIM, JwtVerifier
 from magus.balthasar.tools import build_tools as balthasar_tools
 from magus.book.tools import build_tools as book_tools
 from magus.casper.tools import build_tools as casper_tools
@@ -18,13 +21,27 @@ from magus.store import Store
 SERVER_NAME = "Magus"
 
 
-def build_server(settings: Settings, store: Store, embedder: Embedder | None = None) -> MCPServer:
+def build_server(
+    settings: Settings, store: Store, embedder: Embedder | None = None, verifier: JwtVerifier | None = None
+) -> MCPServer:
+    """settings.auth가 있으면 원격(HTTP) 모드: 리소스 서버로서 토큰을 검증하고 sub로 user_id를 정한다."""
+    auth = settings.auth
+    if auth is not None and verifier is None:
+        verifier = JwtVerifier(auth)
+
     def current_user() -> str:
-        # user_id를 정하는 유일한 곳. P0는 환경변수 USER_ID를 쓰고, P1(HTTP)에서는 요청의 인증 주체에서 꺼낸다.
-        return settings.user_id
+        # user_id를 정하는 유일한 곳. 로컬(stdio)은 환경변수 USER_ID, 원격(HTTP)은 검증된 토큰의 sub → 허용 목록.
+        # 두 모드를 가르는 분기는 이 함수 밖으로 나가지 않는다.
+        if auth is None:
+            return settings.user_id
+        token = get_access_token()
+        if token is None or not token.claims or USER_ID_CLAIM not in token.claims:
+            raise PermissionError("인증된 사용자가 없다")
+        return str(token.claims[USER_ID_CLAIM])
 
     # 장별 미확인 인용 수는 파생값이라 인덱스를 다시 만든 뒤에는 0이다. 시작할 때 한 번 맞춘다.
-    refresh_cite_counts(store, settings.user_id)
+    for user_id in sorted(set(auth.allowed.values())) if auth else [settings.user_id]:
+        refresh_cite_counts(store, user_id)
     tools = [
         *book_tools(store, current_user, settings.files_root),
         *melchior_tools(store, current_user, embedder, settings.files_root),
@@ -37,4 +54,10 @@ def build_server(settings: Settings, store: Store, embedder: Embedder | None = N
         instructions=build_instructions(t.name for t in tools),
         tools=tools,
         middleware=[ToolCallLog(current_user)],  # 도구 이름·user_id·소요 시간·결과만 기록(본문 없음)
+        # 원격 모드: Protected Resource Metadata(/.well-known/oauth-protected-resource/mcp)로 인증 서버를 알리고,
+        # 토큰이 없거나 무효하면 401 + WWW-Authenticate. audience는 JwtVerifier가 직접 검사한다.
+        auth=AuthSettings(issuer_url=auth.issuer, resource_server_url=auth.resource, validate_token_resource=False)
+        if auth
+        else None,
+        token_verifier=verifier if auth else None,
     )

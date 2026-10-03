@@ -4,8 +4,8 @@
 
 ## 진행상황
 
-- 현재 단계: **P1(원격 MCP 서비스) 진행 중.** 1단계(HTTP 전송) 완료(태그 `p1-step1`). P0는 `p0-report1`과 그 뒤 결정 반영 커밋까지.
-- 다음 할 일: 2단계(인증 서비스 연동). 인증 서비스와 호스팅은 조사 결과로 결정 문서를 쓰고 하나를 고른다.
+- 현재 단계: **P1(원격 MCP 서비스) 진행 중.** 1단계 HTTP 전송(`p1-step1`), 2단계 인증(`p1-step2`, WorkOS AuthKit 선택, 실제 연결은 사용자 계정 대기) 완료.
+- 다음 할 일: 3단계(받은함 + files_list + 경로 인자 전환).
 - 대기 사항: 계정·도메인·키처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), P0 Desktop 테스트 결과, 보고서 답변. 상세는 status.md에만 적는다.
 
 ## 개요
@@ -87,6 +87,12 @@
 | `DATA_DIR` | `./data` | 원본 파일과 index.sqlite의 루트 |
 | `FILES_DIR` | `DATA_DIR`의 부모 | 도구가 받은 상대 경로(`fixtures/papers/논문.pdf`)를 푸는 기준. Desktop이 띄우는 작업 폴더는 정해져 있지 않으므로 작업 폴더 기준으로 풀지 않는다(`magus/paths.py`) |
 | `EMBEDDINGS` | `none` | `none` \| `voyage` \| `openai` |
+| `PUBLIC_URL` | — | 원격 모드: 바깥에서 보이는 주소. 커넥터 URL과 PRM의 resource = `PUBLIC_URL/mcp` |
+| `AUTH_ISSUER` | — | 원격 모드: 인증 서버 issuer(WorkOS AuthKit). 있으면 HTTP에서 토큰 검증을 켠다 |
+| `AUTH_JWKS_URL` | issuer 메타데이터의 jwks_uri | 서명 키 주소 |
+| `AUTH_AUDIENCE` | `PUBLIC_URL/mcp` | 받아들일 토큰 aud(쉼표로 여럿) |
+| `ALLOWED_USERS` | — | `sub=user_id` 쉼표 목록. 여기 없는 sub는 403. 공개 가입은 없다 |
+| `PORT` | 8000 | `magus serve --transport http`의 기본 포트 |
 | `VOYAGE_API_KEY` / `OPENAI_API_KEY` | — | 해당 제공자를 쓸 때만 |
 | `EMBEDDINGS_MODEL` | 제공자 기본값 | 임베딩 모델 이름 |
 
@@ -268,9 +274,10 @@ data/index.sqlite
 
 **아키텍처**
 - 전송: streamable-http, **stateless + JSON 응답**(`magus/transports.py: http_app`). 엔드포인트 `/mcp`, 상태 확인 `/healthz`(인증 없음). 서버 코어(build_server)는 그대로 쓴다.
-- 인증: MCP용 OAuth를 지원하는 **관리형** 인증 서비스를 쓴다(`docs/decisions/auth-provider.md`).
+- 인증: MCP용 OAuth를 지원하는 **관리형** 인증 서비스를 쓴다. **WorkOS AuthKit**으로 정했다(`docs/decisions/auth-provider.md`, 차선 Descope). 코드는 표준(JWKS·iss·aud)만 쓴다(`magus/auth.py`).
   - Magus는 리소스 서버만 한다: Protected Resource Metadata를 내고, 액세스 토큰(JWT 서명·만료·issuer·audience)을 검증하고, `sub` → user_id를 매핑한다.
-  - 허용 목록(`ALLOWED_USERS`)에 없는 sub는 거부한다.
+  - 허용 목록(`ALLOWED_USERS`)에 없는 sub는 거부한다. 무효 토큰은 401(+ `resource_metadata`), 유효하지만 목록 밖은 403(`ForbiddenGate`).
+  - PRM의 `resource`는 커넥터 URL(`PUBLIC_URL/mcp`)과 정확히 같아야 한다(Claude 요구). Claude 등록 방식은 CIMD("Claude의 공개 신원 사용").
 - 사용자: `current_user()`가 HTTP에서는 토큰의 sub로, stdio에서는 `USER_ID`로 user_id를 정한다. 두 모드를 가르는 분기는 `current_user()` 밖으로 새지 않는다.
 - 파일
   - 사용자별 받은함 `data/users/<user_id>/inbox/`. 업로드 페이지로만 들어온다.

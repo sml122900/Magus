@@ -13,3 +13,8 @@ wheels/
 data/
 /fixtures/
 .pytest_cache/
+
+# 비밀은 환경변수로만. 예시는 .env.example
+.env
+.env.*
+!.env.example

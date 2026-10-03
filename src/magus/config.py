@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from magus.auth import AuthConfig
 from magus.ids import safe_id
 
 EMBEDDING_PROVIDERS = ("none", "voyage", "openai")
@@ -21,6 +22,8 @@ class Settings:
     openai_api_key: str | None = None
     # 도구가 받은 상대 경로(fixtures/papers/논문.pdf)를 푸는 기준. Desktop이 띄우는 작업 폴더는 정해져 있지 않다.
     files_root: Path | None = None
+    # 원격(HTTP) 모드의 인증 설정. AUTH_ISSUER가 없으면 None(로컬 모드: USER_ID 하나)
+    auth: AuthConfig | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -36,4 +39,5 @@ class Settings:
             voyage_api_key=env.get("VOYAGE_API_KEY") or None,
             openai_api_key=env.get("OPENAI_API_KEY") or None,
             files_root=Path(env.get("FILES_DIR") or data_dir.parent).resolve(),
+            auth=AuthConfig.from_env(env),
         )

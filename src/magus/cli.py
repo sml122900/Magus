@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import logging
 import os
 from pathlib import Path
@@ -67,7 +68,7 @@ def main(argv: list[str] | None = None) -> None:
     log = logging.getLogger("magus")
     log.info(
         "user_id=%s data_dir=%s files_root=%s embeddings=%s",
-        settings.user_id, settings.data_dir, settings.files_root, settings.embeddings,
+        settings.user_id if settings.auth is None else "(토큰)", settings.data_dir, settings.files_root, settings.embeddings,
     )
 
     if args.cmd == "serve":
@@ -75,15 +76,21 @@ def main(argv: list[str] | None = None) -> None:
         from magus.embeddings import get_embedder
         from magus.server import build_server
 
-        if args.transport == "http" and not transports.is_loopback(args.host):
-            # 인증 없는 HTTP를 바깥에 열지 않는다. 원격 공개는 인증(2단계)이 켜진 뒤에만.
-            parser.exit(2, f"인증 없이 {args.host}에 열 수 없습니다. 루프백(127.0.0.1)으로 실행하세요.\n")
-        server = build_server(settings, store, get_embedder(settings))
+        from magus.auth import JwtVerifier
+
+        if args.transport == "stdio":
+            settings = dataclasses.replace(settings, auth=None)  # 로컬 모드는 USER_ID 하나. 인증 설정은 쓰지 않는다
+        if args.transport == "http" and settings.auth is None and not transports.is_loopback(args.host):
+            # 인증 없는 HTTP를 바깥에 열지 않는다. 원격 공개는 인증(AUTH_ISSUER 등)이 켜졌을 때만.
+            parser.exit(2, f"인증 없이 {args.host}에 열 수 없습니다. 루프백(127.0.0.1)으로 실행하거나 AUTH_ISSUER를 설정하세요.\n")
+        verifier = JwtVerifier(settings.auth) if settings.auth else None
+        server = build_server(settings, store, get_embedder(settings), verifier)
         if args.transport == "stdio":
             transports.run_stdio(server)
         else:
-            log.info("streamable-http: http://%s:%d%s (stateless, 인증 없음 — 로컬 전용)", args.host, args.port, transports.MCP_PATH)
-            transports.run_http(server, args.host, args.port)
+            mode = f"인증: {settings.auth.issuer}, 허용 {len(settings.auth.allowed)}명" if settings.auth else "인증 없음 — 로컬 전용"
+            log.info("streamable-http: http://%s:%d%s (stateless, %s)", args.host, args.port, transports.MCP_PATH, mode)
+            transports.run_http(server, args.host, args.port, verifier)
     elif args.cmd == "import":
         from magus.book.importer import import_manuscript
 
