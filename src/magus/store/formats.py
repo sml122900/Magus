@@ -103,7 +103,7 @@ def parse_issues(text: str) -> list[Issue]:
                 chapter_number=int(chapter) if chapter and chapter.isdigit() else None,
                 created_at=meta.get("created_at", ""),
                 closed_note=meta.get("closed_note"),
-                kind="citation" if meta.get("kind") == "citation" else "general",
+                kind=meta.get("kind") if meta.get("kind") in ("citation", "fact") else "general",  # type: ignore[arg-type]
                 ref_key=meta.get("ref_key") or None,
                 ref_id=meta.get("ref_id") or None,
                 text="\n".join(lines).strip(),

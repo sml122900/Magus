@@ -11,7 +11,9 @@ from typing import Any, Literal, Protocol
 
 IssueStatus = Literal["open", "closed"]
 IssueOrigin = Literal["import_comment", "user", "agent"]
-IssueKind = Literal["citation", "general"]
+# citation: 출처 확인 코멘트 + 문헌이 지목됨 / fact: 출처 확인 코멘트지만 문헌 없음(사실·수치 확인) / general: 그 외
+IssueKind = Literal["citation", "fact", "general"]
+ISSUE_KINDS: tuple[str, ...] = ("citation", "fact", "general")
 ChapterStatus = Literal["draft", "revising", "done"]
 CHAPTER_STATUSES: tuple[str, ...] = ("draft", "revising", "done")
 RefStatus = Literal["unverified", "verified"]
@@ -170,6 +172,10 @@ class Store(Protocol):
     def save_original(self, user_id: str, project_id: str, filename: str, data: bytes) -> str:
         """original/<filename>에 저장하고 데이터 루트 기준 상대 경로를 돌려준다(원본 사본·임포트 리포트용)."""
         ...
+    def get_non_citation_terms(self, user_id: str, project_id: str) -> list[str]:
+        """인용 추출에서 뺄 낱말(지명·사건 등). 프로젝트의 book/non_citation_terms.txt, 한 줄에 하나."""
+        ...
+    def set_non_citation_terms(self, user_id: str, project_id: str, terms: list[str]) -> None: ...
     def set_parts(self, user_id: str, project_id: str, parts: list[Part]) -> None: ...
     def list_parts(self, user_id: str, project_id: str) -> list[Part]: ...
 

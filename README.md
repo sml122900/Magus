@@ -68,6 +68,68 @@ Microsoft Store판은 `%LOCALAPPDATA%\Packages\Claude_…\LocalCache\Roaming\Cla
 서버 로그는 `%LOCALAPPDATA%\Claude\Logs\mcp-server-magus.log`에 남습니다.
 새 대화에서 "Magus의 book_outline을 호출해 줘"라고 해 보세요.
 
+## 첫 실행 확인
+
+### 1. Desktop 다시 시작
+
+1. Claude Desktop을 **완전히 종료**합니다. 창을 닫는 것으로는 부족합니다(트레이의 Claude 아이콘 → 종료).
+   작업 관리자에 `magus.exe`가 남아 있으면 서버가 옛 코드로 계속 돕니다.
+2. Claude Desktop을 다시 실행하고 **새 대화**를 엽니다.
+3. 입력창의 도구 메뉴에서 magus가 켜져 있는지 봅니다(도구 18개).
+4. 로그는 `%LOCALAPPDATA%\Claude\Logs\mcp-server-magus.log`에 있습니다.
+   Microsoft Store판은 `%LOCALAPPDATA%\Packages\Claude_…\LocalCache\Roaming\Claude\logs\`에 있습니다.
+   서버가 시작될 때 다음 줄이 찍힙니다.
+   ```
+   magus INFO user_id=default data_dir=C:\project_2026\Magus\data files_root=C:\project_2026\Magus embeddings=none
+   ```
+
+### 2. 시험 문장 세 개
+
+셋 다 읽기만 하고 원고는 바꾸지 않습니다. 기대 결과는 2026-10-03 실원고 임포트 기준입니다.
+
+| 말하기 | 불리는 도구 | 기대 결과 |
+|---|---|---|
+| "Magus로 책 지도를 보여 줘" | `book_outline` | 첫 줄 `프로젝트: 닿으려는 종 (book)`<br>둘째 줄 `40장 · 8부 · 249,065자 · 미확인 인용(장별 합) 355 · 열린 미해결 86`<br>미해결 절 `코멘트 유래 미해결 86건(citation 44 · fact 39 · general 3)` |
+| "35장의 인용을 점검해 줘" | `ref_check(35)` | `verified: []`, `unique_unchecked: 9`<br>하야시·후닝·케인스·김성은·크레머·모리스·넌에 `matched_by: 음역 추정`<br>케인스(1930)는 `음역 추정·연도 a/b 모호` |
+| "사실·수치 확인 요청만 보여 줘" | `book_issues(kind="fact")` | `미해결 39건 (status=open, kind=fact)`<br>첫 항목 `I3 · open · 1장 · import_comment · fact · 확인 필요: 폐가 부레보다…` |
+
+"미확인 인용(장별 합) 355"는 장마다 센 고유 문헌 수를 더한 값입니다.
+여러 장에 걸친 문헌을 한 번만 세면 296편입니다(`magus cite-report`, 저자 보고서의 수).
+
+도구가 불리지 않거나 오류가 나면 로그 끝부분을 보세요.
+
+### 3. 문헌 등록 시연 (`ref_add`)
+
+1. 논문 PDF를 `C:\project_2026\Magus\fixtures\papers\`에 둡니다(폴더가 없으면 만듭니다). 예: `kremer1993.pdf`.
+2. Desktop 새 대화에서 이렇게 말합니다.
+   > fixtures/papers/kremer1993.pdf를 문헌으로 등록해 줘. 쓸 부분은 "…", 이유는 35장 크레머 문단의 근거.
+3. Claude가 다음과 같이 `ref_add`를 부릅니다.
+   ```
+   ref_add(bib={}, passages=[{text: "쓸 부분", reason: "이유"}], file_path="fixtures/papers/kremer1993.pdf")
+   ```
+   - **경로**: 상대 경로는 Desktop이 서버를 띄운 작업 폴더가 아니라 **프로젝트 폴더** 기준으로 풉니다.
+     프로젝트 폴더는 `DATA_DIR`의 부모이고, `FILES_DIR`로 바꿀 수 있습니다. 절대 경로도 됩니다.
+     `book_import`와 `idea_add_conversation(path)`도 같은 규칙을 씁니다.
+   - **서지**: 저자·연도를 말하지 않아도 됩니다. PDF 첫머리(5,000자)에 참고문헌의 제목이 그대로 있으면 그 문헌을 찾습니다.
+     찾지 못하면 "저자와 연도가 필요하다"는 오류가 납니다. 그때 저자와 연도를 말해 주면 됩니다.
+4. 기대 결과:
+   ```
+   kremer1993: unverified → verified · 발췌 1건 추가(총 1건) · 전문 있음 · aliases 없음
+   citation 이슈 연결 변경 0건 · 이 문헌을 인용하는 장: book: 30장, 32장, 35장
+   ```
+   "35장의 인용을 점검해 줘"를 다시 하면 kremer1993(본문 표기 `크레머(1993)`)이 `verified`로 옮겨 가 있습니다.
+   이 출력은 실데이터 사본에 제목만 적힌 PDF로 미리 돌려 본 결과입니다(사본은 지웠습니다).
+5. 파일이 없으면 다음 오류가 납니다.
+   ```
+   파일이 없다: C:\project_2026\Magus\fixtures\papers\… (상대 경로는 C:\project_2026\Magus 기준으로 푼다)
+   ```
+
+쓸 부분은 논문의 문장을 그대로 붙이는 것이 좋습니다. `ref_search`가 이 발췌를 먼저 돌려주고, 글에는 이것만 인용됩니다.
+PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버가 파일을 직접 읽어 전문을 저장합니다.
+
+서버 쪽 흐름은 `tests/test_stdio.py::test_relative_file_path_from_other_cwd`가 확인합니다.
+이 테스트는 다른 작업 폴더에서 서버를 하위 프로세스로 띄우고, 상대 경로로 PDF를 등록합니다.
+
 ## 처음 쓰는 순서
 
 1. **원고 가져오기**: "`C:\…\원고.docx`를 book_import로 가져와 줘"
@@ -92,7 +154,7 @@ Microsoft Store판은 `%LOCALAPPDATA%\Packages\Claude_…\LocalCache\Roaming\Cla
 | `book_import(path, project_id?, title?, replace?)` | docx(또는 pdf) 원고를 장 단위로 나눕니다. 코멘트는 미해결, 참고문헌은 refs가 됩니다. |
 | `book_export(path?)` | 장을 합쳐 docx로 만듭니다. |
 | `ref_import_bibliography(text)` | 참고문헌 목록을 refs(unverified)로 넣습니다. |
-| `ref_add(bib, passages, file_path?/full_text?, aliases?)` | 읽은 문헌을 발췌와 함께 verified로 넣습니다. |
+| `ref_add(bib, passages, file_path?/full_text?, aliases?)` | 읽은 문헌을 발췌와 함께 verified로 넣습니다. 저자·연도 없이 파일만 주면 첫머리의 제목으로 참고문헌에서 찾습니다. |
 | `ref_search(query, scope, k)` | verified 문헌의 발췌(먼저)와 전문에서 찾습니다. |
 | `ref_check(chapter_number)` | 장의 인용을 verified / unverified / unknown으로 나눕니다. |
 | `idea_add(text, kind, origin?)` | 내 생각 하나를 기록합니다(author=me). |
@@ -109,6 +171,7 @@ Microsoft Store판은 `%LOCALAPPDATA%\Packages\Claude_…\LocalCache\Roaming\Cla
 |---|---|---|
 | `USER_ID` | `default` | 사용자 id |
 | `DATA_DIR` | `./data` | 원본 파일과 인덱스(index.sqlite)를 두는 위치 |
+| `FILES_DIR` | `DATA_DIR`의 부모 | 도구에 준 상대 경로(`fixtures/papers/논문.pdf`)를 푸는 기준 |
 | `EMBEDDINGS` | `none` | `none` \| `voyage` \| `openai` |
 | `VOYAGE_API_KEY` / `OPENAI_API_KEY` | — | 임베딩 제공자를 쓸 때만 필요합니다 |
 | `EMBEDDINGS_MODEL` | voyage-3.5 / text-embedding-3-small | 임베딩 모델 |
@@ -124,6 +187,9 @@ magus serve                                     # MCP 서버(stdio). Claude Desk
 magus import fixtures/닿으려는_종.docx --project-id book
 magus import <파일> --project-id book --replace # 다시 임포트(기존 것은 trash/로)
 magus conversation fixtures/대화_전체_기록.md     # 대화 기록 → 영감 책장
+magus cite-report --project-id book             # 책 전체 인용 집계(개발자용)
+magus author-report --project-id book --out docs/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + 같은 이름 docx)
+magus terms --project-id book --add 마닐라 "모스크바 회사"   # 인용으로 보지 않을 낱말(지명·사건). 인자 없으면 목록
 magus synth data/synthetic-fixtures             # 합성 원고·대화 기록 만들기(실파일이 없을 때)
 magus seed-demo                                 # 데모 프로젝트와 책장 표본
 magus reindex                                   # 원본 파일로 인덱스를 다시 만듭니다(파일을 직접 고친 뒤)

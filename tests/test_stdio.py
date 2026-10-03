@@ -76,3 +76,40 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
         assert styled.startswith("기록함 ")
         assert "구절: “고래는 돌아갔다.”" in _text(await client.call_tool("style_search", {"query": "짧은 리듬"}))
 
+
+
+async def test_relative_file_path_from_other_cwd(data_dir: Path, tmp_path: Path):
+    """Desktop은 서버를 어느 작업 폴더에서 띄울지 정하지 않는다. 상대 경로는 DATA_DIR의 부모(프로젝트 폴더) 기준이어야 한다.
+    README '첫 실행 확인'의 시연: "fixtures/papers/<파일>.pdf를 문헌으로 등록해 줘. 쓸 부분은 ~, 이유는 ~"."""
+    import pymupdf
+
+    papers = tmp_path / "fixtures" / "papers"
+    papers.mkdir(parents=True)
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        page.insert_text((72, 72), "Population Growth and Technological Change:")
+        page.insert_text((72, 90), "One Million B.C. to 1990")
+        page.insert_text((72, 120), "Michael Kremer. Quarterly Journal of Economics")
+        doc.save(papers / "kremer.pdf")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "magus", "serve"],
+        env={**os.environ, "USER_ID": "alice", "DATA_DIR": str(data_dir), "EMBEDDINGS": "none"},
+        cwd=str(elsewhere),
+    )
+    bib_line = "Kremer, M. (1993). Population growth and technological change: One million B.C. to 1990. Quarterly Journal of Economics, 108(3), 681–716."
+    async with Client(params) as client:
+        assert "새 refs 1건" in _text(await client.call_tool("ref_import_bibliography", {"text": bib_line}))
+        passage = {"text": "인구가 많을수록 기술 진보가 빠르다", "reason": "35장 크레머 문단의 근거"}
+        # 저자·연도 없이 파일만: 전문 첫머리의 제목으로 참고문헌을 찾는다
+        added = _text(
+            await client.call_tool("ref_add", {"bib": {}, "passages": [passage], "file_path": "fixtures/papers/kremer.pdf"})
+        )
+        assert added.startswith("kremer1993: unverified → verified") and "전문 있음" in added
+        missing = await client.call_tool("ref_add", {"bib": {"key": "x2000"}, "passages": [passage], "file_path": "fixtures/papers/없음.pdf"})
+        assert missing.is_error and f"{tmp_path} 기준으로 푼다" in missing.content[0].text
+    stored = LocalStore(data_dir)
+    assert stored.get_ref("alice", "kremer1993").file_path == str((papers / "kremer.pdf").resolve())
+    stored.close()

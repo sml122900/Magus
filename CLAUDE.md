@@ -4,9 +4,9 @@
 
 ## 진행상황
 
-- 현재 단계: P0 실데이터 검증 완료(태그 `p0-realdata`). 실원고 PDF와 실대화 4종으로 완료 기준을 모두 충족했다.
-- 다음 할 일: 사용자가 집계 리포트로 문헌 확인(ref_add)을 시작하고, Desktop 실사용에서 문제가 나오면 재현 테스트부터 만든다.
-- 대기 사항: 검토 대기 결정(status.md 4절) 확인, Desktop 재시작 후 실사용(사용자). 상세는 status.md에만 적는다.
+- 현재 단계: P0 완료 + 저자용 첫 보고서(태그 `p0-report1`). 코멘트 kind 3분할, 비인용 용어, ref_add 상대 경로까지 마쳤다.
+- 다음 할 일: 저자의 답(연도 불일치·음역 추정·Acemoglu)을 반영하고, Desktop 실사용에서 문제가 나오면 재현 테스트부터 만든다.
+- 대기 사항: 보고서 답변, Desktop 재시작 후 "첫 실행 확인", fixtures/papers/ 논문 PDF, 검토 대기 결정(사용자). 상세는 status.md에만 적는다.
 
 ## 개요
 
@@ -44,6 +44,7 @@
 - **인용 게이트**: refs에 `status=verified`로 있는 출처만 인용할 수 있다. 없는 출처는 본문에 `[출처 필요: 주장 요약]`으로 남긴다. 쓰기를 막지는 않는다. 표시하고 집계만 하며, 판단은 사용자가 한다.
 - **누가 말했는지 보존한다.** Casper는 사용자 발화(`author=me`)와 AI 발화(`author=ai`)를 구분해 저장하고, 검색에서는 me를 먼저 보여 준다.
 - **원본은 사람이 읽을 수 있는 파일(markdown/json)이다. SQLite는 인덱스일 뿐이다.** 인덱스는 언제든 파일에서 다시 만들 수 있어야 한다(`magus reindex`). 파일에 없는 정보를 SQLite에만 두지 않는다. 예외는 계산으로 얻는 값(char_count, unverified_cite_count, chunks)이다.
+- **프로젝트 폴더 밖의 파일은 사용자가 경로를 명시해 지시했을 때만 읽는다.** 필요한 파일이 없으면 status.md에 "대기: 무엇을, 누가"로 기록하고 멈춘다. 다른 폴더를 뒤져 찾아오지 않는다.
 - **합성·테스트 데이터는 `default` 사용자에 넣지 않는다.** default는 실제 저자의 책장이다. 데모 문체 표본이 저자의 취향으로, 가짜 서지가 진짜 서지로 섞인다. 데모는 `USER_ID=demo`, 합성은 `USER_ID=synthetic`을 쓴다. CLI는 default에 `seed-demo`와 `import --synthetic`을 거부한다.
 - **SaaS 준비**
   - 모든 레코드(모든 테이블의 모든 행)에 `user_id`가 있고, 모든 쿼리는 `user_id`로 필터한다.
@@ -82,6 +83,7 @@
 |---|---|---|
 | `USER_ID` | `default` | P0 단일 사용자 id(영문·숫자·`_`·`-`, 64자 이하) |
 | `DATA_DIR` | `./data` | 원본 파일과 index.sqlite의 루트 |
+| `FILES_DIR` | `DATA_DIR`의 부모 | 도구가 받은 상대 경로(`fixtures/papers/논문.pdf`)를 푸는 기준. Desktop이 띄우는 작업 폴더는 정해져 있지 않으므로 작업 폴더 기준으로 풀지 않는다(`magus/paths.py`) |
 | `EMBEDDINGS` | `none` | `none` \| `voyage` \| `openai` |
 | `VOYAGE_API_KEY` / `OPENAI_API_KEY` | — | 해당 제공자를 쓸 때만 |
 | `EMBEDDINGS_MODEL` | 제공자 기본값 | 임베딩 모델 이름 |
@@ -95,8 +97,13 @@
   - **status 값은 `draft` | `revising` | `done` 중 하나다.** 쓸 때 그 밖의 값이 오면 거부한다(Store는 ValueError, 도구는 스키마 enum으로 막는다).
 - chapter_versions(id, user_id, chapter_id, version, path, note, created_at) — 보관된 **이전** 본문들
 - decisions(user_id, project_id, id, text, created_at) — id는 프로젝트별 일련번호 `D{n}`
-- issues(user_id, project_id, id, text, status: open|closed, origin: import_comment|user|agent, chapter_number?, created_at, closed_note?, kind: citation|general, ref_key?, ref_id?) — id는 프로젝트별 일련번호 `I{n}`
-  - `kind`: 임포트할 때 코멘트 본문에 "확인 필요", "인용 확인 필요", "원문 대조"가 들어 있으면(공백 차이는 무시), 또는 독립된 낱말 "서지"가 있으면(앞뒤 문맥으로 판정, "일어서지"는 아님) `citation`, 아니면 `general`이다. 직접 남긴 이슈는 `general`이 기본값이다.
+- issues(user_id, project_id, id, text, status: open|closed, origin: import_comment|user|agent, chapter_number?, created_at, closed_note?, kind: citation|fact|general, ref_key?, ref_id?) — id는 프로젝트별 일련번호 `I{n}`
+  - `kind`: 임포트할 때 코멘트로 정한다. 직접 남긴 이슈는 `general`이 기본값이다.
+    - 출처 확인 코멘트: 본문에 "확인 필요", "인용 확인 필요", "원문 대조"가 들어 있거나(공백 차이와 실제 변형 허용), 독립된 낱말 "서지"가 있는 것("일어서지"는 아님).
+    - `citation`: 출처 확인 코멘트이고 문헌이 지목된 것(코멘트 본문, 또는 서로 다른 인용이 하나뿐인 앵커에서 저자·연도를 찾음).
+    - `fact`: 출처 확인 코멘트지만 문헌이 없는 것(사실·수치 확인 요청).
+    - `general`: 그 외. 인용처럼 보인 것이 모두 비인용 용어면 출처 확인 코멘트여도 general이다(I46 `선하이정(1835)`).
+  - **비인용 용어**: 프로젝트별 `book/non_citation_terms.txt`(한 줄에 하나, `#` 주석). 연도 앞에 오는 지명·사건·기관(마닐라(1571), 모스크바 회사(1555))을 인용 추출 전체(ref_check, 집계, 이슈 연결, 코멘트 분류)에서 뺀다. 여러 낱말 용어는 저자 앞 글과 이어서 본다. `--replace` 재임포트 때 새 프로젝트로 옮긴다. CLI `magus terms`로 고친다.
   - `ref_key`: citation 코멘트에서 뽑은 저자·연도 후보(`daeschler2006`, 한글이면 조사를 뗀 `갤러2022`). 코멘트 본문에 없으면 앵커 원문에서 찾고, 그래도 없으면 null이다. 추출기는 `magus/melchior/citations.py`이고, ref_check도 이것을 쓴다.
   - `ref_id`: ref_key를 refs(key 또는 aliases)에서 해석한 **정식 ref key**(예: `갤러2022` ⇒ `galor2022`). refs 행 id는 재생성되면 바뀌므로 key를 쓴다. 임포트, ref_add, ref_import_bibliography 뒤에 다시 계산한다.
 - chapters.unverified_cite_count: verified가 아닌 **고유 문헌 수**(unverified + unknown, uncertain 제외). 출현 횟수가 아니다(사용자 결정 #17 변경). 파생값이라 인덱스에만 두고, 서버 시작·`magus reindex`·refs 변경·장 쓰기 때 다시 계산한다.
@@ -189,7 +196,8 @@ data/synthetic-fixtures/                                          # magus synth 
 - `ref_add(bib, passages: [{text, reason, locator?}], file_path? | full_text?, aliases?)` → status=verified로 넣는다.
   - **발췌가 하나 이상 있어야 받는다.**
   - bib은 `{key}` 또는 `{authors|author, year, title…}`이다. 같은 key나 alias가 unverified로 있으면 verified로 올리고 bib·aliases·발췌를 합친다.
-  - 전문은 txt/md/pdf/docx 파일이나 full_text로 받는다. 발췌는 ref_picked 레인, 전문은 ref_full 레인으로 청킹한다.
+  - key도 저자·연도도 없으면 bib 제목이나 전문 첫머리 5,000자에 참고문헌 제목이 그대로 있는 문헌 하나를 고른다(둘 이상이면 오류). "fixtures/papers/<파일>.pdf를 문헌으로 등록해 줘"처럼 파일만 받는 경우다.
+  - 전문은 txt/md/pdf/docx 파일이나 full_text로 받는다. 상대 경로는 `FILES_DIR` 기준이다(book_import, idea_add_conversation도 같다). 발췌는 ref_picked 레인, 전문은 ref_full 레인으로 청킹한다.
 - `ref_search(query, scope=picked|full|both(기본), k=8)` → 하이브리드 검색. picked 결과를 먼저 보여 주고, full 결과에는 "발췌되지 않은 부분 → ref_add로 발췌 추가"라고 표시한다.
 - `ref_check(chapter_number, project_id?)` → JSON: verified / unverified / unknown(refs에 없음) / uncertain(한글 표기인데 refs와 못 이음: 인명이면 aliases 필요, 지명·사건이면 무시) 목록과 `unique_unchecked`, `needs_source`.
   - 문헌마다 `count`(출현), `cited_as`, `paragraphs`(장 본문의 문단 번호), `matched_by`(alias·음역 추정·연도 a/b 모호)를 담는다.
@@ -200,6 +208,9 @@ data/synthetic-fixtures/                                          # magus synth 
   - 해석: key → aliases → 공저자로 동명 판별 → 연도 a/b → (한글만) 같은 연도 안 음역 추정(`magus/melchior/translit.py`). 지명·사건 접미사와 일반명사는 저자로 보지 않는다.
 - 책 전체 집계는 CLI `magus cite-report --project-id <id>`로 낸다(`magus/melchior/report.py`).
   - 내용: 고유 미확인 수, 많이 인용된 순위, 참고문헌에 없는 인용(+같은 저자 다른 연도 힌트), uncertain, 추정 연결, 미인용 항목.
+- 저자용 보고서는 CLI `magus author-report --project-id <id> --out docs/reports/<날짜>-인용-점검.md`로 만든다(`magus/melchior/author_report.py`, 같은 이름의 docx도 만든다).
+  - 독자는 개발자가 아니다. key 대신 "저자(연도) 『제목』", 설명은 한두 문장, 3쪽 이내. 대상 사용자·프로젝트의 데이터만 쓴다.
+  - 7개 절: 한 줄 요약 / 바로 확인할 것(연도 불일치, 참고문헌에만 있는 것) / 답해 주실 질문(음역 추정, 동명 판별) / 확인 순서 상위 20 / 사실·수치 요청(fact) / 장별 미확인 수 / 앞으로의 방식.
 
 ### 영감 — Casper (`magus/casper/`)
 - `idea_add(text, kind, origin?)` → author=me로 저장한다.
@@ -252,6 +263,9 @@ magus synth <폴더>                        # 합성 fixture 만들기
 magus seed-demo                           # 데모 프로젝트 + 책장 표본
 magus reindex                             # 파일 → index.sqlite 재생성 + 파생값 재계산
 magus cite-report --project-id book       # 책 전체 인용 집계(확인 순서)
+magus author-report --project-id book --out docs/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + docx)
+magus terms --project-id book [--add …] [--remove …]                         # 비인용 용어 보기·고치기
+.venv/Scripts/python -m ruff check --select F,B src tests                    # 린트(pyflakes·bugbear)
 ```
 
 ## fixtures
@@ -284,6 +298,7 @@ docs/
 ├── daily/YYYY-MM-DD.md      # 일지. 날짜는 로컬(KST) 기준
 ├── decisions/<name>.md      # 기술 결정 기록
 ├── troubleshooting/<name>.md# 트러블슈팅 기록
+├── reports/YYYY-MM-DD-<주제>.md # 저자에게 보내는 보고서(같은 이름의 docx 포함). 생성기로 만들고 손으로 고치지 않는다
 └── par-materials.md         # 이력서 소재 모음
 ```
 

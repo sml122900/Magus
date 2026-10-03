@@ -60,7 +60,8 @@ def test_comments_become_classified_issues(store: LocalStore, report):
     assert by_text["서문 톤 조정"].chapter_number is None  # 분할 못 한 구간
     assert by_text["서지 확인 필요: 번역서 연도"].chapter_number is None  # 참고문헌 구간
     assert dict(report.comments_outside) == {"unsplit": 1, "bib": 1}
-    assert {i.kind for i in issues} == {"citation", "general"}
+    assert {i.kind for i in issues} == {"citation", "fact", "general"}
+    assert by_text["서지 확인 필요: 번역서 연도"].kind == "fact"  # 앵커(참고문헌 줄)에 인용 표기가 없다
 
 
 def test_bibliography_and_files(store: LocalStore, report, data_dir: Path):
@@ -101,7 +102,7 @@ def test_import_reindex_roundtrip(store: LocalStore, report):
 def test_outline_of_imported_project(store: LocalStore, report):
     text = build_outline(store, "alice", "synth")
     assert estimate_tokens(text) <= TOKEN_BUDGET
-    assert "- 코멘트 유래 미해결 13건 — book_issues로 조회" in text
+    assert "- 코멘트 유래 미해결 13건(citation " in text
     assert "### 제2부 뭍" in text and "- 제4장 닿으려는 손 · draft" in text
 
 

@@ -30,6 +30,14 @@ def main(argv: list[str] | None = None) -> None:
     cite = sub.add_parser("cite-report", help="책 전체 인용 집계(미확인 문헌 순위, 참고문헌 누락·미인용)")
     cite.add_argument("--project-id", required=True)
     cite.add_argument("--top", type=int, default=20)
+    author = sub.add_parser("author-report", help="저자용 인용 점검 보고서(md + docx)")
+    author.add_argument("--project-id", required=True)
+    author.add_argument("--out", type=Path, required=True, help="md 경로. 같은 이름의 .docx도 만든다")
+    author.add_argument("--date", default=None)
+    terms = sub.add_parser("terms", help="프로젝트의 비인용 용어(지명·사건 등) 보기·추가·빼기")
+    terms.add_argument("--project-id", required=True)
+    terms.add_argument("--add", nargs="*", default=[])
+    terms.add_argument("--remove", nargs="*", default=[])
     synth = sub.add_parser("synth", help="합성 fixture(원고 docx·pdf, 대화 기록 md)를 만든다")
     synth.add_argument("folder", type=Path)
     sub.add_parser("seed-demo", help="1단계 확인용 가짜 프로젝트 생성")
@@ -51,7 +59,10 @@ def main(argv: list[str] | None = None) -> None:
         parser.exit(2, "합성·데모 데이터는 default 사용자에 넣지 않습니다. USER_ID=demo 또는 USER_ID=synthetic로 실행하세요.\n")
     store = LocalStore(settings.data_dir)
     log = logging.getLogger("magus")
-    log.info("user_id=%s data_dir=%s embeddings=%s", settings.user_id, settings.data_dir, settings.embeddings)
+    log.info(
+        "user_id=%s data_dir=%s files_root=%s embeddings=%s",
+        settings.user_id, settings.data_dir, settings.files_root, settings.embeddings,
+    )
 
     if args.cmd == "serve":
         from magus import transports
@@ -80,6 +91,25 @@ def main(argv: list[str] | None = None) -> None:
         from magus.melchior.report import build_cite_report
 
         print(build_cite_report(store, settings.user_id, args.project_id).render(args.top))
+    elif args.cmd == "author-report":
+        from datetime import date
+
+        from magus.melchior.author_report import build_author_report, write_docx
+
+        text = build_author_report(store, settings.user_id, args.project_id, args.date or date.today().isoformat())
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(text, encoding="utf-8", newline="\n")
+        print(f"{args.out}\n{write_docx(text, args.out.with_suffix('.docx'))}")
+    elif args.cmd == "terms":
+        from magus.melchior.check import after_refs_changed
+
+        current = store.get_non_citation_terms(settings.user_id, args.project_id)
+        if args.add or args.remove:
+            updated = [t for t in [*current, *args.add] if t not in set(args.remove)]
+            store.set_non_citation_terms(settings.user_id, args.project_id, updated)
+            after_refs_changed(store, settings.user_id)  # 장별 미확인 수·이슈 연결을 새 용어로 다시 계산
+            current = store.get_non_citation_terms(settings.user_id, args.project_id)
+        print("\n".join(current) or "(없음)")
     elif args.cmd == "conversation":
         from magus.casper.tools import add_conversation
 

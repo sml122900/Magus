@@ -19,6 +19,8 @@ class Settings:
     embeddings: str = "none"
     voyage_api_key: str | None = None
     openai_api_key: str | None = None
+    # 도구가 받은 상대 경로(fixtures/papers/논문.pdf)를 푸는 기준. Desktop이 띄우는 작업 폴더는 정해져 있지 않다.
+    files_root: Path | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -26,10 +28,12 @@ class Settings:
         embeddings = (env.get("EMBEDDINGS") or "none").strip().lower()
         if embeddings not in EMBEDDING_PROVIDERS:
             raise ValueError(f"EMBEDDINGS={embeddings!r}: {'|'.join(EMBEDDING_PROVIDERS)} 중 하나여야 한다")
+        data_dir = Path(env.get("DATA_DIR") or "./data").resolve()
         return cls(
             user_id=safe_id((env.get("USER_ID") or "default").strip(), "USER_ID"),
-            data_dir=Path(env.get("DATA_DIR") or "./data").resolve(),
+            data_dir=data_dir,
             embeddings=embeddings,
             voyage_api_key=env.get("VOYAGE_API_KEY") or None,
             openai_api_key=env.get("OPENAI_API_KEY") or None,
+            files_root=Path(env.get("FILES_DIR") or data_dir.parent).resolve(),
         )

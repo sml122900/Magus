@@ -25,9 +25,9 @@ def build_server(settings: Settings, store: Store, embedder: Embedder | None = N
     # 장별 미확인 인용 수는 파생값이라 인덱스를 다시 만든 뒤에는 0이다. 시작할 때 한 번 맞춘다.
     refresh_cite_counts(store, settings.user_id)
     tools = [
-        *book_tools(store, current_user),
-        *melchior_tools(store, current_user, embedder),
-        *casper_tools(store, current_user, embedder),
+        *book_tools(store, current_user, settings.files_root),
+        *melchior_tools(store, current_user, embedder, settings.files_root),
+        *casper_tools(store, current_user, embedder, settings.files_root),
         *balthasar_tools(store, current_user, embedder),
     ]
     # instructions는 실제로 등록된 도구만 언급하도록 도구 목록에서 조립한다.

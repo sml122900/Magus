@@ -17,7 +17,8 @@ from mcp.server.mcpserver.tools import Tool
 from magus.book.export import export_docx
 from magus.book.importer import import_manuscript
 from magus.book.outline import build_outline
-from magus.melchior.check import CheckResult, check_chapter, check_text
+from magus.melchior.check import CheckResult, check_chapter, check_text, terms_of
+from magus.paths import resolve_input
 from magus.store import Issue, Project, Store
 from magus.store.base import ChapterStatus
 from magus.store.formats import one_line, strip_front_matter
@@ -54,7 +55,7 @@ def _issue_line(i: Issue) -> str:
     return line + (f" · 닫음: {one_line(i.closed_note)}" if i.closed_note else "")
 
 
-def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
+def build_tools(store: Store, current_user: Callable[[], str], files_root: Path | None = None) -> list[Tool]:
     def resolve_project(project_id: str | None) -> Project:
         project = store.get_project(current_user(), project_id)
         if project is None:
@@ -84,7 +85,7 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
                 "last_note": m.last_note,
                 "updated_at": m.updated_at,
                 "char_count": m.char_count,
-                **_gate(check_text(store, user, chapter.content)),
+                **_gate(check_text(store, user, chapter.content, exclude=terms_of(store, user, project.id))),
                 "open_issues": [f"I{i.id} {one_line(i.text)[:120]}" for i in open_issues],
                 "content": chapter.content,
             }
@@ -126,7 +127,7 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
         status: Literal["open", "closed", "all"] = "open",
         chapter_number: int | None = None,
         origin: Literal["import_comment", "user", "agent"] | None = None,
-        kind: Literal["citation", "general"] | None = None,
+        kind: Literal["citation", "fact", "general"] | None = None,
         limit: int = 50,
         project_id: str | None = None,
     ) -> str:
@@ -194,7 +195,7 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
     ) -> str:
         try:
             report = import_manuscript(
-                store, current_user(), Path(path).expanduser(), project_id=project_id, title=title, replace=replace
+                store, current_user(), resolve_input(path, files_root), project_id=project_id, title=title, replace=replace
             )
         except (ValueError, FileNotFoundError) as e:
             raise ToolError(str(e)) from e
@@ -243,7 +244,7 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
             name="book_import",
             description=(
                 "원고 파일(docx, 없으면 pdf)의 로컬 경로를 받아 새 프로젝트로 임포트한다. '제N부'·'제N장' 제목으로 장을 나누고, "
-                "Word 코멘트는 미해결(import_comment, kind=citation|general)로, 참고문헌은 refs(unverified)로 넣는다. "
+                "Word 코멘트는 미해결(import_comment, kind=citation|fact|general)로, 참고문헌은 refs(unverified)로 넣는다. "
                 "그림·표·수식은 [그림 N]·[표 N]·[수식] 자리표시자로 남기고 원본은 original/에 복사한다. "
                 "같은 project_id가 이미 있으면 replace=true일 때만 기존 것을 휴지통으로 옮기고 다시 만든다. "
                 "리포트(장·부 수, 분할 못 한 구간, 코멘트 분류, 참고문헌 파싱)와 장 매핑표를 돌려준다."
@@ -286,7 +287,7 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
             name="book_issues",
             description=(
                 "미해결 목록(조회 전용). status=open|closed|all, chapter_number, origin=import_comment|user|agent, "
-                "kind=citation|general로 거른다. 한 줄에 하나: 번호·상태·장·출처·종류(citation이면 →ref_key 후보)·내용. "
+                "kind=citation(문헌 지목)|fact(사실·수치 확인)|general로 거른다. 한 줄에 하나: 번호·상태·장·출처·종류(citation이면 →ref_key 후보)·내용. "
                 f"limit 기본 50, 최대 {ISSUE_LIST_MAX}."
             ),
             structured_output=False,

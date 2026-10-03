@@ -138,11 +138,18 @@ def _paragraph_starts(text: str) -> list[int]:
     return [0, *(m.end() for m in re.finditer(r"\n\s*\n", text))]
 
 
-def check_text(store: Store, user_id: str, text: str, resolver: Resolver | None = None) -> CheckResult:
+def terms_of(store: Store, user_id: str, project_id: str) -> frozenset[str]:
+    """프로젝트의 비인용 용어(book/non_citation_terms.txt)."""
+    return frozenset(store.get_non_citation_terms(user_id, project_id))
+
+
+def check_text(
+    store: Store, user_id: str, text: str, resolver: Resolver | None = None, exclude: frozenset[str] = frozenset()
+) -> CheckResult:
     resolver = resolver or Resolver(store, user_id)
     starts = _paragraph_starts(text)
     groups: dict[str, CiteGroup] = {}
-    for c in find_citations(text):
+    for c in find_citations(text, exclude=exclude):
         ref, how = resolver.resolve(c.lookup_keys, c.author if c.hangul else None, c.year, c.coauthors)
         if ref:
             key, status = ref.key, ref.status
@@ -162,7 +169,7 @@ def check_chapter(store: Store, user_id: str, project_id: str, number: int, reso
     chapter = store.read_chapter(user_id, project_id, number)
     if chapter is None:
         return None
-    result = check_text(store, user_id, chapter.content, resolver)
+    result = check_text(store, user_id, chapter.content, resolver, terms_of(store, user_id, project_id))
     store.set_cite_counts(user_id, project_id, {number: result.unchecked_count})
     return result
 
@@ -171,11 +178,12 @@ def refresh_cite_counts(store: Store, user_id: str) -> None:
     """refs가 바뀐 뒤나 인덱스를 다시 만든 뒤에 사용자의 모든 장 집계를 다시 계산한다."""
     resolver = Resolver(store, user_id)
     for project in store.list_projects(user_id):
+        terms = terms_of(store, user_id, project.id)
         counts = {}
         for meta in store.list_chapters(user_id, project.id):
             chapter = store.read_chapter(user_id, project.id, meta.number)
             if chapter is not None:
-                counts[meta.number] = check_text(store, user_id, chapter.content, resolver).unchecked_count
+                counts[meta.number] = check_text(store, user_id, chapter.content, resolver, terms).unchecked_count
         store.set_cite_counts(user_id, project.id, counts)
 
 
@@ -196,11 +204,12 @@ def link_citation_issues(store: Store, user_id: str) -> int:
     resolver = Resolver(store, user_id)
     changed = 0
     for project in store.list_projects(user_id):
+        terms = terms_of(store, user_id, project.id)
         updates: dict[int, str | None] = {}
         for issue in store.list_issues(user_id, project.id, None, kind="citation"):
             comment = issue.text.partition(COMMENT_ANCHOR_SPLIT)[0]  # 이슈에 남은 앵커는 120자로 잘려 있다
             ref = None
-            if cite := next(iter(find_citations(comment, bare=True)), None):
+            if cite := next(iter(find_citations(comment, bare=True, exclude=terms)), None):
                 ref, _ = resolver.resolve(cite.lookup_keys, cite.author if cite.hangul else None, cite.year, cite.coauthors)
             elif issue.ref_key:
                 keys, hangul, year = _issue_lookup(issue.ref_key)
@@ -223,8 +232,9 @@ def chapters_citing(store: Store, user_id: str, key: str) -> dict[str, list[int]
     resolver = Resolver(store, user_id)
     out: dict[str, list[int]] = defaultdict(list)
     for project in store.list_projects(user_id):
+        terms = terms_of(store, user_id, project.id)
         for meta in store.list_chapters(user_id, project.id):
             chapter = store.read_chapter(user_id, project.id, meta.number)
-            if chapter and any(g.key == key for g in check_text(store, user_id, chapter.content, resolver).groups):
+            if chapter and any(g.key == key for g in check_text(store, user_id, chapter.content, resolver, terms).groups):
                 out[project.id].append(meta.number)
     return dict(out)

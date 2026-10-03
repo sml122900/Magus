@@ -43,6 +43,7 @@ from magus.store.schema import SCHEMA, SCHEMA_VERSION, TABLES
 
 log = logging.getLogger("magus.store")
 
+NON_CITATION_TERMS = "non_citation_terms.txt"
 _CHAPTER_FILE = re.compile(r"ch-(\d+)\.md")
 _VERSION_FILE = re.compile(r"ch-(\d+)\.v(\d+)\.md")
 
@@ -132,6 +133,19 @@ class LocalStore(ShelfMixin):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
         return self._rel(path)
+
+    @_locked
+    def get_non_citation_terms(self, user_id: str, project_id: str) -> list[str]:
+        path = self._project_dir(user_id, project_id) / "book" / NON_CITATION_TERMS
+        lines = (line.strip() for line in _read_text(path).splitlines())
+        return [line for line in lines if line and not line.startswith("#")]
+
+    @_locked
+    def set_non_citation_terms(self, user_id: str, project_id: str, terms: list[str]) -> None:
+        path = self._require_project(user_id, project_id) / "book" / NON_CITATION_TERMS
+        clean = list(dict.fromkeys(t.strip() for t in terms if t.strip()))
+        header = "# 인용 추출에서 뺄 낱말(지명·사건·기관 등). 한 줄에 하나. 예: 마닐라(1571)의 '마닐라'\n"
+        _write_text(path, header + "".join(f"{t}\n" for t in clean))
 
     @_locked
     def set_parts(self, user_id: str, project_id: str, parts: list[Part]) -> None:

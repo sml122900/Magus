@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from magus.melchior.check import Resolver, check_text
+from magus.melchior.check import Resolver, check_text, terms_of
 from magus.store import Store
 
 
@@ -87,6 +87,7 @@ class CiteReport:
 
 def build_cite_report(store: Store, user_id: str, project_id: str) -> CiteReport:
     resolver = Resolver(store, user_id)
+    terms = terms_of(store, user_id, project_id)
     docs: dict[str, DocStat] = {}
     per_chapter = []
     needs_source = 0
@@ -94,7 +95,7 @@ def build_cite_report(store: Store, user_id: str, project_id: str) -> CiteReport
         chapter = store.read_chapter(user_id, project_id, meta.number)
         if chapter is None:
             continue
-        result = check_text(store, user_id, chapter.content, resolver)
+        result = check_text(store, user_id, chapter.content, resolver, terms)
         needs_source += result.needs_source
         per_chapter.append(
             (meta.display, meta.title, result.unchecked_count,

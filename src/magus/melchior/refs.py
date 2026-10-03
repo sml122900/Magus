@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,24 @@ def derive_key(bib: dict[str, Any]) -> str:
     return make_ref_key(author, year)
 
 
+def _norm(text: str) -> str:
+    return re.sub(r"[^0-9a-z가-힣]+", " ", unicodedata.normalize("NFKC", text).lower()).strip()
+
+
+def key_by_title(store: Store, user_id: str, bib: dict[str, Any], full_text: str | None) -> str:
+    """bib에 key도 저자·연도도 없을 때: bib의 제목이나 전문 첫머리(5,000자)에 제목이 그대로 들어 있는 참고문헌 하나.
+    "fixtures/papers/논문.pdf를 문헌으로 등록해 줘"처럼 파일만 받았을 때 쓴다. 둘 이상이면 고르지 않는다."""
+    haystack = _norm(f"{bib.get('title') or ''} {(full_text or '')[:5000]}")
+    hits = [
+        r.key for r in store.list_refs(user_id) if len(title := _norm(str(r.bib.get("title", "")))) >= 12 and title in haystack
+    ]
+    if len(hits) == 1:
+        return hits[0]
+    if hits:
+        raise ValueError(f"제목이 맞는 참고문헌이 여럿이다({', '.join(hits)}). bib에 key를 넣어 달라")
+    raise ValueError("bib에 key가 없으면 저자(authors 또는 author)와 네 자리 연도(year)가 필요하다. 전문 첫머리에서 참고문헌 제목도 찾지 못했다")
+
+
 def add_ref(
     store: Store,
     user_id: str,
@@ -69,7 +88,10 @@ def add_ref(
         full_text = read_fulltext(Path(file_path).expanduser())
 
     clean_bib = {k: v for k, v in bib.items() if v not in (None, "", []) and k != "key"}
-    key = derive_key(bib)
+    try:
+        key = derive_key(bib)
+    except ValueError:
+        key = key_by_title(store, user_id, bib, full_text)
     existing = store.resolve_ref(user_id, key)
     if existing:
         old = store.get_passages(user_id, existing.key)

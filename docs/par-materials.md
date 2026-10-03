@@ -55,3 +55,11 @@
 - R: 35장·8부·코멘트 86건·참고문헌 299건을 복원했다(완료 기준 전부 충족). 대화 기록 4종에서 me/ai 226쌍을 분리했다(기준 파일 96/96). 고유 미확인 문헌 296건과 참고문헌 누락 2건·미인용 4건을 집계해 '확인 순서' 리포트를 냈다. 실원고 outline은 1,946토큰이다. 테스트 140개.
 - 근거: [docs/decisions/realdata-import-calibration.md](decisions/realdata-import-calibration.md), [docs/decisions/citation-matching-realdata.md](decisions/citation-matching-realdata.md), [docs/troubleshooting/pdf-bibliography-merge.md](troubleshooting/pdf-bibliography-merge.md)
 - 이력서용 한 문장: 구조 정보가 없는 297쪽 Word 마크업 PDF에서 레이아웃(좌표·글자 크기·들여쓰기)으로 장·부·코멘트 86건·참고문헌 299건을 복원하고, 한글 음역 인용을 영문 참고문헌에 잇는 매칭으로 296개 미확인 문헌의 확인 순서를 산출했다.
+
+## 개발자 집계를 비개발자 저자의 결정 목록으로 바꾸기
+- 날짜: 2026-10-03
+- P: 인용 집계(cite-report)는 ref key·상태 코드로 된 개발자용 표였다. 실제 독자인 저자(비개발자)가 무엇을 먼저 하고 무엇에 답해야 하는지 알 수 없었다. 원고 메모 84건이 한 목록이어서, 문헌을 찾아 확인할 것과 사실·수치를 확인할 것이 섞여 있었다.
+- A: 코멘트를 citation·fact·general로 나눴다. 지명·사건 오탐은 프로젝트별 비인용 용어 파일로 걸렀다. 생성기는 같은 데이터로 '저자(연도) 『제목』' 표기의 3쪽 보고서(md + docx)를 만든다. 내용은 바로 확인할 것, 답해 주실 질문, 확인 순서, 사실·수치 요청이다. 참고문헌에만 있는 문헌은 본문에서 이름만 나온 자리를 찾는다. 음역 점수만으로는 오탐이 많아, 확실한 문맥(이니셜이 맞는 이름, 괄호, 공저자 가운뎃점)만 썼다. Desktop이 정하지 않는 작업 폴더 때문에 상대 경로가 깨지는 문제를 찾아 기준 폴더를 설정값으로 고정했다. 제목 매칭으로 'PDF 경로만 말하면 등록'되게 했다.
+- R: 397곳·296편을 연도 불일치 2, 참고문헌에만 있는 4, 질문 8, 확인 순서 20, 사실·수치 요청 39로 정리했다(약 2.3쪽). fact 39건은 사용자 예상치와 일치했다. 테스트 150개.
+- 근거: [docs/decisions/comment-kinds-and-non-citation-terms.md](decisions/comment-kinds-and-non-citation-terms.md), [docs/troubleshooting/desktop-relative-path.md](troubleshooting/desktop-relative-path.md), [docs/reports/2026-10-03-인용-점검.md](reports/2026-10-03-인용-점검.md)
+- 이력서용 한 문장: 개발자용 인용 집계를 비개발자 저자가 바로 행동할 수 있는 3쪽 보고서로 자동 생성하고, 원고 메모를 문헌 확인과 사실 확인으로 나눠 저자의 결정 항목을 8개 질문과 우선순위 20편으로 줄였다.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Literal
 
 from mcp.server.mcpserver.exceptions import ToolError
@@ -13,6 +14,7 @@ from pydantic import BaseModel, Field
 from magus.melchior.bibliography import import_bibliography
 from magus.melchior.check import after_refs_changed, chapters_citing, check_chapter
 from magus.melchior.refs import add_ref
+from magus.paths import resolve_input
 from magus.search import Embedder, hybrid_search
 from magus.store import Passage, Store
 from magus.store.base import Lane
@@ -25,7 +27,9 @@ class PassageIn(BaseModel):
     locator: str | None = Field(default=None, description="쪽수·장 등 위치(예: p.45)")
 
 
-def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedder | None = None) -> list[Tool]:
+def build_tools(
+    store: Store, current_user: Callable[[], str], embedder: Embedder | None = None, files_root: Path | None = None
+) -> list[Tool]:
     def ref_import_bibliography(text: str) -> str:
         user = current_user()
         report = import_bibliography(store, user, text)
@@ -49,7 +53,7 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
                 user,
                 bib,
                 [Passage(p.text, p.reason, p.locator) for p in passages],
-                file_path=file_path,
+                file_path=str(resolve_input(file_path, files_root)) if file_path else None,
                 full_text=full_text,
                 aliases=aliases,
             )
@@ -121,8 +125,10 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
             name="ref_add",
             description=(
                 "사용자가 실제로 읽은 문헌을 verified로 넣는다. bib: {authors|author, year, title, …} 또는 {key}. "
+                "저자·연도를 모르면 bib를 비우고 file_path만 줘도 된다: 전문 첫머리의 제목으로 참고문헌에서 찾는다. "
                 "passages: [{text, reason, locator?}] 하나 이상 필수(직접 고른 발췌와 고른 이유). "
-                "file_path(txt/md/pdf/docx) 또는 full_text로 전문을 함께 넣을 수 있다. "
+                "file_path(txt/md/pdf/docx, 상대 경로는 프로젝트 폴더 기준. 예: fixtures/papers/논문.pdf) "
+                "또는 full_text로 전문을 함께 넣을 수 있다. "
                 "같은 key나 alias가 unverified로 있으면 verified로 올린다. aliases로 한글 표기(예: 갤러2022)를 더한다."
             ),
             structured_output=False,

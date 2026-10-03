@@ -195,6 +195,7 @@ class ImportReport:
     unsplit_chars: int
     unsplit_preview: str
     comment_rows: list[tuple[int, int | None, str, str | None, str]]  # 이슈 번호, 장, kind, ref_key, 앞 40자
+    comments_linked: int
     comments_outside: Counter
     bib: BibReport
     figures: int
@@ -206,8 +207,6 @@ class ImportReport:
     def summary(self) -> str:
         kinds = Counter(row[2] for row in self.comment_rows)
         citation = kinds.get("citation", 0)
-        with_key = sum(1 for row in self.comment_rows if row[2] == "citation" and row[3])
-        ratio = f"{with_key}/{citation} ({with_key / citation:.0%})" if citation else "0/0"
         lines = [
             f"## 임포트 리포트 — {self.title} ({self.project_id})" + (" · 합성 fixture" if self.synthetic else ""),
             f"- 원본: {self.source}" + "".join(f" · {n}" for n in self.notes),
@@ -218,8 +217,8 @@ class ImportReport:
             f"- 목차 등으로 판단해 버린 제목 줄: {len(self.discarded)}개"
             + (f" — {', '.join(self.discarded[:8])}" + (" …" if len(self.discarded) > 8 else "") if self.discarded else ""),
             f"- 빠진 장 번호: {', '.join(map(str, self.gaps)) or '없음'} · 본문 없는 장: {', '.join(map(str, self.empty_chapters)) or '없음'}",
-            f"- 코멘트 → 이슈 {len(self.comment_rows)}건: citation {citation} · general {kinds.get('general', 0)}"
-            f" · ref_key 후보 {ratio}"
+            f"- 코멘트 → 이슈 {len(self.comment_rows)}건: citation {citation}(문헌 지목, refs 연결 {self.comments_linked})"
+            f" · fact {kinds.get('fact', 0)}(사실·수치 확인) · general {kinds.get('general', 0)}"
             + (f" · 장 밖 코멘트 {dict(self.comments_outside)}" if self.comments_outside else ""),
             f"- {self.bib.render().splitlines()[0]}",
             *(f"  {line}" for line in self.bib.render().splitlines()[1:]),
@@ -273,12 +272,17 @@ def import_manuscript(
     if not split.chapters:
         raise ValueError("'제N장' 제목을 하나도 찾지 못했다. 원고의 장 제목 표기를 확인해 주세요.")
 
+    terms: list[str] = []
     if project_id and store.get_project(user_id, project_id):
         if not replace:
             raise ValueError(f"프로젝트 {project_id!r}가 이미 있다. 새 project_id를 쓰거나 replace=True로 다시 임포트한다.")
+        terms = store.get_non_citation_terms(user_id, project_id)  # 사람이 정한 비인용 용어는 다시 임포트해도 유지
         store.archive_project(user_id, project_id)
     project = store.create_project(user_id, title or manuscript.title or path.stem, project_id=project_id)
     files = {"original": store.save_original(user_id, project.id, path.name, path.read_bytes())}
+    if terms:
+        store.set_non_citation_terms(user_id, project.id, terms)
+    exclude = frozenset(terms)
 
     store.set_parts(user_id, project.id, split.parts)
     empty: list[int] = []
@@ -311,7 +315,7 @@ def import_manuscript(
             outside[region or "위치 모름"] += 1
         else:
             comment_counts[chapter] += 1
-        kind, ref_key = classify_comment(c.text, c.anchor)
+        kind, ref_key = classify_comment(c.text, c.anchor, exclude)
         anchor = one_line(c.anchor)[:120]
         text = (c.text or "(빈 코멘트)") + (f"\n— 원문: “{anchor}”" if anchor else "")
         issue = store.add_issue(
@@ -321,6 +325,7 @@ def import_manuscript(
 
     bib_report = import_bibliography(store, user_id, "\n".join(b.text for b in split.bib_blocks if b.kind == "para"))
     after_refs_changed(store, user_id)  # 장별 미확인 인용 수, citation 이슈 → refs 연결(ref_id)
+    linked = sum(1 for i in store.list_issues(user_id, project.id, None, kind="citation") if i.ref_id)
     numbers = [c.number for c in split.chapters if not c.label]  # 서장(0)·맺음(90)·부록(9N)은 빼고 본다
     gaps = sorted(set(range(1, max(numbers) + 1)) - set(numbers)) if numbers else []
     report = ImportReport(
@@ -339,6 +344,7 @@ def import_manuscript(
         unsplit_chars=len(unsplit_md),
         unsplit_preview=one_line(unsplit_md)[:40],
         comment_rows=rows,
+        comments_linked=linked,
         comments_outside=outside,
         bib=bib_report,
         figures=manuscript.figures,

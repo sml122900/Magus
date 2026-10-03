@@ -1,6 +1,6 @@
 import pytest
 
-from magus.book.comments import classify_comment
+from magus.book.comments import classify_comment, is_citation_comment
 from magus.melchior.citations import find_citations, make_ref_key
 
 
@@ -42,7 +42,7 @@ def test_make_ref_key_folds_diacritics():
     [
         ("Daeschler 2006 원문 확인 필요", None, ("citation", "daeschler2006")),
         ("인용 확인필요", "Clack(2012)은 길게 다룬다.", ("citation", "clack2012")),  # 공백 차이 무시, 원문에서 key
-        ("서지 정보 누락", None, ("citation", None)),
+        ("서지 정보 누락", None, ("fact", None)),  # 출처 확인 요청인데 문헌 지목 없음
         ("원문 대조: Hu et al. 2023 p.12", None, ("citation", "hu2023")),
         ("이 문단은 너무 길다", "Clack(2012)", ("general", None)),
     ],
@@ -73,16 +73,18 @@ def test_year_suffix_is_part_of_key():
 
 
 @pytest.mark.parametrize(
-    ("comment", "kind"),
+    ("comment", "is_request"),
     [
-        ("물고기가 일어서지 못하는 장면 보강", "general"),
-        ("서지 정보 누락", "citation"),
-        ("서지정보 확인", "citation"),
-        ("서지", "citation"),
+        ("물고기가 일어서지 못하는 장면 보강", False),
+        ("서지 정보 누락", True),
+        ("서지정보 확인", True),
+        ("서지", True),
+        ("출간 전에 원문과 대조해 주세요", True),  # 실원고 변형
+        ("표현을 확인할 필요가 있습니다", True),
     ],
 )
-def test_seoji_false_positive(comment, kind):
-    assert classify_comment(comment)[0] == kind
+def test_citation_request_markers(comment, is_request):
+    assert is_citation_comment(comment) is is_request
 
 
 # 실원고(닿으려는 종)에서 확인한 표기들

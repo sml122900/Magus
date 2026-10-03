@@ -54,6 +54,10 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
     issues = store.list_issues(user_id, project.id, "open")
     changes = store.recent_changes(user_id, project.id, limit=5)
     issues_per_chapter = Counter(i.chapter_number for i in issues if i.chapter_number is not None)
+    labels = {c.number: c.label for c in chapters if c.label}  # 90번대 특수 장은 번호 대신 '맺음'·'부록 N'
+
+    def name(number: int) -> str:
+        return labels.get(number) or f"{number}장"
 
     # 첫 줄은 항상 어느 프로젝트인지 밝힌다. project_id를 생략하면 최근 프로젝트가 골라지기 때문이다.
     header_lines = [f"프로젝트: {project.title} ({project.id})"]
@@ -66,7 +70,7 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
         )
     header_lines.append(
         f"{len(chapters)}장 · {len(parts)}부 · {sum(c.char_count for c in chapters):,}자 · "
-        f"미확인 인용 {sum(c.unverified_cite_count for c in chapters)} · 열린 미해결 {len(issues)}"
+        f"미확인 인용(장별 합) {sum(c.unverified_cite_count for c in chapters)} · 열린 미해결 {len(issues)}"
     )
     header = "\n".join(header_lines)
 
@@ -89,17 +93,19 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
     from_comments = len(issues) - len(direct)
     issue_head = f"## 열린 미해결 (직접 남긴 것 {len(direct)}건)"
     if from_comments:
-        issue_head += f"\n- 코멘트 유래 미해결 {from_comments}건 — book_issues로 조회"
+        kinds = Counter(i.kind for i in issues if i.origin == "import_comment")
+        split = " · ".join(f"{k} {kinds[k]}" for k in ("citation", "fact", "general") if kinds[k])
+        issue_head += f"\n- 코멘트 유래 미해결 {from_comments}건({split}) — book_issues(kind)로 조회"
     issue_items = [
         f"- I{i.id}"
-        + (f" · {i.chapter_number}장" if i.chapter_number is not None else "")
+        + (f" · {name(i.chapter_number)}" if i.chapter_number is not None else "")
         + (" · agent" if i.origin == "agent" else "")
         + f" · {_clip(i.text, 60)}"
         for i in direct
     ]
     decision_items = [f"- D{d.id} ({local_time(d.created_at, '%m-%d')}) {_clip(d.text, 60)}" for d in decisions]
     change_items = [
-        f"- {ch.chapter_number}장 v{ch.version} · {local_time(ch.created_at)} · {_clip(ch.note, 50) or '(메모 없음)'}"
+        f"- {name(ch.chapter_number)} v{ch.version} · {local_time(ch.created_at)} · {_clip(ch.note, 50) or '(메모 없음)'}"
         for ch in changes
     ]
 

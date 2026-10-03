@@ -113,13 +113,24 @@ def _citation(author: str, year: str, start: int) -> Citation | None:
     return Citation(author, year, key, start, (key,))
 
 
-def find_citations(text: str, *, bare: bool = False) -> list[Citation]:
-    """본문 순서대로 돌려준다. bare=True면 괄호 없는 '저자 연도' 표기도 찾는다(코멘트용)."""
+def is_excluded(text: str, start: int, author: str, exclude: frozenset[str] | set[str]) -> bool:
+    """프로젝트의 비인용 용어(지명·사건)인가. '모스크바 회사'처럼 여러 낱말이면 저자 앞 글과 이어서 본다."""
+    if not exclude:
+        return False
+    context = re.sub(r"\s+", " ", text[max(0, start - 30) : start] + author).strip()
+    return author in exclude or any(context.endswith(term) for term in exclude)
+
+
+def find_citations(text: str, *, bare: bool = False, exclude: frozenset[str] | set[str] = frozenset()) -> list[Citation]:
+    """본문 순서대로 돌려준다. bare=True면 괄호 없는 '저자 연도' 표기도 찾는다(코멘트용).
+    exclude: 프로젝트의 비인용 용어(book/non_citation_terms.txt). 여기 걸리는 것은 인용으로 보지 않는다."""
     found: dict[int, Citation] = {}
 
     def add(m: re.Match[str], offset: int = 0) -> None:
         group = next(g for g in ("latin", "han", "hangul") if g in m.re.groupindex and m.group(g))
         start = offset + m.start(group)
+        if is_excluded(text, start, m.group(group), exclude):
+            return
         if c := _citation(m.group(group), m.group("year"), start):
             tail = m.group("who")[len(m.group(group)) :]
             names = re.findall(rf"{_LATIN_WORD}|[가-힣]{{1,8}}", tail)

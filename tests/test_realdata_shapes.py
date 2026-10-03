@@ -104,3 +104,35 @@ def test_cite_report(store: LocalStore):
     text = report.render()
     assert "고유 미확인 문헌: **3건**" in text and "| 1 | clack2012 | unverified | 3 | 1, 맺음 |" in text
     assert "마닐라1571" in text.split("한글 표기인데")[1]
+
+
+def test_three_kinds_and_non_citation_terms():
+    from magus.book.comments import classify_comment
+    from magus.melchior.citations import find_citations
+
+    terms = frozenset({"선하이정", "마닐라", "모스크바 회사"})
+    assert classify_comment("인용 확인 필요: Wiessner(2014)의 대화 비율.") == ("citation", "wiessner2014")
+    assert classify_comment("확인 필요: 칙술루브 충돌체의 크기 추정.") == ("fact", None)
+    assert classify_comment("검토 메모: 근거 연구를 인용하면 단단해집니다.") == ("general", None)
+    # 비인용 용어만 걸린 확인 요청은 general(사용자 결정, 실원고 I46)
+    i46 = "확인 필요: 쯔궁 선하이정(1835)의 깊이와 쓰촨 소금의 진출 경위."
+    assert classify_comment(i46)[0] == "citation"  # 용어 목록이 없으면 지명이 인용처럼 잡힌다
+    assert classify_comment(i46, exclude=terms) == ("general", None)
+    assert find_citations("마닐라(1571)와 모스크바 회사(1555), Clack(2012)", exclude=terms)[0].key == "clack2012"
+    assert len(find_citations("마닐라(1571)와 모스크바 회사(1555), Clack(2012)", exclude=terms)) == 1
+
+
+def test_terms_file_and_reimport_keeps_terms(store: LocalStore, tmp_path):
+    from magus.book.importer import import_manuscript
+    from magus.melchior.check import check_chapter
+    from magus.synthetic import build_manuscript_pdf
+
+    pdf = build_manuscript_pdf(tmp_path / "x.pdf")
+    import_manuscript(store, "alice", pdf, project_id="b")
+    store.set_non_citation_terms("alice", "b", ["넌", " 넌 ", "마셜"])
+    assert store.get_non_citation_terms("alice", "b") == ["넌", "마셜"]
+    assert [g.key for g in check_chapter(store, "alice", "b", 2).groups if g.key.startswith("넌") or g.key == "nunn2011"] == []
+    import_manuscript(store, "alice", pdf, project_id="b", replace=True)
+    assert store.get_non_citation_terms("alice", "b") == ["넌", "마셜"]  # 다시 임포트해도 유지
+    issues = store.list_issues("alice", "b")
+    assert issues[0].kind == "general"  # "인용 확인 필요: 마셜(2015)" — 마셜이 비인용 용어가 되면 general

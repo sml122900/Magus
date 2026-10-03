@@ -15,6 +15,7 @@ from mcp.server.mcpserver.tools import Tool
 
 from magus.casper.conversation import split_conversation
 from magus.ids import local_time, new_id
+from magus.paths import resolve_input
 from magus.search import Embedder, hybrid_search
 from magus.store import Idea, Store
 from magus.store.base import IdeaKind, Lane
@@ -44,7 +45,9 @@ def search_ideas(
     return [ideas[i] for i in me_first[:k]]
 
 
-def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedder | None = None) -> list[Tool]:
+def build_tools(
+    store: Store, current_user: Callable[[], str], embedder: Embedder | None = None, files_root: Path | None = None
+) -> list[Tool]:
     def idea_add(
         text: str,
         kind: Literal["thought", "ai", "article", "conversation", "tv", "other"],
@@ -60,9 +63,10 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
         if bool(markdown) == bool(path):
             raise ToolError("markdown(대화 기록 본문)과 path(로컬 .md 파일) 중 하나만 준다")
         if path:
-            file = Path(path).expanduser()
-            if not file.exists():
-                raise ToolError(f"파일이 없다: {file}")
+            try:
+                file = resolve_input(path, files_root)
+            except FileNotFoundError as e:
+                raise ToolError(str(e)) from e
             markdown, origin = file.read_text(encoding="utf-8"), origin or file.stem
         report, ideas = add_conversation(store, current_user(), markdown or "", origin)
         if not ideas:
