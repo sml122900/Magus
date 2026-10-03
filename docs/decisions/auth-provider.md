@@ -81,7 +81,10 @@
 3. 서버 환경변수를 넣는다. `AUTH_ISSUER=https://<이름>.authkit.app`, `PUBLIC_URL=https://<도메인>`.
    - `AUTH_JWKS_URL`은 비워 둔다. 메타데이터에서 찾고, 안 되면 `https://<이름>.authkit.app/oauth2/jwks`.
 4. 두 사람이 한 번씩 로그인하면 WorkOS 사용자 목록에 `user_…` id가 생긴다. `ALLOWED_USERS=user_…=default,user_…=father`로 넣는다.
-5. Claude.ai → 커넥터 추가 → URL `https://<도메인>/mcp`. 등록 방식은 "Claude의 공개 신원 사용"(CIMD)이다.
+5. 웹 로그인용으로 WorkOS에 애플리케이션(OAuth 클라이언트)을 하나 등록한다.
+   - 리다이렉트 URI는 `https://<도메인>/auth/callback`이고, PKCE를 쓴다.
+   - `WEB_CLIENT_ID`(비밀이 있으면 `WEB_CLIENT_SECRET`)와 `SESSION_SECRET`(32자 이상 무작위)을 넣는다.
+6. Claude.ai → 커넥터 추가 → URL `https://<도메인>/mcp`. 등록 방식은 "Claude의 공개 신원 사용"(CIMD)이다.
    - **웹·Desktop·모바일에서 로그인과 토큰 갱신을 모두 확인한다**(알려진 위험).
 
 ## 위험과 대안

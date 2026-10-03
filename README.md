@@ -193,6 +193,8 @@ PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버
 | `MAX_UPLOAD_MB` | 50 | 받은함 업로드 한 개 한도 |
 | `MAX_USER_MB` | 1000 | 사용자별 저장 용량(사용자 폴더 전체) |
 | `MAX_REQUEST_MB` | 2 | MCP 요청 본문 한도(넘으면 413) |
+| `SESSION_SECRET` | (로컬: 실행마다 무작위) | 웹 세션·내려받기 링크 서명 비밀. **원격 모드에서는 필수**(32자 이상) |
+| `WEB_CLIENT_ID` / `WEB_CLIENT_SECRET` | — | 웹 로그인용 OAuth 클라이언트(인증 서버에 등록, 콜백 `PUBLIC_URL/auth/callback`). 없으면 웹 로그인이 꺼진다 |
 
 원격 모드 변수의 예시는 `.env.example`에 있습니다. 비밀은 환경변수로만 넣고 `.env`는 커밋하지 않습니다.
 
@@ -234,6 +236,10 @@ npx -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8000/mcp --transpo
 - 파일은 받은함(`data/users/<id>/inbox/`)에 두고 도구에는 **이름만** 줍니다(`files_list()`로 확인).
   - 원격에서는 로컬 경로를 받지 않습니다. 로컬(stdio, Desktop)에서는 받은함에 없으면 로컬 경로도 받습니다.
 - 한도: 업로드 한 개 `MAX_UPLOAD_MB`, 사용자별 `MAX_USER_MB`, 요청 본문 `MAX_REQUEST_MB`(넘으면 413).
+- 웹 페이지(같은 주소): `/login`, `/inbox`(받은함 업로드·삭제), `/book`(임포트·docx 내보내기), `/checklist`(인용 신호등).
+  - 로컬에서는 `http://127.0.0.1:8000/login`이 `USER_ID`로 바로 로그인합니다.
+  - 원격에서는 WorkOS로 로그인합니다(`WEB_CLIENT_ID`, `SESSION_SECRET`).
+  - book_export는 원격에서 24시간짜리 내려받기 링크를 줍니다. 받으려면 같은 계정으로 로그인해 있어야 합니다.
 - 서버 로그에는 도구 이름·user_id·소요 시간·결과만 남습니다. 원고 본문·발췌·생각은 남지 않습니다. 오류 메시지와 예외도 종류와 위치만 남깁니다.
 
 ### fixtures로 확인하기

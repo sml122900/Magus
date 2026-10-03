@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
@@ -29,6 +31,7 @@ def build_server(
     embedder: Embedder | None = None,
     verifier: JwtVerifier | None = None,
     local_files: bool = False,
+    export_link: Callable[[str, str], str] | None = None,
 ) -> MCPServer:
     """settings.auth가 있으면 원격(HTTP) 모드: 리소스 서버로서 토큰을 검증하고 sub로 user_id를 정한다.
     local_files: 파일 인자로 로컬 경로도 받는다(stdio 개발용만). 기본은 받은함 이름만."""
@@ -51,7 +54,7 @@ def build_server(
         refresh_cite_counts(store, user_id)
     files = FileResolver(store, settings.files_root, local_paths=local_files)
     tools = [
-        *book_tools(store, current_user, files),
+        *book_tools(store, current_user, files, export_link),
         *melchior_tools(store, current_user, embedder, files),
         *casper_tools(store, current_user, embedder, files),
         *balthasar_tools(store, current_user, embedder),

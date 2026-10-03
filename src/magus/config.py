@@ -28,6 +28,10 @@ class Settings:
     max_upload_bytes: int = 50_000_000
     max_user_bytes: int = 1_000_000_000
     max_request_bytes: int = 2_000_000
+    # 웹(원격): 세션·다운로드 링크 서명 비밀, 웹 로그인용 OAuth 클라이언트(인증 서버에 등록한 것)
+    session_secret: str | None = None
+    web_client_id: str | None = None
+    web_client_secret: str | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -47,6 +51,9 @@ class Settings:
             max_upload_bytes=_mb(env, "MAX_UPLOAD_MB", 50),
             max_user_bytes=_mb(env, "MAX_USER_MB", 1000),
             max_request_bytes=_mb(env, "MAX_REQUEST_MB", 2),
+            session_secret=env.get("SESSION_SECRET") or None,
+            web_client_id=env.get("WEB_CLIENT_ID") or None,
+            web_client_secret=env.get("WEB_CLIENT_SECRET") or None,
         )
 
 

@@ -84,3 +84,9 @@ def test_limits_from_env():
     assert (s.max_upload_bytes, s.max_user_bytes, s.max_request_bytes) == (20_000_000, 500_000_000, 1_500_000)
     with pytest.raises(ValueError, match="MAX_USER_MB"):
         Settings.from_env({"MAX_USER_MB": "-1"})
+
+
+def test_size_text():
+    from magus.inbox import size_text
+
+    assert (size_text(41_781), size_text(10), size_text(6_719_586)) == ("42 KB", "1 KB", "6.7 MB")

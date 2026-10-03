@@ -263,7 +263,10 @@ class Store(Protocol):
         """장별 미확인 문헌 key(수는 그 길이)와 미연결 key. 본문과 refs로 계산되는 파생값이라 인덱스에만 둔다."""
         ...
     def save_export(self, user_id: str, project_id: str, filename: str, data: bytes) -> str:
-        """exports/<filename>에 저장하고 위치를 돌려준다(P0: 절대 경로, P1: 내려받기 URL)."""
+        """exports/<filename>에 저장하고 위치(로컬 절대 경로)를 돌려준다. 원격 모드는 이것으로 다운로드 링크를 만든다."""
+        ...
+    def export_path(self, user_id: str, project_id: str, filename: str) -> Path | None:
+        """다운로드용: 그 사용자·프로젝트의 exports/<filename>. 없거나 밖을 가리키면 None."""
         ...
     def list_issues(
         self,

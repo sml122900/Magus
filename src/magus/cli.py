@@ -87,10 +87,18 @@ def main(argv: list[str] | None = None) -> None:
             # 인증 없는 HTTP를 바깥에 열지 않는다. 원격 공개는 인증(AUTH_ISSUER 등)이 켜졌을 때만.
             parser.exit(2, f"인증 없이 {args.host}에 열 수 없습니다. 루프백(127.0.0.1)으로 실행하거나 AUTH_ISSUER를 설정하세요.\n")
         verifier = JwtVerifier(settings.auth) if settings.auth else None
-        server = build_server(settings, store, get_embedder(settings), verifier, local_files=args.transport == "stdio")
         if args.transport == "stdio":
-            transports.run_stdio(server)
+            transports.run_stdio(build_server(settings, store, get_embedder(settings), local_files=True))
         else:
+            from magus.web import Web
+
+            base_url = settings.auth.public_url if settings.auth else f"http://{args.host}:{args.port}"
+            try:
+                web = Web.create(store, settings, base_url, verifier)
+            except ValueError as e:
+                parser.exit(2, f"{e}\n")
+            server = build_server(settings, store, get_embedder(settings), verifier, export_link=web.export_link)
+            web.register(server)  # 웹 페이지 4개 + 내려받기(같은 프로세스)
             mode = f"인증: {settings.auth.issuer}, 허용 {len(settings.auth.allowed)}명" if settings.auth else "인증 없음 — 로컬 전용"
             log.info("streamable-http: http://%s:%d%s (stateless, %s)", args.host, args.port, transports.MCP_PATH, mode)
             transports.run_http(server, args.host, args.port, verifier, settings.max_request_bytes)

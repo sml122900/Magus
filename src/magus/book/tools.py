@@ -54,7 +54,12 @@ def _issue_line(i: Issue) -> str:
     return line + (f" · 닫음: {one_line(i.closed_note)}" if i.closed_note else "")
 
 
-def build_tools(store: Store, current_user: Callable[[], str], files: ResolveFile | None = None) -> list[Tool]:
+def build_tools(
+    store: Store,
+    current_user: Callable[[], str],
+    files: ResolveFile | None = None,
+    export_link: Callable[[str, str], str] | None = None,
+) -> list[Tool]:
     resolve_file = files or FileResolver(store)
     def resolve_project(project_id: str | None) -> Project:
         project = store.get_project(current_user(), project_id)
@@ -187,8 +192,10 @@ def build_tools(store: Store, current_user: Callable[[], str], files: ResolveFil
 
     def book_export(path: str | None = None, project_id: str | None = None) -> str:
         project = resolve_project(project_id)
-        location = export_docx(store, current_user(), project, path)
-        return f"docx를 만들었다: {location}\n(코멘트·그림은 복원하지 않는다. 자리표시자 [그림 N]·[표 N]·[수식]이 그대로 남는다.)"
+        user = current_user()
+        location = export_docx(store, user, project, path)
+        where = f"내려받기(24시간 안, 같은 계정으로 로그인 필요): {export_link(user, location)}" if export_link else location
+        return f"docx를 만들었다: {where}\n(코멘트·그림은 복원하지 않는다. 자리표시자 [그림 N]·[표 N]·[수식]이 그대로 남는다.)"
 
     def book_import(
         path: str, project_id: str | None = None, title: str | None = None, replace: bool = False

@@ -114,7 +114,8 @@ def auth_server(jwks_url, data_dir: Path, tmp_path: Path):
     base = f"http://127.0.0.1:{port}"
     log_path = tmp_path / "server.log"
     env = {**os.environ, "DATA_DIR": str(data_dir), "EMBEDDINGS": "none", "PYTHONIOENCODING": "utf-8",
-           "PUBLIC_URL": base, "AUTH_ISSUER": ISSUER, "AUTH_JWKS_URL": jwks_url, "ALLOWED_USERS": ALLOWED}
+           "PUBLIC_URL": base, "AUTH_ISSUER": ISSUER, "AUTH_JWKS_URL": jwks_url, "ALLOWED_USERS": ALLOWED,
+           "SESSION_SECRET": "s" * 40}
     env.pop("USER_ID", None)
     with log_path.open("w", encoding="utf-8") as log:
         proc = subprocess.Popen([sys.executable, "-m", "magus", "serve", "--transport", "http", "--port", str(port)],

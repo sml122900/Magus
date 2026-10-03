@@ -1,29 +1,30 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-03 18:20 KST — P1 3단계(받은함) 완료, 태그 `p1-step3`.
+> 마지막 갱신: 2026-10-03 19:10 KST — P1 4단계(웹 페이지) 완료, 태그 `p1-step4`.
 
-## 0. 최근 보고 (P1 3단계)
+## 0. 최근 보고 (P1 4단계)
 
-- **받은함** `data/users/<user_id>/inbox/`와 새 도구 **`files_list()`**(도구 19개).
-- **경로 인자 전환**: book_import·ref_add·idea_add_conversation은 받은함 **파일 이름**을 받는다.
-  - 원격(HTTP)에서는 이름만 받는다. 서버 경로를 주면 "받은함에 없다" 오류다. 테스트로 확인했다.
-  - 로컬(stdio)은 개발용으로 로컬 경로도 받는다. 이 차이는 `FileResolver` 한 곳에만 있다.
-- **파일 이름 안전성**: `../`, 폴더 구분자, 숨김, 예약 이름(CON 등), 허용하지 않는 형식(.exe 등)을 거부한다. 형식은 docx·pdf·md·txt만 받는다.
-- **한도**(넘으면 무엇이 얼마인지 밝힌 오류)
-  - 업로드 한 개 `MAX_UPLOAD_MB`(기본 50), 사용자 폴더 전체 `MAX_USER_MB`(기본 1000)
-  - MCP 요청 본문 `MAX_REQUEST_MB`(기본 2, 넘으면 413)
-- 로컬 개발용 CLI `magus inbox --add/--remove`.
-- 테스트를 받은함 기준으로 바꿨다: test_refs·test_casper·test_http·test_auth·test_stdio(원고), test_search(도구 19개, 받은함 격리).
-  - 로컬 경로 대체는 test_stdio의 ref_add 시연 하나로만 확인한다.
-- 고친 것: CLI 테스트가 `setup_logging()`으로 pytest의 stderr에 묶인 핸들러를 남겨 "Logging error"가 났다. 핸들러가 쓸 때마다 sys.stderr를 찾게 하고, 우리 핸들러만 교체한다.
+- **웹 페이지 4개**(`magus/web.py`, MCP와 같은 프로세스): `/login`, `/inbox`(업로드·목록·삭제), `/book`(임포트·docx 내보내기), `/checklist`(문헌 신호등 + 장별 집계), `/download/{token}`.
+- **로그인**
+  - 원격: WorkOS에 OAuth 인가 코드 + PKCE(S256) + `resource=PUBLIC_URL/mcp`로 로그인한다. 토큰은 MCP와 같은 검증기로 보고, 허용 목록 밖은 403이다.
+  - 로컬(루프백, 인증 없음): `USER_ID`로 바로 로그인한다.
+- 세션: HMAC 서명 쿠키(12시간, HttpOnly, SameSite=Lax, https면 Secure)이고, 모든 POST는 CSRF를 확인한다. 원격 모드는 `SESSION_SECRET`(32자 이상)이 없으면 시작을 거부한다.
+- **book_export**(HTTP): 서명·만료(24시간) 내려받기 링크를 돌려준다. 같은 사용자로 로그인해야 받는다. 다른 사용자는 403, 위조·만료는 410이다.
+- **브라우저로 한 바퀴 확인**(Claude in Chrome, 로컬 서버, 임시 폴더 demo 사용자, 합성 원고)
+  - 받은함 업로드 → 원고 임포트(장 7·부 3·코멘트 13) → 인용 체크리스트(🟡 미확인 6, 장별 표)까지 갔다.
+  - 그 과정에서 작은 파일이 "0.0 MB"로 보여 KB 표시로 고쳤다.
+- 테스트 `tests/test_web.py`
+  - 로컬 한 바퀴(+ CSRF 거부, 형식 거부, 링크 위조·로그인 필요)
+  - 가짜 인증 서버로 원격 OAuth 로그인: PKCE·resource 확인, 앨리스/밥 받은함 격리, 남의 링크 403, carol 403
+  - 서명 토큰 용도·만료, SESSION_SECRET 필수
 
 ## 1. 지금 바로 할 일
 
-- **4단계: 웹 페이지 4개**(로그인, 받은함 업로드·목록·삭제, 원고 임포트·내보내기 다운로드, 인용 체크리스트). 같은 프로세스(Starlette)에서 내보낸다.
-  - 로그인은 WorkOS AuthKit(OAuth 인가 코드 + PKCE)으로 하고, 세션은 서명한 쿠키에 둔다.
-  - book_export는 로그인이 필요하고 만료가 있는 다운로드 URL을 돌려준다.
-  - 실제 로그인 화면은 계정이 있어야 보인다. 테스트는 가짜 인증 서버로 한다.
+- **5단계: 배포·도메인·HTTPS·백업·복구 테스트·알림.** 계정이 없어도 할 수 있는 것부터 한다.
+  - 호스팅 결정 문서: 조사 결과, 추천은 Vultr 서울 VPS + Docker Compose + Caddy.
+  - Dockerfile·compose·Caddyfile, 백업 스크립트(restic → R2, 30일), 복구 절차, 알림(웹훅)을 만든다.
+  - 복구 테스트는 로컬 restic 저장소로 먼저 해 본다.
 - 대기(사용자). 실제 연결은 계정이 있어야 하고, 그 전까지 코드와 문서를 준비한다.
   - WorkOS 계정과 AuthKit 설정, 두 사람의 `user_…` id(→ `ALLOWED_USERS`)
   - 호스팅 계정과 도메인
@@ -35,7 +36,7 @@
 
 ## 2. 현재 단계
 
-**P1 진행 중 — 3단계 완료**(`p1-step1`~`p1-step3`). P0는 `step1`~`step7`, `p0-realdata`, `p0-report1`과 그 뒤 결정 반영 커밋까지 끝났다.
+**P1 진행 중 — 4단계 완료**(`p1-step1`~`p1-step4`). P0는 `step1`~`step7`, `p0-realdata`, `p0-report1`과 그 뒤 결정 반영 커밋까지 끝났다.
 
 ## 3. 단계별 체크리스트
 
@@ -48,7 +49,9 @@
 - [x] **P1 3단계 받은함** — 2026-10-03, `p1-step3`
   - `src/magus/inbox.py`(safe_filename·save_upload·FileResolver·files_list), `src/magus/store/{base,local}.py`(받은함 메서드·usage_bytes), `src/magus/config.py`(한도), `src/magus/cli.py`(`magus inbox`)
   - `tests/test_inbox.py`, test_http(요청 한도 413·경로 거부), 기존 테스트의 받은함 전환
-- [ ] P1 4단계 웹 페이지 4개
+- [x] **P1 4단계 웹 페이지** — 2026-10-03, `p1-step4`
+  - `src/magus/web.py`, `src/magus/signing.py`, `src/magus/store/{base,local}.py`(export_path), `src/magus/book/tools.py`(내려받기 링크), `src/magus/cli.py`(웹 등록)
+  - `tests/test_web.py`, 브라우저 확인(Claude in Chrome)
 - [ ] P1 5단계 배포·도메인·HTTPS·백업·복구 테스트·알림
 - [ ] P1 6단계 Claude.ai 커넥터 등록, `docs/connect-claude.md`
 - [ ] P1 7단계 아버지 온보딩 체크리스트
@@ -87,6 +90,19 @@
     - 저장 용량은 사용자 폴더 전체(휴지통 포함)로 센다. 업로드할 때만 검사한다.
 55. **받은함은 SQLite에 색인하지 않는다**(폴더를 그대로 읽는다)
     - 이유: 파일이 진실이고 목록이 짧다. P2(객체 스토리지)에서는 Store 구현이 목록을 준다.
+56. **웹은 서버에서 그린 HTML(템플릿 엔진 없음), MCP와 같은 Starlette 앱**(`server.custom_route`)
+    - 대안: Jinja2, 별도 프런트엔드(SPA).
+    - 이유: 지시가 "같은 프로세스, 가벼운 것"이다. 의존성이 늘지 않고 페이지가 넷뿐이다. 값은 모두 html.escape로 이스케이프한다.
+57. **웹 로그인은 별도 OAuth 클라이언트(WEB_CLIENT_ID) + PKCE + resource 지시자**
+    - 대안: MCP 토큰을 웹에서 재사용(불가능), 인증 서비스의 세션 위젯.
+    - 이유: 같은 aud(PUBLIC_URL/mcp) 토큰을 받으므로 MCP와 같은 검증기·허용 목록을 쓴다. 서버 쪽 세션만 둔다.
+58. **세션은 서명 쿠키(서버 저장 없음), 12시간, CSRF는 세션 sid의 HMAC**
+    - 이유: 단일 인스턴스·두 사용자라 서버 세션 저장소가 필요 없다. 재배포해도 SESSION_SECRET이 같으면 유지된다.
+59. **내려받기는 서명 링크(24시간) + 같은 사용자 로그인 둘 다 필요**
+    - 대안: 링크만으로 받기.
+    - 이유: 링크가 대화 기록에 남는다. 링크만으로 원고가 새면 안 된다.
+60. **로컬 HTTP의 웹은 USER_ID로 자동 로그인**(루프백 전용이라)
+    - 이유: 개발 중 브라우저로 한 바퀴 돌려 보려면 인증 서버 없이도 돼야 한다.
 
 **P0 결정**: #1~#44 모두 확정됐다.
 
@@ -141,17 +157,16 @@
   ```
 - **git**
   - master에 바로 커밋하고, 단계가 끝나면 태그를 단다. 실험은 브랜치에서 하고 squash merge한다.
-  - 태그: `step1`~`step7`, `p0-realdata`, `p0-report1`, `p1-step1`~`p1-step3`. P0 뒤 커밋 두 개(마무리 보완, 결정 반영)에는 태그를 달지 않았다(지시).
+  - 태그: `step1`~`step7`, `p0-realdata`, `p0-report1`, `p1-step1`~`p1-step4`. P0 뒤 커밋 두 개(마무리 보완, 결정 반영)에는 태그를 달지 않았다(지시).
   - `/fixtures/`(루트)와 `data/`는 gitignore. `tests/fixtures/`와 `docs/reports/`는 커밋한다.
 
 ## 6. 마지막 세션 요약
 
-**2026-10-03 저녁(16:30~18:20)** — P1 킥오프, 1~3단계
-- 1단계: streamable-http(stateless + JSON), 감사 로그, 로그 거르기, 루프백 가드. 18개 도구를 HTTP로 확인했다(pytest + MCP Inspector). `p1-step1`.
-- 2단계: 인증 서비스 결정(WorkOS AuthKit), JWT 검증·허용 목록·403 문·PRM, 격리 테스트. `p1-step2`.
-- 3단계: 받은함·files_list·경로 인자 전환·한도·`magus inbox`. `p1-step3`.
-- 테스트 179개 통과, ruff(F·B) 통과.
-- 남긴 것: 4단계(웹)부터. 계정이 필요한 일은 대기.
+**2026-10-03 저녁(16:30~19:10)** — P1 킥오프, 1~4단계
+- 1단계 HTTP 전송(`p1-step1`), 2단계 인증(`p1-step2`), 3단계 받은함(`p1-step3`), 4단계 웹(`p1-step4`).
+- 브라우저(Claude in Chrome)로 업로드 → 임포트 → 체크리스트를 확인했다.
+- 테스트 184개 통과, ruff(F·B) 통과.
+- 남긴 것: 5단계(배포)부터. 계정·도메인이 필요한 일은 대기.
 
 ## 7. 알려진 문제 — 실원고에서 아직 안 맞는 것
 

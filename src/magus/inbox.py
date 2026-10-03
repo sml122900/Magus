@@ -33,6 +33,11 @@ def mb(n: int) -> str:
     return f"{n / 1_000_000:,.1f} MB"
 
 
+def size_text(n: int) -> str:
+    """파일 크기 표시: 1MB 미만은 KB(최소 1 KB)."""
+    return mb(n) if n >= 1_000_000 else f"{max(1, round(n / 1000)):,} KB"
+
+
 def safe_filename(name: str) -> str:
     """받은함 파일 이름. 폴더 구분자·상대 경로·숨김 파일·제어 문자를 막고, 형식은 docx·pdf·md·txt만 받는다."""
     clean = unicodedata.normalize("NFC", name.strip())
@@ -87,7 +92,7 @@ def describe(files: list[InboxFile], used: int, limit: int) -> str:
     if not files:
         return head + "\n받은함이 비어 있다. 웹의 받은함 페이지에서 올린다(로컬 개발: magus inbox --add <파일>)."
     lines = [
-        f"- {f.name} · {mb(f.size)} · {local_time(f.modified)} · {INBOX_TYPES.get(Path(f.name).suffix.lower(), '')}"
+        f"- {f.name} · {size_text(f.size)} · {local_time(f.modified)} · {INBOX_TYPES.get(Path(f.name).suffix.lower(), '')}"
         for f in files
     ]
     return "\n".join([head, *lines, "도구에는 파일 이름만 준다(예: book_import(path=\"원고.docx\"))."])

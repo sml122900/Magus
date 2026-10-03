@@ -4,8 +4,8 @@
 
 ## 진행상황
 
-- 현재 단계: **P1(원격 MCP 서비스) 진행 중.** 1단계 HTTP 전송(`p1-step1`), 2단계 인증(`p1-step2`, WorkOS AuthKit, 실제 연결은 사용자 계정 대기), 3단계 받은함(`p1-step3`) 완료.
-- 다음 할 일: 4단계(웹 페이지 4개: 로그인, 받은함, 원고, 인용 체크리스트).
+- 현재 단계: **P1(원격 MCP 서비스) 진행 중.** 1단계 HTTP 전송(`p1-step1`), 2단계 인증(`p1-step2`, WorkOS AuthKit, 실제 연결은 사용자 계정 대기), 3단계 받은함(`p1-step3`), 4단계 웹(`p1-step4`) 완료.
+- 다음 할 일: 5단계(배포·도메인·HTTPS·백업·복구 테스트·알림). 계정·도메인은 사용자가 만든다. 그 전까지 배포 파일과 절차를 준비한다.
 - 대기 사항: 계정·도메인·키처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), P0 Desktop 테스트 결과, 보고서 답변. 상세는 status.md에만 적는다.
 
 ## 개요
@@ -96,6 +96,8 @@
 | `MAX_UPLOAD_MB` | 50 | 받은함 업로드 한 개 한도 |
 | `MAX_USER_MB` | 1000 | 사용자별 저장 용량(사용자 폴더 전체) |
 | `MAX_REQUEST_MB` | 2 | MCP 요청 본문 한도(넘으면 413) |
+| `SESSION_SECRET` | (로컬: 실행마다 무작위) | 웹 세션·내려받기 링크 서명 비밀. **원격 모드에서는 필수**(32자 이상) |
+| `WEB_CLIENT_ID` / `WEB_CLIENT_SECRET` | — | 웹 로그인용 OAuth 클라이언트(인증 서버에 등록, 콜백 `PUBLIC_URL/auth/callback`). 없으면 웹 로그인이 꺼진다 |
 | `VOYAGE_API_KEY` / `OPENAI_API_KEY` | — | 해당 제공자를 쓸 때만 |
 | `EMBEDDINGS_MODEL` | 제공자 기본값 | 임베딩 모델 이름 |
 
@@ -298,7 +300,13 @@ data/index.sqlite
   - 사용자별 받은함 `data/users/<user_id>/inbox/`. 업로드 페이지로만 들어온다.
   - 경로 인자(book_import, ref_add, idea_add_conversation)는 받은함의 파일 이름을 받는다. 새 도구 `files_list()`로 받은함을 본다.
   - book_export는 exports/에 만들고, 로그인이 필요하고 만료가 있는 다운로드 URL을 돌려준다.
-- 웹: 같은 프로세스에서 서빙하는 최소 페이지 4개(로그인, 받은함, 원고, 인용 체크리스트). 디자인은 P1 범위가 아니다.
+- 웹(`magus/web.py`): 같은 프로세스의 Starlette 라우트로 서버에서 그린 최소 HTML이다(디자인은 P1 범위가 아니다).
+  - 페이지: `/login`, `/inbox`(업로드·목록·삭제), `/book`(임포트·docx 내보내기), `/checklist`(문헌 신호등 🟢확인 🟡미확인 🔴참고문헌에 없음 ⚪미연결 + 장별), `/download/{token}`.
+  - 로그인
+    - 원격: 인증 서버에 OAuth 인가 코드 + PKCE(S256) + `resource=PUBLIC_URL/mcp`로 로그인한다. 토큰은 MCP와 같은 JwtVerifier로 검증하고, 허용 목록 밖은 403이다.
+    - 로컬(인증 없는 HTTP, 루프백 전용): `USER_ID`로 바로 로그인한다.
+  - 세션은 HMAC 서명 쿠키(HttpOnly, SameSite=Lax, https면 Secure, 12시간)다. 모든 POST는 CSRF 토큰을 확인한다(`magus/signing.py`).
+  - 내려받기: book_export(원격·HTTP)는 서명·만료(24시간) 링크를 돌려준다. 링크만으로는 받을 수 없고, 같은 사용자로 로그인해 있어야 한다.
 - 저장: 파일 + SQLite를 유지한다(Store 인터페이스 뒤. Postgres는 P2).
 - 호스팅: 영구 디스크가 있는 단일 인스턴스(Fly.io / Railway / VPS 중 비교해 결정). HTTPS는 플랫폼이나 Caddy가 맡는다. 서버리스는 쓰지 않는다.
 - 백업: 매일 data/ 전체를 객체 스토리지에 스냅샷하고 30일 보관한다. 복구 절차를 문서화하고 실제로 한 번 복구해 본다.

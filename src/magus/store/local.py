@@ -393,6 +393,11 @@ class LocalStore(ShelfMixin):
         folder = self._user_dir(user_id)
         return sum(p.stat().st_size for p in folder.rglob("*") if p.is_file()) if folder.is_dir() else 0
 
+    def export_path(self, user_id: str, project_id: str, filename: str) -> Path | None:
+        folder = self._project_dir(user_id, project_id) / "exports"
+        path = folder / Path(filename).name
+        return path if path.name == filename and path.is_file() else None
+
     @_locked
     def save_export(self, user_id: str, project_id: str, filename: str, data: bytes) -> str:
         path = self._require_project(user_id, project_id) / "exports" / Path(filename).name
