@@ -103,7 +103,7 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 
 업데이트: 로컬에서 새 번들을 만들어 `/root/magus.bundle`에 올린 뒤 아래를 실행한다.
 
-- 지금(2026-10-06 03:02부터) 서버는 master(태그 `p1-ui-terms`)에 있다. 옛 이력은 지웠다.
+- 지금(2026-10-06 03:25부터) 서버는 master(태그 `p1-trash`)에 있다. 옛 이력은 지웠다.
 - 로컬이 Windows면 서버 접속은 Windows OpenSSH(`C:\Windows\System32\OpenSSH\ssh.exe`)로 한다. Git Bash의 ssh는 다른 known_hosts를 읽어 "Host key verification failed"가 난다(호스트 키를 새로 받아들이지 않는다).
 - `ssh … 'bash -s' <<EOF` 안에서 `docker compose exec -T`를 부를 때는 `</dev/null`을 붙인다. 안 붙이면 exec가 스크립트의 남은 줄을 stdin으로 먹는다.
 - 배포는 pull 대신 `cd /opt/magus && sudo git fetch /root/magus.bundle master && sudo git checkout -B master FETCH_HEAD && cd deploy && sudo docker compose up -d --build`. 태그도 가져오려면 `git fetch /root/magus.bundle "refs/heads/master:refs/remotes/bundle/master" "refs/tags/*:refs/tags/*"` 뒤 `git checkout -B master <태그>`.
@@ -115,6 +115,7 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 
 | 날짜(KST) | 반영 | 반영 전 → 후 | 확인 |
 |---|---|---|---|
+| 2026-10-06 03:24 | `p1-trash`(휴지통 #88, 도구 설명 가드·내부 이름 빼기 #87, 문체 tags_by #89, 인덱스 스키마 v13) | `2d9777f`(`p1-ui-terms`) → `74bbbf4` | 반영 전 백업 스냅샷 `ec0c2c20`(802개, 오류 없음). 인덱스 v13 자동 재생성(03:25:23), healthy·재시작 0, 허용 2명, `/healthz` ok, `/mcp` 401, data 802개 해시 같음(index 제외), `.env` 해시 같음. 메모리 magus 130MiB, 호스트 available 460MB. 되돌리기 이미지 `magus:rollback-2d9777f`, 옛 `rollback-4df2720` 삭제. 배포 뒤 default 생각 2건을 `magus trash put`으로 휴지통(status.md 0-8절). 서버 기록 `/root/deploy-20261006-trash/` |
 | 2026-10-06 03:01 | `p1-ui-terms`(웹 스타일, 세 책장 화면, 용어 통일 #85, 입력칸 #86, 허용 목록 중복 거부) | `4df2720`(`p1-reupload`) → `2d9777f` | 배포 전 서버 `ALLOWED_USERS`로 새 검사 통과(2명). 반영 전 백업 스냅샷 `8ea57cec`(798개, 오류 없음). healthy·재시작 0, 로그 허용 2명, `/healthz` ok, `/mcp` 401 + resource_metadata, data 798개 해시 같음(index 제외), `.env` 해시 같음. 새 문구: 바깥 오류 페이지의 상단 바·입력칸 CSS, 컨테이너 안 임시 로컬 서버로 메뉴 확인 요청·생각. 메모리 magus 123MiB, 호스트 available 469MB. 되돌리기 이미지 `magus:rollback-4df2720`, 옛 `rollback-896633c` 삭제. 서버 기록 `/root/deploy-20261006-ui-terms/`(ROLLBACK.txt) |
 | 2026-10-06 01:38 | `p1-reupload`(#69~#77 임포트 보완, #76 다시 올리기, #79 포함) | `896633c`(`p1-auth-audience`) → `4df2720` | 반영 전 백업 스냅샷 `a3322693`(798개, 오류 없음). 인덱스 v12 자동 재생성(01:39:52), healthy, `/healthz` ok, `/mcp` 401 + resource_metadata, data 798개 해시 같음(index 제외), `.env` 해시 같음, default outline 수치 같음. 메모리 magus 123MiB, 호스트 available 440MB. 되돌리기 이미지 `magus:rollback-896633c`, 옛 `rollback-21b4e2a` 삭제. 서버 기록 `/root/deploy-20261006-reupload/`(ROLLBACK.txt) |
 | 2026-10-06 00:53 | `p1-auth-audience`(토큰 aud 검사, 결정 #79) + 이력 교체 | `21b4e2a`(옛 이력) → `896633c`. 같은 상태의 새 이력 커밋은 `78c9668` | `/healthz` ok, `/mcp` 401 + resource_metadata, 컨테이너 안에서 trip_ai·섞인 aud 거부, 다른 `AUTH_AUDIENCE`로 시작 실패(종료 2), data 798개 해시 같음, `docs/reports` 객체 없음. 서버 기록은 `/root/deploy-20261006-auth-audience/`(ROLLBACK.txt) |
