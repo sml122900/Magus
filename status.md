@@ -2,6 +2,31 @@
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
 > 마지막 갱신: 2026-10-06 KST — 사용자 결정 #68(원고 본문의 원본은 저자 파일) 기록, 최신본 docx 시험 임포트(`father-trial`), 다시 올리기 설계안 초안. 검토 대기 #69~#76 답변을 기다린다.
+> 2026-10-06 01시 KST — 토큰 aud 검사 강화(결정 #79)를 `p1-auth-audience`로 서버에 반영하고, 서버의 옛 git 이력을 새 이력으로 바꿨다(0-3절).
+
+## 0-3. 최근 보고 (2026-10-06, 토큰 aud 검사 강화 + 서버 반영)
+
+- 배경: 자매 서비스 trip_ai가 같은 WorkOS 환경(Staging)을 쓰게 된다. 사용자 본인의 sub가 두 서비스에서 같아서, aud를 느슨하게 보면 trip_ai용 토큰이 Magus를 통과한다. 지시: "질문하지 말고 진행하되, 결정은 status.md에 적는다" → 결정 #79(4절).
+- 0단계 확인
+  - 서버 실행 커밋: `21b4e2a`(옛 이력) + 작업 트리의 `deploy/backup.sh` 수정(#62판, 해시 `07ff437`). 새 이력에서는 `decf79c`와 트리가 같다(`docs/reports` 2개만 다름).
+  - 그 뒤 master: `eff78d5`~`d77c4d5`는 문서와 backup.sh(#62)뿐이다. 이 작업 중에 다른 세션(magus-25)이 `785623a`(#69~#78 확정), `9688878`(#74), `e1b57b7`(#69), `0df3d1c`(#70)를 커밋했고 #71~ 진행 중이다. 그 작업은 서버에 배포하지 않았다.
+  - 서버 `.env`: `PUBLIC_URL=https://magus.lifebookapplication.com`, `AUTH_AUDIENCE` 줄 없음(= `PUBLIC_URL/mcp`). 멈출 조건이 아니었다.
+  - magus-alive: 호스트 cron 5분 `deploy/alive.sh`가 **바깥 주소** `https://magus.lifebookapplication.com/healthz`(DNS·Caddy·HTTPS·앱)를 curl한 뒤 healthchecks.io에 핑한다. `/healthz`는 있다(인증 없음, `{"status":"ok"}`). 컨테이너 헬스체크(Dockerfile)는 따로 안쪽 `127.0.0.1:8000/healthz`를 본다.
+- 구멍은 실제로 있었다(옛 코드로 재현): 구멍 2(aud 목록 `[magus, trip_ai]` 통과)는 운영 설정에서도 열려 있었다. 구멍 1(`AUTH_AUDIENCE`로 넓히기)은 운영 `.env`에 값이 없어 열려 있지 않았다. 안내 문구는 `docs/deploy.md`가 아니라 `docs/connect-claude.md` 진단 표에 있었다.
+- 고친 것(`fix/auth-audience`, `decf79c`에서 갈라 만듦, 태그 `p1-auth-audience` = `896633c`)
+  - `78c9668`: 서버가 쓰던 backup.sh(#62)를 브랜치에 넣었다. reset 뒤에도 보관 정책이 30일로 되돌아가지 않는다.
+  - `896633c`: aud는 `PUBLIC_URL/mcp` 하나(문자열, 또는 원소 하나인 목록), `AUTH_AUDIENCE`가 다르면 시작 실패(종료 2, 한국어 이유), 거부할 때 aud 모양을 로그에. 웹 로그인은 같은 `JwtVerifier` 객체를 쓴다(확인). 결정 문서 `docs/decisions/shared-auth-audience.md`.
+  - 테스트 191개 중 190개 통과. 실패 1개는 알려진 간헐 실패 `test_request_size_limit`(따로 5번 중 3번 통과).
+  - master 병합: 충돌 없음. 병합 뒤 `docs/connect-claude.md` 진단 표, `docs/deploy.md` 업데이트 절차·반영 기록, 이 파일, CLAUDE.md 진행상황을 고쳤다.
+- 서버 반영(2026-10-06 00:53 KST): 새 이력 bundle → 옛 태그 삭제 → fetch → `reset --hard p1-auth-audience` → 브랜치 이름 `fix/auth-audience` → `up -d --build` → 확인 뒤 `reflog expire` + `gc --prune=now`.
+  - 실행 커밋: `21b4e2a`(옛 이력) → `896633c`. 작업 트리 깨끗, backup.sh 해시 그대로, `.env` 해시 그대로.
+  - data: 798개 파일(index.sqlite 제외) 해시가 반영 전후 같다. index.sqlite도 크기·시각 그대로다.
+  - 확인: 바깥 `/healthz` ok, `curl -sI /mcp` 401 + `resource_metadata`, PRM resource = `…/mcp`, 컨테이너 재시작 0회.
+    - 컨테이너 안(배포된 코드, 운영 issuer·resource에 시험용 키): trip_ai 문자열·섞인 목록 두 순서 거부, 문자열·원소 하나인 목록 통과.
+    - `docker compose run -e AUTH_AUDIENCE=<trip_ai>`: 종료 2, 한국어 이유 출력.
+  - 옛 이력 정리: `21b4e2a`, 보고서 객체 2개 없음, 객체 1,867 → 668. `/root/magus.bundle`도 새 bundle로 바꿨다.
+  - 되돌리기: `21b4e2a`는 gc로 지웠다. 같은 상태의 새 이력 커밋은 `78c9668`이다. 이미지 `magus:rollback-21b4e2a`(반영 전 이미지)를 남겼다. 절차는 서버 `/root/deploy-20261006-auth-audience/ROLLBACK.txt`.
+- 대기: claude.ai 새 대화에서 Magus 도구 한 번 불러 확인(사용자). 확인되면 서버의 `magus:rollback-21b4e2a` 이미지를 지운다.
 
 ## 0-2. 최근 보고 (2026-10-06, 작업 방식 결정 + 최신본 시험 임포트 + 다시 올리기 설계안)
 
@@ -79,12 +104,8 @@
     - `p1-step1` 19d6a02 → 73733b6, `p1-step2` 7273e47 → 80fd87b, `p1-step3` c4af070 → bb3a279, `p1-step4` ca6a5cf → 20572fa
     - `p1-step5` 9b420a3 → eff78d5, `p1-step6` 2164715 → 49daa60
     - 태그 종류(annotated/lightweight)는 정리 전과 같다.
-  - **서버는 옛 이력이다**(`/opt/magus`, `/root/magus.bundle`에 보고서 포함). 이번에는 건드리지 않았다. **다음 배포 때 새 이력으로 바꾼다.**
-    - 새 bundle을 올린다.
-    - `cd /opt/magus && git fetch /root/magus.bundle master && git reset --hard FETCH_HEAD`(이력이 달라 pull은 안 된다. `.env`·`data/`는 무시 파일이라 그대로 남는다).
-    - `git reflog expire --expire=now --all && git gc --prune=now`로 옛 객체를 지운다.
-    - `ls docs/reports`가 없어야 한다.
-    - 서버 `backup.sh`는 #62 때문에 파일만 새것으로 바꿔 두었다. reset 뒤에도 내용이 같다.
+  - **서버 이력 교체 완료(2026-10-06)**: 서버는 새 이력의 `p1-auth-audience`(`896633c`, 브랜치 `fix/auth-audience`)다. 옛 객체·보고서 객체는 gc로 지웠다(0-3절).
+    - 다음에 master를 배포할 때는 `git fetch /root/magus.bundle master && git checkout -B master FETCH_HEAD`로 한다(docs/deploy.md "업데이트"). 그 master에 `p1-auth-audience`가 들어 있어야 한다.
 - **다음: 7단계 아버지 온보딩**(`docs/onboarding-father.md` 초안). 아래 "7단계 전 확인"을 먼저 끝낸다.
 - **7단계 전 확인**
   - [ ] 검토 대기 #69~#74를 고친다(표 본문, 제N부 들어가며, 코멘트 작성자, [점검·…] 분류, 앵커 전문, instructions 규칙 4). 임포트 때만 채워지는 값이라 아버지 임포트 전에 해야 한다.
@@ -140,8 +161,8 @@
   - Git Bash 기본 ssh는 한글 사용자 폴더 이름 때문에 키를 찾지 못한다.
   - 서버 호스트 키: ED25519 `SHA256:WchFUFNtRDD2D0JaTPPajWdFYWLfBxTmg+EgoumWuJo`.
   - 임시 배포 키는 만들었다가 쓰지 않고 지웠다(서버에 등록된 적 없음).
-- 업데이트 절차: 로컬 `git bundle create magus.bundle master --tags` → scp `/root/magus.bundle` → 서버 `git pull /root/magus.bundle master` → `docker compose up -d --build`.
-  - **단, 2026-10-05 이력 정리 뒤 첫 배포는 pull 대신 fetch + reset --hard**로 한다(위 "보고서 이력 정리").
+- 업데이트 절차: 로컬 `git bundle create magus.bundle master --tags` → `/root/magus.bundle`로 올림 → 서버 `git fetch /root/magus.bundle master && git checkout -B master FETCH_HEAD` → `docker compose up -d --build`. 반영 전 커밋·data 해시를 적어 두고, 되돌릴 때는 그 커밋으로 reset --hard(docs/deploy.md "업데이트").
+  - 올리기: Windows에서는 `cat magus.bundle | ssh root@<서버> 'cat > /root/magus.bundle.new'` 뒤 sha256을 대조했다(2026-10-06, 한글 경로 scp 회피).
 - 계정·설정(2026-10-05, 사용자)
   - WorkOS **Staging**(`https://dapper-palace-57-staging.authkit.app`, issuer 끝 `/` 없음). 10-05 오전의 Production 결정을 사용자 지시로 바꿨다.
   - Magic Auth 켬, 비밀번호 끔, 가입 끔, DCR·CIMD 켬, 리소스 `/mcp`(Default), 웹 리디렉션 `/auth/callback`.
@@ -266,6 +287,18 @@
     - 영문 제목·부제도 따로 둘 수 있으면 둔다.
 78. **운영 규칙: 다시 올리기가 생기기 전까지 replace로 다시 임포트하지 않는다**(사용자 결정, CLAUDE.md)
 
+**2026-10-06 확정(#79, 사용자 지시 "질문하지 말고 진행하되 결정은 status.md에")**
+
+79. **토큰 aud는 `PUBLIC_URL/mcp` 하나만 받는다. `AUTH_AUDIENCE`로 넓히지 않는다**(#51 대체, `docs/decisions/shared-auth-audience.md`)
+    - 전제: trip_ai와 WorkOS 환경(Staging)을 공유한다. issuer·서명 키·sub가 같아 aud만이 서비스를 가른다.
+    - aud가 문자열이면 그 값, 목록이면 원소가 그 값 하나일 때만 통과. 다른 값이 섞이거나 aud가 없으면 401.
+    - `AUTH_AUDIENCE`가 비어 있으면 `PUBLIC_URL/mcp`. 값이 있는데 다르면(쉼표 목록·끝 `/` 포함) 서버가 시작하지 않고 이유를 한국어로 남긴다.
+    - aud로 거부할 때 받은 aud의 모양(문자열/목록, 값)을 로그에 남긴다. 토큰·sub는 남기지 않는다(#52).
+    - `ALLOWED_USERS`는 서비스별로 따로다. 같은 sub가 두 목록에 다 있을 수 있어서, 서비스 사이 토큰 재사용은 허용 목록이 아니라 aud로 막는다.
+    - 401(aud 불일치)이면 WorkOS에 등록한 리소스 주소가 `PUBLIC_URL/mcp`와 글자까지 같은지 확인한다.
+    - 대안: PyJWT strict_aud(원소 하나인 목록도 거부해 지금 로그인을 깨뜨릴 수 있음), 서비스별 WorkOS 환경(전제와 다름), azp로 구분(두 서비스 모두 Claude라 같음), 경고만 내고 무시(조용히 다르게 돔).
+    - 서버 반영: 2026-10-06 00:53 KST, `p1-auth-audience`(0-3절).
+
 **P0 결정**: #1~#44 모두 확정됐다.
 **P1 결정**: #45~#64 모두 확정됐다(2026-10-05). 내용은 아래 "P1 확정 결정"에 있다.
 **사용자 결정 #68**(2026-10-06): 확정. 내용은 아래 "P1 확정 결정"의 68번에 있다.
@@ -300,6 +333,7 @@
   - #74 규칙 4의 취지(사용자): 수정안은 대화에서 제안하고 저자가 Word에 반영한다. book_write_chapter는 저자가 Magus 원고에 저장하라고 명시했을 때만 쓴다.
   - #71 보완(사용자): AI가 단 코멘트에서 온 미해결은 저자에게 보일 때도 AI의 확인 요청임이 드러나야 한다(book_issues, outline, 웹).
   - #76: 범위를 바꿔 확정. #77(제목·부제), #78(replace 금지 운영 규칙)은 새로 기록했다.
+- 2026-10-06 토큰 aud 지시: #79(확정, #51 대체). 지시가 "질문하지 말고 진행, 결정은 status.md에"라 바로 확정으로 기록했다.
 
 **P1 확정 결정(#45~#64, 2026-10-05 / #68, 2026-10-06)**
 
@@ -323,6 +357,7 @@
     - 대안: 둘 다 401.
     - 이유: 401이면 Claude가 다시 로그인하라고 되풀이한다. 403이면 "허용 목록에 없다"는 이유가 보인다.
 51. **audience는 검증기가 직접 본다**(`validate_token_resource=False`, 기본 aud = `PUBLIC_URL/mcp`, `AUTH_AUDIENCE`로 여럿 허용)
+    - **2026-10-06 #79로 대체**: `AUTH_AUDIENCE`로 여럿 허용하지 않는다. aud는 `PUBLIC_URL/mcp` 하나만 받는다. 검증기가 직접 보는 것(`validate_token_resource=False`)은 그대로다.
     - 대안: SDK의 resource 비교.
     - 이유: 서비스마다 aud를 리소스 URL·클라이언트 id 등 다르게 넣는다. 설정으로 맞춘다.
 52. **로그에 sub를 남기지 않는다**(거부할 때 sha256 앞 10자만)
@@ -415,6 +450,13 @@
   - `/fixtures/`(루트), `data/`, `/private/`(저자용 보고서 등 실원고 파생 자료)는 gitignore. `tests/fixtures/`(합성)는 커밋한다.
 
 ## 6. 마지막 세션 요약
+
+**2026-10-06 (2)** — 토큰 aud 검사 강화(#79), 서버 반영·이력 교체(세션 magus-a1, 다른 세션 magus-25의 #69~ 작업과 동시 진행)
+- `decf79c`(서버 실행 커밋의 새 이력판)에서 `fix/auth-audience`를 갈라 고쳤다(별도 worktree `.worktrees/auth-audience`, `.git/info/exclude`로 숨김). 태그 `p1-auth-audience`.
+- 서버에 그 태그만 반영했다. master는 배포하지 않았다. 서버 옛 이력은 교체하고 gc했다. data 해시 같음.
+- master에 병합하고 브랜치·태그·master를 push했다. 결정 문서 `docs/decisions/shared-auth-audience.md`.
+- 실수 1건: 처음에 메인 작업 트리에서 `git switch`를 해 magus-25의 작업 트리를 약 1분 decf79c로 옮겼다. 바로 master로 되돌렸고(미커밋 수정 4개 그대로), magus-25에 알렸다. 그 뒤로는 별도 worktree에서만 작업했다.
+- 남긴 것: 사용자의 claude.ai 확인, 확인 뒤 서버 `magus:rollback-21b4e2a` 이미지 삭제.
 
 **2026-10-06** — 작업 방식 결정 #68, 최신본 시험 임포트, 다시 올리기 설계안(로컬 전용, 서버 변경 없음)
 - #68을 기록했다(`docs/decisions/author-file-is-source.md`). CLAUDE.md·README·store-interface.md를 결정에 맞게 고쳤다.

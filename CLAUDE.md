@@ -13,8 +13,8 @@
 - 최신본 docx 시험 임포트(2026-10-06, 로컬 `father-trial` 사용자): 표 37개의 글이 빠지고, "제N부 들어가며" 두 곳이 장 밖으로 나가는 문제를 찾았다. 고칠 것은 status.md #69~#78(2026-10-06 확정)에 있다.
 - **운영 규칙(#78)**: 다시 올리기가 생기기 전까지 아버지 원고를 `replace`로 다시 임포트하지 않는다. replace는 결정·직접 남긴 미해결·닫은 미해결까지 휴지통으로 보낸다.
 - 다음 할 일: #69~#77과 다시 올리기 기본 부분(#76)을 구현한다. 그다음 **7단계 아버지 온보딩**(`docs/onboarding-father.md`)을 한다. 시작 전 확인은 status.md "7단계 전 확인"을 따른다.
-- 서버 교체 필요: 서버는 아직 **옛 이력의 bundle**을 쓴다(2026-10-05 filter-repo 정리 전, 보고서 포함).
-  - 다음 배포 때 status.md에 적힌 절차로 바꾼다: 새 bundle → `git fetch` 후 `reset --hard FETCH_HEAD` → reflog expire와 `gc --prune=now`.
+- 서버(2026-10-06): 토큰 aud 검사 강화(결정 #79)만 `p1-auth-audience`로 반영했다(브랜치 `fix/auth-audience`, master의 #69~ 작업은 미배포). 옛 이력은 새 이력으로 바꾸고 gc했다.
+  - 다음 master 배포는 docs/deploy.md "업데이트" 절차(`git fetch … master && git checkout -B master FETCH_HEAD`)로 한다.
 - 알려진 문제: `tests/test_http.py::test_request_size_limit`가 Windows에서 간헐적으로 실패한다(413 응답 전에 연결이 리셋됨). 서버 동작은 정상이다(status.md 7절).
 - 대기 사항: 계정·키·결정·아버지 docx처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), 저자 보고서 답변. 상세는 status.md에만 적는다.
 
@@ -315,6 +315,7 @@ data/index.sqlite
   - 허용 목록(`ALLOWED_USERS`)에 없는 sub는 거부한다. 무효 토큰은 401(+ `resource_metadata`), 유효하지만 목록 밖은 403(`ForbiddenGate`).
   - 무효 토큰의 원인(iss 불일치·aud 불일치·만료·서명·kid·형식)은 `JwtVerifier.check`가 서버 로그에 남긴다. iss·aud·kid 같은 공개 값만 쓰고 토큰 값은 남기지 않는다.
   - WorkOS는 당분간 **Staging 환경**(`dapper-palace-57-staging.authkit.app`)으로 운영한다. Production은 공개 서비스로 바꿀 때 옮긴다(결정 #49, 2026-10-05). 허용 목록 순서: 운영자 본인 `=default`(개발용 PDF 임포트본, 6단계 시험)가 먼저이고, 아버지 `=father`(docx 원본 새 임포트)는 나중이다(docs/deploy.md 2-1절, docs/onboarding-father.md).
+  - **토큰 aud는 `PUBLIC_URL/mcp` 하나만 받는다**(문자열, 또는 원소 하나인 목록). 다른 값이 섞이면 401이다. `AUTH_AUDIENCE`로 넓히지 않고, 다르면 서버가 시작하지 않는다. 자매 서비스 trip_ai와 WorkOS 환경을 공유하기 때문이다(결정 #79, `docs/decisions/shared-auth-audience.md`). `ALLOWED_USERS`는 서비스별로 따로다.
   - PRM의 `resource`는 커넥터 URL(`PUBLIC_URL/mcp`)과 정확히 같아야 한다(Claude 요구). Claude 등록 방식은 CIMD("Claude의 공개 신원 사용").
 - 사용자: `current_user()`가 HTTP에서는 토큰의 sub로, stdio에서는 `USER_ID`로 user_id를 정한다. 두 모드를 가르는 분기는 `current_user()` 밖으로 새지 않는다.
 - 파일

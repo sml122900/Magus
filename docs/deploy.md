@@ -101,7 +101,18 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
   - 아버지 원고는 docx 원본을 아버지 받은함에 새로 올려 임포트한다(PDF 임포트본을 옮기지 않는다).
   - 절차는 [onboarding-father.md](onboarding-father.md)에 있다.
 
-업데이트: 로컬에서 새 번들을 만들어 `/root/magus.bundle`에 올린 뒤 `cd /opt/magus && sudo git pull /root/magus.bundle master && cd deploy && sudo docker compose up -d --build`.
+업데이트: 로컬에서 새 번들을 만들어 `/root/magus.bundle`에 올린 뒤 아래를 실행한다.
+
+- 지금(2026-10-06부터) 서버는 브랜치 `fix/auth-audience`(태그 `p1-auth-audience`)에 있다. 옛 이력은 지웠다.
+- 다음에 master를 배포할 때는 pull 대신 `cd /opt/magus && sudo git fetch /root/magus.bundle master && sudo git checkout -B master FETCH_HEAD && cd deploy && sudo docker compose up -d --build`.
+  - 그 master에 `p1-auth-audience`가 병합돼 있어야 한다(`git merge-base --is-ancestor p1-auth-audience FETCH_HEAD`). 아니면 aud 검사가 옛 판으로 되돌아간다.
+- 반영 전에 되돌릴 커밋(`git rev-parse HEAD`)과 data 해시 목록을 적어 둔다. 되돌릴 때는 그 커밋으로 `reset --hard` 후 다시 빌드한다(`HEAD~1`을 쓰지 않는다).
+
+반영 기록
+
+| 날짜(KST) | 반영 | 반영 전 → 후 | 확인 |
+|---|---|---|---|
+| 2026-10-06 00:53 | `p1-auth-audience`(토큰 aud 검사, 결정 #79) + 이력 교체 | `21b4e2a`(옛 이력) → `896633c`. 같은 상태의 새 이력 커밋은 `78c9668` | `/healthz` ok, `/mcp` 401 + resource_metadata, 컨테이너 안에서 trip_ai·섞인 aud 거부, 다른 `AUTH_AUDIENCE`로 시작 실패(종료 2), data 798개 해시 같음, `docs/reports` 객체 없음. 서버 기록은 `/root/deploy-20261006-auth-audience/`(ROLLBACK.txt) |
 
 ## 3. 알림 확인
 
