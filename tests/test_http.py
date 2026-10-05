@@ -27,6 +27,7 @@ TOOLS = {
     "book_issue_close", "book_import", "book_export", "ref_import_bibliography", "ref_add", "ref_search", "ref_check",
     "idea_add", "idea_add_conversation", "idea_search", "idea_delete", "style_add", "style_search", "style_delete",
     "category_list", "category_create", "category_edit", "category_put", "category_search", "category_trash", "category_title_default",
+    "book_questions", "book_answer",
 }
 # 로그에 나오면 안 되는 내용(본문·발췌·생각·문체 구절·카테고리 항목)
 SECRET = ("비밀본문가나다", "비밀발췌라마바", "비밀생각사아자", "비밀구절차카타", "비밀항목파하거")
@@ -110,6 +111,8 @@ async def test_all_tools_over_http_and_log_has_no_content(http_server, data_dir:
             ("category_put", {"category": "사례", "author": "me", "content": SECRET[4], "title": SECRET[4], "title_by": "author"}),
             ("category_search", {"query": "파하거"}),
             ("category_title_default", {"mode": "none"}),
+            ("book_questions", {"status": "all"}),
+            ("book_answer", {"question_id": "bibonly:zimmer1998", "choice": "keep", "note": SECRET[4]}),
         ]
         out = {name: _text(await client.call_tool(name, args)) for name, args in calls}
         deletes = [("idea_delete", {"id": out["idea_add"].split()[2], "note": "시험"}),  # 휴지통으로 옮긴 내용도 로그에는 없다

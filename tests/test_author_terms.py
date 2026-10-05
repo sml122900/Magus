@@ -40,7 +40,7 @@ async def test_author_facing_text_has_no_old_or_core_names(settings: Settings, s
         assert not _hits(c.instructions.replace(AVOID, "")), _hits(c.instructions.replace(AVOID, ""))
         assert c.instructions.count(AVOID) == 1
         tools = (await c.list_tools()).tools
-        assert len(tools) == 28
+        assert len(tools) == 30
         for tool in tools:
             seen[f"설명 {tool.name}"] = f"{tool.description}\n{json.dumps(tool.input_schema, ensure_ascii=False)}"
 
@@ -67,6 +67,10 @@ async def test_author_facing_text_has_no_old_or_core_names(settings: Settings, s
         await call("ref_add", {"bib": {"key": "clack2012"}, "passages": [{"text": "tetrapods came ashore", "reason": "1장 근거"}]})
         await call("ref_search", {"query": "tetrapods"})
         await call("ref_check", {"chapter_number": 1})
+        listed = await call("book_questions", {"status": "all"})
+        await call("book_answer", {"question_id": "year:없는것", "choice": "fix_text"}, "book_answer 오류")
+        if qid := re.search(r"\[(bibonly:[^\]]+)\]", listed):
+            await call("book_answer", {"question_id": qid.group(1), "choice": "keep", "note": "시험"})
         await call("idea_add", {"text": "바다는 돌아가는 곳이다", "kind": "thought"}, "idea_add 오류(제목을 묻게 함)")
         idea = await call("idea_add", {"text": "바다는 돌아가는 곳이다", "kind": "thought", "title": "바다", "title_by": "ai"})
         await call("idea_add_conversation", {"path": "대화.md"})

@@ -24,6 +24,7 @@ def test_labels_and_chapters():
     assert chapters_text(["15", "32"]) == "제15·32장"
     assert chapters_text(["15", "부록 2"]) == "제15장, 부록 2"
     assert chapters_text(["제35장"]) == "제35장"
+    assert chapters_text(["35", "35", "부록 2", "부록 2"]) == "제35장, 부록 2"  # 같은 장이 두 번 찍히던 오탐
     assert short_title("Is growth obsolete? In Economic Growth (pp") == "Is growth obsolete?"
     assert short_title("A Treatise on Money, Vol") == "A Treatise on Money"
     assert short_title("The World Economy: A Millennial Perspective") == "The World Economy"
@@ -39,6 +40,7 @@ def test_name_mentions_only_certain_spots(store: LocalStore):
         ("제2장", "레슬리 아이엘로와 휠러는 말했다. 훨씬 이른 시기였다."),  # Lee 음역 오탐 자리
         ("제19장", "노리치·콜체스터로 이주했다."),  # Nordhaus 비슷하지만 공저자(토빈)가 없다
         ("제35장", "케인스(1930), 노드하우스·토빈의 여가"),
+        ("제32장", "국내 연구(이상호, 박지민)도 있다."),  # 한국인 성명은 성씨 표기만 맞아도 1점이라 Lee로 잡히던 오탐
     ]
     assert name_mentions(texts, graunt) == (["존 그랜트"], ["서장"])
     assert name_mentions(texts, lee) == (["리처드 리"], ["제10장"])

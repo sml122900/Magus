@@ -10,6 +10,9 @@
 - **서버에는 접속하지 않는다. 서버 배포 태그는 여전히 `p1-trash`(74bbbf4)다.** 오늘 밤 태그(`shelf-web`·`shelf-categories`·`questions`)는 GitHub 백업용이다.
 - A 완료: `/shelf`(책 세 권) + 게시판형 목록·고유 주소·검색(웹 전용 레인 style_passage·ref_bib, 인덱스 v14), 용어집 책장·카테고리(#92). 태그 `shelf-web`(0dac85e).
 - B 완료: 저자의 카테고리(저장·도구 7개·웹 만들기·이름·색·휴지통·바로 적기), 책 색(격자 18·내 색 12·직접 고르기), 항목 제목(생각·카테고리, 기본값 서버 저장), instructions 머리말·규칙 7·9·10. 인덱스 v15, 도구 21 → 28. 태그 `shelf-categories`.
+- C 완료: 캡처 `private/screens/2026-10-06-shelf/`(24장), 스스로 점검 3회(9a375f8), 되돌리기 안전(제목 없는 생각 파일에 title 키 안 씀, b8ed3c2). 예시 공간 다시 만들기·캡처 스크립트는 `private/demo/`.
+- D 완료(일부): #84 `book_questions`·`book_answer` + `book/answers.md`, 저자 보고서 오탐 두 개 수정. 도구 28 → 30. father-trial 질문 19건(자료의 18곳 + IEA 중복분), 2,102토큰. 웹 `/questions`·수정본 리포트 절은 남음. 태그 `questions`.
+- E: 아침 보고 `docs/daily/2026-10-06.md`.
 - 예시 공간 `demo-shelf`(합성 데이터, data/users/demo-shelf). 실행: `USER_ID=demo-shelf DATA_DIR=./data .venv/Scripts/python -m magus serve --transport http --port 8765` → http://127.0.0.1:8765/shelf
 
 ## 0-8. 최근 보고 (2026-10-06, 서버 배포 `p1-trash` + 시험 기록 정리, 세션 magus-25)
@@ -489,6 +492,7 @@
 **2026-10-06 확정(#84, 사용자 승인)**
 
 84. **저자 확인 질문지(`book_questions`) 설계안 승인. 구현은 7단계(아버지 온보딩) 뒤 첫 작업으로 한다**(`docs/decisions/author-questions.md`)
+    - **2026-10-06 밤 앞당겨 구현(야간 작업 D, 서버 배포 전)**: book_questions·book_answer·answers.md. 웹 `/questions`와 수정본 리포트 절은 남았다. 판별 로직은 옮기지 않고 불러 쓴다(설계와 다른 점, 검토 대기).
     - 조사: 1절 질문 18곳 중 MCP·웹으로 바로 얻을 수 있는 것은 케인스 a/b·미연결뿐이다. 연도 불일치·추정 연결·같은 저자 두 편·중복 서지는 일부(장마다 ref_check 또는 올릴 때 리포트에만), "참고문헌에만 있음"은 CLI 보고서에만 있다.
     - 판별은 check.py(장마다), report.py(hint·uncited), author_report.py(same_author·이름 언급), bibliography.py(중복 서지, 올릴 때만)에 흩어져 있고 책 단위로 저장되지 않는다.
     - 제안: 판별을 questions.py로 모으고 `book_questions`(조회) → `book_answer`(alias·비인용 용어·결정 기록·`book/answers.md`) 순서. 질문은 매번 계산하고 답만 파일에 남긴다. 다시 올리기 리포트에 "새로 생긴 질문" 절, 웹 `/questions` 조회. Word 코멘트로 돌려주기는 P2.

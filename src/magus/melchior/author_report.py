@@ -16,7 +16,7 @@ from pathlib import Path
 
 from magus.melchior.check import Resolver, check_text, terms_of
 from magus.melchior.report import build_cite_report
-from magus.melchior.translit import korean_skeleton, latin_skeleton, score
+from magus.melchior.translit import KOREAN_SURNAMES, korean_skeleton, latin_skeleton, score
 from magus.store import Ref, Store
 from magus.store.formats import one_line
 
@@ -56,9 +56,9 @@ def cite_label(ref: Ref | None, key: str = "", all_authors: bool = False) -> str
 
 
 def chapters_text(labels: Iterable[str]) -> str:
-    """['15', '32'] → '제15·32장', ['15', '부록 2'] → '제15장, 부록 2', ['제35장'] → '제35장'."""
+    """['15', '32'] → '제15·32장', ['15', '부록 2'] → '제15장, 부록 2', ['제35장'] → '제35장'. 같은 장이 여러 번 와도 한 번만."""
     nums, others = [], []
-    for label in labels:
+    for label in dict.fromkeys(labels):
         if m := re.fullmatch(r"제?(\d+)장?", label):
             nums.append(m.group(1))
         else:
@@ -91,6 +91,9 @@ def name_mentions(chapters: list[tuple[str, str]], ref: Ref) -> tuple[list[str],
     initial = re.search(r",\s*([A-Z])", authors)
     given = latin_skeleton(initial.group(1))[:1] if initial else ""
     sound, lead = latin_skeleton(surname), latin_skeleton(surname)[:1]
+    # 한국인 성명(성씨표의 첫 글자 + 두세 글자)은 성씨 표기만 맞아도 점수가 1이 된다(이상호 ≈ Lee). 저자가 한국 이름처럼
+    # 보이지 않으면(이름 머리글자에 하이픈이 없으면) 그런 낱말은 이름 언급으로 보지 않는다.
+    korean_author = bool(re.search(r",\s*[A-Z][a-z]*\.?-[A-Za-z]", authors))
     shown: dict[str, None] = {}
     where: list[str] = []
     for label, text in chapters:
@@ -108,6 +111,8 @@ def name_mentions(chapters: list[tuple[str, str]], ref: Ref) -> tuple[list[str],
             )
             nxt = words[i + 1].group() if i + 1 < len(words) else ""
             for stem in _stems(m.group()):
+                if not korean_author and len(stem) == 3 and stem[0] in KOREAN_SURNAMES:
+                    continue
                 before = text[m.start() - 1 : m.start()]
                 after = text[m.start() + len(stem) : m.start() + len(stem) + 1]
                 s = _score(stem, surname)

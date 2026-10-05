@@ -150,6 +150,8 @@ async def test_every_tool_is_user_scoped(settings: Settings, store: LocalStore, 
         "style_search": {"query": "짧은 호흡"},
         "idea_delete": {"id": alice_idea, "note": "x"},  # 같은 id라도 bob의 휴지통 일이다(앨리스 것은 못 옮긴다)
         "style_delete": {"id": alice_style, "note": "x"},
+        "book_questions": {"project_id": "demo"},
+        "book_answer": {"question_id": "bibonly:clack2012", "choice": "keep", "project_id": "demo"},
         "category_list": {},
         "category_search": {"query": "바다"},
         "category_put": {"category": "앨리스의 사례", "author": "me", "content": "x", "untitled": True},
@@ -158,7 +160,7 @@ async def test_every_tool_is_user_scoped(settings: Settings, store: LocalStore, 
     }
     async with Client(build_server(bob, store)) as client:
         names = {t.name for t in (await client.list_tools()).tools}
-        assert len(names) == 28
+        assert len(names) == 30
         for name, args in calls.items():
             result = await client.call_tool(name, args)
             text = result.content[0].text

@@ -19,6 +19,7 @@ from magus.inbox import FileResolver
 from magus.inbox import build_tools as inbox_tools
 from magus.instructions import build_instructions
 from magus.melchior.check import refresh_cite_counts
+from magus.melchior.question_tools import build_tools as question_tools
 from magus.melchior.tools import build_tools as melchior_tools
 from magus.search import Embedder
 from magus.store import Store
@@ -57,6 +58,7 @@ def build_server(
     tools = [
         *book_tools(store, current_user, files, export_link),
         *melchior_tools(store, current_user, embedder, files),
+        *question_tools(store, current_user),
         *casper_tools(store, current_user, embedder, files),
         *balthasar_tools(store, current_user, embedder),
         *category_tools(store, current_user, embedder),
