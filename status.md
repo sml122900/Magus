@@ -1,7 +1,7 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-06 KST — #84(저자 확인 질문지) 승인, 구현은 7단계 뒤 첫 작업. 사용자 격리 점검과 시험 추가(`tests/test_isolation.py`, 문제 없음). 대기: claude.ai에서 book_outline 확인(사용자).
+> 마지막 갱신: 2026-10-06 02:17 KST(서버 시각) — 아버지 계정을 서버 허용 목록에 추가(`=father`, 허용 2명). 다음: 아버지 첫 로그인과 `/book`이 비어 있는지 확인.
 > 2026-10-06 01시 KST — 토큰 aud 검사 강화(결정 #79)를 `p1-auth-audience`로 서버에 반영하고, 서버의 옛 git 이력을 새 이력으로 바꿨다(0-3절).
 
 ## 0-6. 최근 보고 (2026-10-06, 사용자 격리 점검 — 아버지 계정 추가 전, 세션 magus-25)
@@ -148,6 +148,9 @@
 ## 1. 지금 바로 할 일
 
 - **대기(사용자)**: claude.ai 새 대화에서 Magus의 book_outline을 한 번 불러 확인한다(서버 배포 `p1-reupload` 뒤).
+- **다음: 아버지 첫 로그인**(2026-10-06 02:17 허용 목록에 추가함). `/book`이 비어 있어야 한다. 그다음 온보딩 B절.
+- **할 일(다음 배포, book_questions 때 함께)**: `ALLOWED_USERS`에 같은 이름이 두 번이거나 같은 sub가 두 번이면 서버 시작을 거부한다.
+  - 지금 `auth.parse_allowed`는 dict라 같은 sub가 두 번이면 뒤의 것이 조용히 이기고, 같은 이름이 두 번이면 두 계정이 한 공간을 쓴다(격리 점검 0-6절의 운영 위험).
 - (처리함 2026-10-06) 서버 배포 `p1-reupload`(0-5절), `docs/worktree-rule` 병합(`e396d3f`, 사용자 지시).
 - **운영 규칙(#78)**: 같은 책을 다시 올릴 때는 새 판으로 한다(`book_import new_edition=true`, 웹 "이 책의 새 판으로 올리기", CLI `--new-edition`). `replace`는 결정·직접 남긴 미해결·닫은 미해결까지 휴지통으로 보내니 쓰지 않는다.
 - 로컬 시험 공간: **아버지 온보딩이 끝날 때까지 지우지 않는다(#83).** 그 뒤 지울 때는 폴더를 지우고 `magus reindex`
@@ -274,7 +277,15 @@
   - 웹·모바일에서 book_outline, ref_check, book_read_chapter, idea_add 성공(CIMD, 인증 실패 0)
   - `docs/connect-claude.md`(실제 화면 순서), `docs/daily/2026-10-05.md`
   - 토큰 갱신(하루 이상 지난 뒤 재접속)은 따로 확인하지 않는다. 실사용 중 문제가 생기면 조치한다(2026-10-05 사용자 결정).
-- [ ] P1 7단계 아버지 온보딩 체크리스트 — 다음. `docs/onboarding-father.md`(2026-10-06 최신 수치·흐름 반영)
+- [ ] P1 7단계 아버지 온보딩 체크리스트 — **진행 중**. `docs/onboarding-father.md`(2026-10-06 최신 수치·흐름 반영)
+  - [x] WorkOS(Staging)에 아버지 계정 생성(사용자, 2026-10-06). id는 WorkOS 화면에서 받았다(403 화면으로 얻는 단계는 생략).
+  - [x] 서버 `ALLOWED_USERS`에 `<아버지 id>=father` 추가, `docker compose up -d`(2026-10-06 02:17 서버 시각)
+    - 저장 전 확인: 새 id가 기존 id와 다름, 이름 default·father 서로 다름, 한 이름에 sub 하나. 앱 파서로 다시 읽어 허용 2명 확인
+    - 백업: 서버 `/root/deploy-20261006-father/env.before`(600). `ALLOWED_USERS` 밖의 줄은 그대로
+    - 확인: healthy·재시작 0, 로그 "허용 2명", `/healthz` ok, `/mcp` 401, default 파일 798개 해시 같음
+    - father 공간(`data/users/father/`)은 재시작 때 생기지 않는다. 첫 쓰기(받은함 업로드·임포트·생각 기록) 때 생긴다. 읽기(outline, `/book`·`/inbox` 화면)는 폴더를 만들지 않는다.
+  - [ ] 아버지 첫 로그인 → `/book`이 비어 있는지 확인(잘못된 짝을 잡는 단계)
+  - [ ] 커넥터 등록, docx 업로드·처음 가져오기, 비인용 용어 6개, 첫 세션 대본(온보딩 B·C절)
   - 7단계 준비(2026-10-06, 로컬): `9688878` #74, `e1b57b7` #69, `0df3d1c` #70, `1708217` #71, `1d78eb6` #72, `fc6bdec` #73, `393f5e0` #77, `ef903d1` #76, `0109ad4`, `a1c9a12`
   - 파일: `src/magus/book/{reupload,importer,docx_reader,comments,outline,tools,export}.py`, `src/magus/store/*`, `src/magus/melchior/{bibliography,author_report}.py`, `src/magus/{web,cli,instructions}.py`, `tests/test_docx_features.py`, `tests/test_reupload.py`
 
@@ -544,6 +555,10 @@
   - `/fixtures/`(루트), `data/`, `/private/`(저자용 보고서 등 실원고 파생 자료)는 gitignore. `tests/fixtures/`(합성)는 커밋한다.
 
 ## 6. 마지막 세션 요약
+
+**2026-10-06 (7)** — 아버지 계정을 서버 허용 목록에 추가(세션 magus-25)
+- `.env` 백업 → 짝 확인(id 다름, 이름 서로 다름, 한 이름에 sub 하나) → 저장(600) → 앱 파서로 허용 2명 확인 → `up -d` → healthy, default 해시 같음. id는 출력·기록하지 않았다.
+- 남긴 것: 아버지 첫 로그인 확인, 할 일 "같은 이름·sub 두 번이면 시작 거부"(다음 배포).
 
 **2026-10-06 (6)** — #84 승인 기록, 사용자 격리 점검(세션 magus-25, 로컬·서버 변경 없음)
 - #84는 승인. 구현은 7단계 뒤 첫 작업이다. 그 요청 사이에 #84 구현을 시작하라는 지시가 있었으나, 이어진 요청으로 시기가 바뀌어 코드는 건드리지 않았다.

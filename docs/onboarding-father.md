@@ -26,10 +26,10 @@
 
 ## A. 운영자가 할 일
 
-- [ ] WorkOS(**Staging**, 결정 #49)에서 아버지를 **초대**한다(가입은 꺼져 있다). 로그인 방법은 이메일 코드(Magic Auth)다.
-- [ ] 아버지가 한 번 로그인하게 한다: `https://magus.lifebookapplication.com/login` → 403 화면의 사용자 id를 받는다.
-  - WorkOS 대시보드 Users에서 아버지 id를 찾아도 된다.
-- [ ] 서버 `.env`에 `ALLOWED_USERS=<운영자 id>=default,<아버지 id>=father`를 넣고 `sudo docker compose up -d`를 실행한다(`restart`가 아니라 `up -d`).
+- [x] WorkOS(**Staging**, 결정 #49)에 아버지 계정을 만들었다(2026-10-06, 가입은 꺼져 있다). 로그인 방법은 이메일 코드(Magic Auth)다.
+- [x] 아버지 사용자 id: WorkOS 대시보드에서 받았다(403 화면으로 얻는 단계는 생략, 2026-10-06).
+- [x] 서버 `.env`에 `ALLOWED_USERS=<운영자 id>=default,<아버지 id>=father`를 넣고 `sudo docker compose up -d`를 실행했다(2026-10-06 02:17, 로그 "허용 2명").
+  - 넣기 전에 확인한다: 새 id가 기존 id와 다르고, 이름이 서로 다르며(default·father), 한 이름에 sub가 둘 붙지 않았다.
 - [ ] 아버지가 다시 로그인해 `/book`이 비어 있는 것을 확인한다.
 - [ ] **비인용 용어 넣기**: `default`의 book 프로젝트에 넣었던 용어 5개(선하이정·마닐라·유조프카·푸둥·모스크바 회사)는 프로젝트별 파일이라 따라오지 않는다. 최신본 제27장 표의 `상트페테르부르크(1703)`도 지명이라 함께 넣는다(#81). 임포트한 뒤 아래를 실행한다. 새 판으로 다시 올려도 이 목록은 그대로 남는다.
   ```sh
