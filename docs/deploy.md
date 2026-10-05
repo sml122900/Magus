@@ -159,7 +159,7 @@ cd /opt/magus/deploy && sudo ./restore-test.sh default father
 | 날짜 | 어디서 | 결과 |
 |---|---|---|
 | 2026-10-03 | 로컬(Docker, restic 공식 이미지, 로컬 저장소, 실데이터 사본 53.4MB) | 백업 34초·스냅샷 50.3MiB → 복구 2,396개 → reindex → default/book outline 66줄 **같음** |
-| (배포 후) | 서버(R2) | `restore-test.sh default father` |
+| 2026-10-05 | 서버(Vultr 서울, R2, restic 0.19.1, default PDF 임포트본 797개·8.1MB, trash 제외) | 첫 백업 24초·스냅샷 `28e5e451` 7.7MiB → `restore-test.sh default` 28초 → 복구 797개 → reindex → default/book outline 66줄 **같음** |
 
 ## 6. 점검 체크리스트(월 1회)
 

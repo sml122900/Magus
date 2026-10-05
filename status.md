@@ -1,7 +1,7 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-05 KST — 계정 준비 끝(사용자). 배포용 `deploy/.env` 생성(비밀이 아닌 값·SESSION_SECRET 채움, 비밀 10개는 사용자 대기). 태그 없음.
+> 마지막 갱신: 2026-10-05 KST — P1 5단계 배포(서버·HTTPS·SSH 키 전용·알림·alive·데이터 이전·백업·서버 복구 시험 같음). 웹 로그인 확인 대기. 태그 없음.
 
 ## 0-1. 최근 보고 (2026-10-05, WorkOS 설정)
 
@@ -37,34 +37,47 @@
 
 ## 1. 지금 바로 할 일
 
-- **대기: `deploy/.env`의 비밀값 10개, 사용자.** 사용자가 메모장으로 직접 채운다. 비밀값은 채팅으로 묻지 않고, 파일 내용도 출력하지 않는다.
-  - 빈 키: WEB_CLIENT_SECRET, ALLOWED_USERS, ALERT_TELEGRAM_BOT_TOKEN, ALERT_TELEGRAM_CHAT_ID, HEALTHCHECK_ALIVE_URL, HEALTHCHECK_URL, R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, RESTIC_PASSWORD.
-  - 사용자가 "값 채웠어"라고 하면 다음 순서로 간다.
-    1. 키 이름만으로 빈 값을 점검한다(값은 출력하지 않는다). 형식도 확인하되 통과·실패만 말한다: BOM·CRLF, `$`, R2_ENDPOINT 끝 버킷, hc-ping URL.
-    2. 자가 점검을 한 뒤 배포한다(아래 "내가 할 일").
-- 계정 준비 완료(2026-10-05, 사용자)
-  - 서버 `158.247.225.48`: Vultr 서울, Ubuntu 24.04 LTS, root, SSH 키.
-  - 도메인 `magus.lifebookapplication.com`, R2 버킷 `magus-backup`, 텔레그램, healthchecks(magus-alive 5분/5분, magus-backup 1일/2시간).
-  - WorkOS는 **Staging 환경**(`https://dapper-palace-57-staging.authkit.app`)이다.
-    - 10-05 오전의 "Production" 결정을 사용자 지시로 바꿨다. issuer·클라이언트·사용자 id를 모두 Staging에서 가져와야 한다. issuer 끝의 `/`는 배포 때 .well-known과 실제 토큰의 iss로 맞춘다.
-    - 설정 상태: Magic Auth 켬, 비밀번호 끔, 가입 끔, DCR·CIMD 켬, 리소스 `/mcp`(Default), 웹 리디렉션 `/auth/callback`.
-    - 웹 클라이언트 `client_01M45PBRZEBZV6XEGJQSPWVH4P`는 기밀 클라이언트이고, PKCE 미사용으로 만들었다. 우리 코드는 PKCE(S256)와 client_secret을 함께 보낸다. 받아들여지는지는 첫 로그인에서 확인한다.
-- `deploy/.env`의 구조는 `.env.example`과 다르다. **배포 때 `.env.example`과 deploy.md 표를 맞춘다.**
-  - R2는 `R2_ENDPOINT`·`R2_ACCESS_KEY_ID`·`R2_SECRET_ACCESS_KEY`로 받는다. `RESTIC_REPOSITORY`·`AWS_*`는 compose가 `${…}`로 만든다(env_file 보간, 가짜 값으로 확인).
-  - `HEALTHCHECK_ALIVE_URL`(magus-alive)은 아직 읽는 코드가 없다. 배포 때 호스트 cron(`/healthz` 확인 뒤 핑)으로 연결한다.
-- 불명: "이전에 받은 P1 5~6단계 진행 지시"의 원문이 이 세션과 리포에 없다. 판단: 아래 "내가 할 일"과 docs/deploy.md 1~4절대로 진행한다.
-- 내가 할 일(배포)
-  - `docs/deploy.md` 1~4절대로 배포한다.
-  - `alert-test`로 알림을 받아 본다.
-  - 첫 백업을 돌리고, `restore-test.sh default father`로 서버에서 복구 시험을 한다. 결과는 deploy.md 기록 표에 적는다.
-  - 그다음 `p1-step5` 태그를 단다.
+- **대기: 웹 로그인 확인, 사용자.**
+  - `https://magus.lifebookapplication.com/login` → WorkOS(Staging) Magic Auth(메일 코드) → `/book`에 "닿으려는 종"이 보이면 성공이다.
+  - 403이면 허용 목록 id가 다른 것이다. 화면의 id를 `.env`의 `ALLOWED_USERS`에 `=default`로 넣고 `docker compose up -d`.
+  - 401이면 `docker compose logs magus | grep "token rejected"`로 원인을 본다(iss·aud·만료·서명).
+  - 웹 클라이언트는 PKCE 미사용으로 만들었는데 우리는 PKCE + client_secret을 보낸다. 거부되면 여기서 드러난다.
+- 대기(사용자 확인): 텔레그램 "알림 시험" 수신, healthchecks.io의 magus-alive·magus-backup이 초록인지.
+- 로그인이 되면: `p1-step5` 태그 → 6단계(Claude 커넥터 등록, `docs/connect-claude.md`).
+- **5단계 배포 결과(2026-10-05)**
+  - 서버: Docker 29.1.3, Compose 2.40.3, ufw 22·80·443, 시간대 Asia/Seoul, unattended-upgrades 켬, 스왑은 Vultr 기본 2.3G.
+  - SSH: 비밀번호 로그인 끔(`/etc/ssh/sshd_config.d/00-magus.conf`, 50-cloud-init보다 먼저 읽힘). 기존 세션을 열어 둔 채 새 세션 키 접속을 확인한 뒤 닫았다.
+  - 서버는 이제 `publickey`만 제시한다. root는 prohibit-password.
+  - 코드: git bundle → `/opt/magus`(현재 `21b4e2a`). `.env`는 600 root, `data/`는 uid 10001.
+  - 확인(바깥에서)
+    - `/healthz` ok, Let's Encrypt 인증서 발급, HTTP는 308로 HTTPS.
+    - PRM resource = `/mcp`, 토큰 없이 401(+resource_metadata), `/login`은 WorkOS(S256·resource).
+    - 로그 "허용 1명", 컨테이너 uid 10001.
+  - 알림: 봇 토큰·chat id 유효(텔레그램 API getMe·getChat, 값 출력 없음), alert-test 보냄. alive.sh 핑 성공, cron 5분.
+  - 데이터: 로컬 default의 projects·shelf(797개, 8.1MB, trash 제외)를 서버로 옮기고 reindex했다. outline이 로컬과 바이트 단위로 같다(66줄).
+    - 처음에는 시각만 달랐다(컨테이너 UTC). compose에 `TZ: Asia/Seoul`을 넣어 고쳤다(`0c8e089`).
+  - 백업: 첫 백업 24초, 스냅샷 `28e5e451` 7.7MiB, 오류 없음. cron 매일 04:00 KST(시간대 변경 뒤 cron 재시작). restic 0.19.1 고정(`21b4e2a`).
+  - 복구 시험(서버, R2): `restore-test.sh default` 28초, outline 같음. deploy.md 기록 표에 적었다.
+  - 운영 스크립트의 `docker compose exec·run`에 `</dev/null`을 붙였다(표준입력을 먹어 뒤 명령이 사라지는 것을 겪음).
+- 접속 메모
+  - 서버 접속은 Windows OpenSSH(`/c/Windows/System32/OpenSSH/ssh.exe`, Git Bash에서도 됨)와 사용자의 ssh-agent(id_ed25519, 사용자가 등록)를 쓴다.
+  - Git Bash 기본 ssh는 한글 사용자 폴더 이름 때문에 키를 찾지 못한다.
+  - 서버 호스트 키: ED25519 `SHA256:WchFUFNtRDD2D0JaTPPajWdFYWLfBxTmg+EgoumWuJo`.
+  - 임시 배포 키는 만들었다가 쓰지 않고 지웠다(서버에 등록된 적 없음).
+- 업데이트 절차: 로컬 `git bundle create magus.bundle master --tags` → scp `/root/magus.bundle` → 서버 `git pull /root/magus.bundle master` → `docker compose up -d --build`.
+- 계정·설정(2026-10-05, 사용자)
+  - WorkOS **Staging**(`https://dapper-palace-57-staging.authkit.app`, issuer 끝 `/` 없음). 10-05 오전의 Production 결정을 사용자 지시로 바꿨다.
+  - Magic Auth 켬, 비밀번호 끔, 가입 끔, DCR·CIMD 켬, 리소스 `/mcp`(Default), 웹 리디렉션 `/auth/callback`.
+  - 웹 클라이언트 `client_01M45PBRZEBZV6XEGJQSPWVH4P`(기밀).
+  - `deploy/.env` 점검: 빈 값·형식 문제 없음. ALLOWED_USERS는 id만 있어서 값을 보지 않고 `=default`를 붙였다.
+- 불명(승인됨): "P1 5~6단계 진행 지시" 원문이 없어 status.md와 docs/deploy.md 기준으로 진행했다(사용자 승인 2026-10-05).
 - 불명
   - 완료 기준의 "refs 297": 실데이터 refs는 299건이다(파싱 실패 raw 1, acemoglu2001-2 포함). 297은 고유 미확인 문헌 수다. 판단: "refs 299, 미확인 문헌 297"로 검증한다.
   - 완료 기준의 "업로드한 docx": 실원고는 PDF만 있다(docx 없음). 판단: docx가 올 때까지 PDF로 검증한다. 대기: 원고 docx(사용자).
 
 ## 2. 현재 단계
 
-**P1 진행 중 — 4단계 완료, 5단계 준비 완료(계정 대기)**(`p1-step1`~`p1-step4`). P0는 `step1`~`step7`, `p0-realdata`, `p0-report1`과 그 뒤 결정 반영 커밋까지 끝났다.
+**P1 진행 중 — 5단계 배포 완료, 웹 로그인 확인 대기**(`p1-step1`~`p1-step4`, `p1-step5`는 로그인 뒤). P0는 `step1`~`step7`, `p0-realdata`, `p0-report1`과 그 뒤 결정 반영 커밋까지 끝났다.
 
 ## 3. 단계별 체크리스트
 
@@ -80,7 +93,9 @@
 - [x] **P1 4단계 웹 페이지** — 2026-10-03, `p1-step4`
   - `src/magus/web.py`, `src/magus/signing.py`, `src/magus/store/{base,local}.py`(export_path), `src/magus/book/tools.py`(내려받기 링크), `src/magus/cli.py`(웹 등록)
   - `tests/test_web.py`, 브라우저 확인(Claude in Chrome)
-- [ ] P1 5단계 배포·도메인·HTTPS·백업·복구 테스트·알림 — **준비 완료**(2026-10-03, 태그 없음), 실제 배포는 계정 대기
+- [ ] P1 5단계 배포·도메인·HTTPS·백업·복구 테스트·알림 — **배포 완료 2026-10-05**, 웹 로그인 확인 뒤 `p1-step5`
+  - 배포: `deploy/alive.sh`, `deploy/compose.yaml`(TZ·restic 0.19.1), `deploy/restore-test.sh`(</dev/null), `deploy/.env.example`(R2_*), 서버 `/opt/magus`
+  - 서버 복구 시험 같음(docs/deploy.md 기록 표)
   - `Dockerfile`, `.dockerignore`, `.gitattributes`, `deploy/{compose.yaml,Caddyfile,backup.sh,restore-test.sh,.env.example}`, `src/magus/alerts.py`, `src/magus/cli.py`(outline·alert-test)
   - `docs/decisions/hosting.md`, `docs/deploy.md`, `tests/test_alerts.py`, `tests/test_restore.py`
 - [ ] P1 6단계 Claude.ai 커넥터 등록, `docs/connect-claude.md`(초안만 있음)
@@ -216,6 +231,15 @@
   - `/fixtures/`(루트)와 `data/`는 gitignore. `tests/fixtures/`와 `docs/reports/`는 커밋한다.
 
 ## 6. 마지막 세션 요약
+
+**2026-10-05 (3)** — P1 5단계 배포
+- env 점검(값 출력 없음)과 자가 점검(테스트 190·ruff·DNS·WorkOS 메타·compose 해석)을 했다.
+- SSH: ssh-agent 문제는 사용자가 직접 풀었다.
+- 서버 준비(Docker·ufw·시간대)를 하고, 비밀번호 로그인을 껐다(기존 세션 유지 절차).
+- 번들로 배포했고, HTTPS·PRM·401·/login을 확인했다.
+- 알림을 시험하고, alive cron을 걸었다.
+- default 데이터를 옮겼다(outline 같음, TZ 수정). 첫 백업, 백업 cron, restic 고정, 서버 복구 시험(같음)까지 했다.
+- 커밋 `6d2c5d2`, `0c8e089`, `21b4e2a`. 웹 로그인 확인 대기에서 멈춤.
 
 **2026-10-05 (2)** — 배포용 env 파일
 - `deploy/.env`를 만들었다. 비밀이 아닌 값을 채우고, SESSION_SECRET(64자 hex)은 로컬에서 만들어 바로 썼다(출력하지 않음).
