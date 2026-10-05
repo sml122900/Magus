@@ -10,8 +10,9 @@
 - 원격 저장소: GitHub 비공개 `sml122900/Magus`(`origin`). **단계 태그를 찍으면 push까지 한다**(아래 "원격 저장소").
 - **사용자 결정 #68(2026-10-06)**: 원고 본문의 원본은 저자의 Word(·한글) 파일이다. Magus의 원고는 최신 업로드의 사본이다(`docs/decisions/author-file-is-source.md`).
   - 다시 올리기가 핵심 기능이 됐다. 설계안 초안은 `docs/decisions/reupload-design.md`이고, 아직 구현하지 않았다.
-- 최신본 docx 시험 임포트(2026-10-06, 로컬 `father-trial` 사용자): 표 37개의 글이 빠지고, "제N부 들어가며" 두 곳이 장 밖으로 나가는 문제를 찾았다. 고칠 것은 status.md 검토 대기 #69~#76에 있다.
-- 다음 할 일: 검토 대기 #69~#76에 대한 답을 받아 7단계 전 항목을 고친다. 그다음 **7단계 아버지 온보딩**(`docs/onboarding-father.md`)을 한다. 시작 전 확인은 status.md "7단계 전 확인"을 따른다.
+- 최신본 docx 시험 임포트(2026-10-06, 로컬 `father-trial` 사용자): 표 37개의 글이 빠지고, "제N부 들어가며" 두 곳이 장 밖으로 나가는 문제를 찾았다. 고칠 것은 status.md #69~#78(2026-10-06 확정)에 있다.
+- **운영 규칙(#78)**: 다시 올리기가 생기기 전까지 아버지 원고를 `replace`로 다시 임포트하지 않는다. replace는 결정·직접 남긴 미해결·닫은 미해결까지 휴지통으로 보낸다.
+- 다음 할 일: #69~#77과 다시 올리기 기본 부분(#76)을 구현한다. 그다음 **7단계 아버지 온보딩**(`docs/onboarding-father.md`)을 한다. 시작 전 확인은 status.md "7단계 전 확인"을 따른다.
 - 서버 교체 필요: 서버는 아직 **옛 이력의 bundle**을 쓴다(2026-10-05 filter-repo 정리 전, 보고서 포함).
   - 다음 배포 때 status.md에 적힌 절차로 바꾼다: 새 bundle → `git fetch` 후 `reset --hard FETCH_HEAD` → reflog expire와 `gc --prune=now`.
 - 알려진 문제: `tests/test_http.py::test_request_size_limit`가 Windows에서 간헐적으로 실패한다(413 응답 전에 연결이 리셋됨). 서버 동작은 정상이다(status.md 7절).
