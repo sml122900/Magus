@@ -106,6 +106,9 @@ def parse_bib_line(line: str) -> dict[str, Any] | None:
             more, _, rest = rest.partition(". ")
             authors_part = f"{authors_part}. {more}"
         authors, year = authors_part.strip(" ,."), y.group("year")
+        # "IEA (International Energy Agency). (2025). Energy and AI." — 저자에 괄호가 있어 APA로 못 읽은 줄은
+        # 남은 글이 "(2025). 제목"으로 시작한다. 연도 괄호를 떼야 제목이 "(2025)"가 되지 않는다(key는 그대로).
+        rest = re.sub(rf"^\(\s*{_YEAR}\s*\)\s*[.,]?\s*", "", rest.strip())
         title, container = _title_and_rest(rest)
         approx = True
     else:

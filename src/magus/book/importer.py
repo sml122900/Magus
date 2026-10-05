@@ -18,6 +18,7 @@ from pathlib import Path
 
 from magus.book.comments import author_kind, classify_comment, comment_fingerprint
 from magus.book.docx_reader import Block, Comment, Manuscript, read_docx
+from magus.book.outline import count_by_labels
 from magus.book.pdf_reader import read_pdf
 from magus.melchior.bibliography import BibReport, import_bibliography
 from magus.melchior.check import after_refs_changed
@@ -230,8 +231,7 @@ class ImportReport:
             f"## 임포트 리포트 — {self.title} ({self.project_id})" + (" · 합성 fixture" if self.synthetic else ""),
             f"- 원본: {self.source}" + "".join(f" · {n}" for n in self.notes),
             *([titles_line(self.titles)] if self.titles and titles_line(self.titles) else []),
-            f"- 장 {len(self.chapters)}개(번호 장 {sum(1 for c in self.chapters if not c[1])}"
-            f" + 서장·맺음·부록 {sum(1 for c in self.chapters if c[1])}) · 부 {len(self.parts)}개"
+            f"- 장 {len(self.chapters)}개({count_by_labels([c[1] for c in self.chapters])}) · 부 {len(self.parts)}개"
             f" · 그림 {self.figures} · 표 {self.tables} · 수식 {self.equations}",
             f"- 분할 못 한 구간: {self.unsplit_chars:,}자 (original/unsplit.md) — {self.unsplit_preview}",
             f"- 목차 등으로 판단해 버린 제목 줄: {len(self.discarded)}개"

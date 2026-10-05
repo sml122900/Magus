@@ -24,8 +24,12 @@ def estimate_tokens(text: str) -> int:
 
 
 def chapter_count(chapters: list[ChapterMeta]) -> str:
+    return count_by_labels([c.label for c in chapters])
+
+
+def count_by_labels(labels: list[str | None]) -> str:
     """'35장 + 서장·부 들어가며 2·맺음·부록 1~3'. 번호 없는 장은 이름으로 적고, 부록은 이어지면 범위로 묶는다."""
-    named = [c.label for c in chapters if c.label]
+    named = [label for label in labels if label]
     appendix = sorted(int(m.group(1)) for label in named if (m := re.fullmatch(r"부록\s*(\d+)", label)))
     intros = [label for label in named if label.endswith("부 들어가며")]
     others = [label for label in named if not re.fullmatch(r"부록\s*\d+", label) and label not in intros]
@@ -34,7 +38,7 @@ def chapter_count(chapters: list[ChapterMeta]) -> str:
     if appendix:
         contiguous = len(appendix) > 1 and appendix == list(range(appendix[0], appendix[-1] + 1))
         others.append(f"부록 {appendix[0]}~{appendix[-1]}" if contiguous else "부록 " + "·".join(map(str, appendix)))
-    numbered = f"{len(chapters) - len(named)}장"
+    numbered = f"{len(labels) - len(named)}장"
     return f"{numbered} + {'·'.join(others)}" if others else numbered
 
 

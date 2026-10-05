@@ -81,3 +81,16 @@ def test_duplicate_entries_and_differences_are_reported(store: LocalStore):
     assert again.existing == ["clack2012"] and again.created == []
     assert again.differs == ["clack2012: 제목 'Gaining ground' → 새 목록 'Gaining ground: The origin of tetrapods'"]
     assert store.get_ref("alice", "clack2012").bib["title"] == "Gaining ground"
+
+
+def test_same_title_and_year_with_different_author_forms_is_a_duplicate(store: LocalStore):
+    """최신본: 같은 보고서가 'IEA (International Energy Agency)'와 'International Energy Agency (IEA)'로 두 번 있다.
+    저자에 괄호가 있어도 제목을 읽고(key는 그대로), 제목·연도가 같으면 중복 서지로 리포트한다."""
+    report = import_bibliography(
+        store, "alice",
+        "IEA (International Energy Agency). (2025). Energy and AI. IEA.\n"
+        "International Energy Agency (IEA). (2025). Energy and AI. IEA.",
+    )
+    assert report.created == ["iea2025", "internationalenergyagency2025"]
+    assert store.get_ref("alice", "iea2025").bib["title"] == "Energy and AI"
+    assert report.duplicates == ["iea2025 = International Energy Agency (IEA). (2025). Energy and AI. IEA. (제목·연도가 같고 저자 표기만 다름)"]
