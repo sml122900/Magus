@@ -4,9 +4,15 @@
 
 ## 진행상황
 
-- 현재 단계: **P1(원격 MCP 서비스) 진행 중.** 1단계 HTTP 전송(`p1-step1`), 2단계 인증(`p1-step2`, WorkOS AuthKit, 실제 연결은 사용자 계정 대기), 3단계 받은함(`p1-step3`), 4단계 웹(`p1-step4`) 완료. 5단계는 **준비 완료**(배포 파일·백업·복구 훈련·알림, 태그 없음).
-- 다음 할 일: **대기 — 사용자가 계정(Vultr·도메인·WorkOS·R2·텔레그램·healthchecks)을 만들면** docs/deploy.md대로 배포하고 서버에서 복구 시험을 한다. 그다음 6·7단계.
-- 대기 사항: 계정·도메인·키처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), P0 Desktop 테스트 결과, 보고서 답변. 상세는 status.md에만 적는다.
+- 현재 단계: **P1(원격 MCP 서비스) 1~6단계 완료**(`p1-step1`~`p1-step6`).
+  - 서버는 Vultr 서울에 배포했다(`https://magus.lifebookapplication.com`, WorkOS Staging). 백업과 서버 복구 시험을 마쳤다.
+  - claude.ai 커스텀 커넥터로 웹·모바일 연결에 성공했다(CIMD).
+- 원격 저장소: GitHub 비공개 `sml122900/Magus`(`origin`). **단계 태그를 찍으면 push까지 한다**(아래 "원격 저장소").
+- 다음 할 일: **7단계 아버지 온보딩**(`docs/onboarding-father.md`). 시작 전 확인은 status.md "7단계 전 확인"을 따른다.
+- 서버 교체 필요: 서버는 아직 **옛 이력의 bundle**을 쓴다(2026-10-05 filter-repo 정리 전, 보고서 포함).
+  - 다음 배포 때 status.md에 적힌 절차로 바꾼다: 새 bundle → `git fetch` 후 `reset --hard FETCH_HEAD` → reflog expire와 `gc --prune=now`.
+- 알려진 문제: `tests/test_http.py::test_request_size_limit`가 Windows에서 간헐적으로 실패한다(413 응답 전에 연결이 리셋됨). 서버 동작은 정상이다(status.md 7절).
+- 대기 사항: 계정·키·결정·아버지 docx처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), 저자 보고서 답변. 상세는 status.md에만 적는다.
 
 ## 개요
 
