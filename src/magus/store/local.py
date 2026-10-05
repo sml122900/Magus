@@ -42,6 +42,7 @@ from magus.store.base import (
     IssueStatus,
     Part,
     Project,
+    reading_order,
 )
 from magus.store.schema import SCHEMA, SCHEMA_VERSION, TABLES
 
@@ -177,7 +178,7 @@ class LocalStore(ShelfMixin):
             "SELECT * FROM chapters WHERE user_id = ? AND project_id = ? ORDER BY number",
             (user_id, project_id),
         )
-        return [_chapter_meta(r) for r in rows]
+        return reading_order(_chapter_meta(r) for r in rows)
 
     @_locked
     def read_chapter(self, user_id: str, project_id: str, number: int) -> Chapter | None:

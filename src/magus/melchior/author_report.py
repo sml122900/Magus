@@ -225,7 +225,7 @@ def build_author_report(store: Store, user_id: str, project_id: str, date: str) 
         "괄호 속 번호(I3 등)로 말씀하시면 해당 메모를 바로 찾습니다.",
         "",
     ]
-    order = {m.display: m.number for m in store.list_chapters(user_id, project_id)}
+    order = {m.display: n for n, m in enumerate(store.list_chapters(user_id, project_id))}  # 읽는 순서
     for name in sorted(facts, key=lambda n: order.get(n, 999)):
         lines.append(f"- **{name}**: " + " / ".join(facts[name]))
 

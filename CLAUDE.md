@@ -122,6 +122,8 @@
 - parts(user_id, project_id, number, title) — *추가(승인됨)*: 완료 기준의 "부 8개"를 위해 둔다. book_outline은 부 제목 아래에 장을 묶어 보여 준다.
 - chapters(id, user_id, project_id, number, label?, title, status, part_number, path, char_count, unverified_cite_count, version, last_note, updated_at)
   - **번호 없는 장**: 서장·프롤로그 = 0, 맺음·에필로그·나가며 = 90, 부록 N = 90+N. `label`(서장·맺음·부록 N)을 앞머리와 인덱스에 두고, outline·export·read에서 "제N장" 대신 보여 준다. 부에 속하지 않는다.
+    - **제N부 들어가며** = 100+N(#70). label `제N부 들어가며`, part_number N(그 부에 속한다). 장 목록·outline·export는 **읽는 순서**(`store.base.reading_order`)라 그 부의 첫 장 바로 앞에 온다.
+    - outline 장 줄에는 번호 없는 장의 번호를 괄호로 적는다(`서장(0)`, `제2부 들어가며(102)`). 도구에 줄 번호다.
   - **status 값은 `draft` | `revising` | `done` 중 하나다.** 쓸 때 그 밖의 값이 오면 거부한다(Store는 ValueError, 도구는 스키마 enum으로 막는다).
 - chapter_versions(id, user_id, chapter_id, version, path, note, created_at) — 보관된 **이전** 본문들
 - decisions(user_id, project_id, id, text, created_at) — id는 프로젝트별 일련번호 `D{n}`
@@ -205,7 +207,7 @@ data/index.sqlite
 ### 책 (`magus/book/`)
 - `book_outline(project_id?)` → **3,000 토큰 이하**. 모든 원고 작업은 이 도구로 시작한다.
   - 첫 줄은 `프로젝트: 제목 (id)`다. 프로젝트가 2개 이상이면 안내 줄을 붙인다.
-  - 집계 줄: `35장 + 서장·맺음·부록 1~3 · 8부 · N자 · 미확인 문헌 N편 · 미연결 N · 열린 미해결 N`. 미확인 문헌은 **책 전체 고유 수**(여러 장에 나오는 문헌은 한 번)이고 저자 보고서 1절의 문헌 수와 같다. 장별 수는 각 장 줄에만 싣는다.
+  - 집계 줄: `35장 + 서장·부 들어가며 2·맺음·부록 1~3 · 8부 · N자 · 미확인 문헌 N편 · 미연결 N · 열린 미해결 N`. 미확인 문헌은 **책 전체 고유 수**(여러 장에 나오는 문헌은 한 번)이고 저자 보고서 1절의 문헌 수와 같다. 장별 수는 각 장 줄에만 싣는다.
   - 미연결(uncertain: 한글 표기인데 refs와 못 이음)은 미확인 수에 넣지 않지만 숨기지 않는다. 머리줄에 따로 세고, ref_check에는 별도 목록(`uncertain`, `unique_uncertain`)으로 준다(사용자 결정 #29).
   - 장 목록은 부 제목 아래에 묶고, 각 줄에는 집계만 싣는다: `제N장 제목 · 상태 · N자 · 미해결 n · 미확인인용 n`. 장별 미해결 수에는 코멘트 유래까지 모두 센다.
   - 미해결 전문은 origin이 `user`·`agent`인 것만 싣는다. `import_comment`는 `코멘트 유래 미해결 N건(citation · fact · general 수) — book_issues(kind)로 조회` 한 줄로만 보인다.
@@ -219,7 +221,7 @@ data/index.sqlite
 - `book_issue_add(text, chapter_number?, origin=user|agent, project_id?)` → 없는 장 번호는 거부한다.
 - `book_issue_close(id="I3"|"3", note?, project_id?)`
 - `book_import(path, project_id?, title?, replace=false)` → 로컬 docx(없으면 pdf)를 새 프로젝트로 만든다(`magus/book/importer.py`).
-  - 제목: "제N장"·"제N부"(공백·콜론·대시 변형 허용, 제목이 다음 줄에 와도 됨)와 번호 없는 장(서장·맺음·부록 N, 제목 서식이 있을 때만).
+  - 제목: "제N장"·"제N부"(공백·콜론·대시 변형 허용, 제목이 다음 줄에 와도 됨)와 번호 없는 장(서장·맺음·부록 N, 제목 서식이 있을 때만). "제N부 들어가며 …"는 부 제목이 아니라 그 부의 장(100+N)이다(#70).
   - 같은 장 번호가 여러 번 나오면(목차) 제목 서식이 있는 것, 그다음 본문이 가장 긴 것이 진짜다.
   - 첫 제목 앞의 글(표지·목차)과 부 서문은 `original/unsplit.md`에 둔다(목차 점선은 줄임). 장 안의 절·소절은 `##`·`###`이다.
   - 코멘트 표현: "확인 필요"(확인필요·확인할 필요), "인용 확인 필요", "서지"(문맥 판정), "원문 대조"(원문과·으로 대조).
@@ -229,7 +231,6 @@ data/index.sqlite
   - 그림·수식은 자리표시자(`[그림 N]`, `[수식]`)로 남긴다. docx 표는 칸의 글까지 markdown 표(`| 칸 |`)로 싣는다(#69, 칸이 모두 비면 `[표 N]`). export에서는 Word 표로 나간다. 원본은 **무엇보다 먼저** original/에 복사한다.
   - 재실행: 같은 project_id는 거부한다. `replace=true`면 기존 프로젝트를 trash/로 옮긴다. refs는 이미 있는 key를 건드리지 않는다.
     - **replace는 다시 올리기가 아니다.** 결정·직접 남긴 미해결·닫은 미해결·판 이력까지 휴지통으로 간다. 같은 책의 새 판은 다시 올리기(설계안 `docs/decisions/reupload-design.md`, 미구현)로 한다. 그 전까지 아버지 원고는 replace로 다시 올리지 않는다.
-  - "제N부 들어가며"는 부 제목으로 읽혀 부 이름을 덮고, 그 본문은 unsplit.md로 간다(#70에서 고친다).
   - 리포트: 장·부 수, 분할 못 한 구간, 목차로 판단해 버린 제목 줄, 빠진 장 번호, 코멘트→이슈(kind별, ref_key 비율, 장 밖 코멘트), 참고문헌→refs(파싱 실패 줄, key 충돌), `ch-NN.md ↔ 제목` 매핑표. 코멘트 분류 전체 표는 `original/import-report.md`에 있다. 평소에는 리포트를 낸 뒤 멈추고 사용자의 매핑 확인을 기다린다.
 - `book_export(path?, project_id?)` → 부 H1·장 H2·소제목 H3로 합쳐 docx를 만든다. path는 파일 이름만 받고 `exports/`에 저장한다. 코멘트와 그림은 복원하지 않는다.
 

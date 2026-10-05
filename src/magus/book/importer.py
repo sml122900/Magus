@@ -21,10 +21,13 @@ from magus.book.pdf_reader import read_pdf
 from magus.melchior.bibliography import BibReport, import_bibliography
 from magus.melchior.check import after_refs_changed
 from magus.store import Part, Store
+from magus.store.base import PART_INTRO_BASE, reading_order
 from magus.store.formats import one_line
 
 _SEP = r"[\s:：.\-–—·]"
 _PART = re.compile(rf"^\s*제\s*(\d+)\s*부(?:{_SEP}+(.*?))?\s*$")
+# "제2부 들어가며  인간은 왜 …": 부 제목이 아니라 그 부의 첫머리 글(번호 없는 장, 번호 100+N, #70)
+_PART_INTRO = re.compile(rf"^\s*제\s*(\d+)\s*부\s*들어가며(?:{_SEP}+(.*?))?\s*$")
 _CHAPTER = re.compile(rf"^\s*제\s*(\d+)\s*장(?:{_SEP}+(.*?))?\s*$")
 # 번호 없는 장. 제목 서식이 있는 줄일 때만 인정한다(목차 줄·본문 문장과 구별). 번호: 서장 0, 맺음 90, 부록 N은 90+N.
 _SPECIAL = re.compile(rf"^\s*(?P<label>서장|프롤로그|맺음말?|에필로그|나가며|부록\s*(?P<n>\d+))(?:{_SEP}+(?P<title>.*?))?\s*$")
@@ -52,7 +55,8 @@ class Head:
     title_index: int | None = None  # 제목이 다음 줄에 있었으면 그 블록
     body_chars: int = 0
     styled: bool = False  # 제목 서식(docx 제목 스타일, PDF 큰 글씨)이 있는 줄인가
-    label: str | None = None  # 번호 없는 장의 표시 이름(서장, 맺음, 부록 1)
+    label: str | None = None  # 번호 없는 장의 표시 이름(서장, 맺음, 부록 1, 제2부 들어가며)
+    intro_part: int | None = None  # "제N부 들어가며"면 N
 
     @property
     def body_start(self) -> int:
@@ -91,7 +95,13 @@ def _heads(blocks: list[Block]) -> list[Head]:
         if not text or len(text) > MAX_HEADING_LEN:
             continue
         styled = b.heading_level is not None
-        if m := _PART.match(text):
+        if m := _PART_INTRO.match(text):
+            n = int(m.group(1))
+            heads.append(
+                Head(i, "chapter", PART_INTRO_BASE + n, (m.group(2) or "").strip(), styled=styled,
+                     label=f"제{n}부 들어가며", intro_part=n)
+            )
+        elif m := _PART.match(text):
             heads.append(Head(i, "part", int(m.group(1)), (m.group(2) or "").strip(), styled=styled))
         elif m := _CHAPTER.match(text):
             heads.append(Head(i, "chapter", int(m.group(1)), (m.group(2) or "").strip(), styled=styled))
@@ -153,12 +163,13 @@ def split_manuscript(blocks: list[Block]) -> Split:
             split.unsplit += [b for b in region if b.text.strip()]  # 부 제목과 첫 장 사이의 글(부 서문)
         elif h.kind == "chapter":
             title = h.title or h.label or f"제{h.number}장"
-            # 서장·맺음·부록은 어느 부에도 속하지 않는다
+            # 서장·맺음·부록은 어느 부에도 속하지 않는다. 부 들어가며는 그 부에 속한다.
+            part_of = h.intro_part if h.intro_part is not None else (None if h.label else part)
             level = blocks[h.index].heading_level or 1
-            split.chapters.append(ChapterPlan(h.number, title, None if h.label else part, region, h.label, level))
+            split.chapters.append(ChapterPlan(h.number, title, part_of, region, h.label, level))
         else:
             split.bib_blocks = region
-    split.chapters.sort(key=lambda c: c.number)
+    split.chapters = reading_order(split.chapters)
     return split
 
 
@@ -326,7 +337,7 @@ def import_manuscript(
     bib_report = import_bibliography(store, user_id, "\n".join(b.text for b in split.bib_blocks if b.kind == "para"))
     after_refs_changed(store, user_id)  # 장별 미확인 인용 수, citation 이슈 → refs 연결(ref_id)
     linked = sum(1 for i in store.list_issues(user_id, project.id, None, kind="citation") if i.ref_id)
-    numbers = [c.number for c in split.chapters if not c.label]  # 서장(0)·맺음(90)·부록(9N)은 빼고 본다
+    numbers = [c.number for c in split.chapters if not c.label]  # 서장(0)·맺음(90)·부록(9N)·부 들어가며(100+N)는 빼고 본다
     gaps = sorted(set(range(1, max(numbers) + 1)) - set(numbers)) if numbers else []
     report = ImportReport(
         project_id=project.id,

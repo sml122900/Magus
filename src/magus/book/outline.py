@@ -22,10 +22,13 @@ def estimate_tokens(text: str) -> int:
 
 
 def _chapter_count(chapters: list[ChapterMeta]) -> str:
-    """'35장 + 서장·맺음·부록 1~3'. 번호 없는 장은 이름으로 적고, 부록은 이어지면 범위로 묶는다."""
+    """'35장 + 서장·부 들어가며 2·맺음·부록 1~3'. 번호 없는 장은 이름으로 적고, 부록은 이어지면 범위로 묶는다."""
     named = [c.label for c in chapters if c.label]
     appendix = sorted(int(m.group(1)) for label in named if (m := re.fullmatch(r"부록\s*(\d+)", label)))
-    others = [label for label in named if not re.fullmatch(r"부록\s*\d+", label)]
+    intros = [label for label in named if label.endswith("부 들어가며")]
+    others = [label for label in named if not re.fullmatch(r"부록\s*\d+", label) and label not in intros]
+    if intros:
+        others.insert(1 if others[:1] == ["서장"] else 0, f"부 들어가며 {len(intros)}")
     if appendix:
         contiguous = len(appendix) > 1 and appendix == list(range(appendix[0], appendix[-1] + 1))
         others.append(f"부록 {appendix[0]}~{appendix[-1]}" if contiguous else "부록 " + "·".join(map(str, appendix)))
@@ -100,8 +103,9 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
         elif c.part_number is None and current_part is not None:
             toc_items.append("### (부 밖)")  # 부가 끝난 뒤의 맺음·부록
         current_part = c.part_number
+        # 번호 없는 장은 도구에 줄 번호를 괄호로 밝힌다(서장(0), 제2부 들어가며(102), 부록 1(91))
         toc_items.append(
-            f"- {c.display} {_clip(c.title, 24)} · {c.status} · {c.char_count:,}자 · "
+            f"- {c.display}{f'({c.number})' if c.label else ''} {_clip(c.title, 24)} · {c.status} · {c.char_count:,}자 · "
             f"미해결 {issues_per_chapter[c.number]} · 미확인인용 {c.unverified_cite_count}"
         )
 

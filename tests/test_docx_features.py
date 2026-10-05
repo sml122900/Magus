@@ -1,14 +1,17 @@
-"""최신본 docx 시험 임포트(2026-10-06)에서 나온 보완: 표(#69). 작은 합성 docx로 확인한다."""
+"""최신본 docx 시험 임포트(2026-10-06)에서 나온 보완: 표(#69), 제N부 들어가며(#70). 작은 합성 docx로 확인한다."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from docx import Document
+from mcp import Client
 from docx.oxml.ns import qn
 
 from magus.book.importer import import_manuscript
 from magus.melchior.check import check_chapter
+from magus.server import build_server
 from magus.store import LocalStore
 
 BIB = [
@@ -83,3 +86,59 @@ def test_empty_table_keeps_placeholder(store: LocalStore, tmp_path: Path):
     m.table([["", ""], ["", ""]])
     import_manuscript(store, "alice", m.bibliography().save(tmp_path / "e.docx"), project_id="b")
     assert "[표 1]" in store.read_chapter("alice", "b", 1).content
+
+
+def _part_intro_manuscript(path: Path) -> Path:
+    """실원고 모양: 부 제목은 서식 없는 줄, 장·부 들어가며·맺음은 제목 1."""
+    m = Manuscript()
+    m.para("제1부 항온").heading("제1장  따뜻한 피는 왜 비싼가").para("항온의 비용(Clack, 2012).")
+    m.para("제2부 평지와 털").para("부의 제사(題詞).")
+    m.heading("제2부 들어가며  인간은 왜 넓은 평지에 사는가")
+    m.para("지리산 천왕봉에서 ", ("평지를 내려다본다", "수치 확인 필요"), "(Daeschler, Shubin & Jenkins, 2006).")
+    m.heading("제2장  아르디는 왜 나무에서 내려왔나").para("나무 위의 삶.")
+    m.heading("맺음  다음 맥박").para("맺는 글.")
+    return m.bibliography().save(path)
+
+
+def test_part_intro_is_a_chapter_of_its_part(store: LocalStore, tmp_path: Path):
+    from magus.book.export import assemble_markdown
+    from magus.book.outline import build_outline
+
+    report = import_manuscript(store, "alice", _part_intro_manuscript(tmp_path / "p.docx"), project_id="b")
+    # 진짜 부 제목이 남는다(최신본: "제2부 평지와 털"이 버려지고 부 이름이 "들어가며 …"가 됐었다)
+    assert [(p.number, p.title) for p in store.list_parts("alice", "b")] == [(1, "항온"), (2, "평지와 털")]
+    chapters = store.list_chapters("alice", "b")  # 읽는 순서: 부 들어가며는 그 부의 첫 장 앞
+    assert [(c.number, c.display, c.title, c.part_number) for c in chapters] == [
+        (1, "제1장", "따뜻한 피는 왜 비싼가", 1),
+        (102, "제2부 들어가며", "인간은 왜 넓은 평지에 사는가", 2),
+        (2, "제2장", "아르디는 왜 나무에서 내려왔나", 2),
+        (90, "맺음", "다음 맥박", None),
+    ]
+    assert report.gaps == [] and not report.comments_outside
+    [issue] = store.list_issues("alice", "b")
+    assert issue.chapter_number == 102  # 장 밖 코멘트가 아니다
+    assert {g.key for g in check_chapter(store, "alice", "b", 102).groups} == {"daeschler2006"}
+    unsplit = (store.root / "users/alice/projects/b/original/unsplit.md").read_text(encoding="utf-8")
+    assert "부의 제사" in unsplit and "지리산" not in unsplit  # 부 제사만 부 서문으로 남는다
+
+    outline = build_outline(store, "alice", "b")
+    assert "2장 + 부 들어가며 1·맺음 · 2부 · " in outline
+    assert "### 제2부 평지와 털\n- 제2부 들어가며(102) 인간은 왜 넓은 평지에 사는가 · draft" in outline
+    heads = [line for line in assemble_markdown(store, "alice", store.get_project("alice", "b")).splitlines() if line.startswith("#")]
+    assert heads == [
+        "# 제1부 항온", "## 제1장 따뜻한 피는 왜 비싼가",
+        "# 제2부 평지와 털", "## 제2부 들어가며 인간은 왜 넓은 평지에 사는가", "## 제2장 아르디는 왜 나무에서 내려왔나",
+        "## 맺음 다음 맥박",
+    ]
+
+
+@pytest.mark.anyio
+async def test_issue_lines_name_part_intro(settings, store: LocalStore, tmp_path: Path):
+    import_manuscript(store, settings.user_id, _part_intro_manuscript(tmp_path / "p.docx"), project_id="b")
+    async with Client(build_server(settings, store)) as client:
+        text = (await client.call_tool("book_issues", {"project_id": "b"})).content[0].text
+        added = (await client.call_tool("book_issue_add", {"text": "도입 다듬기", "chapter_number": 102, "project_id": "b"})).content[0].text
+        read = (await client.call_tool("book_read_chapter", {"number": 102, "project_id": "b"})).content[0].text
+    assert "- I1 · open · 제2부 들어가며 · import_comment" in text
+    assert added.startswith("I2 열림 (b · 제2부 들어가며 · user)")
+    assert '"label": "제2부 들어가며"' in read

@@ -6,6 +6,7 @@ P0 구현은 LocalStore(사람이 읽는 파일이 원본, SQLite는 인덱스)�
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, Protocol
@@ -70,6 +71,30 @@ class ChapterMeta:
     @property
     def display(self) -> str:
         return self.label or f"제{self.number}장"
+
+
+PART_INTRO_BASE = 100  # "제N부 들어가며"의 장 번호는 100 + N(#70). 서장 0, 본문 1~89, 맺음 90, 부록 N은 90+N
+
+
+class _Numbered(Protocol):
+    number: int
+    part_number: int | None
+
+
+def reading_order[T: _Numbered](chapters: Iterable[T]) -> list[T]:
+    """책을 읽는 순서. 번호순이되, 부 들어가며(100+N)는 그 부의 첫 장 바로 앞에 둔다."""
+    chapters = list(chapters)
+    first: dict[int, int] = {}
+    for c in chapters:
+        if c.number < PART_INTRO_BASE and c.part_number is not None:
+            first[c.part_number] = min(first.get(c.part_number, c.number), c.number)
+
+    def key(c: T) -> tuple[int, int]:
+        if c.number > PART_INTRO_BASE and c.part_number is not None:
+            return (first.get(c.part_number, c.number), 0)
+        return (c.number, 1)
+
+    return sorted(chapters, key=key)
 
 
 @dataclass(frozen=True)
@@ -214,7 +239,9 @@ class Store(Protocol):
     def list_parts(self, user_id: str, project_id: str) -> list[Part]: ...
 
     # 장
-    def list_chapters(self, user_id: str, project_id: str) -> list[ChapterMeta]: ...
+    def list_chapters(self, user_id: str, project_id: str) -> list[ChapterMeta]:
+        """읽는 순서(reading_order): 번호순이되 부 들어가며는 그 부의 첫 장 앞."""
+        ...
     def read_chapter(self, user_id: str, project_id: str, number: int) -> Chapter | None: ...
     def write_chapter(
         self,

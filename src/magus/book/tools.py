@@ -42,10 +42,14 @@ def _gate(result: CheckResult) -> dict[str, Any]:
     return {"unverified_cites": result.unverified_cites(), "needs_source": result.needs_source}
 
 
-def _issue_line(i: Issue) -> str:
+def _chapter_name(number: int, labels: dict[int, str]) -> str:
+    return labels.get(number) or f"{number}장"
+
+
+def _issue_line(i: Issue, labels: dict[int, str]) -> str:
     parts = [f"I{i.id}", i.status]
     if i.chapter_number is not None:
-        parts.append(f"{i.chapter_number}장")
+        parts.append(_chapter_name(i.chapter_number, labels))
     kind = i.kind + (f"→{i.ref_key}" if i.ref_key else "")
     if i.kind == "citation" and i.ref_key:
         kind += f" ⇒ {i.ref_id}" if i.ref_id and i.ref_id != i.ref_key else ("" if i.ref_id else " ⇒ refs 없음")
@@ -154,7 +158,8 @@ def build_tools(
         head = f"미해결 {len(issues)}건 ({', '.join(filters)})"
         if len(issues) > limit:
             head += f" — 앞 {limit}건만 표시. 조건을 좁히거나 limit을 늘리세요(최대 {ISSUE_LIST_MAX})."
-        return "\n".join([head, *(_issue_line(i) for i in issues[:limit])])
+        labels = {c.number: c.label for c in store.list_chapters(current_user(), project.id) if c.label}
+        return "\n".join([head, *(_issue_line(i, labels) for i in issues[:limit])])
 
     def book_decide(text: str, project_id: str | None = None) -> str:
         project = resolve_project(project_id)
@@ -171,13 +176,15 @@ def build_tools(
         project_id: str | None = None,
     ) -> str:
         project = resolve_project(project_id)
-        if chapter_number is not None and store.read_chapter(current_user(), project.id, chapter_number) is None:
-            raise ToolError(f"{chapter_number}장이 없습니다.")
+        where = ""
+        if chapter_number is not None:
+            if (chapter := store.read_chapter(current_user(), project.id, chapter_number)) is None:
+                raise ToolError(f"{chapter_number}장이 없습니다.")
+            where = f" · {chapter.meta.label or f'{chapter_number}장'}"
         try:
             issue = store.add_issue(current_user(), project.id, text, origin=origin, chapter_number=chapter_number)
         except ValueError as e:
             raise ToolError(str(e)) from e
-        where = f" · {chapter_number}장" if chapter_number is not None else ""
         return f"I{issue.id} 열림 ({project.id}{where} · {origin}): {one_line(issue.text)[:120]}"
 
     def book_issue_close(id: str, note: str | None = None, project_id: str | None = None) -> str:
@@ -275,7 +282,9 @@ def build_tools(
             book_read_chapter,
             name="book_read_chapter",
             description=(
-                "장 하나를 읽는다. JSON: content(본문 markdown만), title, status, part_number, version, last_note, "
+                "장 하나를 읽는다. number는 장 번호다: 제N장은 N, 서장 0, 맺음 90, 부록 N은 90+N, 제N부 들어가며는 100+N"
+                "(outline에서 번호 없는 장 옆 괄호의 숫자). "
+                "JSON: content(본문 markdown만), title, status, part_number, version, last_note, "
                 "unverified_cites, open_issues(이 장의 열린 미해결). 필요한 장만 읽는다. " + UNVERIFIED_CITES_MEANING
             ),
             structured_output=False,
