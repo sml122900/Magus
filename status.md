@@ -37,13 +37,28 @@
 
 ## 1. 지금 바로 할 일
 
-- **대기: 웹 로그인 확인, 사용자.**
-  - `https://magus.lifebookapplication.com/login` → WorkOS(Staging) Magic Auth(메일 코드) → `/book`에 "닿으려는 종"이 보이면 성공이다.
-  - 403이면 허용 목록 id가 다른 것이다. 화면의 id를 `.env`의 `ALLOWED_USERS`에 `=default`로 넣고 `docker compose up -d`.
-  - 401이면 `docker compose logs magus | grep "token rejected"`로 원인을 본다(iss·aud·만료·서명).
-  - 웹 클라이언트는 PKCE 미사용으로 만들었는데 우리는 PKCE + client_secret을 보낸다. 거부되면 여기서 드러난다.
-- 대기(사용자 확인): 텔레그램 "알림 시험" 수신, healthchecks.io의 magus-alive·magus-backup이 초록인지.
-- 로그인이 되면: `p1-step5` 태그 → 6단계(Claude 커넥터 등록, `docs/connect-claude.md`).
+- **6단계 진행 중 — 웹 완료, 대기: 모바일 시험과 다음 날 재접속(토큰 갱신) 확인, 사용자.** `p1-step6` 태그는 이 둘 뒤에 단다(사용자 지시).
+  - 웹 결과(2026-10-05 23:05~23:13, 사용자): 넷 다 성공했다.
+    - book_outline: 35장 + 서장·맺음·부록 1~3, 8부, 249,065자, 미확인 297, 미연결 0, 미해결 86(citation 44 · fact 40 · general 2).
+    - 제12장 ref_check: 28편, 문단 번호 포함.
+    - 제31장 요약: I78과 미확인 8편도 함께 언급.
+    - idea_add: `20261005141301887-3e167c`.
+  - 커넥터 화면은 "지금 로그인", "Claude의 게시된 ID 사용"(CIMD)을 감지했다. 로컬 magus 커넥터는 꺼 두었다.
+  - 서버 로그(감사 로그는 인자를 남기지 않는다): book_outline 23:05:43 → ref_check 23:06:15 → book_read_chapter 23:10:24(31장 요약 동안 **1회**) → idea_add 23:13:01. auth 실패 없음.
+    - 장 번호는 로그에 없다. 대화창의 도구 호출 입력에서 확인한다.
+  - 등록 흐름: 23:01:21 `POST /mcp` 401 → PRM 200 → (WorkOS) → 23:01:57 `POST /mcp` 200(Bearer, `Claude-User`).
+    - CIMD·DCR은 서버에서 보이지 않는다. 화면 선택이 CIMD였고, WorkOS 대시보드에 동적 등록 클라이언트가 새로 생기지 않았으면 CIMD로 확정한다.
+  - 임시 Caddy 접근 로그는 되돌렸다(HEAD와 같음, caddy 재생성으로 쌓인 로그 삭제, 2026-10-05 23:2x).
+    - 그사이 인증서 공개 뒤의 스캐너 접근(`GET /`, `/login`)이 보였다. 정상적인 인터넷 소음이다.
+  - `docs/connect-claude.md`를 실제 화면 순서로 갱신했다(감지된 인증·CIMD, 요청 헤더 비움, 도구 메뉴에서 켜기, 로컬·원격 동시 사용 금지).
+- **미해결: 영감 항목 삭제.** idea_delete 도구도, 웹 기능도 없다.
+  - 지금은 운영자가 서버에서 `shelf/casper/<id>.json`을 지우고 reindex한다(connect-claude.md "영감 항목 지우기").
+  - 테스트 메모 `20261005141301887-3e167c`는 서버 default 책장에 남아 있다. 사용자가 지우라고 하면 지운다.
+- 확인됨(2026-10-05, 사용자)
+  - 웹 로그인 성공: `/book`에 "닿으려는 종"(book, 40장)이 보이고 상단이 default다. PKCE 충돌 없음.
+  - 텔레그램 "알림 시험"을 받았다. healthchecks magus-alive가 up이다(22:50·22:55 핑).
+  - `p1-step5` 태그(`9b420a3`).
+- 다음(6단계 뒤): 웹 페이지의 "장 40" 표기를 outline 표기(`35장 + 서장·맺음·부록 1~3`)와 같게 맞춘다(사용자 요청, 급하지 않음).
 - **5단계 배포 결과(2026-10-05)**
   - 서버: Docker 29.1.3, Compose 2.40.3, ufw 22·80·443, 시간대 Asia/Seoul, unattended-upgrades 켬, 스왑은 Vultr 기본 2.3G.
   - SSH: 비밀번호 로그인 끔(`/etc/ssh/sshd_config.d/00-magus.conf`, 50-cloud-init보다 먼저 읽힘). 기존 세션을 열어 둔 채 새 세션 키 접속을 확인한 뒤 닫았다.
