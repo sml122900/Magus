@@ -1,8 +1,25 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-06 KST — 사용자 결정 #68(원고 본문의 원본은 저자 파일) 기록, 최신본 docx 시험 임포트(`father-trial`), 다시 올리기 설계안 초안. 검토 대기 #69~#76 답변을 기다린다.
+> 마지막 갱신: 2026-10-06 03시 KST — #69~#77과 다시 올리기 기본(#76)을 구현했다(로컬, 서버 변경 없음). `father-trial`을 최신본으로 다시 임포트했고, 4판 → 최신본 다시 올리기 시험을 통과했다. 대기: 서버 배포 승인, `docs/worktree-rule` 병합 확인(사용자).
 > 2026-10-06 01시 KST — 토큰 aud 검사 강화(결정 #79)를 `p1-auth-audience`로 서버에 반영하고, 서버의 옛 git 이력을 새 이력으로 바꿨다(0-3절).
+
+## 0-4. 최근 보고 (2026-10-06, #69~#77 구현 + 다시 올리기 기본 + 최신본 재임포트, 세션 magus-25)
+
+- 로컬 전용. 서버와 default는 건드리지 않았다(default 파일 1,383개 해시가 세션 시작 때와 같다).
+- 구현(단계마다 테스트를 넣고 커밋, 테스트 190 → 223개)
+  - #74 규칙 4(`9688878`), #69 표(`e1b57b7`), #70 제N부 들어가며(`0df3d1c`), #71 작성자·AI 확인 요청(`1708217`)
+  - #72 [점검·…] 분류(`1d78eb6`), #73 앵커 전문·문단 번호(`fc6bdec`), #77 제목·부제(`393f5e0`)
+  - #76 다시 올리기 기본(`ef903d1`), PDF 미해결 잇기 보완(`0109ad4`), 괄호 저자 제목·리포트 장 수(`a1c9a12`)
+  - 다른 세션 magus-a1의 #79(aud) 작업을 master에 병합했다(`9162a8b`). 그 세션이 `1d78eb6`까지 push했다.
+- `father-trial` 최신본 재임포트(비우고 새로): 42장(35장 + 서장·부 들어가며 2·맺음·부록 1~3), 8부(부 이름 바로잡힘), 343,185자(표 37개 포함)
+  - 미해결 129: citation 43 · fact 82 · general 4, 작성자 Claude(AI) 129, 장 밖 2(참고문헌), 걸린 문장 잘림 0(최대 426자 전문 저장)
+  - 참고문헌 337줄 → refs 337, 인용 출현 454, 고유 미확인 335(참고문헌에 없음 3), 미연결 2, 중복 서지 1(IEA), key 충돌 2(acemoglu·hsieh)
+  - outline 2,231토큰(추정). 자료: `data/realdata/2026-10-06-father-trial-{import-report-v2,cite-report-v2,verify}.md`
+- 다시 올리기 시험
+  - `reupload-trial`: 4판 docx(E1, 코멘트 86) → 최신본(E2). 바뀐 장 6만 교체(36장 버전 그대로), 기존 미해결 86 유지 + 새 43, 결정·직접 미해결·영감·책장 그대로, 닫은 미해결은 닫힌 채.
+  - `reupload-trial-pdf`(보조): 10/02 PDF(E1) → 최신본(E2). 기존 86을 코멘트 본문으로 잇고 새 43, 새 refs 38, hsieh2019는 talent 그대로·housing이 -2.
+  - 자료: `data/realdata/2026-10-06-reupload-trial*.md`
 
 ## 0-3. 최근 보고 (2026-10-06, 토큰 aud 검사 강화 + 서버 반영)
 
@@ -84,13 +101,20 @@
 
 ## 1. 지금 바로 할 일
 
-- **진행 중(2026-10-06)**: #74 → #69 → #70 → #71 → #72 → #73 → 제목·부제(#77) → 다시 올리기 기본(#76) 순서로 구현하고 단계마다 커밋한다. 그다음 `father-trial`을 비우고 최신본을 새로 임포트해 수치를 잰다(#75).
-- **운영 규칙(2026-10-06)**: 다시 올리기를 구현하기 전까지 아버지 원고는 `replace`로 다시 임포트하지 않는다. replace는 결정·직접 남긴 미해결·닫은 미해결까지 휴지통으로 보낸다.
-- `father-trial`(로컬 시험 공간)은 지우지 않았다: `data/users/father-trial/`(4.3MB). 지울 때는 이 폴더를 지우고 `magus reindex`를 실행한다.
+- **대기(사용자, 2026-10-06)**
+  - **서버에 master 배포 승인**: 7단계 전에 필요하다. 아버지 원고는 서버에서 임포트하므로 새 파서(#69~#77)와 다시 올리기(#76)가 서버에 있어야 한다. 이번 세션은 로컬 전용이라 배포하지 않았다.
+    - 절차: docs/deploy.md "업데이트"(fetch + `checkout -B master`). SCHEMA_VERSION 12라 첫 시작 때 인덱스를 자동으로 다시 만든다. 서버 default(10/02 PDF 판)는 판 기록 전 프로젝트로 그대로 쓰인다.
+  - **`docs/worktree-rule` 병합 확인**: 다른 세션(magus-a1)이 CLAUDE.md에 운영 규칙(동시 세션은 각자 worktree, 메인 트리에서 switch·checkout·reset 금지, 되돌리기 기준 커밋)을 넣은 브랜치다(끝 `195af55`, origin에 있음, master와 충돌 없음). 다른 세션 요청만으로는 CLAUDE.md를 바꾸지 않아서 병합하지 않았다. 사용자가 지시하면 병합한다.
+- **운영 규칙(#78)**: 같은 책을 다시 올릴 때는 새 판으로 한다(`book_import new_edition=true`, 웹 "이 책의 새 판으로 올리기", CLI `--new-edition`). `replace`는 결정·직접 남긴 미해결·닫은 미해결까지 휴지통으로 보내니 쓰지 않는다.
+- 로컬 시험 공간(지우지 않았다. 지울 때는 폴더를 지우고 `magus reindex`)
+  - `data/users/father-trial/`(4.4MB): 최신본 새 임포트(2026-10-06 두 번째, 새 파서)
+  - `data/users/reupload-trial/`(7.2MB): 4판 → 최신본 다시 올리기 시험. 시험용 결정·영감·직접 미해결이 들어 있다(`[시험]`).
+  - `data/users/reupload-trial-pdf/`(18MB): 10/02 PDF → 최신본 다시 올리기 보조 시험. 시험용 항목 같음.
 - 불명(2026-10-06) — 둘 다 사용자가 해석을 확인했다(2026-10-06)
   - "설계 원칙 3·6"은 채팅 Claude 쪽 번호다. 3 = 단일 진실 원천 + 원본은 파일, 6 = 누가 말했는지 보존한다.
   - "D번호"는 status.md의 `#N` 체계가 맞다(#68).
   - "media 11": docx 안 `word/media/`의 파일은 png 10개다. 그림(drawing)도 10개다.
+  - "4판 docx"(2026-10-06 두 번째 요청): 세션 중간에 `fixtures/261004-닿으려는_종_전면개정4판.docx`가 생겼다(처음 확인 때는 없었음). 그 파일로 요청대로 시험했다. 이 판은 파일 속성에 제목이 없어 E1 제목이 파일 이름이 됐고, E2(최신본)에서 원고 제목으로 바뀌었다.
 - **GitHub 원격 저장소(2026-10-05)**: `origin` = https://github.com/sml122900/Magus (**Private**, 로그인 없는 API 조회 404)
   - master, `p0-realdata-parser`, 태그 15개를 push했다. 로컬과 원격의 해시가 모두 같다(ls-remote 27줄, peel 포함).
   - `origin/master` 트리(133개)에 `.env`·`data/`·`fixtures/`·`private/`·`docs/reports/`가 없다. 원격 이력 전체에도 없다.
@@ -108,8 +132,9 @@
     - 다음에 master를 배포할 때는 `git fetch /root/magus.bundle master && git checkout -B master FETCH_HEAD`로 한다(docs/deploy.md "업데이트"). 그 master에 `p1-auth-audience`가 들어 있어야 한다.
 - **다음: 7단계 아버지 온보딩**(`docs/onboarding-father.md` 초안). 아래 "7단계 전 확인"을 먼저 끝낸다.
 - **7단계 전 확인**
-  - [ ] 검토 대기 #69~#74를 고친다(표 본문, 제N부 들어가며, 코멘트 작성자, [점검·…] 분류, 앵커 전문, instructions 규칙 4). 임포트 때만 채워지는 값이라 아버지 임포트 전에 해야 한다.
-  - [ ] `docs/onboarding-father.md`의 기대 수치와 작업 방식 안내를 #68·최신본에 맞게 고친다(이번에는 고치지 않음, 어긋나는 곳은 2026-10-06 보고에 목록).
+  - [x] #69~#74, #77, #76 기본 부분 구현(2026-10-06, 로컬). 최신본 재임포트·다시 올리기 시험 통과.
+  - [x] `docs/onboarding-father.md`를 최신 수치와 새 흐름(Word가 원본, 새 판으로 다시 올리기)으로 고쳤다(2026-10-06). 아버지께 드릴 자료는 채팅 Claude가 다시 만든다.
+  - [ ] **서버에 master 배포**(사용자 승인 대기). 배포 뒤 서버에서 `/book`·`/issues` 화면과 outline 판 줄을 한 번 본다.
   - [x] 아버지 docx 크기: 최신본 1.4MB(한도 50MB 안).
   - [ ] 아버지 docx를 받으면 업로드 전에 크기를 확인한다(한도 `MAX_UPLOAD_MB` 50MB, #54). 넘으면 서버 `.env`에서 한도를 올리고 `up -d`.
   - [ ] 사용자가 받은함 업로드 화면(`/inbox`)을 캡처해 채팅 Claude와 검토한다(#56). 아버지가 혼자 쓸 수 있는지 본다.
@@ -118,7 +143,7 @@
 - 대기(사용자 결정)
   - (처리함) `docs/reports`: 올리지 않는다. 이력에서 빼고 `private/reports/`로 옮겼다(2026-10-05 사용자 결정).
   - 테스트 메모 `20261005141301887-3e167c`를 지울지.
-- 다음(급하지 않음): 웹 페이지의 "장 40" 표기를 outline 표기(`35장 + 서장·맺음·부록 1~3`)와 같게 맞춘다(사용자 요청).
+- (처리함, 2026-10-06 `1708217`) 웹 `/book`의 장 수를 outline 표기(`35장 + 서장·…`)와 같게 맞췄다(사용자 요청).
 - **6단계 결과(2026-10-05, 완료, `p1-step6`)**
   - 모바일 Claude 앱(사용자): 웹과 같은 시험이 모두 성공했다.
   - 웹 결과(2026-10-05 23:05~23:13, 사용자): 넷 다 성공했다.
@@ -172,12 +197,12 @@
 - 불명
   - 완료 기준의 "refs 297": 실데이터 refs는 299건이다(파싱 실패 raw 1, acemoglu2001-2 포함). 297은 고유 미확인 문헌 수다. 판단: "refs 299, 미확인 문헌 297"로 검증한다.
   - 완료 기준의 "업로드한 docx": 실원고는 PDF만 있다(docx 없음). 판단: docx가 올 때까지 PDF로 검증한다. 대기: 원고 docx(사용자).
-    - 2026-10-06: docx(최신본)를 받았다. 수치가 달라 완료 기준을 바꿀지 검토 대기 #75로 올렸다.
+    - 2026-10-06: docx(최신본)를 받았다. #75 승인으로 완료 기준을 최신본 수치로 바꿨다: 35장 + 서장·부 들어가며 2·맺음·부록 1~3, 8부, 코멘트 129(AI 129), refs 337(미확인 문헌 335편). CLAUDE.md 완료 기준에 반영.
 
 ## 2. 현재 단계
 
 **P1 진행 중 — 6단계 완료, 다음은 7단계(아버지 온보딩)**(`p1-step1`~`p1-step6`). 7단계 전 확인 항목이 1절에 있다.
-2026-10-06: 작업 방식 결정 #68에 따라 7단계 전에 임포트 보완(#69~#74)이 필요하다. 다시 올리기(설계안, #76)는 아버지의 첫 다시 올리기 전까지 만든다. P0는 `step1`~`step7`, `p0-realdata`, `p0-report1`과 그 뒤 결정 반영 커밋까지 끝났다.
+2026-10-06: 작업 방식 결정 #68에 따라 7단계 전 보완(#69~#77)과 다시 올리기 기본(#76)을 로컬에서 끝냈다. 남은 7단계 전 일은 서버 배포(승인 대기)다. P0는 `step1`~`step7`, `p0-realdata`, `p0-report1`과 그 뒤 결정 반영 커밋까지 끝났다.
 
 ## 3. 단계별 체크리스트
 
@@ -202,7 +227,9 @@
   - 웹·모바일에서 book_outline, ref_check, book_read_chapter, idea_add 성공(CIMD, 인증 실패 0)
   - `docs/connect-claude.md`(실제 화면 순서), `docs/daily/2026-10-05.md`
   - 토큰 갱신(하루 이상 지난 뒤 재접속)은 따로 확인하지 않는다. 실사용 중 문제가 생기면 조치한다(2026-10-05 사용자 결정).
-- [ ] P1 7단계 아버지 온보딩 체크리스트 — 다음. 초안은 `docs/onboarding-father.md`
+- [ ] P1 7단계 아버지 온보딩 체크리스트 — 다음. `docs/onboarding-father.md`(2026-10-06 최신 수치·흐름 반영)
+  - 7단계 준비(2026-10-06, 로컬): `9688878` #74, `e1b57b7` #69, `0df3d1c` #70, `1708217` #71, `1d78eb6` #72, `fc6bdec` #73, `393f5e0` #77, `ef903d1` #76, `0109ad4`, `a1c9a12`
+  - 파일: `src/magus/book/{reupload,importer,docx_reader,comments,outline,tools,export}.py`, `src/magus/store/*`, `src/magus/melchior/{bibliography,author_report}.py`, `src/magus/{web,cli,instructions}.py`, `tests/test_docx_features.py`, `tests/test_reupload.py`
 
 ## 4. 검토 대기 결정
 
@@ -418,7 +445,7 @@
 - **Python** 3.12(.venv). **MCP SDK** mcp 2.2.0.
 - **의존성**: python-docx 1.2.0, pymupdf 1.28.2, pypandoc-binary 1.17(pandoc 3.9), numpy 2.5.3, lxml. ruff 0.16(개발용, `--select F,B`로 점검).
 - **Node** v22.23.2(fnm). MCP Inspector는 `npx -y @modelcontextprotocol/inspector --cli …`로 쓴다.
-- **SQLite** 3.49.1. 인덱스 `SCHEMA_VERSION=8`. 버전이 바뀌면 처음 열 때 자동으로 다시 만들고, 서버가 시작할 때 파생값을 다시 계산한다.
+- **SQLite** 3.49.1. 인덱스 `SCHEMA_VERSION=12`(2026-10-06: 9 작성자, 10 앵커, 11 부제, 12 판·지문·stale). 버전이 바뀌면 처음 열 때 자동으로 다시 만들고, 서버가 시작할 때 파생값을 다시 계산한다.
 - **Claude Desktop**
   - 설정: `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json`(USER_ID=default, DATA_DIR=C:\project_2026\Magus\data → FILES_DIR 기본 C:\project_2026\Magus)
   - 로그: `%LOCALAPPDATA%\Claude\Logs\mcp-server-magus.log`. 시작 줄에 files_root가 찍힌다.
@@ -428,9 +455,11 @@
   - `demo`: 데모 프로젝트·표본
   - `synthetic`: 합성 synth
   - `father-trial`(2026-10-06): 최신본 docx 시험 임포트 `book`(받은함에 원본 사본, 비인용 용어 5개). 서버에는 없다. 시험용이라 지워도 된다(폴더 삭제 + reindex).
+  - `reupload-trial`·`reupload-trial-pdf`(2026-10-06): 다시 올리기 시험 공간(4판 → 최신본, PDF → 최신본). 시험용 결정·영감 포함. 지워도 된다.
 - **fixtures**
   - 실데이터(gitignore): `fixtures/261002-닿으려는_종_전면개정_그림추가.pdf`, 대화 md 4개, `fixtures/papers/`(비어 있음, 사용자가 논문 PDF를 둔다).
   - 최신본(2026-10-06 받음): `fixtures/261005-인류가_선택한_진화_시대가_선택한_도시_원고.docx`(1.4MB, 코멘트 129, 표 37, 그림 10)
+  - 4판(2026-10-06 세션 중간에 생김): `fixtures/261004-닿으려는_종_전면개정4판.docx`(1.4MB, 코멘트 86, 파일 속성 제목 없음)
   - 시험 임포트 명령: `USER_ID=father-trial DATA_DIR=./data .venv/Scripts/python -m magus inbox --add fixtures/261005-….docx`, 그다음 `… -m magus import data/users/father-trial/inbox/261005-….docx --project-id book`
   - 합성(커밋): `tests/fixtures/synthetic/`(원고 docx·pdf, 대화 md 3개, 야간 작업 리포트).
 - **명령**(Bash, 프로젝트 루트에서 실행. 콘솔 한글은 `PYTHONIOENCODING=utf-8`)
@@ -443,6 +472,7 @@
   DATA_DIR=./data .venv/Scripts/python -m magus terms --project-id book [--add …] [--remove …]
   DATA_DIR=./data .venv/Scripts/python -m magus alias <key> <표기>
   DATA_DIR=./data .venv/Scripts/python -m magus reindex
+  USER_ID=<사용자> DATA_DIR=./data .venv/Scripts/python -m magus import <받은함 원고> --project-id book --new-edition   # 같은 책의 새 판
   ```
 - **git**
   - master에 바로 커밋하고, 단계가 끝나면 태그를 단다. 실험은 브랜치에서 하고 squash merge한다.
@@ -450,6 +480,12 @@
   - `/fixtures/`(루트), `data/`, `/private/`(저자용 보고서 등 실원고 파생 자료)는 gitignore. `tests/fixtures/`(합성)는 커밋한다.
 
 ## 6. 마지막 세션 요약
+
+**2026-10-06 (3)** — #69~#77 구현, 다시 올리기 기본(#76), 최신본 재임포트·다시 올리기 시험(세션 magus-25, 로컬 전용)
+- 단계마다 테스트를 넣고 커밋했다(0-4절 해시). 테스트 223개 통과, ruff(F·B) 통과. 간헐 실패 `test_request_size_limit`도 이번에는 5번 모두 통과했다.
+- 다른 세션(magus-a1)이 잠깐 메인 트리 HEAD를 옮겼다가 되돌렸다. 그 뒤 그쪽은 별도 worktree만 썼다. 그 세션의 병합 브랜치는 master에 합쳤고(`9162a8b`), CLAUDE.md 운영 규칙 브랜치는 사용자 확인 대기로 남겼다.
+- 검증하면서 두 가지를 더 고쳤다: PDF 판 미해결을 코멘트 본문으로 잇기(`0109ad4`), 저자에 괄호가 있는 참고문헌 제목(IEA 중복 찾기)·리포트 장 수(`a1c9a12`).
+- 남긴 것: 서버 배포(승인 대기), `docs/worktree-rule` 병합(확인 대기). 태그는 달지 않았다(7단계 완료 때 `p1-step7`).
 
 **2026-10-06 (2)** — 토큰 aud 검사 강화(#79), 서버 반영·이력 교체(세션 magus-a1, 다른 세션 magus-25의 #69~ 작업과 동시 진행)
 - `decf79c`(서버 실행 커밋의 새 이력판)에서 `fix/auth-audience`를 갈라 고쳤다(별도 worktree `.worktrees/auth-audience`, `.git/info/exclude`로 숨김). 태그 `p1-auth-audience`.
@@ -500,17 +536,17 @@
 
 ## 7. 알려진 문제 — 실원고에서 아직 안 맞는 것
 
-- **docx 임포트(2026-10-06 최신본 시험)**: 고칠 것은 검토 대기 #69~#73에 있다. 아래는 그 밖의 것이다.
-  - 책 제목을 파일 속성(`docProps/core.xml` dc:title)에서 읽는다. 저자가 Word 표지만 고치고 속성을 그대로 두면 옛 제목이 들어온다. 웹 임포트의 "제목" 칸에 적으면 그것을 쓴다.
-  - 중복 서지 판정이 첫 저자 표기가 다르면 같은 문헌을 놓친다. 최신본 참고문헌에 `IEA (International Energy Agency). (2025). Energy and AI`와 `International Energy Agency (IEA). (2025). Energy and AI`가 둘 다 있다(iea2025, internationalenergyagency2025).
-  - 참고문헌 key 충돌 접미사가 목록 순서에 따라 바뀐다. `hsieh2019`는 10/02 판에서 talent 논문이지만 최신본에서는 housing 논문이다. 다시 올리기에서 고친다(설계안 6절).
-  - 표 안의 `상트페테르부르크(1703)`는 #69를 고치면 미연결로 잡힐 것이다. 비인용 용어 후보다.
+- **docx 임포트(2026-10-06)**: #69~#73·#77·#76으로 표·들어가며·작성자·분류·앵커·제목·IEA 중복·key 안정화를 고쳤다. 남은 것:
+  - 책 제목은 파일 속성 제목과 표지의 Title·Subtitle 서식에서만 읽는다. 4판처럼 속성 제목이 없고 표지에 서식도 없으면 파일 이름이 제목이 된다. 임포트 때 제목·부제 칸에 적으면 그것을 쓴다.
+  - `상트페테르부르크(1703)`(제27장 표)가 미연결로 잡힌다. 지명이라 비인용 용어 후보다(`magus terms --add 상트페테르부르크`, 사용자 확인 뒤).
+  - `셰 등(2019)`(제30장)이 미연결이다. 참고문헌에 Hsieh 2019가 두 편(hsieh2019 housing, hsieh2019-2 talent)이라 음역 추정이 하나로 정해지지 않는다. 저자가 어느 쪽인지 정하면 `magus alias`로 잇는다.
+  - 다시 올리기는 같은 번호 = 같은 장이다. 장을 끼워 넣어 번호가 밀리면 내용이 다른 장을 같은 장으로 보고 교체한다(이전본은 versions/, 미해결은 걸린 문장으로 따라간다). 본문 유사도·이동·분할 판정은 뒤로 미뤘다(#76).
 
 - **간헐 실패 테스트(Windows)**: `tests/test_http.py::test_request_size_limit`(2026-10-05 발견).
   - 5번 중 3번 실패했다(`-x`로 돌림).
   - 증상: 서버가 Content-Length만 보고 413으로 먼저 끊으면, 2MB 넘는 본문을 보내던 urllib 클라이언트가 응답 대신 `ConnectionResetError`/`ConnectionAbortedError`를 받는다.
   - 서버 동작(413으로 거절)은 맞다. 테스트가 리셋을 견디도록 고쳐야 한다(예: 리셋도 "거절됨"으로 받거나, 헤더만 보내고 응답을 먼저 읽기). 아직 고치지 않았다.
-- **표**: 칸 구분 없이 한 문단으로 들어온다(27장 등). 표 안의 도시 설립 연도는 비인용 용어 파일로 걸렀다(그대로 둠, docx 재임포트 때 다시 본다).
+- **표(PDF 판만)**: 칸 구분 없이 한 문단으로 들어온다(27장 등). docx는 #69로 markdown 표다. 표 안의 도시 설립 연도는 비인용 용어 파일로 걸렀다(그대로 둠, docx 재임포트 때 다시 본다).
 - **수식·그림**: 수식은 텍스트 그대로(`g_Y ≈ g_N + g_y`), 그림 10개는 `[그림 N]` 자리표시자다(그대로 둠).
 - **코멘트 앵커**: PDF에서는 말풍선 높이의 문단 단위로 근사한다. 앵커에 인용이 하나뿐이면 그 문헌으로 잇기 때문에, 사실·수치 요청 일부(I81·I82 인구 수치)가 citation(buckley2010)으로 분류된다(#30 승인).
 - **원고 쪽 불일치**(보고서 2·3절, 저자 답변 대기)
