@@ -189,3 +189,15 @@ async def test_book_import_new_edition_tool(settings, store: LocalStore, tmp_pat
     assert done.startswith("## 새 판 E2 — 가상 책 (b)") and "### 바뀐 장" in done
     assert stale.startswith("미해결 2건 (status=open, 해결됐을 수 있음만)")
     assert "해결됐을 수 있음(원고에서 코멘트가 지워짐, E2)" in stale and "해결됐을 수 있음(걸린 문장이 원고에 없음, E2)" in stale
+
+
+def test_pdf_comments_without_author_are_linked_by_text(store: LocalStore, tmp_path: Path, e1):
+    """PDF로 임포트한 미해결은 작성자·날짜 없이 만든 지문이라 docx 판과 맞지 않는다. 코멘트 본문으로 잇는다(10/02 PDF → 10/05 docx)."""
+    pdir = store.root / "users" / U / "projects" / P
+    lines = (pdir / "issues.md").read_text(encoding="utf-8").splitlines()
+    pdf_like = ["- comment_fp: 0000000000000000" if x.startswith("- comment_fp:") else x
+                for x in lines if not x.startswith(("- author", "- comment_date:"))]
+    (pdir / "issues.md").write_text("\n".join(pdf_like), encoding="utf-8")
+    store.reindex()
+    report = reupload_manuscript(store, U, edition(tmp_path / "e2.docx", 2), P)
+    assert (report.issues_kept, report.issues_new, dict(report.stale)) == (3, 1, {"comment_removed": 1, "anchor_missing": 1})

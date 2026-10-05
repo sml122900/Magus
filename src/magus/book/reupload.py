@@ -288,7 +288,8 @@ def _merge_comments(store: Store, user_id: str, project_id: str, manuscript, spl
     by_fp = {i.comment_fp: i for i in from_comments if i.comment_fp}
     by_text: dict[str, list[Issue]] = {}
     for i in from_comments:
-        if not i.comment_fp:  # 판 기록 전(또는 PDF) 미해결: 코멘트 본문으로 잇는다
+        # 지문이 없거나(판 기록 전) 작성자 없이 만든 지문(PDF 말풍선)이면 docx 판의 지문과 맞을 수 없다: 코멘트 본문으로 잇는다
+        if not i.comment_fp or not i.author:
             by_text.setdefault(_squash(_comment_body(i)), []).append(i)
     matched: set[int] = set()
     updates: list[Issue] = []
