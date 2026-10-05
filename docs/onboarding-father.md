@@ -31,12 +31,11 @@
   - WorkOS 대시보드 Users에서 아버지 id를 찾아도 된다.
 - [ ] 서버 `.env`에 `ALLOWED_USERS=<운영자 id>=default,<아버지 id>=father`를 넣고 `sudo docker compose up -d`를 실행한다(`restart`가 아니라 `up -d`).
 - [ ] 아버지가 다시 로그인해 `/book`이 비어 있는 것을 확인한다.
-- [ ] **비인용 용어 옮기기**: `default`의 book 프로젝트에 넣었던 용어 5개(선하이정·마닐라·유조프카·푸둥·모스크바 회사)는 프로젝트별 파일이라 따라오지 않는다. 임포트한 뒤 아래를 실행한다. 새 판으로 다시 올려도 이 목록은 그대로 남는다.
+- [ ] **비인용 용어 넣기**: `default`의 book 프로젝트에 넣었던 용어 5개(선하이정·마닐라·유조프카·푸둥·모스크바 회사)는 프로젝트별 파일이라 따라오지 않는다. 최신본 제27장 표의 `상트페테르부르크(1703)`도 지명이라 함께 넣는다(#81). 임포트한 뒤 아래를 실행한다. 새 판으로 다시 올려도 이 목록은 그대로 남는다.
   ```sh
-  sudo docker compose exec -e USER_ID=father magus /app/.venv/bin/magus terms --project-id book --add 선하이정 마닐라 유조프카 푸둥 "모스크바 회사"
+  sudo docker compose exec -e USER_ID=father magus /app/.venv/bin/magus terms --project-id book --add 선하이정 마닐라 유조프카 푸둥 "모스크바 회사" 상트페테르부르크
   ```
-  - 최신본에서는 표 안의 `상트페테르부르크(1703)`가 "미연결"로 잡힌다. 지명이라 같은 방법으로 넣을 후보다(사용자 확인 뒤).
-- [ ] 아버지 보고서 답변(음역 추정 등)을 확정할 때는 아버지 책장에 넣는다.
+- [ ] 아버지 보고서 답변(음역 추정, `셰 등(2019)`이 Hsieh 2019 두 편 중 어느 것인지(#82) 등)을 확정할 때는 아버지 책장에 넣는다.
   ```sh
   sudo docker compose exec -e USER_ID=father magus /app/.venv/bin/magus alias <key> <표기>
   ```
