@@ -28,6 +28,7 @@ from magus.store.fileio import write_json as _write_json
 from magus.store.fileio import write_text as _write_text
 from magus.store.shelf import ShelfMixin
 from magus.store.base import (
+    ANCHOR_MAX,
     CHAPTER_STATUSES,
     AuthorKind,
     Change,
@@ -313,6 +314,8 @@ class LocalStore(ShelfMixin):
         author: str | None = None,
         author_kind: AuthorKind | None = None,
         comment_date: str | None = None,
+        anchor: str | None = None,
+        paragraph: int | None = None,
     ) -> Issue:
         if not text.strip():
             raise ValueError("미해결 내용이 비어 있다")
@@ -330,6 +333,8 @@ class LocalStore(ShelfMixin):
             author=author or None,
             author_kind=author_kind,
             comment_date=comment_date or None,
+            anchor=formats.one_line(anchor)[:ANCHOR_MAX] or None if anchor else None,
+            paragraph=paragraph,
         )
         _write_text(path, formats.dump_issues([*issues, issue]))
         with self._db:
@@ -446,7 +451,8 @@ class LocalStore(ShelfMixin):
         return [
             Issue(
                 r["id"], r["text"], r["status"], r["origin"], r["chapter_number"], r["created_at"], r["closed_note"],
-                r["kind"], r["ref_key"], r["ref_id"], r["author"], r["author_kind"], r["comment_date"],
+                r["kind"], r["ref_key"], r["ref_id"], r["author"], r["author_kind"], r["comment_date"], r["anchor"],
+                r["paragraph"],
             )
             for r in rows
         ]
@@ -579,10 +585,11 @@ class LocalStore(ShelfMixin):
         self._db.executemany(
             "INSERT OR REPLACE INTO issues "
             "(user_id, project_id, id, text, status, origin, chapter_number, created_at, closed_note, kind, ref_key, "
-            "ref_id, author, author_kind, comment_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "ref_id, author, author_kind, comment_date, anchor, paragraph) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (user_id, project_id, i.id, i.text, i.status, i.origin, i.chapter_number, i.created_at, i.closed_note,
-                 i.kind, i.ref_key, i.ref_id, i.author, i.author_kind, i.comment_date)
+                 i.kind, i.ref_key, i.ref_id, i.author, i.author_kind, i.comment_date, i.anchor, i.paragraph)
                 for i in issues
             ],
         )

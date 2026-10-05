@@ -127,7 +127,8 @@
   - **status 값은 `draft` | `revising` | `done` 중 하나다.** 쓸 때 그 밖의 값이 오면 거부한다(Store는 ValueError, 도구는 스키마 enum으로 막는다).
 - chapter_versions(id, user_id, chapter_id, version, path, note, created_at) — 보관된 **이전** 본문들
 - decisions(user_id, project_id, id, text, created_at) — id는 프로젝트별 일련번호 `D{n}`
-- issues(user_id, project_id, id, text, status: open|closed, origin: import_comment|user|agent, chapter_number?, created_at, closed_note?, kind: citation|fact|general, ref_key?, ref_id?, author?, author_kind?: ai|person, comment_date?) — id는 프로젝트별 일련번호 `I{n}`
+- issues(user_id, project_id, id, text, status: open|closed, origin: import_comment|user|agent, chapter_number?, created_at, closed_note?, kind: citation|fact|general, ref_key?, ref_id?, author?, author_kind?: ai|person, comment_date?, anchor?, paragraph?) — id는 프로젝트별 일련번호 `I{n}`
+  - **걸린 문장 전문(`anchor`, 1,000자까지)과 장 본문의 문단 번호(`paragraph`)를 둔다(#73).** 문단 번호는 ref_check의 paragraphs와 같은 번호다(빈 줄로 나눈 N번째, 소제목 포함). 본문 끝의 `— 원문: “…”`은 표시용 120자다. book_issues·book_read_chapter는 `¶N`으로 보인다. 다시 올리기에서 걸린 문장이 남았는지 이것으로 본다.
   - **원고 코멘트의 작성자를 보존한다(#71).** `author`는 Word 이름 그대로, `author_kind`는 이름으로 판정한다(`book/comments.py: author_kind`, 기본 AI 이름 목록 + 프로젝트의 `book/ai_authors.txt`). 파일(issues.md)에 적으므로 사람이 고칠 수 있다.
     - AI가 단 코멘트에서 온 미해결은 저자에게 보일 때도 **AI 확인 요청**으로 드러난다: book_issues 출처 `AI 확인 요청(Claude)`, book_read_chapter `[AI 확인 요청]`, outline `그중 AI 확인 요청 N건`, 웹 `/issues`·`/book`의 🤖, 저자 보고서 5절.
   - `kind`: 임포트할 때 코멘트로 정한다. 직접 남긴 이슈는 `general`이 기본값이다.

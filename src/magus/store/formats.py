@@ -84,6 +84,10 @@ def dump_issues(issues: list[Issue]) -> str:
             meta.append(f"- author_kind: {i.author_kind}")
         if i.comment_date:
             meta.append(f"- comment_date: {i.comment_date}")
+        if i.paragraph is not None:
+            meta.append(f"- paragraph: {i.paragraph}")
+        if i.anchor:
+            meta.append(f"- anchor: {one_line(i.anchor)}")
         if i.closed_note:
             meta.append(f"- closed_note: {one_line(i.closed_note)}")
         out.append(f"## I{i.id} · {i.status}\n" + "\n".join(meta) + f"\n\n{i.text.strip()}\n")
@@ -115,6 +119,8 @@ def parse_issues(text: str) -> list[Issue]:
                 author=meta.get("author") or None,
                 author_kind=meta.get("author_kind") if meta.get("author_kind") in ("ai", "person") else None,  # type: ignore[arg-type]
                 comment_date=meta.get("comment_date") or None,
+                anchor=meta.get("anchor") or None,
+                paragraph=int(meta["paragraph"]) if meta.get("paragraph", "").isdigit() else None,
                 text="\n".join(lines).strip(),
             )
         )

@@ -1,4 +1,4 @@
-"""최신본 docx 시험 임포트(2026-10-06)에서 나온 보완: 표(#69), 제N부 들어가며(#70), 코멘트 작성자(#71). 작은 합성 docx로 확인한다."""
+"""최신본 docx 시험 임포트(2026-10-06)에서 나온 보완: 표(#69), 제N부 들어가며(#70), 코멘트 작성자(#71), 걸린 문장 전문(#73). 작은 합성 docx로 확인한다."""
 
 from __future__ import annotations
 
@@ -141,7 +141,7 @@ async def test_issue_lines_name_part_intro(settings, store: LocalStore, tmp_path
         text = (await client.call_tool("book_issues", {"project_id": "b"})).content[0].text
         added = (await client.call_tool("book_issue_add", {"text": "도입 다듬기", "chapter_number": 102, "project_id": "b"})).content[0].text
         read = (await client.call_tool("book_read_chapter", {"number": 102, "project_id": "b"})).content[0].text
-    assert "- I1 · open · 제2부 들어가며 · 원고 코멘트(편집자) · fact" in text
+    assert "- I1 · open · 제2부 들어가며 ¶1 · 원고 코멘트(편집자) · fact" in text
     assert added.startswith("I2 열림 (b · 제2부 들어가며 · user)")
     assert '"label": "제2부 들어가며"' in read
 
@@ -187,9 +187,9 @@ async def test_ai_comments_are_marked_in_tools(settings, store: LocalStore, tmp_
     async with Client(build_server(settings, store)) as client:
         lines = (await client.call_tool("book_issues", {"project_id": "b"})).content[0].text
         read = (await client.call_tool("book_read_chapter", {"number": 1, "project_id": "b"})).content[0].text
-    assert "- I1 · open · 1장 · AI 확인 요청(Claude) · citation→daeschler2006" in lines
-    assert "- I2 · open · 1장 · 원고 코멘트(편집자) · general" in lines
-    assert '"I1 [AI 확인 요청] 인용 확인 필요' in read and '"I2 문단 줄이기' in read
+    assert "- I1 · open · 1장 ¶1 · AI 확인 요청(Claude) · citation→daeschler2006" in lines
+    assert "- I2 · open · 1장 ¶2 · 원고 코멘트(편집자) · general" in lines
+    assert '"I1 ¶1 [AI 확인 요청] 인용 확인 필요' in read and '"I2 ¶2 문단 줄이기' in read
 
 
 def test_web_marks_ai_comments(server_proc, tmp_path: Path):  # noqa: F811 - test_web의 픽스처
@@ -207,3 +207,21 @@ def test_web_marks_ai_comments(server_proc, tmp_path: Path):  # noqa: F811 - tes
     assert "그중 🤖 AI 확인 요청 1건(AI가 원고에 단 코멘트입니다)" in issues
     assert "<td>🤖 AI 확인 요청(Claude)</td><td>문헌 확인</td>" in issues
     assert "<td>원고 코멘트(편집자)</td><td>기타</td>" in issues
+
+
+# ---- #73 걸린 문장 전문과 문단 번호 -------------------------------------------------------------------
+
+
+def test_anchor_full_text_and_paragraph(store: LocalStore, tmp_path: Path):
+    long = "가" * 150 + "(Clack, 2012)" + "나" * 60
+    m = Manuscript().heading("제1장 물가").para("첫 문단.").heading("1.1 절", 2)
+    m.para("셋째 문단의 ", (long, "인용 확인 필요", "Claude"), " 끝.")
+    import_manuscript(store, "alice", m.bibliography().save(tmp_path / "a.docx"), project_id="b")
+    [issue] = store.list_issues("alice", "b")
+    assert issue.anchor == long  # 본문 표시는 120자로 잘리지만, 전문은 따로 둔다(최신본: 129건 중 82건이 잘렸다)
+    assert "— 원문: “" + long[:120] + "”" in issue.text
+    [group] = check_chapter(store, "alice", "b", 1).groups
+    assert issue.paragraph == 3 and group.as_dict()["paragraphs"] == [3]  # 제목(##)도 문단 하나: ref_check와 같은 번호
+    store.reindex()
+    assert store.list_issues("alice", "b")[0].anchor == long
+    assert f"- paragraph: 3\n- anchor: {long}" in (store.root / "users/alice/projects/b/issues.md").read_text(encoding="utf-8")

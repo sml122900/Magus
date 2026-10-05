@@ -75,6 +75,10 @@ class ChapterPlan:
     def markdown(self) -> str:
         return blocks_to_markdown(self.blocks, self.level)
 
+    def paragraphs(self) -> dict[int, int]:
+        """블록 → 장 본문의 문단 번호(1부터). 빈 블록은 본문에 실리지 않으므로 세지 않는다(ref_check의 paragraphs와 같다)."""
+        return {b.index: n for n, b in enumerate((b for b in self.blocks if b.text.strip()), 1)}
+
 
 @dataclass
 class Split:
@@ -325,6 +329,7 @@ def import_manuscript(
     comment_counts: Counter = Counter()
     outside: Counter = Counter()
     authors: Counter = Counter()
+    paragraphs = {ch.number: ch.paragraphs() for ch in split.chapters}
     rows: list[tuple[int, int | None, str, str | None, str]] = []
     for c in sorted(manuscript.comments, key=lambda c: (c.block_index is None, c.block_index or 0, int(c.id) if c.id.isdigit() else 0)):
         region = split.region_of_block.get(c.block_index) if c.block_index is not None else None
@@ -334,11 +339,13 @@ def import_manuscript(
         else:
             comment_counts[chapter] += 1
         kind, ref_key = classify_comment(c.text, c.anchor, exclude)
+        paragraph = paragraphs.get(chapter, {}).get(c.block_index) if chapter is not None else None
         anchor = one_line(c.anchor)[:120]
         text = (c.text or "(빈 코멘트)") + (f"\n— 원문: “{anchor}”" if anchor else "")
         issue = store.add_issue(
             user_id, project.id, text, origin="import_comment", chapter_number=chapter, kind=kind, ref_key=ref_key,
             author=c.author, author_kind=author_kind(c.author, ai_names), comment_date=c.date,
+            anchor=c.anchor, paragraph=paragraph,
         )
         rows.append((issue.id, chapter, kind, ref_key, one_line(c.text)[:40]))
         if c.author:

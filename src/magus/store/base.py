@@ -17,6 +17,7 @@ IssueOrigin = Literal["import_comment", "user", "agent"]
 IssueKind = Literal["citation", "fact", "general"]
 ISSUE_KINDS: tuple[str, ...] = ("citation", "fact", "general")
 AuthorKind = Literal["ai", "person"]  # 원고 코멘트 작성자: AI인가 사람인가(#71)
+ANCHOR_MAX = 1000  # 미해결에 남기는 걸린 문장의 최대 길이(#73)
 ChapterStatus = Literal["draft", "revising", "done"]
 CHAPTER_STATUSES: tuple[str, ...] = ("draft", "revising", "done")
 RefStatus = Literal["unverified", "verified"]
@@ -127,6 +128,10 @@ class Issue:
     author: str | None = None  # Word의 작성자 이름 그대로. PDF·직접 남긴 미해결은 None
     author_kind: AuthorKind | None = None  # ai | person. 작성자 이름으로 판정해 파일에 적는다(사람이 고칠 수 있다)
     comment_date: str | None = None  # Word 코멘트의 작성 시각(w:date)
+    # 코멘트가 걸린 문장 전문(한 줄로, ANCHOR_MAX자까지)과 그 장 본문의 문단 번호(ref_check의 paragraphs와 같은 번호, #73).
+    # 본문의 "— 원문: “…”"은 표시용 120자다. 다시 올리기에서 걸린 문장이 남아 있는지 이것으로 본다.
+    anchor: str | None = None
+    paragraph: int | None = None
 
     @property
     def by_ai(self) -> bool:
@@ -295,6 +300,8 @@ class Store(Protocol):
         author: str | None = None,
         author_kind: AuthorKind | None = None,
         comment_date: str | None = None,
+        anchor: str | None = None,
+        paragraph: int | None = None,
     ) -> Issue: ...
     def close_issue(self, user_id: str, project_id: str, issue_id: int, note: str | None = None) -> Issue | None:
         """없는 번호면 None. 이미 닫힌 이슈는 note만 갱신한다."""
