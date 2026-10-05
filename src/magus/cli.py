@@ -76,7 +76,11 @@ def main(argv: list[str] | None = None) -> None:
             print(f"{name}: {path}")
         return
 
-    settings = Settings.from_env()
+    try:
+        settings = Settings.from_env()
+    except ValueError as e:
+        # 설정이 틀리면 시작하지 않는다. 이유는 stderr(운영에서는 docker compose logs)에 한국어로 남는다
+        parser.exit(2, f"설정 오류로 시작하지 않습니다: {e}\n")
     if settings.user_id == DEFAULT_USER and (args.cmd == "seed-demo" or (args.cmd == "import" and args.synthetic)):
         # 합성·테스트 데이터는 default 사용자(실제 저자의 책장)에 넣지 않는다. 데모 책장이 저자의 취향으로 검색된다.
         parser.exit(2, "합성·데모 데이터는 default 사용자에 넣지 않습니다. USER_ID=demo 또는 USER_ID=synthetic로 실행하세요.\n")
