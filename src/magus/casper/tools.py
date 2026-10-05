@@ -13,6 +13,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 
 from magus.casper.conversation import split_conversation
+from magus.category.titles import TITLE_RULE, decide_title
 from magus.ids import local_time, new_id
 from magus.inbox import FileResolver, ResolveFile
 from magus.search import Embedder, hybrid_search
@@ -20,7 +21,8 @@ from magus.store import Idea, Store
 from magus.store.base import IdeaKind, Lane
 from magus.store.formats import one_line
 
-ASK = "'저장해 줘'처럼 넣을 곳이 정해지지 않았으면 부르지 말고 생각·문체·문헌 세 곳 중 어디인지 먼저 묻는다(원고는 선택지에 넣지 않는다). "
+ASK = ("'저장해 줘'처럼 넣을 곳이 정해지지 않았으면 부르지 말고 생각·문체·문헌과 저자의 카테고리(category_list) 중 어디인지 먼저 묻는다"
+       "(원고는 선택지에 넣지 않는다). ")
 DELETE_RULE = '저자가 그 항목을 지우라고 분명히 말했을 때만 부른다. 여러 개면 목록을 보여 주고 확인받는다. '
 
 
@@ -56,12 +58,17 @@ def build_tools(
         text: str,
         kind: Literal["thought", "ai", "article", "conversation", "tv", "other"],
         origin: str | None = None,
+        title: str | None = None,
+        title_by: Literal["ai", "author"] = "ai",
+        untitled: bool = False,
     ) -> str:
         if not text.strip():
             raise ToolError("text가 비어 있다")
         kind_: IdeaKind = kind
-        [idea] = store.add_ideas(current_user(), [Idea(new_id(), text.strip(), kind_, "me", origin)])
-        return f"기록함 [me] {idea.id} · {kind}" + (f" · {origin}" if origin else "")
+        user = current_user()
+        name, by, said = decide_title(store, user, title, title_by, untitled)  # 제목(#92): 기본값이 '매번 묻기'면 먼저 묻게 한다
+        [idea] = store.add_ideas(user, [Idea(new_id(), text.strip(), kind_, "me", origin, title=name, title_by=by)])
+        return f"기록함 [me] {idea.id} · {kind}" + (f" · {origin}" if origin else "") + f" · {said}"
 
     def idea_add_conversation(markdown: str | None = None, path: str | None = None, origin: str | None = None) -> str:
         if bool(markdown) == bool(path):
@@ -88,6 +95,7 @@ def build_tools(
         for n, idea in enumerate(ideas, 1):
             head = f"{n}. [{idea.author}] {local_time(idea.created_at, '%Y-%m-%d')} · {idea.kind}"
             head += (f" · {idea.origin}" if idea.origin else "") + f" · {idea.id}"
+            head += (f" · 제목 「{idea.title}」" + (" (AI가 지은 제목)" if idea.title_by == "ai" else "")) if idea.title else ""
             lines += [head, f"   “{one_line(idea.text)[:300]}”"]
             if idea.parent_id and idea.parent_id in parents:
                 lines.append(f"   ↳ 이 AI 발화가 응답한 사용자 발화: “{one_line(parents[idea.parent_id].text)[:80]}”")
@@ -113,7 +121,7 @@ def build_tools(
             description=(
                 "저자가 '생각'에 넣으라고 분명히 말했을 때만 부른다. " + ASK
                 + "저자의 생각 한 조각을 생각에 기록한다(author=me). kind=thought|ai|article|conversation|tv|other, "
-                "origin은 출처(책·기사·방송 이름 등)."
+                "origin은 출처(책·기사·방송 이름 등). " + TITLE_RULE
             ),
             structured_output=False,
         ),

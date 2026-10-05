@@ -1,7 +1,7 @@
 """SQLite 인덱스 스키마. 인덱스는 언제든 원본 파일에서 다시 만들 수 있으므로,
 스키마가 바뀌면 SCHEMA_VERSION을 올린다. 그러면 LocalStore가 인덱스를 지우고 다시 만든다."""
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 # 지울 때는 역순으로 지운다. chunks_fts는 가상 테이블이다(그림자 테이블도 함께 지워진다).
 TABLES = (
@@ -16,6 +16,8 @@ TABLES = (
     "ref_passages",
     "ideas",
     "style_entries",
+    "categories",
+    "category_items",
     "chunks",
     "chunks_fts",
 )
@@ -141,6 +143,8 @@ CREATE TABLE ideas (
     author      TEXT NOT NULL CHECK (author IN ('me', 'ai')),
     parent_id   TEXT,
     created_at  TEXT NOT NULL,
+    title       TEXT,
+    title_by    TEXT CHECK (title_by IN ('ai', 'author')),
     PRIMARY KEY (user_id, id)
 );
 
@@ -156,12 +160,46 @@ CREATE TABLE style_entries (
     PRIMARY KEY (user_id, id)
 );
 
+-- 저자가 만든 카테고리(#92). 원본은 shelf/categories/<id>/category.json. schema_version은 파일 형식 버전이다.
+CREATE TABLE categories (
+    id              TEXT NOT NULL,
+    user_id         TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    name_key        TEXT NOT NULL,
+    template        TEXT NOT NULL,
+    color           TEXT NOT NULL,
+    fields          TEXT NOT NULL DEFAULT '[]',
+    schema_version  INTEGER NOT NULL,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    PRIMARY KEY (user_id, id),
+    UNIQUE (user_id, name_key)
+);
+
+CREATE TABLE category_items (
+    id              TEXT NOT NULL,
+    user_id         TEXT NOT NULL,
+    category_id     TEXT NOT NULL,
+    title           TEXT,
+    title_by        TEXT CHECK (title_by IN ('ai', 'author')),
+    content         TEXT NOT NULL,
+    fields          TEXT NOT NULL DEFAULT '{}',
+    author          TEXT NOT NULL CHECK (author IN ('me', 'ai')),
+    tags            TEXT NOT NULL DEFAULT '[]',
+    chapters        TEXT NOT NULL DEFAULT '[]',
+    schema_version  INTEGER NOT NULL,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    PRIMARY KEY (user_id, category_id, id)
+);
+
 CREATE TABLE chunks (
     id          INTEGER PRIMARY KEY,
     user_id     TEXT NOT NULL,
     owner_type  TEXT NOT NULL,
     owner_id    TEXT NOT NULL,
-    lane        TEXT NOT NULL CHECK (lane IN ('ref_picked', 'ref_full', 'idea_me', 'idea_ai', 'style', 'style_passage', 'ref_bib')),
+    lane        TEXT NOT NULL CHECK (lane IN ('ref_picked', 'ref_full', 'idea_me', 'idea_ai', 'style', 'style_passage', 'ref_bib',
+                                              'category')),
     text        TEXT NOT NULL,
     embedding   BLOB
 );

@@ -60,7 +60,7 @@ async def test_completion_criterion_and_search(settings: Settings, store: LocalS
         assert len(me) == 96 and len(ai) == 96 and all(i.parent_id in me for i in ai)
         assert all(i.kind == "conversation" and i.origin == "대화_전체_기록" for i in ideas)
 
-        assert _text(await client.call_tool("idea_add", {"text": "고래는 돌아간 자의 상징이다", "kind": "thought", "origin": "산책"})).startswith("기록함 [me]")
+        assert _text(await client.call_tool("idea_add", {"text": "고래는 돌아간 자의 상징이다", "kind": "thought", "origin": "산책", "untitled": True})).startswith("기록함 [me]")
         default = _text(await client.call_tool("idea_search", {"query": "고래"}))
         assert "(author=me)" in default and "[ai]" not in default and "[me]" in default
         both = _text(await client.call_tool("idea_search", {"query": "고래 관점", "author": "all", "k": 20}))

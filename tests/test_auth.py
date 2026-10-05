@@ -248,7 +248,7 @@ async def test_remote_auth_rejects_and_isolates_users(keys, auth_server, data_di
         assert "원고.docx" in _text(await c.call_tool("files_list", {}))
         _text(await c.call_tool("book_import", {"path": "원고.docx", "project_id": "synth"}))
         assert _text(await c.call_tool("book_outline", {})).startswith("프로젝트: 닿으려는 종 (합성) (synth)")
-        _text(await c.call_tool("idea_add", {"text": "앨리스의 생각", "kind": "thought"}))
+        _text(await c.call_tool("idea_add", {"text": "앨리스의 생각", "kind": "thought", "untitled": True}))
     async with _client(mcp_url, bob) as c:  # 다른 계정: 앨리스의 원고·생각이 보이지 않는다
         assert _text(await c.call_tool("book_outline", {})).startswith("프로젝트가 없습니다")
         assert "받은함이 비어 있다" in _text(await c.call_tool("files_list", {}))  # 받은함도 사용자별

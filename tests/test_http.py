@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import shutil
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -24,9 +26,10 @@ TOOLS = {
     "files_list", "book_outline", "book_issues", "book_read_chapter", "book_write_chapter", "book_decide", "book_issue_add",
     "book_issue_close", "book_import", "book_export", "ref_import_bibliography", "ref_add", "ref_search", "ref_check",
     "idea_add", "idea_add_conversation", "idea_search", "idea_delete", "style_add", "style_search", "style_delete",
+    "category_list", "category_create", "category_edit", "category_put", "category_search", "category_trash", "category_title_default",
 }
-# 로그에 나오면 안 되는 내용(본문·발췌·생각·문체 구절)
-SECRET = ("비밀본문가나다", "비밀발췌라마바", "비밀생각사아자", "비밀구절차카타")
+# 로그에 나오면 안 되는 내용(본문·발췌·생각·문체 구절·카테고리 항목)
+SECRET = ("비밀본문가나다", "비밀발췌라마바", "비밀생각사아자", "비밀구절차카타", "비밀항목파하거")
 
 
 def _free_port() -> int:
@@ -96,15 +99,22 @@ async def test_all_tools_over_http_and_log_has_no_content(http_server, data_dir:
             ("ref_check", {"chapter_number": 1}),
             ("ref_add", {"bib": {"key": "clack2012"}, "passages": [{"text": SECRET[1], "reason": "1장"}]}),
             ("ref_search", {"query": "라마바"}),
-            ("idea_add", {"text": SECRET[2], "kind": "thought"}),
+            ("idea_add", {"text": SECRET[2], "kind": "thought", "title": SECRET[2], "title_by": "author"}),
             ("idea_add_conversation", {"markdown": "**사용자:** 고래는 돌아갔다\n**Claude:** 맞습니다"}),
             ("idea_search", {"query": "사아자"}),
             ("style_add", {"passage": SECRET[3], "reason": "짧은 리듬", "tags": tags}),
             ("style_search", {"query": "짧은 리듬"}),
+            ("category_create", {"name": "사례", "template": "사례"}),
+            ("category_list", {}),
+            ("category_edit", {"category": "사례", "color": "빨강"}),
+            ("category_put", {"category": "사례", "author": "me", "content": SECRET[4], "title": SECRET[4], "title_by": "author"}),
+            ("category_search", {"query": "파하거"}),
+            ("category_title_default", {"mode": "none"}),
         ]
         out = {name: _text(await client.call_tool(name, args)) for name, args in calls}
         deletes = [("idea_delete", {"id": out["idea_add"].split()[2], "note": "시험"}),  # 휴지통으로 옮긴 내용도 로그에는 없다
-                   ("style_delete", {"id": out["style_add"].split()[2], "note": "시험"})]
+                   ("style_delete", {"id": out["style_add"].split()[2], "note": "시험"}),
+                   ("category_trash", {"category": "사례", "note": "시험"})]
         for name, args in deletes:
             _text(await client.call_tool(name, args))
         calls += deletes
@@ -134,10 +144,20 @@ def test_refuses_public_bind_without_auth(data_dir: Path):
 
 def test_request_size_limit(http_server):
     # MCP 요청 본문 상한(MAX_REQUEST_MB, 기본 2MB). 넘으면 명확한 오류로 거절한다
+    # 머리만 보내고 응답을 먼저 읽는다. 본문을 다 보내는 도중에 서버가 413으로 끊으면 Windows 클라이언트는 응답 대신
+    # 연결 리셋을 받아 간헐적으로 실패했다(status.md 7절). 서버는 Content-Length만 보고 거절하므로 본문 없이도 같은 것을 본다.
     url, _ = http_server
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                        "params": {"name": "idea_add", "arguments": {"text": "가" * 1_100_000, "kind": "thought"}}}).encode()
-    request = urllib.request.Request(url, body, {"content-type": "application/json", "accept": "application/json, text/event-stream"})
-    with pytest.raises(urllib.error.HTTPError) as e:
-        urllib.request.urlopen(request, timeout=20)
-    assert e.value.code == 413
+    parts = urllib.parse.urlsplit(url)
+    conn = http.client.HTTPConnection(parts.hostname, parts.port, timeout=20)
+    try:
+        conn.putrequest("POST", parts.path)
+        for name, value in (("content-type", "application/json"), ("accept", "application/json, text/event-stream"),
+                            ("content-length", str(len(body)))):
+            conn.putheader(name, value)
+        conn.endheaders()
+        response = conn.getresponse()
+        assert response.status == 413
+    finally:
+        conn.close()

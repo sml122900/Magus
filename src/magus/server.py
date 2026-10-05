@@ -13,6 +13,7 @@ from magus.auth import USER_ID_CLAIM, JwtVerifier
 from magus.balthasar.tools import build_tools as balthasar_tools
 from magus.book.tools import build_tools as book_tools
 from magus.casper.tools import build_tools as casper_tools
+from magus.category.tools import build_tools as category_tools
 from magus.config import Settings
 from magus.inbox import FileResolver
 from magus.inbox import build_tools as inbox_tools
@@ -58,6 +59,7 @@ def build_server(
         *melchior_tools(store, current_user, embedder, files),
         *casper_tools(store, current_user, embedder, files),
         *balthasar_tools(store, current_user, embedder),
+        *category_tools(store, current_user, embedder),
         *inbox_tools(store, current_user, settings.max_user_bytes),
     ]
     # instructions는 실제로 등록된 도구만 언급하도록 도구 목록에서 조립한다.

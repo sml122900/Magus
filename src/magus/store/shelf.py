@@ -12,6 +12,7 @@ import json
 import re
 import sqlite3
 import threading
+from collections.abc import Callable
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,10 @@ class ShelfMixin:
     _lock: threading.RLock
 
     def _user_dir(self, user_id: str) -> Path: ...  # LocalStore가 구현한다
+    # CategoryMixin이 구현한다(메서드 껍데기를 두면 MRO에서 진짜를 가리므로 주석만 둔다)
+    _trashed_categories: Callable[[str], list[tuple[str, str, dict[str, Any], str]]]
+    _restore_category: Callable[[str, str, str | None], list[str]]
+    _restore_category_item: Callable[[str, str], list[str]]
 
     # ---- Melchior: 문헌 --------------------------------------------------------------
 
@@ -158,12 +163,14 @@ class ShelfMixin:
 
     def _index_idea(self, user_id: str, idea: Idea) -> None:
         self._db.execute(
-            "INSERT OR REPLACE INTO ideas (id, user_id, text, kind, origin, author, parent_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (idea.id, user_id, idea.text, idea.kind, idea.origin, idea.author, idea.parent_id, idea.created_at),
+            "INSERT OR REPLACE INTO ideas (id, user_id, text, kind, origin, author, parent_id, created_at, title, title_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (idea.id, user_id, idea.text, idea.kind, idea.origin, idea.author, idea.parent_id, idea.created_at, idea.title,
+             idea.title_by),
         )
         lane: Lane = "idea_me" if idea.author == "me" else "idea_ai"
-        self._replace_chunks(user_id, "idea", idea.id, lane, chunk_text(idea.text))
+        text = f"{idea.title}\n{idea.text}" if idea.title else idea.text  # 제목(#92)도 찾는다
+        self._replace_chunks(user_id, "idea", idea.id, lane, chunk_text(text))
 
     @locked
     def get_ideas(self, user_id: str, ids: list[str]) -> dict[str, Idea]:
@@ -225,7 +232,7 @@ class ShelfMixin:
     # 지우지 않고 trash/shelf/<casper|balthasar>/<id>.json으로 옮긴다. 파일에 "_trash"(시각·이유·함께 옮긴 생각)를 덧붙인다.
     # shelf/ 밖이라 reindex·검색·목록·웹에서 빠진다. 되살리면 "_trash"를 떼고 제자리로 돌려 다시 색인한다.
 
-    def _trash_dir(self, user_id: str, kind: TrashKind) -> Path:
+    def _trash_dir(self, user_id: str, kind: TrashKind) -> Path:  # 생각·문체만
         return self._user_dir(user_id) / "trash" / "shelf" / ("casper" if kind == "idea" else "balthasar")
 
     def _shelf_dir(self, user_id: str, kind: TrashKind) -> Path:
@@ -271,10 +278,19 @@ class ShelfMixin:
                 mark = data.get("_trash") or {}
                 items.append(TrashItem(kind, path.stem, mark.get("at", ""), mark.get("note", ""),  # type: ignore[arg-type]
                                        str(data.get("text") or data.get("passage") or "")[:80], mark.get("with")))
+        for kind, item_id, data, at in self._trashed_categories(user_id):  # 카테고리 통째·카테고리 항목(#92)
+            mark = data.get("_trash") or {}
+            preview = (f"카테고리 「{data.get('name', '')}」" if kind == "category"
+                       else str(data.get("title") or data.get("content") or "")[:80])
+            items.append(TrashItem(kind, item_id, at, mark.get("note", ""), preview))  # type: ignore[arg-type]
         return sorted(items, key=lambda i: i.trashed_at, reverse=True)
 
     @locked
-    def restore_trash(self, user_id: str, kind: TrashKind, item_id: str) -> list[str]:
+    def restore_trash(self, user_id: str, kind: TrashKind, item_id: str, *, name: str | None = None) -> list[str]:
+        if kind == "category":
+            return self._restore_category(user_id, item_id, name)
+        if kind == "category_item":
+            return self._restore_category_item(user_id, item_id)
         safe_id(item_id, f"{kind} id")
         trash = self._trash_dir(user_id, kind)
         if not (trash / f"{item_id}.json").exists():
@@ -416,7 +432,7 @@ def _style(r: sqlite3.Row) -> StyleEntry:
 def _idea(r: sqlite3.Row) -> Idea:
     return Idea(
         id=r["id"], text=r["text"], kind=r["kind"], author=r["author"], origin=r["origin"], parent_id=r["parent_id"],
-        created_at=r["created_at"],
+        created_at=r["created_at"], title=r["title"], title_by=r["title_by"],
     )
 
 

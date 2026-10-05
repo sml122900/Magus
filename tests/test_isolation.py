@@ -259,7 +259,7 @@ async def test_concurrent_requests_keep_their_own_user(keys, auth_server):  # no
     tokens = {"앨리스": _token(good, aud=url), "밥": _token(good, aud=url, sub="sub-bob")}
     for word, token in tokens.items():
         async with _client(url, token) as c:
-            await c.call_tool("idea_add", {"text": f"{word}의 바다 생각", "kind": "thought"})
+            await c.call_tool("idea_add", {"text": f"{word}의 바다 생각", "kind": "thought", "untitled": True})
     results: list[tuple[str, str]] = []
 
     async def ask(word: str) -> None:

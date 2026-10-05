@@ -99,7 +99,7 @@ async def test_delete_tools_and_tags_by(settings: Settings, store: LocalStore):
         assert descriptions[name].startswith("저자가 그 항목을 지우라고 분명히 말했을 때만 부른다. 여러 개면 목록을 보여 주고 확인받는다.")
     for name, place in (("idea_add", "생각"), ("style_add", "문체"), ("ref_add", "문헌")):
         assert descriptions[name].startswith(f"저자가 '{place}'에 넣으라고 분명히 말했을 때만 부른다. '저장해 줘'처럼 넣을 곳이 정해지지 않았으면 부르지 말고")
-        assert "생각·문체·문헌 세 곳 중 어디인지 먼저 묻는다(원고는 선택지에 넣지 않는다)." in descriptions[name]  # #90
+        assert "생각·문체·문헌과 저자의 카테고리(category_list) 중 어디인지 먼저 묻는다(원고는 선택지에 넣지 않는다)." in descriptions[name]  # #90·#92
     assert descriptions["book_write_chapter"].startswith("저자가 'Magus 원고에 저장'하라고 분명히 말했을 때만 부른다. 넣을 곳을 되묻는 선택지에도 원고를 넣지 않는다.")
     assert {i.id for i in store.list_ideas("bob")} == {ME, AI, OTHER}  # 밥의 같은 id는 그대로
     assert len(store.list_styles("bob")) == 1

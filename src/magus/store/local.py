@@ -26,6 +26,7 @@ from magus.store.fileio import read_text as _read_text
 from magus.store.fileio import to_int as _int
 from magus.store.fileio import write_json as _write_json
 from magus.store.fileio import write_text as _write_text
+from magus.store.categories import CategoryMixin
 from magus.store.shelf import ShelfMixin
 from magus.store.base import (
     ANCHOR_MAX,
@@ -57,7 +58,7 @@ AI_AUTHORS = "ai_authors.txt"  # 이 프로젝트에서 AI로 볼 코멘트 작�
 _CHAPTER_FILE = re.compile(r"ch-(\d+)\.md")
 _VERSION_FILE = re.compile(r"ch-(\d+)\.v(\d+)\.md")
 
-class LocalStore(ShelfMixin):
+class LocalStore(ShelfMixin, CategoryMixin):
     def __init__(self, data_dir: Path):
         self.root = Path(data_dir)
         self.root.mkdir(parents=True, exist_ok=True)
@@ -570,6 +571,7 @@ class LocalStore(ShelfMixin):
                 for project_json in sorted((udir / "projects").glob("*/project.json")):
                     self._reindex_project(udir.name, project_json.parent)
                 self._reindex_shelf(udir.name)
+                self._reindex_categories(udir.name)
         db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _reindex_project(self, user_id: str, pdir: Path) -> None:

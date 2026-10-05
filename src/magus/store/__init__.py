@@ -1,5 +1,7 @@
 from magus.store.base import (
     BookTitles,
+    Category,
+    CategoryItem,
     Change,
     Chapter,
     ChapterMeta,
@@ -12,6 +14,7 @@ from magus.store.base import (
     Passage,
     Project,
     Ref,
+    ShelfSettings,
     Store,
     StyleEntry,
     TrashItem,
@@ -20,6 +23,8 @@ from magus.store.local import LocalStore
 
 __all__ = [
     "BookTitles",
+    "Category",
+    "CategoryItem",
     "Change",
     "Chapter",
     "ChapterMeta",
@@ -33,6 +38,7 @@ __all__ = [
     "Passage",
     "Project",
     "Ref",
+    "ShelfSettings",
     "Store",
     "StyleEntry",
     "TrashItem",

@@ -323,7 +323,7 @@ def test_shelf_books_and_board_lists(server_proc):
         assert '<span class="aux"><span class="tag">AI</span></span>' in ideas
         assert 'AI의 답입니다. <a href="/shelf/ideas/20261001000000000-aaaaaa">응답한 생각</a>' in ideas
         assert '<a href="/shelf/ideas/20261001000000000-aaaaaa">이 항목의 주소</a>' in ideas
-        first = ideas.split("<summary>")[1].split("</summary>")[0]
+        first = ideas.split('<ol class="board">')[1].split("</summary>")[0]
         assert "가" * 70 in first and "가" * 80 not in first and "가" * 400 in ideas  # 줄에는 앞부분만, 펼치면 전부
         assert "1–100 / 123" in ideas and "다음</a>" in ideas and "오래된 생각 0<" not in ideas
         assert "오래된 생각 0<" in c.get("/shelf/ideas?page=2").text
@@ -350,8 +350,9 @@ def test_shelf_books_and_board_lists(server_proc):
         assert '<details id="i-clack2012" open data-here>' in c.get("/shelf/refs/clack2012").text
         assert c.get("/shelf/ideas/20260101000000000-ffffff").status_code == 404
         assert c.get("/shelf/nothing").status_code == 404
-        for page in (ideas, refs, styles, shelf):
-            assert page.count('method="post"') == 1  # 로그아웃뿐(읽기 전용)
+        for page in (refs, styles, shelf):
+            assert page.count('method="post"') == 1  # 로그아웃뿐(문체·문헌은 대화로 넣는다)
+        assert ideas.count('method="post"') == 2  # 생각에는 바로 적기 폼이 있다(#92)
         assert "<h1>생각</h1>" in ideas and 'aria-current=page>책장</a>' in styles
 
 

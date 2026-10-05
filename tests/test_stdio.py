@@ -68,7 +68,7 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
         # 5단계
         convo = _text(await client.call_tool("idea_add_conversation", {"markdown": "**사용자:** 고래는 돌아갔다\n**Claude:** 맞습니다"}))
         assert convo.startswith("me 1건, ai 1건")
-        assert _text(await client.call_tool("idea_add", {"text": "물가의 망설임", "kind": "thought"})).startswith("기록함 [me]")
+        assert _text(await client.call_tool("idea_add", {"text": "물가의 망설임", "kind": "thought", "untitled": True})).startswith("기록함 [me]")
         assert "[me]" in _text(await client.call_tool("idea_search", {"query": "고래"}))
 
         # 6단계

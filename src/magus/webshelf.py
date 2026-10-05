@@ -1,12 +1,16 @@
-"""웹 책장(2026-10-06): 생각·문체·문헌(기본 카테고리)을 책장에 꽂힌 양장본으로 보이고,
+"""웹 책장(2026-10-06, #92): 생각·문체·문헌(기본 카테고리)과 저자가 만든 카테고리를 책장에 꽂힌 양장본으로 보이고,
 책을 누르면 게시판형 목록(한 줄 = 제목 · 작성 시각 · 보조 정보, 누르면 그 자리에서 펼침)과 검색이 열린다.
 
-- 항목마다 고유 주소(/shelf/ideas/<id> 등)가 있고, 그 주소로 들어오면 그 항목이 펼쳐진 채 보인다.
+- 항목마다 고유 주소(/shelf/ideas/<id>, /shelf/<카테고리 id>/<항목 id> 등)가 있고, 그 주소로 들어오면 그 항목이 펼쳐진 채 보인다.
 - 검색은 서버에서 한다(GET ?q=). 두 글자 이상은 기존 FTS 인덱스(2글자 조각)로 찾아 많이 맞은 것부터,
   한 글자는 2글자 조각 색인으로 찾을 수 없어 그 글자가 그대로 들어 있는 항목을 최근 것부터 보인다.
-- 책장 전용 색(책 색 격자·선반 나무색)은 이 파일에만 있다. 다른 화면에는 쓰지 않는다(docs/decisions/web-style.md "책장 전용").
+- 카테고리 만들기·이름 바꾸기·색 바꾸기·휴지통은 이 화면과 대화(category_* 도구) 양쪽에서 된다.
+  저자가 만든 카테고리와 생각에는 제목(선택)과 내용을 바로 적는 폼이 있다(누가 = 저자). 문체·문헌은 대화로 넣는다.
+- 책장 전용 색(책 색 격자·선반 나무색)은 이 파일과 magus.category.rules에만 있다. 다른 화면에는 쓰지 않는다
+  (docs/decisions/web-style.md "책장 전용").
 - 책 색은 ^#[0-9a-fA-F]{6}$ 형식만 스타일에 넣는다. 글자색은 책 색에 맞춰 흰색·짙은 색 중 대비가 높은 쪽(4.5:1 이상)이고,
   결·띠·가운데 밝은 줄은 글자와 반대 방향(글자가 희면 어둡게, 짙으면 밝게)으로만 얹어 글자 대비를 낮추지 않는다.
+- 모든 POST는 CSRF 토큰을 확인한다(Web._form). 카테고리 이름·항목 내용은 모든 출력에서 이스케이프한다.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ import hashlib
 import html
 import re
 import urllib.parse
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,10 +27,14 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from magus.ids import local_time
+from magus.category.rules import (
+    BUILTINS, COLOR_NAMES, CONTENT_MAX, DEFAULT_COLORS, FIELD_MAX, HEX, MAX_CATEGORIES, MAX_MY_COLORS, NEW_COLOR_ORDER,
+    PALETTE, PALETTE_BY_NAME, TEMPLATE_BY_KEY, TEMPLATES, TITLE_MAX, check_name, name_key,
+)
+from magus.ids import local_time, new_id
 from magus.melchior.author_report import chapters_text, cite_label
 from magus.melchior.report import build_cite_report
-from magus.store import Store
+from magus.store import Category, CategoryItem, Idea, ShelfSettings, Store
 from magus.store.base import Lane
 from magus.store.formats import one_line
 from magus.textindex import match_query, tokens
@@ -39,17 +47,8 @@ WHEN = "%Y-%m-%d %H:%M"
 LIGHTS = {"verified": ("🟢", "확인"), "unverified": ("🟡", "미확인")}
 TAGS_BY = {"ai": "AI가 뽑은 태그", "author": "저자가 정한 태그"}
 SAY = "Claude에게 이렇게 말하면 쌓입니다. 예: "
-
-# ---- 책 색(책장 전용) ----------------------------------------------------------------------
-# 기본 색 격자. 이름은 대화로 색을 바꿀 때도 쓴다("사례 카테고리를 빨강으로"). 색에 뜻을 붙이지 않는다(뜻은 저자가 정한다).
-PALETTE: tuple[tuple[str, str], ...] = (
-    ("빨강", "#b3261e"), ("주황", "#d2691e"), ("노랑", "#e8c547"), ("초록", "#2e7d4f"), ("파랑", "#2f6db5"),
-    ("남색", "#1f2f5c"), ("보라", "#6b3fa0"), ("분홍", "#e58fb0"), ("갈색", "#7a4e2d"), ("회색", "#8a8d91"),
-    ("검정", "#1e1e1e"), ("미색", "#f1e9d2"), ("자주", "#6e1f2f"), ("짙은 초록", "#1f4a3a"), ("청록", "#2a7f86"),
-    ("겨자", "#b8923a"), ("하늘", "#8db8de"), ("먹색", "#3b4652"),
-)
-HEX = re.compile(r"#[0-9a-fA-F]{6}")
 LIGHT_TEXT, DARK_TEXT = "#ffffff", "#1a1a1a"
+AI_TITLE = '<span class="tag">AI가 지은 제목</span>'
 
 
 def luminance(color: str) -> float:
@@ -83,32 +82,41 @@ def safe_color(value: str | None, fallback: str) -> str:
 class Book:
     """책장에 꽂힌 책 하나(카테고리 하나)."""
 
-    key: str  # 주소에 쓰는 이름: ideas | styles | refs
+    key: str  # 주소에 쓰는 이름: ideas | styles | refs | 카테고리 id
     name: str
     band: str  # 위쪽 띠: 기본 카테고리면 "기본", 저자의 카테고리면 템플릿 이름
     count: int
     color: str
-    href: str
+    href: str | None  # None이면 누를 수 없는 미리보기
+
+
+def book_style(book: Book) -> str:
+    color = safe_color(book.color, "#3b4652")
+    fg = text_color(color)
+    light_text = fg == LIGHT_TEXT or fg == "#ffffff"
+    n = len(book.name)
+    size = 26 if n <= 2 else 24 if n <= 4 else 22 if n <= 6 else 20 if n <= 9 else 18
+    # 높이: 카테고리마다 조금 다르게(주소 이름의 해시라 같은 카테고리는 언제나 같다), 이름이 길면 이름이 다 들어가게 키운다.
+    height = max(252 + int(hashlib.sha256(book.key.encode()).hexdigest()[:4], 16) % 41, 108 + round(n * size * 1.12))
+    width = 56 if book.count < 10 else 64 if book.count < 50 else 74 if book.count < 200 else 86  # 많을수록 두껍게
+    return (f"--c:{color};--fg:{fg};--fgrgb:{' '.join(str(int(fg[i:i + 2], 16)) for i in (1, 3, 5))};"
+            f"--away:{'0 0 0' if light_text else '255 255 255'};"
+            f"--glow:{0 if light_text else .14};--fs:{size}px;height:{height}px;width:{width}px")
 
 
 def book_html(book: Book) -> str:
-    color = safe_color(book.color, "#3b4652")
-    fg = text_color(color)
-    light_text = fg in (LIGHT_TEXT, "#ffffff")
-    n = len(book.name)
-    size = 26 if n <= 2 else 24 if n <= 4 else 22 if n <= 6 else 20 if n <= 9 else 18
-    # 높이: 카테고리마다 조금 다르게(이름의 해시라 같은 카테고리는 언제나 같다), 이름이 길면 이름이 다 들어가게 키운다.
-    height = max(252 + int(hashlib.sha256(book.key.encode()).hexdigest()[:4], 16) % 41, 108 + round(n * size * 1.12))
-    width = 56 if book.count < 10 else 64 if book.count < 50 else 74 if book.count < 200 else 86  # 많을수록 두껍게
     count = f"{book.count}개" if book.count < 10000 else f"{book.count / 10000:.1f}만개"
-    style = (f"--c:{color};--fg:{fg};--fgrgb:{' '.join(str(int(fg[i:i + 2], 16)) for i in (1, 3, 5))};"
-             f"--away:{'0 0 0' if light_text else '255 255 255'};"
-             f"--glow:{0 if light_text else .14};--fs:{size}px;height:{height}px;width:{width}px")
-    label = f"{book.name}, 항목 {book.count}개"
-    return (f'<li><a class="book" href="{html.escape(book.href)}" style="{style}" aria-label="{html.escape(label)}">'
-            f'<span class="band top" aria-hidden="true">{html.escape(book.band)}</span>'
-            f'<span class="spine-title" aria-hidden="true">{html.escape(book.name)}</span>'
-            f'<span class="band bottom" aria-hidden="true">{count}</span></a></li>')
+    inner = (f'<span class="band top" aria-hidden="true">{html.escape(book.band)}</span>'
+             f'<span class="spine-title" aria-hidden="true">{html.escape(book.name)}</span>'
+             f'<span class="band bottom" aria-hidden="true">{count}</span>')
+    label = html.escape(f"{book.name}, 항목 {book.count}개")
+    if book.href is None:
+        return f'<li><span class="book" style="{book_style(book)}" role="img" aria-label="{label}">{inner}</span></li>'
+    return f'<li><a class="book" href="{html.escape(book.href)}" style="{book_style(book)}" aria-label="{label}">{inner}</a></li>'
+
+
+ADD_BOOK = ('<li><a class="book add" href="/shelf/new" aria-label="카테고리 추가"><span class="plus" aria-hidden="true">+</span>'
+            '<span class="spine-title" aria-hidden="true">카테고리 추가</span></a></li>')
 
 
 def shelf_html(books: list[str], extra: str = "") -> str:
@@ -140,10 +148,10 @@ color:var(--fg);text-decoration:none;border-radius:4px 4px 2px 2px;background-co
 background-image:
  linear-gradient(90deg,rgb(0 0 0/.30),rgb(0 0 0/0) 15%,rgb(0 0 0/0) 85%,rgb(0 0 0/.28)),
  linear-gradient(90deg,transparent 30%,rgb(255 255 255/var(--glow)) 50%,transparent 70%),
- repeating-linear-gradient(0deg,rgb(var(--away)/.05) 0 1px,transparent 1px 3px),
- repeating-linear-gradient(90deg,rgb(var(--away)/.04) 0 1px,transparent 1px 4px);
+ repeating-linear-gradient(0deg,rgb(var(--away)/.035) 0 1px,transparent 1px 3px),
+ repeating-linear-gradient(90deg,rgb(var(--away)/.025) 0 1px,transparent 1px 4px);
 box-shadow:inset 0 1px 0 rgb(255 255 255/.25),1px 0 2px rgb(0 0 0/.25);transition:transform .15s ease,box-shadow .15s ease}
-.book:hover,.book:focus-visible{color:var(--fg);transform:translateY(-14px);box-shadow:inset 0 1px 0 rgb(255 255 255/.25),0 10px 14px rgb(0 0 0/.3)}
+a.book:hover,a.book:focus-visible{color:var(--fg);transform:translateY(-14px);box-shadow:inset 0 1px 0 rgb(255 255 255/.25),0 10px 14px rgb(0 0 0/.3)}
 .book:focus-visible{outline:3px solid var(--primary);outline-offset:3px}
 .band{display:block;width:100%;text-align:center;font-size:14px;font-weight:600;line-height:1.2;
 padding:6px 2px;background:rgb(var(--away)/.22);border-top:2px solid rgb(var(--fgrgb)/.45);
@@ -151,35 +159,101 @@ border-bottom:2px solid rgb(var(--fgrgb)/.45);font-variant-numeric:tabular-nums;
 .band.top{margin-top:14px}.band.bottom{margin-bottom:12px}
 .spine-title{writing-mode:vertical-rl;text-orientation:mixed;font-size:var(--fs);font-weight:600;line-height:1.1;
 letter-spacing:.06em;margin:auto 0;padding:10px 0;white-space:nowrap}
-.book.add{background:transparent;color:var(--ink2);border:2px dashed var(--ink2);box-shadow:none;justify-content:center;gap:10px}
-.book.add .plus{font-size:26px;line-height:1}
-.book.add:hover,.book.add:focus-visible{background:rgb(255 255 255/.6);color:var(--ink)}
+.book.add{--fs:18px;background:transparent;color:var(--ink2);border:2px dashed var(--ink2);box-shadow:none;justify-content:center;
+gap:10px;width:60px;height:252px}
+.book.add .plus{font-size:28px;line-height:1;font-weight:600}
+.book.add .spine-title{margin:0;padding:0}
+a.book.add:hover,a.book.add:focus-visible{background:rgb(255 255 255/.6);color:var(--ink)}
 @media (prefers-reduced-motion:reduce){.book{transition:none}
-.book:hover,.book:focus-visible{transform:none;outline:3px solid var(--primary);outline-offset:3px}}
+a.book:hover,a.book:focus-visible{transform:none;outline:3px solid var(--primary);outline-offset:3px}}
 .board{list-style:none;margin:12px 0;padding:0;background:var(--canvas);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
 .board>li{border-bottom:1px solid var(--line)}.board>li:last-child{border-bottom:0}
-.board summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 16px;padding:12px 16px 12px 44px;min-height:48px;
-cursor:pointer;list-style:none;position:relative}
+.board summary{display:grid;grid-template-columns:minmax(0,1fr) 9em 13em;align-items:baseline;gap:4px 16px;
+padding:12px 16px 12px 44px;min-height:48px;cursor:pointer;list-style:none;position:relative}
 .board summary::-webkit-details-marker{display:none}
 .board summary::before{content:"▸";position:absolute;left:16px;top:10px;color:var(--ink2);font-size:20px;line-height:1.4}
 .board details[open]>summary::before{content:"▾"}
 .board details[open]{box-shadow:inset 4px 0 0 var(--primary)}
 .board summary:hover .t{text-decoration:underline}
-.board .t{flex:1 1 320px;font-weight:600;font-size:17px;color:var(--ink)}
+.board .t{font-weight:600;font-size:17px;color:var(--ink)}
 .board .t.none{font-weight:400;color:var(--mute)}
-.board .hit{flex:1 0 100%;order:5;color:var(--ink2);font-size:15px}
-.board .when{color:var(--ink2);font-variant-numeric:tabular-nums;white-space:nowrap;min-width:9em}
-.board .aux{color:var(--ink2);font-size:15px;min-width:4em;max-width:40%}
+.board .t .tag{font-size:14px;font-weight:400;margin-left:8px;vertical-align:1px}
+.board .hit{grid-column:1/-1;color:var(--ink2);font-size:15px}
+.board .when{color:var(--ink2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.board .aux{color:var(--ink2);font-size:15px}
+.muted{color:var(--ink2)}
 .board .body{padding:0 16px 16px 44px}
 .board .body p{margin:8px 0}.board .body .muted{color:var(--ink2);font-size:15px}
 mark{background:#fff0a8;color:var(--ink);border-radius:2px;padding:0 1px}
 .group h2{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}.group h2 small{font-weight:400;font-size:16px}
-@media (max-width:767px){.board summary{padding-left:40px}.board .t{flex-basis:100%}.board .when{min-width:0}
-.board .aux{max-width:none}
-.board .body{padding-left:40px}.books{padding:28px 10px 0}}
+dl.fields{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:8px 0}
+dl.fields dt{color:var(--ink2);font-weight:600}dl.fields dd{margin:0}
+.write>summary{font-weight:600;color:var(--ink);font-size:17px}
+label.block{display:block;margin:12px 0 4px}label.block>input,label.block>textarea{display:block;width:100%;margin-top:4px}
+textarea{font:inherit;color:var(--ink);background:var(--canvas);border:1px solid var(--mute);border-radius:6px;padding:8px 12px;
+width:100%;min-height:150px;max-width:100%}
+textarea:focus{border-color:var(--primary)}
+fieldset{border:1px solid var(--line);border-radius:12px;padding:12px 16px 16px;margin:16px 0;background:var(--canvas);min-width:0}
+legend{font-weight:600;padding:0 4px}
+.tpl{display:flex;gap:8px;align-items:baseline;margin:8px 0}.tpl .muted{color:var(--ink2);font-size:15px}
+.sw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin:8px 0 12px}
+.sw{display:flex;align-items:center;gap:8px;margin:0;padding:6px 8px;min-height:44px;border:1px solid var(--line);border-radius:8px;
+background:var(--canvas);cursor:pointer}
+.sw .chip{width:28px;height:28px;border-radius:6px;border:1px solid rgb(0 0 0/.3);flex:0 0 auto}
+.sw:has(input:checked){border-color:var(--primary);box-shadow:0 0 0 2px var(--primary)}
+.picker{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:8px 0}
+.picker label{margin:0}.picker input[type=number]{width:5.5em}.picker input[name=hex]{width:7.5em}
+.picker input[type=color]{width:56px;height:44px;padding:2px;border:1px solid var(--mute);border-radius:6px;background:var(--canvas);vertical-align:middle}
+.preview .case{display:inline-block;margin:0}.preview .books{padding:28px 24px 0}
+.mycolors{list-style:none;padding:0;margin:8px 0;display:flex;flex-wrap:wrap;gap:8px 16px}
+.mycolors li{display:flex;align-items:center;gap:8px}.mycolors .chip{width:28px;height:28px;border-radius:6px;border:1px solid rgb(0 0 0/.3)}
+@media (max-width:767px){.board summary{display:flex;flex-wrap:wrap;padding-left:40px}.board .t{flex-basis:100%}
+.board .hit{flex-basis:100%}.board .body{padding-left:40px}.books{padding:28px 10px 0}.sw-grid{grid-template-columns:repeat(2,1fr)}}
 """
 # 고유 주소로 들어왔을 때 펼친 항목을 화면 위로(자바스크립트가 꺼져 있어도 펼쳐진 채 보인다)
 SCROLL_SCRIPT = '<script>(function(){var d=document.querySelector("details[data-here]");if(d)d.scrollIntoView({block:"start"});})();</script>'
+# 색 고르기: 색 선택기·#RRGGBB·R·G·B를 서로 맞추고 미리보기 책의 색과 글자색을 바꾼다. 서버는 이것과 상관없이 값을 다시 검사한다.
+COLOR_SCRIPT = """<script>
+(function () {
+  var form = document.querySelector("form.colors");
+  if (!form) return;
+  var pick = form.querySelector("input[name=picker]"), hex = form.querySelector("input[name=hex]");
+  var rgb = ["r", "g", "b"].map(function (n) { return form.querySelector("input[name=" + n + "]"); });
+  var custom = form.querySelector("input[name=color][value=custom]"), book = document.querySelector(".preview .book");
+  function lum(h) {
+    return [1, 3, 5].map(function (i) { var c = parseInt(h.substr(i, 2), 16) / 255;
+      return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); })
+      .reduce(function (s, c, i) { return s + c * [0.2126, 0.7152, 0.0722][i]; }, 0);
+  }
+  function ratio(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function show(h) {  // 서버의 text_color와 같은 규칙
+    if (!book || !/^#[0-9a-fA-F]{6}$/.test(h)) return;
+    var fg = ratio(h, "#ffffff") >= ratio(h, "#1a1a1a") ? "#ffffff" : "#1a1a1a";
+    if (ratio(h, fg) < 4.5) fg = ratio(h, "#ffffff") >= ratio(h, "#000000") ? "#ffffff" : "#000000";
+    var light = fg === "#ffffff";
+    book.style.setProperty("--c", h); book.style.setProperty("--fg", fg);
+    book.style.setProperty("--fgrgb", [1, 3, 5].map(function (i) { return parseInt(fg.substr(i, 2), 16); }).join(" "));
+    book.style.setProperty("--away", light ? "0 0 0" : "255 255 255"); book.style.setProperty("--glow", light ? "0" : ".14");
+  }
+  function fill(h, mark) {
+    h = h.toLowerCase(); pick.value = h; hex.value = h;
+    rgb.forEach(function (el, i) { el.value = parseInt(h.substr(1 + 2 * i, 2), 16); });
+    if (mark) custom.checked = true;
+    show(h);
+  }
+  pick.addEventListener("input", function () { fill(pick.value, true); });
+  hex.addEventListener("input", function () { if (/^#[0-9a-fA-F]{6}$/.test(hex.value)) fill(hex.value, true); });
+  rgb.forEach(function (el) { el.addEventListener("input", function () {
+    var h = "#" + rgb.map(function (e) { var v = Math.max(0, Math.min(255, parseInt(e.value || "0", 10) || 0));
+      return (v < 16 ? "0" : "") + v.toString(16); }).join("");
+    pick.value = h; hex.value = h; custom.checked = true; show(h); }); });
+  form.querySelectorAll("input[name=color]").forEach(function (el) { el.addEventListener("change", function () {
+    if (el.value !== "custom") fill(el.value, false); else show(hex.value); }); });
+  var name = form.querySelector("input[name=name]"), title = document.querySelector(".preview .spine-title");
+  var initial = title ? title.textContent : "";
+  if (name && title) name.addEventListener("input", function () { title.textContent = name.value.trim() || initial; });
+})();
+</script>"""
 
 
 # ---- 검색 ----------------------------------------------------------------------------------
@@ -242,7 +316,7 @@ def snippet(text: str, q: str, width: int = 40) -> str:
 
 @dataclass
 class Row:
-    """게시판 한 줄. title이 없으면 preview(내용 앞부분)를 흐리게 보인다. aux·body는 이미 이스케이프한 HTML."""
+    """게시판 한 줄. title이 없으면 preview(내용 앞부분)를 흐리게 보인다. aux·body·badge는 이미 이스케이프한 HTML."""
 
     id: str
     link: str  # 고유 주소
@@ -252,11 +326,12 @@ class Row:
     aux: str
     body: str
     text: str  # 맞은 부분 찾기용 평문(제목 밖에서 맞았을 때 한 줄 보이기)
+    badge: str = ""  # 제목 뒤 표시(AI가 지은 제목)
 
 
 def row_html(row: Row, q: str = "", open_: bool = False) -> str:
     if row.title:
-        head = f'<span class="t">{mark(row.title, q)}</span>'
+        head = f'<span class="t">{mark(row.title, q)}{row.badge}</span>'
         hit = "" if (q and _pattern(q, row.title)) else snippet(row.text, q)
     else:
         preview = one_line(row.preview)
@@ -286,12 +361,13 @@ def style_tags(entry: Any) -> list[str]:
 
 @dataclass
 class Kind:
-    """기본 카테고리 하나(생각·문체·문헌)의 목록 화면 정의."""
+    """목록 화면 하나(기본 카테고리 또는 저자의 카테고리)."""
 
-    key: str
+    key: str  # 주소 이름: ideas | styles | refs | 카테고리 id
     name: str
     lanes: list[Lane]
-    empty: str  # 빈 책장 안내(기존 문구 그대로)
+    empty: str  # 빈 목록 안내
+    category: Category | None = None  # 저자의 카테고리면 그 카테고리
 
 
 KINDS: dict[str, Kind] = {
@@ -301,20 +377,77 @@ KINDS: dict[str, Kind] = {
     "refs": Kind("refs", "문헌", ["ref_bib", "ref_picked"],
                  f'아직 등록한 문헌이 없습니다. {SAY}"받은함의 kremer1993.pdf를 문헌으로 등록해 줘. 쓸 부분은 「…」, 이유는 …"'),
 }
-DEFAULT_COLORS = {"ideas": "#1f2f5c", "styles": "#6e1f2f", "refs": "#1f4a3a"}  # 남색·자주·짙은 초록
+
+
+def category_kind(c: Category) -> Kind:
+    return Kind(c.id, c.name, ["category"],
+                f'아직 적은 것이 없습니다. 위에서 바로 적거나, {SAY}"{html.escape(c.name)}에 넣어 줘: …"', c)
+
+
+def color_fieldset(current: str, my_colors: tuple[str, ...]) -> str:
+    """책 색 고르기: 기본 색 격자 + 내 색 + 직접 고르기(색 선택기·#RRGGBB·R·G·B)."""
+    current = safe_color(current, PALETTE[0][1])
+    chosen = current if current in COLOR_NAMES or current in my_colors else "custom"
+
+    def swatch(value: str, label: str) -> str:
+        return (f'<label class="sw"><input type="radio" name="color" value="{value}"{" checked" if chosen == value else ""}>'
+                f'<span class="chip" style="background:{value}" aria-hidden="true"></span>{html.escape(label)}</label>')
+
+    r, g, b = (int(current[i : i + 2], 16) for i in (1, 3, 5))
+    mine = "".join(swatch(c, c) for c in my_colors)
+    return (
+        '<fieldset><legend>책 색</legend><p class="muted">색의 뜻은 저자가 정합니다(예: 중요한 것은 빨간 책).</p>'
+        f'<div class="sw-grid" role="group" aria-label="기본 색">{"".join(swatch(h, n) for n, h in PALETTE)}</div>'
+        + (f'<p><b>내 색</b></p><div class="sw-grid" role="group" aria-label="내 색">{mine}</div>' if mine else "")
+        + f'<div class="picker"><label class="sw"><input type="radio" name="color" value="custom"{" checked" if chosen == "custom" else ""}>'
+        "직접 고르기</label>"
+        f'<label>색 선택기 <input type="color" name="picker" value="{current}"></label>'
+        f'<label>#RRGGBB <input name="hex" value="{current}" maxlength="7" pattern="#[0-9A-Fa-f]{{6}}" autocomplete="off"></label>'
+        f'<label>R <input type="number" name="r" min="0" max="255" value="{r}"></label>'
+        f'<label>G <input type="number" name="g" min="0" max="255" value="{g}"></label>'
+        f'<label>B <input type="number" name="b" min="0" max="255" value="{b}"></label>'
+        f'<label><input type="checkbox" name="keep" value="1"> 내 색에 저장(최대 {MAX_MY_COLORS}개)</label></div></fieldset>'
+    )
+
+
+def chosen_color(form: Any) -> str:
+    """폼에서 고른 색 → #rrggbb. 직접 고르기면 #RRGGBB 칸을 먼저, 없으면 R·G·B 숫자를 본다. 그 밖에는 ValueError."""
+    choice = str(form.get("color") or "")
+    if choice == "custom":
+        typed = str(form.get("hex") or "").strip()
+        if HEX.fullmatch(typed):
+            return typed.lower()
+        try:
+            values = [int(str(form.get(k) or "").strip()) for k in ("r", "g", "b")]
+        except ValueError:
+            values = []
+        if len(values) != 3 or not all(0 <= v <= 255 for v in values):
+            raise ValueError("직접 고른 색을 읽지 못했습니다. #RRGGBB(예: #b22222)나 R·G·B 숫자(0~255)로 적어 주세요.")
+        return "#" + "".join(f"{v:02x}" for v in values)
+    if HEX.fullmatch(choice):
+        return choice.lower()
+    raise ValueError("책 색을 골라 주세요.")
 
 
 class ShelfPages:
-    """Web에 섞어 쓰는 책장 화면들. Web의 _page·user_of·_need_login·store를 쓴다."""
+    """Web에 섞어 쓰는 책장 화면들. Web의 _page·user_of·_need_login·_form·_csrf_input·store를 쓴다."""
 
     store: Store
     _page: Callable[..., Response]
     user_of: Callable[[Request], tuple[str, str] | None]
     _need_login: Callable[[Request], Response]
+    _csrf_input: Callable[[tuple[str, str]], str]
+    _form: Callable[[Request, tuple[str, str]], Awaitable[Any]]
 
     def shelf_routes(self) -> list[tuple[str, list[str], Callable[..., Any]]]:
+        # 고정 주소를 먼저 둔다(/shelf/{kind}보다 앞에서 맞아야 한다).
         return [
             ("/shelf", ["GET"], self.shelf),
+            ("/shelf/new", ["GET", "POST"], self.shelf_new),
+            ("/shelf/edit/{kind}", ["GET", "POST"], self.shelf_edit),
+            ("/shelf/trash/{kind}", ["GET", "POST"], self.shelf_trash),
+            ("/shelf/write/{kind}", ["POST"], self.shelf_write),
+            ("/shelf/colors", ["POST"], self.shelf_colors),
             ("/shelf/{kind}", ["GET"], self.shelf_list),
             ("/shelf/{kind}/{item}", ["GET"], self.shelf_item),
             # 예전 주소(생각·문헌·문체 메뉴)는 책장의 같은 목록으로 넘긴다. 거르기 조건은 그대로 이어 간다.
@@ -332,11 +465,24 @@ class ShelfPages:
     def _shelf_page(self, title: str, body: str, session: tuple[str, str], status: int = 200) -> Response:
         return self._page(title, body, session, status, current="책장", css=SHELF_STYLE)
 
+    def _kind(self, uid: str, key: str) -> Kind | None:
+        if key in KINDS:
+            return KINDS[key]
+        try:
+            category = self.store.get_category(uid, key)
+        except ValueError:
+            return None
+        return category_kind(category) if category else None
+
     # --- 책장 ---
     def books(self, uid: str) -> list[Book]:
+        settings = self.store.get_shelf_settings(uid)
         counts = {"ideas": len(self.store.list_ideas(uid)), "styles": len(self.store.list_styles(uid)),
                   "refs": len(self.store.list_refs(uid))}
-        return [Book(k, KINDS[k].name, "기본", counts[k], DEFAULT_COLORS[k], f"/shelf/{k}") for k in KINDS]
+        builtins = [Book(k, KINDS[k].name, "기본", counts[k], settings.colors.get(k, DEFAULT_COLORS[k]), f"/shelf/{k}") for k in KINDS]
+        mine = [Book(c.id, c.name, TEMPLATE_BY_KEY[c.template].band if c.template in TEMPLATE_BY_KEY else "일반", c.items, c.color,
+                     f"/shelf/{c.id}") for c in self.store.list_categories(uid)]
+        return builtins + mine
 
     async def shelf(self, request: Request) -> Response:
         session = self.user_of(request)
@@ -347,17 +493,22 @@ class ShelfPages:
         form = (f'<form method="get" action="/shelf" class="search" role="search"><label>책장 전체에서 찾기 '
                 f'<input type="search" name="q" value="{html.escape(q)}"></label><button>찾기</button></form>')
         if not q:
-            body = (f"{form}{shelf_html([book_html(b) for b in self.books(uid)])}"
-                    "<p>책을 누르면 그 카테고리의 목록이 열립니다.</p>")
+            done = await run_in_threadpool(self._done_message, uid, request)
+            books = await run_in_threadpool(self.books, uid)
+            room = len(books) - len(KINDS) < MAX_CATEGORIES
+            body = (f"{done}{form}{shelf_html([book_html(b) for b in books], ADD_BOOK if room else '')}"
+                    "<p>책을 누르면 그 카테고리의 목록이 열립니다."
+                    + (" 점선 자리를 누르면 카테고리를 새로 만듭니다." if room else f" 카테고리는 {MAX_CATEGORIES}개까지 만들 수 있습니다.") + "</p>")
             return self._shelf_page("책장", body, session)
         groups, total = [], 0
-        for kind in KINDS.values():
-            rows = await run_in_threadpool(self._rows, uid, kind.key, None, q)
+        kinds = [*KINDS.values(), *(category_kind(c) for c in self.store.list_categories(uid))]
+        for kind in kinds:
+            rows = await run_in_threadpool(self._rows, uid, kind, None, q)
             total += bool(rows)
-            more = (f' <small><a href="/shelf/{kind.key}?q={urllib.parse.quote(q)}">{kind.name}에서 {len(rows)}개 모두 보기</a></small>'
+            more = (f' <small><a href="/shelf/{kind.key}?q={urllib.parse.quote(q)}">{html.escape(kind.name)}에서 {len(rows)}개 모두 보기</a></small>'
                     if len(rows) > GROUP_SIZE else "")
             groups.append(
-                f'<section class="group"><h2>{kind.name} <small>{len(rows)}개</small>{more}</h2>'
+                f'<section class="group"><h2>{html.escape(kind.name)} <small>{len(rows)}개</small>{more}</h2>'
                 + (f'<ol class="board">{"".join(row_html(r, q) for r in rows[:GROUP_SIZE])}</ol>' if rows else "<p>없음</p>")
                 + "</section>"
             )
@@ -365,6 +516,21 @@ class ShelfPages:
                 f"<p>「{html.escape(q)}」 " + ("찾은 카테고리 " + str(total) + "곳" if total else "찾는 말이 들어간 항목이 없습니다.")
                 + (" · 한 글자는 그 글자가 들어간 항목을 최근 것부터 보입니다." if one_char(q) else "") + "</p>")
         return self._shelf_page("책장", head + "".join(groups), session)
+
+    def _done_message(self, uid: str, request: Request) -> str:
+        """만들기·고치기·휴지통 뒤 책장으로 돌아왔을 때 한 줄(주소의 값을 그대로 보이지 않고 정해진 문장만)."""
+        done, cid = request.query_params.get("done"), request.query_params.get("c") or ""
+        try:
+            category = self.store.get_category(uid, cid) if cid else None
+        except ValueError:
+            category = None
+        shown = category.name if category else BUILTINS.get(cid, "")
+        name = f"「{html.escape(shown)}」 " if shown else ""
+        text = {"made": f"{name}카테고리를 꽂았습니다.", "edit": f"{name}카테고리를 고쳤습니다.",
+                "trash": "카테고리를 휴지통으로 옮겼습니다. 지운 것이 아니라 운영자가 되살릴 수 있습니다."}.get(done or "")
+        if text and request.query_params.get("full") == "1":
+            text += f" 내 색은 {MAX_MY_COLORS}개까지라 이번 색은 내 색에 넣지 못했습니다. 하나를 뺀 뒤 다시 저장하세요."
+        return f'<p class="msg">{text}</p>' if text else ""
 
     # --- 목록 ---
     async def shelf_list(self, request: Request) -> Response:
@@ -378,23 +544,26 @@ class ShelfPages:
         if not session:
             return self._need_login(request)
         uid = session[0]
-        kind = KINDS.get(kind_key)
+        kind = await run_in_threadpool(self._kind, uid, kind_key)
         if kind is None:
             return self._shelf_page("책장", '<p class="msg err">없는 카테고리입니다. <a href="/shelf">책장</a>으로 돌아가세요.</p>',
                                     session, 404)
         crumb = '<p class="crumb"><a href="/shelf">← 책장</a></p>'
-        if not await run_in_threadpool(self._has_any, uid, kind.key):
-            return self._shelf_page(kind.name, f'{crumb}<p class="msg">{kind.empty}</p>', session)
+        writable = kind.key == "ideas" or kind.category is not None
+        write = self._write_form(session, kind, request.query_params.get("error") == "empty") if writable else ""
+        if not await run_in_threadpool(self._has_any, uid, kind):
+            summary = await run_in_threadpool(self._summary, uid, kind, {})
+            return self._shelf_page(kind.name, f'{crumb}{summary}{write}<p class="msg">{kind.empty}</p>', session)
         params = request.query_params
         q = "" if item else clean_query(params.get("q"))
         filters = {} if item else {k: params.get(k, "") for k in ("author", "status", "tag", "project")}
-        rows = await run_in_threadpool(self._rows, uid, kind.key, filters, q)
+        rows = await run_in_threadpool(self._rows, uid, kind, filters, q)
         page = 1
         if item:
             index = next((n for n, r in enumerate(rows) if r.id == item), None)
             if index is None:
                 return self._shelf_page(kind.name, f'{crumb}<p class="msg err">없는 항목입니다(휴지통으로 옮겨졌을 수 있습니다). '
-                                                   f'<a href="/shelf/{kind.key}">{kind.name} 목록</a></p>', session, 404)
+                                                   f'<a href="/shelf/{kind.key}">{html.escape(kind.name)} 목록</a></p>', session, 404)
             page = index // PAGE_SIZE + 1
         else:
             try:
@@ -416,11 +585,11 @@ class ShelfPages:
             nav += [link(page - 1, "이전")] if page > 1 else []
             nav += [link(page + 1, "다음")] if page < pages else []
             pager = f'<p class="pager">{" · ".join(nav)}</p>'
-        search = (f'<form method="get" action="/shelf/{kind.key}" class="search" role="search"><label>{kind.name}에서 찾기 '
+        search = (f'<form method="get" action="/shelf/{kind.key}" class="search" role="search"><label>{html.escape(kind.name)}에서 찾기 '
                   f'<input type="search" name="q" value="{html.escape(q)}"></label>'
                   + "".join(f'<input type="hidden" name="{k}" value="{html.escape(v)}">' for k, v in filters.items() if v)
                   + "<button>찾기</button></form>")
-        summary = await run_in_threadpool(self._summary, uid, kind.key, filters)
+        summary = await run_in_threadpool(self._summary, uid, kind, filters)
         found = ""
         if q:
             found = (f"<p>「{html.escape(q)}」 찾은 항목 {len(rows)}개 · "
@@ -428,43 +597,62 @@ class ShelfPages:
                      + f' · <a href="/shelf/{kind.key}">검색 지우기</a></p>')
         board = (f'<ol class="board">{"".join(row_html(r, q, r.id == item) for r in shown)}</ol>'
                  if shown else '<p class="msg">찾는 말이 들어간 항목이 없습니다.</p>' if q else '<p class="msg">없음</p>')
-        body = f"{crumb}{summary}{search}{found}{pager}{board}{pager}" + (SCROLL_SCRIPT if item else "")
+        body = f"{crumb}{summary}{search}{write}{found}{pager}{board}{pager}" + (SCROLL_SCRIPT if item else "")
         return self._shelf_page(kind.name, body, session)
 
-    def _has_any(self, uid: str, kind: str) -> bool:
-        return bool({"ideas": self.store.list_ideas, "styles": self.store.list_styles, "refs": self.store.list_refs}[kind](uid))
+    def _has_any(self, uid: str, kind: Kind) -> bool:
+        if kind.category is not None:
+            return bool(self.store.list_category_items(uid, kind.category.id))
+        return bool({"ideas": self.store.list_ideas, "styles": self.store.list_styles, "refs": self.store.list_refs}[kind.key](uid))
 
-    def _summary(self, uid: str, kind: str, filters: dict[str, str]) -> str:
-        """목록 위 한 줄: 개수와 거르기 링크(기존 화면과 같은 거르기)."""
-        if kind == "ideas":
+    def _summary(self, uid: str, kind: Kind, filters: dict[str, str]) -> str:
+        """목록 위 한 줄: 개수와 거르기 링크(기존 화면과 같은 거르기), 그리고 이름·색 바꾸기."""
+        edit = f' · <a href="/shelf/edit/{kind.key}">{"이름·색 바꾸기" if kind.category else "책 색 바꾸기"}</a>'
+        if kind.category is not None:
+            c = kind.category
+            items = self.store.list_category_items(uid, c.id)
+            mine = sum(1 for i in items if i.author == "me")
+            template = TEMPLATE_BY_KEY.get(c.template)
+            base = f"/shelf/{c.id}"
+            return (f"<p>{html.escape(c.name)} {len(items)}개(나 {mine} · AI {len(items) - mine}) · "
+                    f"{html.escape(template.name if template else c.template)} 템플릿{edit}"
+                    f' · <a href="/shelf/trash/{c.id}">휴지통으로</a></p>'
+                    + (f'<p><a href="{base}">전체</a> · <a href="{base}?author=me">나</a> · <a href="{base}?author=ai">AI</a></p>'
+                       if items else ""))
+        if kind.key == "ideas":
             ideas = self.store.list_ideas(uid)
             mine = sum(1 for i in ideas if i.author == "me")
             return (f"<p>생각 {len(ideas)}개(나 {mine} · AI {len(ideas) - mine}) · "
                     '<a href="/shelf/ideas">전체</a> · <a href="/shelf/ideas?author=me">나</a> · '
-                    '<a href="/shelf/ideas?author=ai">AI</a></p>')
-        if kind == "styles":
+                    f'<a href="/shelf/ideas?author=ai">AI</a>{edit}</p>')
+        if kind.key == "styles":
             tag = filters.get("tag", "")
             only = f' · 태그 「{html.escape(tag)}」만 · <a href="/shelf/styles">전체</a>' if tag else ""
-            return f"<p>문장 {len(self.store.list_styles(uid))}개{only}</p>"
+            return f"<p>문장 {len(self.store.list_styles(uid))}개{only}{edit}</p>"
         refs = self.store.list_refs(uid)
         verified = sum(1 for r in refs if r.status == "verified")
         project = self.store.get_project(uid, filters.get("project") or None)
         q = f"project={urllib.parse.quote(project.id)}&" if project else ""
         checklist = f' · 인용 현황은 <a href="/checklist?{q}">인용 체크리스트</a>' if project else ""
-        return (f"<p>문헌 {len(refs)}편(확인 {verified} · 미확인 {len(refs) - verified}){checklist}</p>"
+        return (f"<p>문헌 {len(refs)}편(확인 {verified} · 미확인 {len(refs) - verified}){checklist}{edit}</p>"
                 f'<p><a href="/shelf/refs?{q}">전체</a> · <a href="/shelf/refs?{q}status=verified">{LIGHTS["verified"][0]} '
                 f'{LIGHTS["verified"][1]}</a> · <a href="/shelf/refs?{q}status=unverified">{LIGHTS["unverified"][0]} '
                 f'{LIGHTS["unverified"][1]}</a></p>')
 
-    def _rows(self, uid: str, kind: str, filters: dict[str, str] | None, q: str) -> list[Row]:
-        """그 카테고리의 줄들. 검색어가 있으면 맞은 것만 검색 순서로, 없으면 기본 순서(생각·문체는 최근 것부터, 문헌은 확인한 것부터)."""
+    def _rows(self, uid: str, kind: Kind, filters: dict[str, str] | None, q: str) -> list[Row]:
+        """그 카테고리의 줄들. 검색어가 있으면 맞은 것만 검색 순서로, 없으면 기본 순서(문헌은 확인한 것부터, 나머지는 최근 것부터)."""
         filters = filters or {}
-        build: dict[str, Callable[[str, dict[str, str], str], list[tuple[str, Row]]]] = {
-            "ideas": self._idea_rows, "styles": self._style_rows, "refs": self._ref_rows}
-        pairs = build[kind](uid, filters, q)
+        if kind.category is not None:
+            pairs = self._category_rows(uid, kind.category, filters, q)
+        else:
+            build = {"ideas": self._idea_rows, "styles": self._style_rows, "refs": self._ref_rows}[kind.key]
+            pairs = build(uid, filters, q)
         if not q:
             return [row for _, row in pairs]
-        order = {owner: n for n, owner in enumerate(find(self.store, uid, KINDS[kind].lanes, q))}
+        owners = find(self.store, uid, kind.lanes, q)
+        if kind.category is not None:  # 카테고리 항목의 owner_id는 "<카테고리 id>/<항목 id>"
+            owners = [o.split("/", 1)[1] for o in owners if o.startswith(f"{kind.category.id}/")]
+        order = {owner: n for n, owner in enumerate(owners)}
         return [row for owner, row in sorted((p for p in pairs if p[0] in order), key=lambda p: order[p[0]])]
 
     def _idea_rows(self, uid: str, filters: dict[str, str], q: str) -> list[tuple[str, Row]]:
@@ -478,8 +666,10 @@ class ShelfPages:
             back = (f'<p class="muted">AI의 답입니다. <a href="/shelf/ideas/{html.escape(i.parent_id)}">응답한 생각</a></p>'
                     if i.parent_id else "")
             origin = f'<p class="muted">출처: {html.escape(i.origin)}</p>' if i.origin else ""
-            rows.append((i.id, Row(i.id, f"/shelf/ideas/{i.id}", i.created_at, None, i.text, who,
-                                   paragraphs(i.text, q) + origin + back, i.text)))
+            by = '<p class="muted">제목은 AI가 지었습니다.</p>' if i.title and i.title_by == "ai" else ""
+            rows.append((i.id, Row(i.id, f"/shelf/ideas/{i.id}", i.created_at, i.title, i.text, who,
+                                   paragraphs(i.text, q) + origin + back + by, i.text,
+                                   AI_TITLE if i.title and i.title_by == "ai" else "")))
         return rows
 
     def _style_rows(self, uid: str, filters: dict[str, str], q: str) -> list[tuple[str, Row]]:
@@ -531,3 +721,249 @@ class ShelfPages:
             rows.append((r.key, Row(r.key, f"/shelf/refs/{urllib.parse.quote(r.key)}", r.created_at, cite_label(r, r.key),
                                     "", aux, body, text)))
         return rows
+
+    def _category_rows(self, uid: str, category: Category, filters: dict[str, str], q: str) -> list[tuple[str, Row]]:
+        author = filters.get("author") if filters.get("author") in ("me", "ai") else None
+        tag = (filters.get("tag") or "").strip()
+        names: dict[str, dict[int, str]] = {}
+
+        def chapter_name(project: str, number: int) -> str:
+            if project not in names:
+                try:
+                    names[project] = {c.number: c.display for c in self.store.list_chapters(uid, project)}
+                except ValueError:
+                    names[project] = {}
+            return names[project].get(number, f"{number}(없는 장)")
+
+        rows = []
+        for i in reversed(self.store.list_category_items(uid, category.id)):
+            if (author and i.author != author) or (tag and tag not in i.tags):
+                continue
+            chapters = [chapter_name(p, n) for p, n in i.chapters]
+            aux = " ".join(["나" if i.author == "me" else '<span class="tag">AI</span>',
+                            *(f'<span class="tag">{html.escape(t)}</span>' for t in i.tags[:2]),
+                            *([html.escape(", ".join(chapters))] if chapters else [])])
+            fields = "".join(f"<dt>{html.escape(k)}</dt><dd>{mark(v, q)}</dd>" for k, v in i.fields.items() if v)
+            pills = " ".join(f'<a class="tag" href="/shelf/{category.id}?tag={urllib.parse.quote(t)}">{html.escape(t)}</a>' for t in i.tags)
+            body = (paragraphs(i.content, q)
+                    + (f'<dl class="fields">{fields}</dl>' if fields else "")
+                    + (f"<p>{pills}</p>" if pills else "")
+                    + (f"<p>연결된 장: {html.escape(', '.join(chapters))}</p>" if chapters else "")
+                    + f'<p class="muted">누가: {"저자의 말" if i.author == "me" else "Claude가 쓴 글"}'
+                    + (" · 제목은 AI가 지었습니다." if i.title and i.title_by == "ai" else "") + "</p>")
+            text = "\n".join([i.content, *(f"{k} {v}" for k, v in i.fields.items()), " ".join(i.tags)])
+            rows.append((i.id, Row(i.id, f"/shelf/{category.id}/{i.id}", i.created_at, i.title, i.content, aux, body, text,
+                                   AI_TITLE if i.title and i.title_by == "ai" else "")))
+        return rows
+
+    # --- 바로 적기(생각·저자의 카테고리) ---
+    def _write_form(self, session: tuple[str, str], kind: Kind, error: bool) -> str:
+        fields = kind.category.fields if kind.category else ()
+        extra = "".join(f'<label class="block">{html.escape(f)} <input name="f:{html.escape(f)}" maxlength="{FIELD_MAX}"></label>'
+                        for f in fields)
+        return (
+            f'<details class="card write"{" open" if error else ""}><summary>새로 적기</summary>'
+            + ('<p class="msg err">내용을 적어 주세요.</p>' if error else "")
+            + f'<form method="post" action="/shelf/write/{kind.key}">{self._csrf_input(session)}'
+            f'<label class="block">제목(비워 둬도 됩니다) <input name="title" maxlength="{TITLE_MAX}"></label>'
+            f'<label class="block">내용 <textarea name="content" rows="6" maxlength="{CONTENT_MAX}" required></textarea></label>'
+            + (f"<details><summary>칸 더 적기(선택)</summary>{extra}</details>" if extra else "")
+            + '<p><button class="primary">적어 두기</button> 적은 사람은 저자(나)로 남습니다.</p></form></details>'
+        )
+
+    async def shelf_write(self, request: Request) -> Response:
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        try:
+            form = await self._form(request, session)
+        except PermissionError:
+            return self._shelf_page("책장", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+        kind = await run_in_threadpool(self._kind, uid, request.path_params["kind"])
+        if kind is None or not (kind.key == "ideas" or kind.category is not None):
+            return self._shelf_page("책장", '<p class="msg err">여기에는 바로 적을 수 없습니다.</p>', session, 404)
+        content = str(form.get("content") or "").strip()[:CONTENT_MAX]
+        title = one_line(str(form.get("title") or ""))[:TITLE_MAX] or None
+        if not content:
+            return RedirectResponse(f"/shelf/{kind.key}?error=empty", status_code=303)
+        if kind.category is None:  # 생각(저자가 직접 적음)
+            [idea] = await run_in_threadpool(self.store.add_ideas, uid, [
+                Idea(new_id(), content, "thought", "me", title=title, title_by="author" if title else None)])
+            return RedirectResponse(f"/shelf/ideas/{idea.id}", status_code=303)
+        values = {f: one_line(str(form.get(f"f:{f}") or ""))[:FIELD_MAX] for f in kind.category.fields}
+        item = await run_in_threadpool(self.store.put_category_item, uid, CategoryItem(
+            new_id(), kind.category.id, content, "me", title, "author" if title else None, {k: v for k, v in values.items() if v}))
+        return RedirectResponse(f"/shelf/{kind.category.id}/{item.id}", status_code=303)
+
+    # --- 카테고리 만들기·고치기·휴지통 ---
+    async def shelf_new(self, request: Request) -> Response:
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        mine = await run_in_threadpool(self.store.list_categories, uid)
+        settings = await run_in_threadpool(self.store.get_shelf_settings, uid)
+        default_color = PALETTE_BY_NAME[NEW_COLOR_ORDER[len(mine) % len(NEW_COLOR_ORDER)]]
+        values = {"name": "", "template": "blank", "color": default_color}
+        error = ""
+        if request.method == "POST":
+            try:
+                form = await self._form(request, session)
+            except PermissionError:
+                return self._shelf_page("카테고리 추가", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            values = {"name": str(form.get("name") or ""), "template": str(form.get("template") or "blank"),
+                      "color": safe_color(str(form.get("hex") or ""), default_color)}
+            try:
+                if len(mine) >= MAX_CATEGORIES:
+                    raise ValueError(f"카테고리는 {MAX_CATEGORIES}개까지 만들 수 있습니다.")
+                name = check_name(values["name"], {name_key(c.name): c.name for c in mine})
+                template = TEMPLATE_BY_KEY.get(values["template"])
+                if template is None:
+                    raise ValueError("템플릿을 골라 주세요.")
+                color = chosen_color(form)
+                values["color"] = color
+                made = await run_in_threadpool(self.store.create_category, uid, name, template.key, color,
+                                               tuple(f for f, _ in template.fields))
+                note = await run_in_threadpool(self._keep_color, uid, form, color)
+                return RedirectResponse(f"/shelf?done=made&c={made.id}" + note, status_code=303)
+            except ValueError as e:
+                error = f'<p class="msg err">{html.escape(str(e))}</p>'
+        templates = "".join(
+            f'<label class="tpl"><input type="radio" name="template" value="{t.key}"{" checked" if t.key == values["template"] else ""}>'
+            f'<span><b>{html.escape(t.name)}</b> — {html.escape(t.about)} <span class="muted">'
+            + (f"(칸: {' · '.join(f for f, _ in t.fields)})" if t.fields else "(제목·내용만)") + "</span></span></label>"
+            for t in TEMPLATES
+        )
+        preview = shelf_html([book_html(Book("preview", values["name"] or "새 카테고리", "일반", 0, values["color"], None))])
+        body = (
+            f'<p class="crumb"><a href="/shelf">← 책장</a></p>{error}'
+            f'<form method="post" action="/shelf/new" class="colors">{self._csrf_input(session)}'
+            f'<label class="block">이름(12자까지) <input name="name" value="{html.escape(values["name"])}" maxlength="12" required></label>'
+            '<p class="muted">생각·문체·문헌·원고·전체·확인 요청처럼 정해진 이름과, 이미 있는 이름은 쓸 수 없습니다.</p>'
+            f"<fieldset><legend>템플릿</legend>{templates}</fieldset>"
+            + color_fieldset(values["color"], settings.my_colors)
+            + f'<div class="preview"><p><b>미리보기</b></p>{preview}</div>'
+            '<p><button class="primary">책장에 꽂기</button> <a href="/shelf">그만두기</a></p></form>' + COLOR_SCRIPT
+        )
+        return self._shelf_page("카테고리 추가", body, session, 400 if error else 200)
+
+    def _keep_color(self, uid: str, form: Any, color: str) -> str:
+        """'내 색에 저장'을 골랐으면 내 색에 더한다(기본 색 격자에 있는 색은 더하지 않는다). 다 찼으면 주소에 표시만 남긴다."""
+        if form.get("keep") != "1" or color in COLOR_NAMES:
+            return ""
+        settings = self.store.get_shelf_settings(uid)
+        if color in settings.my_colors:
+            return ""
+        if len(settings.my_colors) >= MAX_MY_COLORS:
+            return "&full=1"
+        self.store.save_shelf_settings(uid, ShelfSettings(settings.colors, (*settings.my_colors, color), settings.title_default))
+        return ""
+
+    async def shelf_edit(self, request: Request) -> Response:
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        kind = await run_in_threadpool(self._kind, uid, request.path_params["kind"])
+        if kind is None:
+            return self._shelf_page("책장", '<p class="msg err">없는 카테고리입니다. <a href="/shelf">책장</a>으로 돌아가세요.</p>', session, 404)
+        settings = await run_in_threadpool(self.store.get_shelf_settings, uid)
+        current = kind.category.color if kind.category else settings.colors.get(kind.key, DEFAULT_COLORS[kind.key])
+        name, error = kind.name, ""
+        if request.method == "POST":
+            try:
+                form = await self._form(request, session)
+            except PermissionError:
+                return self._shelf_page("카테고리 고치기", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            name = str(form.get("name") or kind.name)
+            current = safe_color(str(form.get("hex") or ""), current)
+            try:
+                color = chosen_color(form)
+                current = color
+                if kind.category is None:  # 기본 카테고리: 색만
+                    await run_in_threadpool(self.store.save_shelf_settings, uid, ShelfSettings(
+                        {**settings.colors, kind.key: color}, settings.my_colors, settings.title_default))
+                else:
+                    taken = {name_key(c.name): c.name for c in self.store.list_categories(uid) if c.id != kind.category.id}
+                    clean = check_name(name, taken) if name_key(name) != name_key(kind.category.name) else None
+                    await run_in_threadpool(lambda: self.store.update_category(uid, kind.category.id, name=clean, color=color))
+                note = await run_in_threadpool(self._keep_color, uid, form, color)
+                return RedirectResponse(f"/shelf?done=edit&c={kind.key}" + note, status_code=303)
+            except ValueError as e:
+                error = f'<p class="msg err">{html.escape(str(e))}</p>'
+            settings = await run_in_threadpool(self.store.get_shelf_settings, uid)
+        count = len(await run_in_threadpool(self._count_rows, uid, kind))
+        band = ("기본" if kind.category is None else
+                TEMPLATE_BY_KEY[kind.category.template].band if kind.category.template in TEMPLATE_BY_KEY else "일반")
+        preview = shelf_html([book_html(Book(kind.key, name, band, count, current, None))])
+        name_field = (f'<label class="block">이름(12자까지) <input name="name" value="{html.escape(name)}" maxlength="12" required></label>'
+                      if kind.category else '<p class="muted">기본 카테고리라 이름은 바꿀 수 없습니다. 책 색만 바꿀 수 있습니다.</p>')
+        mine = "".join(
+            f'<li><span class="chip" style="background:{c}" aria-hidden="true"></span>{c}'
+            f'<form method="post" action="/shelf/colors" class="inline">{self._csrf_input(session)}'
+            f'<input type="hidden" name="remove" value="{c}"><input type="hidden" name="next" value="/shelf/edit/{kind.key}">'
+            f'<button aria-label="내 색 {c} 빼기">빼기</button></form></li>'
+            for c in settings.my_colors
+        )
+        trash = (f'<h2>휴지통</h2><p><a href="/shelf/trash/{kind.key}">이 카테고리를 휴지통으로 옮기기</a></p>' if kind.category else "")
+        body = (
+            f'<p class="crumb"><a href="/shelf/{kind.key}">← {html.escape(kind.name)}</a></p>{error}'
+            f'<form method="post" action="/shelf/edit/{kind.key}" class="colors">{self._csrf_input(session)}{name_field}'
+            + color_fieldset(current, settings.my_colors)
+            + f'<div class="preview"><p><b>미리보기</b></p>{preview}</div>'
+            f'<p><button class="primary">저장</button> <a href="/shelf/{kind.key}">그만두기</a></p></form>'
+            + (f'<h2>내 색</h2><ul class="mycolors">{mine}</ul>' if mine else "") + trash + COLOR_SCRIPT
+        )
+        title = f"{kind.name} — {'이름·색 바꾸기' if kind.category else '책 색 바꾸기'}"
+        return self._shelf_page(title, body, session, 400 if error else 200)
+
+    def _count_rows(self, uid: str, kind: Kind) -> list[Any]:
+        if kind.category is not None:
+            return self.store.list_category_items(uid, kind.category.id)
+        return {"ideas": self.store.list_ideas, "styles": self.store.list_styles, "refs": self.store.list_refs}[kind.key](uid)
+
+    async def shelf_colors(self, request: Request) -> Response:
+        """내 색 빼기."""
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        try:
+            form = await self._form(request, session)
+        except PermissionError:
+            return self._shelf_page("책장", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+        remove = str(form.get("remove") or "").lower()
+        settings = await run_in_threadpool(self.store.get_shelf_settings, uid)
+        await run_in_threadpool(self.store.save_shelf_settings, uid, ShelfSettings(
+            settings.colors, tuple(c for c in settings.my_colors if c != remove), settings.title_default))
+        nxt = str(form.get("next") or "/shelf")
+        return RedirectResponse(nxt if re.fullmatch(r"/shelf(/[A-Za-z0-9_/-]*)?", nxt) else "/shelf", status_code=303)
+
+    async def shelf_trash(self, request: Request) -> Response:
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        key = request.path_params["kind"]
+        if key in BUILTINS:
+            return self._shelf_page("책장", '<p class="msg err">기본 카테고리(생각·문체·문헌)는 휴지통으로 옮길 수 없습니다.</p>', session, 400)
+        kind = await run_in_threadpool(self._kind, uid, key)
+        if kind is None or kind.category is None:
+            return self._shelf_page("책장", '<p class="msg err">없는 카테고리입니다. <a href="/shelf">책장</a>으로 돌아가세요.</p>', session, 404)
+        category = kind.category
+        if request.method == "POST":
+            try:
+                await self._form(request, session)
+            except PermissionError:
+                return self._shelf_page("휴지통으로", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            await run_in_threadpool(self.store.trash_category, uid, category.id, "웹 책장에서 옮김")
+            return RedirectResponse("/shelf?done=trash", status_code=303)
+        body = (
+            f'<p class="crumb"><a href="/shelf/{category.id}">← {html.escape(category.name)}</a></p>'
+            f'<div class="card"><p>「{html.escape(category.name)}」 카테고리를 휴지통으로 옮길까요?</p>'
+            f"<p>항목 {category.items}개가 함께 옮겨집니다. 지우는 것이 아니라 옮기는 것이라 운영자가 되살릴 수 있습니다.</p>"
+            f'<form method="post" action="/shelf/trash/{category.id}">{self._csrf_input(session)}'
+            f'<p><button>휴지통으로 옮기기</button> <a href="/shelf/{category.id}">그만두기</a></p></form></div>'
+        )
+        return self._shelf_page("휴지통으로", body, session)

@@ -23,10 +23,14 @@ ChapterStatus = Literal["draft", "revising", "done"]
 CHAPTER_STATUSES: tuple[str, ...] = ("draft", "revising", "done")
 RefStatus = Literal["unverified", "verified"]
 # style_passage·ref_bib는 웹 책장 검색 전용이다(문체 구절·문헌 서지). 도구 검색(style_search·ref_search)은 쓰지 않고 임베딩도 하지 않는다.
-Lane = Literal["ref_picked", "ref_full", "idea_me", "idea_ai", "style", "style_passage", "ref_bib"]
+# category는 저자가 만든 카테고리의 항목(#92). owner_id는 "<카테고리 id>/<항목 id>"다.
+Lane = Literal["ref_picked", "ref_full", "idea_me", "idea_ai", "style", "style_passage", "ref_bib", "category"]
 WEB_ONLY_LANES: tuple[str, ...] = ("style_passage", "ref_bib")
 TagsBy = Literal["ai", "author"]  # 문체 태그를 누가 정했나: Claude가 뽑음(ai) / 저자가 말함(author). 기록 전 항목은 None
-TrashKind = Literal["idea", "style"]  # 휴지통에 옮길 수 있는 책장 항목(#88)
+# 휴지통에 옮길 수 있는 책장 항목(#88). 카테고리는 통째(category, id = 카테고리 id)와 항목(category_item, id = "<카테고리 id>/<항목 id>")
+TrashKind = Literal["idea", "style", "category", "category_item"]
+TitleBy = Literal["ai", "author"]  # 항목 제목을 누가 지었나(#92). 태그의 tags_by와 같은 방식
+TitleMode = Literal["ask", "ai", "none"]  # 저자가 제목을 말하지 않았을 때: 매번 묻기 / AI가 짓기 / 비워 두기
 
 
 @dataclass(frozen=True)
@@ -220,6 +224,8 @@ class Idea:
     origin: str | None = None
     parent_id: str | None = None
     created_at: str = ""
+    title: str | None = None  # 선택 제목(#92). 없으면 목록에 내용 앞부분이 흐리게 보인다
+    title_by: TitleBy | None = None
 
 
 @dataclass(frozen=True)
@@ -233,6 +239,46 @@ class StyleEntry:
     work: str | None = None
     created_at: str = ""
     tags_by: TagsBy | None = None  # 태그를 누가 정했나(#89). 웹 /styles에 보인다
+
+
+@dataclass(frozen=True)
+class Category:
+    """저자가 만든 카테고리(#92). 칸 정의(fields)는 만들 때 템플릿에서 복사해 둔다(템플릿이 바뀌어도 그대로)."""
+
+    id: str
+    name: str
+    template: str  # magus.category.rules.TEMPLATES의 key
+    color: str  # #rrggbb
+    fields: tuple[str, ...] = ()
+    created_at: str = ""
+    updated_at: str = ""
+    items: int = 0  # 항목 수(목록에서 채운다)
+
+
+@dataclass(frozen=True)
+class CategoryItem:
+    """카테고리 항목 하나. author: 누가 말했나(me = 저자의 말, ai = Claude가 쓴 글). chapters: [(project_id, 장 번호)]."""
+
+    id: str
+    category_id: str
+    content: str
+    author: Author
+    title: str | None = None
+    title_by: TitleBy | None = None
+    fields: dict[str, str] = field(default_factory=dict)
+    tags: tuple[str, ...] = ()
+    chapters: tuple[tuple[str, int], ...] = ()
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class ShelfSettings:
+    """사용자의 책장 설정(shelf/settings.json): 기본 카테고리의 책 색, 내 색(최대 12), 제목 기본값."""
+
+    colors: dict[str, str] = field(default_factory=dict)  # ideas|styles|refs → #rrggbb
+    my_colors: tuple[str, ...] = ()
+    title_default: TitleMode = "ask"
 
 
 @dataclass(frozen=True)
@@ -445,8 +491,34 @@ class Store(Protocol):
         ...
     def trash_style(self, user_id: str, style_id: str, note: str) -> StyleEntry | None: ...
     def list_trash(self, user_id: str) -> list[TrashItem]: ...
-    def restore_trash(self, user_id: str, kind: TrashKind, item_id: str) -> list[str]:
-        """되살린 id들(생각이면 함께 옮긴 AI 발화 포함). 휴지통에 없으면 ValueError."""
+    def restore_trash(self, user_id: str, kind: TrashKind, item_id: str, *, name: str | None = None) -> list[str]:
+        """되살린 id들(생각이면 함께 옮긴 AI 발화 포함). 휴지통에 없으면 ValueError.
+        카테고리는 같은 이름이 이미 있으면 ValueError(name으로 새 이름을 주면 그 이름으로 되살린다)."""
+        ...
+
+    # 카테고리(#92) — 사람 소유. 원본은 shelf/categories/<id>/{category.json, items/<항목 id>.json}
+    def list_categories(self, user_id: str) -> list[Category]:
+        """만든 순서. items에 항목 수를 채운다."""
+        ...
+    def get_category(self, user_id: str, category_id: str) -> Category | None: ...
+    def create_category(self, user_id: str, name: str, template: str, color: str, fields: tuple[str, ...]) -> Category:
+        """이름·템플릿·색은 호출자가 magus.category.rules로 검사한 값이다. id는 저장소가 짓는다."""
+        ...
+    def update_category(self, user_id: str, category_id: str, *, name: str | None = None, color: str | None = None) -> Category: ...
+    def trash_category(self, user_id: str, category_id: str, note: str) -> Category | None:
+        """카테고리 폴더를 통째로 trash/shelf/categories/로 옮긴다(항목 포함). 없으면 None."""
+        ...
+    def put_category_item(self, user_id: str, item: CategoryItem) -> CategoryItem:
+        """같은 id가 있으면 바꾼다(created_at은 그대로, updated_at은 지금)."""
+        ...
+    def list_category_items(self, user_id: str, category_id: str | None = None) -> list[CategoryItem]:
+        """category_id가 None이면 모든 카테고리. 항목 id 순(= 만든 순)."""
+        ...
+    def get_category_item(self, user_id: str, category_id: str, item_id: str) -> CategoryItem | None: ...
+    def trash_category_item(self, user_id: str, category_id: str, item_id: str, note: str) -> CategoryItem | None: ...
+    def get_shelf_settings(self, user_id: str) -> ShelfSettings: ...
+    def save_shelf_settings(self, user_id: str, settings: ShelfSettings) -> ShelfSettings:
+        """색은 #rrggbb만 남기고, 내 색은 최대 12개."""
         ...
 
     # 검색 청크 (모든 책장 공용)

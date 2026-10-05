@@ -51,11 +51,13 @@ def main(argv: list[str] | None = None) -> None:
     terms.add_argument("--project-id", required=True)
     terms.add_argument("--add", nargs="*", default=[])
     terms.add_argument("--remove", nargs="*", default=[])
-    trash = sub.add_parser("trash", help="생각·문체 휴지통(운영자용, USER_ID 사용자): list | put idea|style <id> --note … | restore idea|style <id>")
+    trash = sub.add_parser("trash", help="책장 휴지통(운영자용, USER_ID 사용자): list | put idea|style <id> --note … | "
+                                         "restore idea|style|category|category-item <id> [--name 새 이름]")
     trash.add_argument("action", choices=["list", "put", "restore"])
-    trash.add_argument("kind", nargs="?", choices=["idea", "style"])
-    trash.add_argument("id", nargs="?")
+    trash.add_argument("kind", nargs="?", choices=["idea", "style", "category", "category-item"])
+    trash.add_argument("id", nargs="?", help="category-item은 <카테고리 id>/<항목 id>")
     trash.add_argument("--note", default="", help="put: 휴지통으로 옮기는 이유")
+    trash.add_argument("--name", default=None, help="restore category: 같은 이름이 이미 있으면 이 이름으로 되살린다")
     synth = sub.add_parser("synth", help="합성 fixture(원고 docx·pdf, 대화 기록 md)를 만든다")
     synth.add_argument("folder", type=Path)
     sub.add_parser("seed-demo", help="1단계 확인용 가짜 프로젝트 생성")
@@ -204,13 +206,21 @@ def main(argv: list[str] | None = None) -> None:
             parser.exit(2, "put·restore에는 idea|style과 id가 필요합니다\n")
         try:
             if args.action == "put":
+                if args.kind not in ("idea", "style"):  # 카테고리는 웹 책장이나 대화(category_trash)로 옮긴다
+                    parser.exit(2, "put은 idea|style만 받습니다\n")
                 moved = ([i.id for i in store.trash_idea(user, args.id, args.note)] if args.kind == "idea"
                          else [e.id for e in [store.trash_style(user, args.id, args.note)] if e])
                 if not moved:
                     parser.exit(2, f"없음: {args.kind} {args.id}\n")
                 print(f"휴지통으로 옮김({user}): {args.kind} {', '.join(moved)}")
             elif args.action == "restore":
-                print(f"되살림({user}): {args.kind} {', '.join(store.restore_trash(user, args.kind, args.id))}")
+                kind = args.kind.replace("-", "_")
+                name = None
+                if kind == "category" and args.name:
+                    from magus.category.rules import check_name, name_key
+
+                    name = check_name(args.name, {name_key(c.name): c.name for c in store.list_categories(user)})
+                print(f"되살림({user}): {args.kind} {', '.join(store.restore_trash(user, kind, args.id, name=name))}")
         except ValueError as e:
             parser.exit(2, f"{e}\n")
         items = store.list_trash(user)

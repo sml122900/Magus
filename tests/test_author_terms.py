@@ -40,7 +40,7 @@ async def test_author_facing_text_has_no_old_or_core_names(settings: Settings, s
         assert not _hits(c.instructions.replace(AVOID, "")), _hits(c.instructions.replace(AVOID, ""))
         assert c.instructions.count(AVOID) == 1
         tools = (await c.list_tools()).tools
-        assert len(tools) == 21
+        assert len(tools) == 28
         for tool in tools:
             seen[f"설명 {tool.name}"] = f"{tool.description}\n{json.dumps(tool.input_schema, ensure_ascii=False)}"
 
@@ -67,7 +67,8 @@ async def test_author_facing_text_has_no_old_or_core_names(settings: Settings, s
         await call("ref_add", {"bib": {"key": "clack2012"}, "passages": [{"text": "tetrapods came ashore", "reason": "1장 근거"}]})
         await call("ref_search", {"query": "tetrapods"})
         await call("ref_check", {"chapter_number": 1})
-        idea = await call("idea_add", {"text": "바다는 돌아가는 곳이다", "kind": "thought"})
+        await call("idea_add", {"text": "바다는 돌아가는 곳이다", "kind": "thought"}, "idea_add 오류(제목을 묻게 함)")
+        idea = await call("idea_add", {"text": "바다는 돌아가는 곳이다", "kind": "thought", "title": "바다", "title_by": "ai"})
         await call("idea_add_conversation", {"path": "대화.md"})
         await call("idea_search", {"query": "바다", "author": "all"})
         await call("idea_delete", {"id": idea.split()[2], "note": "시험"})
@@ -75,6 +76,21 @@ async def test_author_facing_text_has_no_old_or_core_names(settings: Settings, s
         style = await call("style_add", {"passage": "짧다.", "reason": "(저자가 이유를 밝히지 않음)", "tags": TAGS})
         await call("style_search", {"query": "짧음"})
         await call("style_delete", {"id": style.split()[2], "note": "시험"})
+        await call("category_list", {})
+        await call("category_create", {"name": "사례", "template": "사례", "color": "빨강"})
+        await call("category_create", {"name": "생각"}, "category_create 오류(정해진 이름)")
+        await call("category_edit", {"category": "생각", "color": "#b22222"})
+        await call("category_edit", {"category": "사례", "new_name": "옛 사례"})
+        await call("category_put", {"category": "옛 사례", "author": "me", "content": "1850년대 항구", "fields": {"시기": "1850년대"},
+                                    "chapters": [1]}, "category_put 오류(제목을 묻게 함)")
+        item = await call("category_put", {"category": "옛 사례", "author": "me", "content": "1850년대 항구", "untitled": True})
+        await call("category_put", {"category": "생각", "author": "me", "content": "x"}, "category_put 오류(기본 카테고리)")
+        await call("category_search", {"query": "항구"})
+        await call("category_title_default", {"mode": "ai"})
+        await call("category_put", {"category": "옛 사례", "author": "ai", "content": "요약"}, "category_put 오류(AI가 짓기)")
+        await call("category_list", {}, "category_list 뒤")
+        await call("category_trash", {"category": "옛 사례", "item_id": re.search(r"\d{17}-[0-9a-f]{6}", item).group(), "note": "시험"})
+        await call("category_trash", {"category": "옛 사례", "note": "시험"}, "category_trash 통째")
     called = {k.split()[1] for k in seen if k.startswith("응답 ")}
     assert called == {t.name for t in tools}, {t.name for t in tools} - called  # 모든 도구의 응답을 봤다
     found = {where: _hits(text) for where, text in seen.items() if _hits(text)}
