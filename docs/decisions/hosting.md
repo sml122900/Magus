@@ -43,7 +43,10 @@
   - DNS를 Cloudflare에 두면 **프록시를 끈 DNS 전용**으로 둔다. 무료 프록시는 응답을 125초에 끊는다.
 - **백업: restic → Cloudflare R2**(APAC 위치 힌트)
   - 매일 04:00 KST에 호스트 cron이 `docker compose --profile backup run --rm backup`을 부른다(`deploy/backup.sh`).
-  - restic은 암호화하고 중복을 없애고 증분으로 올린다. 그래서 30일치가 R2 무료 10GB 안에 들어간다. 보관은 `restic forget --keep-daily 30 --prune`으로 한다.
+  - restic은 암호화하고 중복을 없애고 증분으로 올린다. 그래서 일별 30개에 월별 12개를 더해도 R2 무료 10GB 안에 들어간다(첫 스냅샷 7.7MiB).
+  - 보관은 `restic forget --keep-daily 30 --keep-monthly 12 --prune`이다.
+    - 처음에는 일별 30개만 두었다. 2026-10-05 사용자 결정(#62 보완)으로 월별 12개를 더했다.
+    - 30일이 지나서야 손상을 발견해도, 최대 1년 전까지 각 달 말 상태로 되돌릴 수 있게 하기 위해서다.
   - **R2 버킷에 수명 주기 규칙을 걸지 않는다.** 스냅샷끼리 데이터 파일을 나눠 쓰므로, 날짜로 지우면 새 스냅샷이 깨진다.
   - `index.sqlite`는 백업에서 뺀다. 원본 파일에서 `magus reindex`로 다시 만들기 때문에, 실행 중인 DB의 일관성 문제가 생기지 않는다. 임베딩은 EMBEDDINGS=none이라 다시 받을 것도 없다.
   - 매번 `restic check --read-data-subset=1/30`로 데이터의 1/30을 읽어 검사한다(한 달이면 전체).

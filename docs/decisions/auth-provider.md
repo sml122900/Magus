@@ -74,10 +74,13 @@
 
 ### 연결 절차(사용자, 5·6단계에서 실행)
 
-1. WorkOS 계정을 만들고 AuthKit을 켠다. **Production 환경**에서 한다(2026-10-05 사용자 결정). MCP 가이드(https://workos.com/docs/authkit/mcp)를 따른다.
+1. WorkOS 계정을 만들고 AuthKit을 켠다. MCP 가이드(https://workos.com/docs/authkit/mcp)를 따른다.
+   - 환경은 당분간 **Staging**이다(결정 #49, 2026-10-05).
+     - 오전에 Production으로 정했지만 대시보드에서 생성이 거부돼 Staging으로 운영한다.
+     - Production은 공개 서비스로 바꿀 때 옮긴다. 옮기면 issuer와 사용자 id가 바뀌므로, 허용 목록·커넥터·웹 클라이언트를 다시 맞춘다.
    - CIMD와 DCR이 켜져 있는지 확인한다.
    - 리소스(audience)로 `https://<도메인>/mcp`를 등록한다.
-2. 가입을 끄고(초대만) 두 사람을 초대한다. 로그인 방법은 Google과 이메일 코드를 켠다.
+2. 가입을 끄고(초대만) 두 사람을 초대한다. 로그인 방법은 이메일 코드(Magic Auth)를 켜고 비밀번호는 끈다(2026-10-05 설정).
 3. 서버 환경변수를 넣는다. `AUTH_ISSUER=https://<이름>.authkit.app`, `PUBLIC_URL=https://<도메인>`.
    - `AUTH_JWKS_URL`은 비워 둔다. 메타데이터에서 찾고, 안 되면 `https://<이름>.authkit.app/oauth2/jwks`.
 4. 허용 목록은 처음에 비워 두고 배포한다(모두 403). 로그인하면 403 화면에 자기 `user_…` id가 보인다. WorkOS Users에도 같은 id가 있다.

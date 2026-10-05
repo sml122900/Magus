@@ -9,9 +9,14 @@
 2. 아버지는 그 뒤 **`father`로 따로 추가**한다.
 3. 아버지 원고는 **docx 원본을 아버지 받은함에 새로 임포트**한다. `default`의 PDF 임포트본은 옮기지 않는다.
 
+## 0. 7단계 전에 확인할 것
+
+- [ ] **받은함 화면 검토**(결정 #56 보완): 사용자가 `/inbox` 업로드 화면을 캡처해 채팅 Claude와 검토한다. 아버지가 혼자 올릴 수 있는지 본다.
+- [ ] **docx 크기 확인**(결정 #54 보완): 아버지 docx를 받으면 업로드 전에 크기를 본다. 한도는 `MAX_UPLOAD_MB` 50MB다. 넘으면 서버 `.env`에서 올리고 `sudo docker compose up -d`.
+
 ## A. 운영자가 할 일
 
-- [ ] WorkOS(Production)에서 아버지를 **초대**한다(가입은 꺼져 있다). 로그인 방법은 Google 또는 이메일 코드다.
+- [ ] WorkOS(**Staging**, 결정 #49)에서 아버지를 **초대**한다(가입은 꺼져 있다). 로그인 방법은 이메일 코드(Magic Auth)다.
 - [ ] 아버지가 한 번 로그인하게 한다: `https://magus.lifebookapplication.com/login` → 403 화면의 사용자 id를 받는다.
   - WorkOS 대시보드 Users에서 아버지 id를 찾아도 된다.
 - [ ] 서버 `.env`에 `ALLOWED_USERS=<운영자 id>=default,<아버지 id>=father`를 넣고 `sudo docker compose up -d`를 실행한다(`restart`가 아니라 `up -d`).
