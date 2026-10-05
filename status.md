@@ -105,6 +105,7 @@
     - `p1-step5` 9b420a3 → eff78d5, `p1-step6` 2164715 → 49daa60
     - 태그 종류(annotated/lightweight)는 정리 전과 같다.
   - **서버 이력 교체 완료(2026-10-06)**: 서버는 새 이력의 `p1-auth-audience`(`896633c`, 브랜치 `fix/auth-audience`)다. 옛 객체·보고서 객체는 gc로 지웠다(0-3절).
+    - **서버 되돌리기 기준 커밋: `78c9668`**(2026-10-06 반영 직전 상태와 트리가 같다. 반영 전 이미지 `magus:rollback-21b4e2a`). `HEAD~1`을 쓰지 않는다(CLAUDE.md 호스팅).
     - 다음에 master를 배포할 때는 `git fetch /root/magus.bundle master && git checkout -B master FETCH_HEAD`로 한다(docs/deploy.md "업데이트"). 그 master에 `p1-auth-audience`가 들어 있어야 한다.
 - **다음: 7단계 아버지 온보딩**(`docs/onboarding-father.md` 초안). 아래 "7단계 전 확인"을 먼저 끝낸다.
 - **7단계 전 확인**
