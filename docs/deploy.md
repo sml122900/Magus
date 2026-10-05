@@ -6,8 +6,13 @@
 ## 0. 준비물(계정)
 
 - [ ] Vultr 계정(결제 수단). 서버: 서울, `vc2-1c-1gb`, Ubuntu LTS. SSH 키로만 접속한다.
-- [ ] 도메인(예: `magus.example.com`). DNS A 레코드 → 서버 IP. Cloudflare DNS라면 **프록시 끔(DNS 전용)**.
-- [ ] WorkOS 계정(AuthKit). 절차는 auth-provider.md "연결 절차"에 있다.
+- [ ] 도메인 `magus.lifebookapplication.com`. DNS A 레코드 → 서버 IP `158.247.225.48`. Cloudflare DNS라면 **프록시 끔(DNS 전용)**.
+- [ ] WorkOS 계정(AuthKit), **Production 환경**에서 설정한다. issuer·클라이언트 ID·사용자 id를 모두 같은 환경에서 가져온다(섞이면 iss 불일치로 401). 절차는 auth-provider.md "연결 절차"에 있다.
+  - 리디렉션 URI 세 개(글자 그대로):
+    - `https://magus.lifebookapplication.com/auth/callback` — 웹 로그인(코드: `PUBLIC_URL/auth/callback`)
+    - `https://claude.ai/api/mcp/auth_callback` — Claude 커넥터(Claude CIMD 메타데이터의 콜백, 2026-10-03 조사)
+    - `https://claude.com/api/mcp/auth_callback` — Claude 커넥터. **사용자가 추가로 등록함, 출처는 WorkOS 측 안내**(우리 조사로는 확인하지 않았다)
+  - 리소스(audience): `https://magus.lifebookapplication.com/mcp`
 - [ ] Cloudflare R2 버킷 `magus-backup`(위치 힌트 APAC)과 그 버킷 전용 API 토큰(읽기·쓰기). **수명 주기 규칙은 걸지 않는다.**
 - [ ] 텔레그램 봇(BotFather)과 운영자 chat id.
 - [ ] healthchecks.io 체크 하나: 주기 1일, 유예 2시간, 알림은 텔레그램.
@@ -42,7 +47,7 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 | `MAGUS_DOMAIN` | `magus.example.com`(Caddy가 이 이름으로 인증서를 받는다) |
 | `PUBLIC_URL` | `https://magus.example.com` |
 | `AUTH_ISSUER` | `https://<이름>.authkit.app` |
-| `ALLOWED_USERS` | `user_…=default,user_…=father`(두 사람이 한 번 로그인한 뒤 WorkOS 사용자 목록에서 id를 옮긴다) |
+| `ALLOWED_USERS` | **처음에는 비워 둔다**(모두 403). 2-1절대로 첫 로그인 뒤 `user_…=default`를 넣는다. 아버지는 나중에 `,user_…=father`를 더한다 |
 | `SESSION_SECRET` | `python -c "import secrets;print(secrets.token_hex(32))"` |
 | `WEB_CLIENT_ID`(·`WEB_CLIENT_SECRET`) | WorkOS 웹 클라이언트(리다이렉트 `https://<도메인>/auth/callback`) |
 | `ALERT_TELEGRAM_BOT_TOKEN`·`ALERT_TELEGRAM_CHAT_ID` | 텔레그램 |
@@ -51,8 +56,28 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 | `AWS_ACCESS_KEY_ID`·`AWS_SECRET_ACCESS_KEY` | R2 API 토큰 |
 | `HEALTHCHECK_URL` | `https://hc-ping.com/<uuid>` |
 
-기존 원고 옮기기: 로컬의 `data/users/default`를 서버의 `/opt/magus/deploy/data/users/default`로 복사한다(`scp -r`).
-그다음 `sudo chown -R 10001 data && sudo docker compose exec magus /app/.venv/bin/magus reindex`를 실행한다.
+### 2-1. 첫 로그인과 허용 목록(user id 얻기)
+
+허용 목록에는 이메일이 아니라 WorkOS 사용자 id(토큰의 `sub`, `user_…`)를 적는다. 그 id는 한 번 로그인해 봐야 보인다.
+
+1. **배포**: `.env`의 `ALLOWED_USERS`는 비워 둔 채 `sudo docker compose up -d --build`를 실행한다.
+   - 비어 있으면 서버는 "모든 사용자를 거부한다"는 경고를 남기고 뜬다. 아무도 들어오지 못한다.
+2. **로그인 시도(403 예상)**: 브라우저에서 `https://magus.lifebookapplication.com/login` → WorkOS 로그인으로 간다.
+   - 403 화면이 나오고, 거기에 **사용자 id가 보인다**("운영자에게 아래 사용자 id를 알려 주세요").
+   - 401 화면("로그인 토큰을 받아들이지 못했습니다")이면 허용 목록 문제가 아니라 설정 문제다. `sudo docker compose logs magus | grep "token rejected"`로 원인을 본다. 원인은 iss 불일치·aud 불일치·만료·서명 중 하나로 나온다.
+3. **id 복사**: 403 화면의 id를 복사한다. 같은 값이 WorkOS 대시보드 Users의 그 사용자 id다(둘 중 아무 데서나).
+4. **목록에 넣기**: `.env`에 `ALLOWED_USERS=user_…=default`를 쓴다.
+5. **재시작**: `sudo docker compose up -d`.
+   - `restart`는 `.env`를 다시 읽지 않는다. 바뀐 설정으로 컨테이너를 다시 만드는 `up -d`를 쓴다.
+6. **재로그인**: `/login` → `/book`이 보이면 끝이다.
+
+**순서(2026-10-05 결정)**
+- 지금은 **운영자(사용자) 본인 계정을 `default`에 연결**한다. 개발용 PDF 임포트본으로 6단계(Claude 커넥터)를 시험한다.
+  - 기존 원고 옮기기: 로컬의 `data/users/default`를 서버의 `/opt/magus/deploy/data/users/default`로 복사한다(`scp -r`).
+  - 그다음 `sudo chown -R 10001 data && sudo docker compose exec magus /app/.venv/bin/magus reindex`를 실행한다.
+- **아버지는 나중에 `father`로 따로 추가**한다. 같은 1~6단계로 id를 얻어 `ALLOWED_USERS=user_…=default,user_…=father`로 넣는다.
+  - 아버지 원고는 docx 원본을 아버지 받은함에 새로 올려 임포트한다(PDF 임포트본을 옮기지 않는다).
+  - 절차는 [onboarding-father.md](onboarding-father.md)에 있다.
 
 업데이트: `cd /opt/magus && sudo git pull && cd deploy && sudo docker compose up -d --build`.
 

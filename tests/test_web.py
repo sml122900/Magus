@@ -133,33 +133,37 @@ def fake_issuer():
             if not pending or pending["challenge"] != challenge or form.get("resource") != pending["resource"]:
                 return self._json({"error": "invalid_grant"}, 400)
             now = int(time.time())
-            token = jwt.encode({"sub": pending["sub"], "iss": issuer, "aud": form["resource"], "iat": now, "exp": now + 600},
-                               ISSUER_KEY, algorithm="RS256", headers={"kid": "k1"})
+            bad = pending.get("bad", {})
+            claims = {"sub": pending["sub"], "iss": bad.get("iss", issuer), "aud": bad.get("aud", form["resource"]),
+                      "iat": now, "exp": now + bad.get("exp_in", 600)}
+            token = jwt.encode(claims, bad.get("key", ISSUER_KEY), algorithm="RS256", headers={"kid": "k1"})
+            issued.append(token)
             self._json({"access_token": token, "token_type": "Bearer"})
 
         def log_message(self, *args):
             pass
 
+    issued: list[str] = []
     httpd = http.server.HTTPServer(("127.0.0.1", 0), Handler)
     issuer = f"http://127.0.0.1:{httpd.server_port}"
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    yield issuer, state
+    yield issuer, state, issued
     httpd.shutdown()
 
 
-def _login(c: httpx2.Client, issuer_state: dict, sub: str) -> httpx2.Response:
+def _login(c: httpx2.Client, issuer_state: dict, sub: str, bad: dict | None = None) -> httpx2.Response:
     """브라우저 흉내: /login → 인증 서버로 가는 주소 확인 → 인증 서버가 code를 발급했다고 치고 콜백 호출."""
     to_issuer = c.get("/login?next=/inbox", follow_redirects=False)
     query = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(to_issuer.headers["location"]).query))
     assert query["code_challenge_method"] == "S256" and query["response_type"] == "code" and query["client_id"] == "web-client"
     assert query["resource"].endswith("/mcp") and query["redirect_uri"].endswith("/auth/callback")
     code = f"code-{sub}"
-    issuer_state[code] = {"sub": sub, "challenge": query["code_challenge"], "resource": query["resource"]}
+    issuer_state[code] = {"sub": sub, "challenge": query["code_challenge"], "resource": query["resource"], "bad": bad or {}}
     return c.get(f"/auth/callback?code={code}&state={query['state']}", follow_redirects=False)
 
 
 def test_remote_web_login_with_oauth(server_proc, fake_issuer):
-    issuer, issuer_state = fake_issuer
+    issuer, issuer_state, _ = fake_issuer
     base, data_dir, _ = server_proc({
         "PUBLIC_URL": "http://127.0.0.1:{port}", "AUTH_ISSUER": issuer, "ALLOWED_USERS": "sub-alice=alice,sub-bob=bob",
         "SESSION_SECRET": "x" * 40, "WEB_CLIENT_ID": "web-client",
@@ -183,8 +187,51 @@ def test_remote_web_login_with_oauth(server_proc, fake_issuer):
         assert bob.get(link).status_code == 403  # 앨리스의 내려받기 링크
     with httpx2.Client(base_url=base, timeout=60) as carol:
         denied = _login(carol, issuer_state, "sub-carol")
-        assert denied.status_code == 403 and "허용 목록에 없는" in denied.text
+        # 403: 허용 목록 밖. 본인의 사용자 id를 보여 준다(운영자가 ALLOWED_USERS에 넣을 값)
+        assert denied.status_code == 403 and "허용 목록에 없습니다(403)" in denied.text
+        assert "<code>sub-carol</code>" in denied.text and "받아들이지 못했습니다" not in denied.text
         assert carol.get("/inbox", follow_redirects=False).status_code == 303  # 세션 없음
+
+
+def test_web_login_rejected_token_is_401_with_reason_in_log(server_proc, fake_issuer):
+    """토큰 무효(401)와 허용 목록 밖(403)을 다른 문구로 보인다. 401의 원인은 서버 로그에만, 토큰 값은 남기지 않는다."""
+    issuer, issuer_state, issued = fake_issuer
+    base, _, log_path = server_proc({
+        "PUBLIC_URL": "http://127.0.0.1:{port}", "AUTH_ISSUER": issuer, "ALLOWED_USERS": "sub-alice=alice",
+        "SESSION_SECRET": "x" * 40, "WEB_CLIENT_ID": "web-client",
+    })
+    other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    cases = {
+        "aud 불일치 (토큰 aud=web-client": {"aud": "web-client"},
+        "iss 불일치 (토큰 iss=https://evil.test": {"iss": "https://evil.test"},
+        "만료 (exp=": {"exp_in": -300},
+        "서명 (kid=k1, alg=RS256)": {"key": other_key},
+    }
+    for bad in cases.values():
+        with httpx2.Client(base_url=base, timeout=60) as c:
+            page = _login(c, issuer_state, "sub-alice", bad)
+            assert page.status_code == 401, bad
+            assert "로그인 토큰을 받아들이지 못했습니다(401)" in page.text and "허용 목록" not in page.text
+            assert c.get("/inbox", follow_redirects=False).status_code == 303  # 세션이 생기지 않았다
+    time.sleep(0.3)
+    log = log_path.read_text(encoding="utf-8")
+    for hint in cases:
+        assert f"web login: token rejected ({hint}" in log, hint
+    assert len(issued) == len(cases) and not any(token in log for token in issued)  # 토큰 값은 로그에 없다
+    assert not any(token.split(".")[2] in log for token in issued)  # 서명 조각도 없다
+
+
+def test_empty_allow_list_starts_and_denies_everyone(server_proc, fake_issuer):
+    # 첫 배포: ALLOWED_USERS를 비워 두고 띄운다 → 로그인하면 403과 함께 자기 id가 보인다 → 그 id를 목록에 넣는다
+    issuer, issuer_state, _ = fake_issuer
+    base, _, log_path = server_proc({
+        "PUBLIC_URL": "http://127.0.0.1:{port}", "AUTH_ISSUER": issuer, "ALLOWED_USERS": "",
+        "SESSION_SECRET": "x" * 40, "WEB_CLIENT_ID": "web-client",
+    })
+    with httpx2.Client(base_url=base, timeout=60) as c:
+        page = _login(c, issuer_state, "user_01FIRST")
+        assert page.status_code == 403 and "<code>user_01FIRST</code>" in page.text
+    assert "ALLOWED_USERS가 비어 있다" in log_path.read_text(encoding="utf-8")
 
 
 def test_remote_requires_session_secret(tmp_path: Path):

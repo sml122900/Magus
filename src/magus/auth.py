@@ -59,7 +59,8 @@ class AuthConfig:
             raise ValueError("AUTH_ISSUER를 쓰려면 PUBLIC_URL(바깥에서 보이는 서버 주소)이 필요하다")
         allowed = parse_allowed(env.get("ALLOWED_USERS") or "")
         if not allowed:
-            raise ValueError("ALLOWED_USERS가 비어 있다. 'sub=user_id' 쉼표 목록이 필요하다(공개 가입은 하지 않는다)")
+            # 비어 있으면 모두 거부한다(열리는 쪽이 아니다). 첫 로그인(403)으로 user id를 얻는 단계에 쓴다(docs/deploy.md).
+            log.warning("ALLOWED_USERS가 비어 있다: 모든 사용자를 거부한다(403). 첫 로그인으로 id를 얻은 뒤 채운다")
         resource = public_url.rstrip("/") + "/mcp"
         audiences = tuple(a.strip() for a in (env.get("AUTH_AUDIENCE") or resource).split(",") if a.strip())
         return cls(public_url.rstrip("/"), issuer, audiences, allowed, (env.get("AUTH_JWKS_URL") or "").strip() or None)
@@ -84,7 +85,7 @@ class JwtVerifier:
         self.config = config
         self._static = jwt.PyJWKSet.from_dict(dict(jwks)) if jwks else None
         self._client: jwt.PyJWKClient | None = None
-        self._cache: OrderedDict[str, tuple[float, dict[str, Any] | None]] = OrderedDict()
+        self._cache: OrderedDict[str, tuple[float, dict[str, Any] | None, str]] = OrderedDict()
 
     def _jwks_client(self) -> jwt.PyJWKClient:
         if self._client is None:
@@ -97,17 +98,23 @@ class JwtVerifier:
             kid = jwt.get_unverified_header(token).get("kid")
             keys = [k for k in self._static.keys if kid is None or k.key_id == kid]
             if not keys:
-                raise jwt.InvalidTokenError("알 수 없는 kid")
+                raise jwt.PyJWKClientError("알 수 없는 kid")
             return keys[0].key
         return self._jwks_client().get_signing_key_from_jwt(token).key
 
     def decode(self, token: str) -> dict[str, Any] | None:
-        """서명·exp·iss·aud를 검증한 클레임. 실패하면 None(이유는 종류만 로그에 남긴다)."""
+        """서명·exp·iss·aud를 검증한 클레임. 실패하면 None."""
+        return self.check(token)[0]
+
+    def check(self, token: str) -> tuple[dict[str, Any] | None, str]:
+        """(클레임, 실패 이유). 성공이면 이유는 "". 실패 이유(iss·aud 불일치, 만료, 서명 …)는 서버 로그에도 남긴다.
+        토큰 값은 로그에 남기지 않는다. 설정을 맞추는 데 필요한 iss·aud·kid 같은 공개 값만 함께 적는다."""
         now = time.time()
         if (hit := self._cache.get(token)) and hit[0] > now:
-            return hit[1]
+            return hit[1], hit[2]
+        reason = ""
         try:
-            claims = jwt.decode(
+            claims: dict[str, Any] | None = jwt.decode(
                 token,
                 self._key(token),
                 algorithms=ALGORITHMS,
@@ -117,13 +124,13 @@ class JwtVerifier:
                 options={"require": ["exp", "iss", "sub"]},
             )
         except (jwt.PyJWTError, ValueError) as e:
-            log.info("auth=invalid reason=%s", type(e).__name__)
-            claims = None
+            claims, reason = None, explain(e, token, self.config)
+            log.warning("auth=invalid reason=%s", reason)
         expires = min(now + 60, float(claims["exp"])) if claims else now + 10
-        self._cache[token] = (expires, claims)
+        self._cache[token] = (expires, claims, reason)
         while len(self._cache) > 256:
             self._cache.popitem(last=False)
-        return claims
+        return claims, reason
 
     def user_of(self, claims: Mapping[str, Any]) -> str | None:
         return self.config.allowed.get(str(claims.get("sub", "")))
@@ -148,6 +155,44 @@ class JwtVerifier:
             subject=str(claims["sub"]),
             claims={"iss": claims.get("iss"), USER_ID_CLAIM: user_id},
         )
+
+
+# 실패 원인 힌트. 위에서부터 첫 일치(하위 클래스가 먼저: InvalidSignatureError는 DecodeError의 하위다).
+_REASONS: tuple[tuple[type[Exception], str], ...] = (
+    (jwt.ExpiredSignatureError, "만료"),
+    (jwt.ImmatureSignatureError, "아직 유효하지 않음(nbf·iat)"),
+    (jwt.InvalidIssuerError, "iss 불일치"),
+    (jwt.InvalidAudienceError, "aud 불일치"),
+    (jwt.InvalidSignatureError, "서명"),
+    (jwt.MissingRequiredClaimError, "필수 클레임 없음"),
+    (jwt.InvalidAlgorithmError, "알고리즘"),
+    (jwt.PyJWKClientError, "서명 키(kid) 없음 또는 JWKS를 못 읽음"),
+    (jwt.DecodeError, "JWT 형식 아님"),
+)
+
+
+def explain(error: Exception, token: str, config: AuthConfig) -> str:
+    """'aud 불일치 (토큰 aud=…, 기대=…)'. 토큰 자체나 서명은 넣지 않는다. 검증 전 값이라 설정 맞추기에만 쓴다."""
+    hint = next((text for kind, text in _REASONS if isinstance(error, kind)), type(error).__name__)
+    try:
+        unverified = jwt.decode(token, options={"verify_signature": False})
+        header = jwt.get_unverified_header(token)
+    except (jwt.PyJWTError, ValueError):
+        return hint
+    short = lambda value: str(value)[:120]  # noqa: E731
+    if hint == "iss 불일치":
+        return f"{hint} (토큰 iss={short(unverified.get('iss'))}, 기대={config.issuer})"
+    if hint == "aud 불일치":
+        return f"{hint} (토큰 aud={short(unverified.get('aud'))}, 기대={', '.join(config.audiences)})"
+    if hint == "만료":
+        exp = unverified.get("exp")
+        when = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(exp))) if isinstance(exp, int | float) else "?"
+        return f"{hint} (exp={when})"
+    if hint in ("서명", "서명 키(kid) 없음 또는 JWKS를 못 읽음", "알고리즘"):
+        return f"{hint} (kid={short(header.get('kid'))}, alg={short(header.get('alg'))})"
+    if hint == "필수 클레임 없음":
+        return f"{hint} ({error})"
+    return hint
 
 
 def discover_jwks_url(issuer: str) -> str:

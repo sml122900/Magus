@@ -6,7 +6,7 @@
 ## 운영자가 미리 할 일
 
 - [ ] 서버 주소가 열려 있다: `https://<도메인>/healthz` → ok
-- [ ] 두 사람이 WorkOS에 초대돼 있고, `ALLOWED_USERS`에 두 사람의 id가 들어 있다
+- [ ] 운영자 본인이 `ALLOWED_USERS`에 `=default`로 들어 있다(docs/deploy.md 2-1절). 아버지는 7단계에서 `=father`로 추가한다([onboarding-father.md](onboarding-father.md))
 - [ ] 커넥터 URL: `https://<도메인>/mcp`
 
 ---

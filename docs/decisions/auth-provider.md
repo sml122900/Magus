@@ -74,15 +74,18 @@
 
 ### 연결 절차(사용자, 5·6단계에서 실행)
 
-1. WorkOS 계정을 만들고 AuthKit을 켠다. MCP 가이드(https://workos.com/docs/authkit/mcp)를 따른다.
+1. WorkOS 계정을 만들고 AuthKit을 켠다. **Production 환경**에서 한다(2026-10-05 사용자 결정). MCP 가이드(https://workos.com/docs/authkit/mcp)를 따른다.
    - CIMD와 DCR이 켜져 있는지 확인한다.
    - 리소스(audience)로 `https://<도메인>/mcp`를 등록한다.
 2. 가입을 끄고(초대만) 두 사람을 초대한다. 로그인 방법은 Google과 이메일 코드를 켠다.
 3. 서버 환경변수를 넣는다. `AUTH_ISSUER=https://<이름>.authkit.app`, `PUBLIC_URL=https://<도메인>`.
    - `AUTH_JWKS_URL`은 비워 둔다. 메타데이터에서 찾고, 안 되면 `https://<이름>.authkit.app/oauth2/jwks`.
-4. 두 사람이 한 번씩 로그인하면 WorkOS 사용자 목록에 `user_…` id가 생긴다. `ALLOWED_USERS=user_…=default,user_…=father`로 넣는다.
+4. 허용 목록은 처음에 비워 두고 배포한다(모두 403). 로그인하면 403 화면에 자기 `user_…` id가 보인다. WorkOS Users에도 같은 id가 있다.
+   - 그 id를 `ALLOWED_USERS`에 넣는다. 순서는 운영자 본인 `=default`가 먼저이고, 아버지 `=father`는 나중이다. 단계는 docs/deploy.md 2-1절에 있다.
 5. 웹 로그인용으로 WorkOS에 애플리케이션(OAuth 클라이언트)을 하나 등록한다.
    - 리다이렉트 URI는 `https://<도메인>/auth/callback`이고, PKCE를 쓴다.
+   - 같은 화면 또는 해당 설정에 Claude 콜백도 등록한다: `https://claude.ai/api/mcp/auth_callback`, `https://claude.com/api/mcp/auth_callback`.
+     - claude.com 쪽은 **사용자가 추가로 등록함, 출처는 WorkOS 측 안내**다. 우리 조사(Claude CIMD 메타데이터, 2026-10-03)에는 claude.ai 콜백만 있었다.
    - `WEB_CLIENT_ID`(비밀이 있으면 `WEB_CLIENT_SECRET`)와 `SESSION_SECRET`(32자 이상 무작위)을 넣는다.
 6. Claude.ai → 커넥터 추가 → URL `https://<도메인>/mcp`. 등록 방식은 "Claude의 공개 신원 사용"(CIMD)이다.
    - **웹·Desktop·모바일에서 로그인과 토큰 갱신을 모두 확인한다**(알려진 위험).

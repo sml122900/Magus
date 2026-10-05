@@ -71,14 +71,30 @@ async def test_verifier_accepts_only_valid_allowed_tokens(keys):
     assert await v.verify_token(jwt.encode({"sub": "sub-alice", "aud": "http://magus.test/mcp", "iss": ISSUER,
                                             "exp": int(time.time()) + 600}, "s" * 32, algorithm="HS256")) is None  # 대칭키 위조
     assert await v.verify_token("not-a-jwt") is None
+    # 실패 이유(서버 로그·웹 401용). 토큰 값은 넣지 않고, 설정을 맞추는 데 필요한 공개 값만 적는다
+    reasons = {
+        "aud": v.check(_token(good, aud="https://other.example/mcp"))[1],
+        "iss": v.check(_token(good, iss="https://evil.test"))[1],
+        "exp": v.check(_token(good, exp_in=-120))[1],
+        "sig": v.check(_token(evil))[1],
+        "kid": v.check(_token(good, kid="nope"))[1],
+        "fmt": v.check("not-a-jwt")[1],
+    }
+    assert reasons["aud"] == "aud 불일치 (토큰 aud=https://other.example/mcp, 기대=http://magus.test/mcp)"
+    assert reasons["iss"] == f"iss 불일치 (토큰 iss=https://evil.test, 기대={ISSUER})"
+    assert reasons["exp"].startswith("만료 (exp=") and reasons["sig"] == "서명 (kid=k1, alg=RS256)"
+    assert reasons["kid"].startswith("서명 키(kid) 없음") and reasons["fmt"] == "JWT 형식 아님"
+    claims, reason = v.check(_token(good))
+    assert reason == "" and claims["sub"] == "sub-alice"
 
 
 def test_config_requires_allow_list_and_public_url():
     assert AuthConfig.from_env({}) is None  # 인증 없음 = 로컬 모드
     with pytest.raises(ValueError, match="PUBLIC_URL"):
         AuthConfig.from_env({"AUTH_ISSUER": ISSUER, "ALLOWED_USERS": ALLOWED})
-    with pytest.raises(ValueError, match="ALLOWED_USERS"):
-        AuthConfig.from_env({"AUTH_ISSUER": ISSUER, "PUBLIC_URL": "https://m.example"})
+    # 빈 허용 목록은 "아무도 못 들어옴"이다(첫 로그인으로 id를 얻는 단계). 열리는 쪽이 아니다
+    empty = AuthConfig.from_env({"AUTH_ISSUER": ISSUER, "PUBLIC_URL": "https://m.example"})
+    assert empty is not None and dict(empty.allowed) == {}
     assert parse_allowed(" a=default , user_01H=father ") == {"a": "default", "user_01H": "father"}
     with pytest.raises(ValueError):
         parse_allowed("a=../etc")

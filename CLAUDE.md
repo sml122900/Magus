@@ -91,7 +91,7 @@
 | `AUTH_ISSUER` | — | 원격 모드: 인증 서버 issuer(WorkOS AuthKit). 있으면 HTTP에서 토큰 검증을 켠다 |
 | `AUTH_JWKS_URL` | issuer 메타데이터의 jwks_uri | 서명 키 주소 |
 | `AUTH_AUDIENCE` | `PUBLIC_URL/mcp` | 받아들일 토큰 aud(쉼표로 여럿) |
-| `ALLOWED_USERS` | — | `sub=user_id` 쉼표 목록. 여기 없는 sub는 403. 공개 가입은 없다 |
+| `ALLOWED_USERS` | — | `sub=user_id` 쉼표 목록(sub는 WorkOS 사용자 id `user_…`, 이메일 아님). 여기 없는 sub는 403. 비우면 모두 403(첫 배포에서 id를 얻는 단계). 공개 가입은 없다 |
 | `PORT` | 8000 | `magus serve --transport http`의 기본 포트 |
 | `MAX_UPLOAD_MB` | 50 | 받은함 업로드 한 개 한도 |
 | `MAX_USER_MB` | 1000 | 사용자별 저장 용량(사용자 폴더 전체) |
@@ -294,6 +294,8 @@ data/index.sqlite
 - 인증: MCP용 OAuth를 지원하는 **관리형** 인증 서비스를 쓴다. **WorkOS AuthKit**으로 정했다(`docs/decisions/auth-provider.md`, 차선 Descope). 코드는 표준(JWKS·iss·aud)만 쓴다(`magus/auth.py`).
   - Magus는 리소스 서버만 한다: Protected Resource Metadata를 내고, 액세스 토큰(JWT 서명·만료·issuer·audience)을 검증하고, `sub` → user_id를 매핑한다.
   - 허용 목록(`ALLOWED_USERS`)에 없는 sub는 거부한다. 무효 토큰은 401(+ `resource_metadata`), 유효하지만 목록 밖은 403(`ForbiddenGate`).
+  - 무효 토큰의 원인(iss 불일치·aud 불일치·만료·서명·kid·형식)은 `JwtVerifier.check`가 서버 로그에 남긴다. iss·aud·kid 같은 공개 값만 쓰고 토큰 값은 남기지 않는다.
+  - WorkOS는 **Production 환경**에서 쓴다. 허용 목록 순서: 운영자 본인 `=default`(개발용 PDF 임포트본, 6단계 시험)가 먼저이고, 아버지 `=father`(docx 원본 새 임포트)는 나중이다(docs/deploy.md 2-1절, docs/onboarding-father.md).
   - PRM의 `resource`는 커넥터 URL(`PUBLIC_URL/mcp`)과 정확히 같아야 한다(Claude 요구). Claude 등록 방식은 CIMD("Claude의 공개 신원 사용").
 - 사용자: `current_user()`가 HTTP에서는 토큰의 sub로, stdio에서는 `USER_ID`로 user_id를 정한다. 두 모드를 가르는 분기는 `current_user()` 밖으로 새지 않는다.
 - 파일
@@ -303,7 +305,8 @@ data/index.sqlite
 - 웹(`magus/web.py`): 같은 프로세스의 Starlette 라우트로 서버에서 그린 최소 HTML이다(디자인은 P1 범위가 아니다).
   - 페이지: `/login`, `/inbox`(업로드·목록·삭제), `/book`(임포트·docx 내보내기), `/checklist`(문헌 신호등 🟢확인 🟡미확인 🔴참고문헌에 없음 ⚪미연결 + 장별), `/download/{token}`.
   - 로그인
-    - 원격: 인증 서버에 OAuth 인가 코드 + PKCE(S256) + `resource=PUBLIC_URL/mcp`로 로그인한다. 토큰은 MCP와 같은 JwtVerifier로 검증하고, 허용 목록 밖은 403이다.
+    - 원격: 인증 서버에 OAuth 인가 코드 + PKCE(S256) + `resource=PUBLIC_URL/mcp`로 로그인한다. 토큰은 MCP와 같은 JwtVerifier로 검증한다.
+    - 실패 화면은 둘로 나뉜다. 토큰 무효는 401("로그인 토큰을 받아들이지 못했습니다", 원인은 서버 로그)이다. 허용 목록 밖은 403("허용 목록에 없습니다")이고, **본인의 사용자 id를 화면에 보여 준다**(운영자가 목록에 넣을 값).
     - 로컬(인증 없는 HTTP, 루프백 전용): `USER_ID`로 바로 로그인한다.
   - 세션은 HMAC 서명 쿠키(HttpOnly, SameSite=Lax, https면 Secure, 12시간)다. 모든 POST는 CSRF 토큰을 확인한다(`magus/signing.py`).
   - 내려받기: book_export(원격·HTTP)는 서명·만료(24시간) 링크를 돌려준다. 링크만으로는 받을 수 없고, 같은 사용자로 로그인해 있어야 한다.

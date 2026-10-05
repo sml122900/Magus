@@ -232,11 +232,26 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
         except (OSError, ValueError, RuntimeError) as e:
             log.warning("web login: token exchange failed (%s)", type(e).__name__)
             return self._page("로그인", '<p class="msg err">로그인에 실패했습니다. <a href="/login">다시 로그인</a></p>', status=502)
-        claims = await run_in_threadpool(self.verifier.decode, token)
-        uid = self.verifier.user_of(claims) if claims else None
-        if uid is None:
-            status = 403 if claims else 401
-            return self._page("로그인", '<p class="msg err">허용 목록에 없는 사용자입니다. 운영자에게 문의하세요.</p>', status=status)
+        claims, reason = await run_in_threadpool(self.verifier.check, token)
+        if claims is None:  # 토큰을 받아들이지 못함(서버 설정 문제일 가능성이 크다). 원인은 서버 로그에만
+            log.warning("web login: token rejected (%s)", reason)
+            return self._page(
+                "로그인",
+                '<p class="msg err">로그인은 됐지만 Magus가 로그인 토큰을 받아들이지 못했습니다(401). '
+                "서버 설정 문제일 수 있습니다. 운영자에게 알려 주세요. 원인은 서버 로그에 있습니다.</p>"
+                '<p><a href="/login">다시 로그인</a></p>',
+                status=401,
+            )
+        uid = self.verifier.user_of(claims)
+        if uid is None:  # 토큰은 유효하지만 허용 목록 밖. 본인의 사용자 id를 보여 준다(운영자가 목록에 넣을 값)
+            sub = str(claims.get("sub", ""))
+            log.warning("web login: not allowed sub_hash=%s", hashlib.sha256(sub.encode()).hexdigest()[:10])
+            return self._page(
+                "로그인",
+                '<p class="msg err">로그인은 됐지만 이 계정은 Magus 허용 목록에 없습니다(403).</p>'
+                f"<p>운영자에게 아래 사용자 id를 알려 주세요.</p><p><code>{html.escape(sub)}</code></p>",
+                status=403,
+            )
         response = RedirectResponse(str(pending.get("n") or "/book"), status_code=303)
         self._cookie(response, SESSION_COOKIE, sign({"uid": uid, "sid": secrets.token_hex(8)}, self.secret, "session",
                                                     SESSION_TTL), SESSION_TTL)
