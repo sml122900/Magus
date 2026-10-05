@@ -146,6 +146,8 @@ PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버
 3. **작업 시작**: 매번 `book_outline`으로 시작하고, 필요한 장만 `book_read_chapter`로 읽습니다.
 4. **문헌 검증**: 읽은 문헌은 `ref_add`로 발췌와 함께 넣습니다. 그러면 그 문헌을 인용한 곳이 verified가 됩니다.
    - 장을 고치면 `book_write_chapter`가 미확인 인용을 알려 줍니다.
+   - 원고 본문의 원본은 저자의 Word 파일입니다(결정 #68, `docs/decisions/author-file-is-source.md`). 수정안은 대화에서 받아 Word에 반영하고, `book_write_chapter`는 Magus 안에 저장하라고 할 때만 씁니다.
+   - 원고가 바뀌면 다시 올립니다. 다시 올리기 기능은 설계 중입니다(`docs/decisions/reupload-design.md`). 그 전에 `replace`로 다시 임포트하면 결정과 미해결까지 휴지통으로 갑니다.
 5. **문체**: 좋아하는 문장은 `style_add`로 넣고, 문체 작업 전에 `style_search`로 꺼냅니다.
 
 같은 일을 명령줄로도 할 수 있습니다(아래 "명령").

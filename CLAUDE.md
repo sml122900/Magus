@@ -8,7 +8,10 @@
   - 서버는 Vultr 서울에 배포했다(`https://magus.lifebookapplication.com`, WorkOS Staging). 백업과 서버 복구 시험을 마쳤다.
   - claude.ai 커스텀 커넥터로 웹·모바일 연결에 성공했다(CIMD).
 - 원격 저장소: GitHub 비공개 `sml122900/Magus`(`origin`). **단계 태그를 찍으면 push까지 한다**(아래 "원격 저장소").
-- 다음 할 일: **7단계 아버지 온보딩**(`docs/onboarding-father.md`). 시작 전 확인은 status.md "7단계 전 확인"을 따른다.
+- **사용자 결정 #68(2026-10-06)**: 원고 본문의 원본은 저자의 Word(·한글) 파일이다. Magus의 원고는 최신 업로드의 사본이다(`docs/decisions/author-file-is-source.md`).
+  - 다시 올리기가 핵심 기능이 됐다. 설계안 초안은 `docs/decisions/reupload-design.md`이고, 아직 구현하지 않았다.
+- 최신본 docx 시험 임포트(2026-10-06, 로컬 `father-trial` 사용자): 표 37개의 글이 빠지고, "제N부 들어가며" 두 곳이 장 밖으로 나가는 문제를 찾았다. 고칠 것은 status.md 검토 대기 #69~#76에 있다.
+- 다음 할 일: 검토 대기 #69~#76에 대한 답을 받아 7단계 전 항목을 고친다. 그다음 **7단계 아버지 온보딩**(`docs/onboarding-father.md`)을 한다. 시작 전 확인은 status.md "7단계 전 확인"을 따른다.
 - 서버 교체 필요: 서버는 아직 **옛 이력의 bundle**을 쓴다(2026-10-05 filter-repo 정리 전, 보고서 포함).
   - 다음 배포 때 status.md에 적힌 절차로 바꾼다: 새 bundle → `git fetch` 후 `reset --hard FETCH_HEAD` → reflog expire와 `gc --prune=now`.
 - 알려진 문제: `tests/test_http.py::test_request_size_limit`가 Windows에서 간헐적으로 실패한다(413 응답 전에 연결이 리셋됨). 서버 동작은 정상이다(status.md 7절).
@@ -18,6 +21,7 @@
 
 책을 쓰는 사람이 머릿속 재료를 세 책장(코어)에 넣어 두고, Claude가 MCP로 꺼내 쓰게 하는 서버.
 책장은 **사람 소유**(여러 책에 재사용), 원고는 **책(프로젝트) 소유**.
+**원고 본문의 원본은 저자의 파일(Word·한글)이다.** Magus의 원고는 최신 업로드의 사본이다. 저자는 Word에서 고치고, 바뀌면 다시 올린다(사용자 결정 #68).
 
 ## 왜 만드나 (막아야 할 다섯 가지)
 
@@ -27,7 +31,7 @@
 2. 대화가 바뀌면 생각이 사라졌다(md 수동 첨부 8번, ChatGPT 답변 복붙). → **Casper(영감) 책장**
 3. 인용 약 270개, 참고문헌 약 250편이 LLM 기억에서 생성됐다. Word 코멘트 86개 중 82개가 "확인 필요". → **Melchior(문헌) + 인용 게이트**
 4. 문체가 저자의 목소리가 아니라 LLM 기본 문체였다. → **Balthasar(문체) 책장**
-5. 원고가 두 파일로 갈라졌다. → **단일 진실 원천(디스크의 ch-NN.md)**
+5. 원고가 두 파일로 갈라졌다. → **단일 진실 원천은 저자 파일.** Magus는 최신 업로드의 사본(ch-NN.md)을 들고, 다시 올리기로 맞춘다(#68. P0의 "디스크의 ch-NN.md가 원천"에서 바뀜)
 
 ## 이름과 명명 규칙
 
@@ -46,10 +50,14 @@
 
 ## 절대 원칙
 
+- **원고 본문의 원본은 저자 파일이다**(사용자 결정 #68).
+  - 원고 상태(목차·결정·미해결·판 이력)는 대화 밖, Magus에 둔다. 이 원칙은 그대로다. 바뀐 것은 원고 본문의 원본이 저자 파일이라는 점이다.
+  - Claude의 원고 수정안은 대화로 내고, 저자가 Word에 반영한다. Magus 안의 원고를 Claude가 고쳐 쓰는 것(book_write_chapter)은 기본 흐름이 아니다.
+  - 서버 instructions 규칙 4는 아직 반대로 적혀 있다. 바꾸는 것은 승인 대기다(status.md #74).
 - **에이전트는 책 전체를 들고 있지 않는다.** 한 작업의 컨텍스트는 목차·결정·미해결(book_outline) + 장 1개 + 검색 top-k로 이루어진다. 책 전체를 반환하는 도구는 만들지 않는다.
 - **인용 게이트**: refs에 `status=verified`로 있는 출처만 인용할 수 있다. 없는 출처는 본문에 `[출처 필요: 주장 요약]`으로 남긴다. 쓰기를 막지는 않는다. 표시하고 집계만 하며, 판단은 사용자가 한다.
 - **누가 말했는지 보존한다.** Casper는 사용자 발화(`author=me`)와 AI 발화(`author=ai`)를 구분해 저장하고, 검색에서는 me를 먼저 보여 준다.
-- **원본은 사람이 읽을 수 있는 파일(markdown/json)이다. SQLite는 인덱스일 뿐이다.** 인덱스는 언제든 파일에서 다시 만들 수 있어야 한다(`magus reindex`). 파일에 없는 정보를 SQLite에만 두지 않는다. 예외는 계산으로 얻는 값(char_count, unverified_cite_count, chunks)이다.
+- **Magus 안의 원본은 사람이 읽을 수 있는 파일(markdown/json)이다. SQLite는 인덱스일 뿐이다.** (원고 본문의 ch-NN.md는 그 자체가 저자 파일의 사본이다.) 인덱스는 언제든 파일에서 다시 만들 수 있어야 한다(`magus reindex`). 파일에 없는 정보를 SQLite에만 두지 않는다. 예외는 계산으로 얻는 값(char_count, unverified_cite_count, chunks)이다.
 - **프로젝트 폴더 밖의 파일은 사용자가 경로를 명시해 지시했을 때만 읽는다.** 필요한 파일이 없으면 status.md에 "대기: 무엇을, 누가"로 기록하고 멈춘다. 다른 폴더를 뒤져 찾아오지 않는다.
   - "프로젝트 폴더 밖"에는 환경이 알려 준 경로(대화 기록 파일, 홈 폴더, Downloads)도 포함된다. 사용자가 이 세션에서 경로를 직접 적었을 때만 읽는다.
 - **지시문의 참조를 찾지 못하면 밖에서 찾거나 추측하지 않는다.** status.md에 "불명: …"으로 적고, 내 판단으로 진행한 뒤 보고한다(예: "위 세 가지 테스트 프롬프트"가 메시지에 없을 때).
@@ -205,7 +213,7 @@ data/index.sqlite
 - `book_issues(status=open|closed|all, chapter_number?, origin?, kind?, limit=50, project_id?)` → 미해결 목록(조회 전용). 한 줄에 `I번호 · 상태 · 장 · origin · kind(→ref_key) · 내용(300자)`를 담는다. limit 최대 200. *(사용자 요청으로 추가된 도구)*
 - `book_read_chapter(number, project_id?)` → JSON을 돌려준다. `content`(본문 markdown만), `title`, `status`, `part_number`, `version`, `last_note`, `unverified_cites`, `open_issues`(그 장의 열린 미해결). *(1단계 검토 반영으로 미리 구현)*
   - **`unverified_cites`**: 인용 게이트 결과 중 verified가 아닌 것(`{key, status: unverified|unknown, count, cited_as}`). `[]`는 검사했고 미확인 인용이 없다는 뜻이다(null은 검사 전, 4단계 이후에는 나오지 않는다). `needs_source`는 `[출처 필요: …]` 표시 수다.
-- `book_write_chapter(number, content, note, title?, status?, project_id?)` → content는 본문만 받는다. 이전 본문을 versions/에 저장하고 새 본문을 기록한 **뒤** ref_check를 자동 실행한다(막지 않음). 응답에 `unverified_cites`와 `needs_source`를 담고 장별 집계를 갱신한다. 없는 번호면 새 장을 만든다. front matter가 붙어 오면 벗겨 내고 `warnings`에 경고를 넣는다. 빈 본문은 거부한다.
+- `book_write_chapter(number, content, note, title?, status?, project_id?)` → **#68 이후 기본 흐름이 아니다**(저자가 Magus에 저장하라고 할 때만). 위치는 다시 올리기 설계안 7절을 따른다. content는 본문만 받는다. 이전 본문을 versions/에 저장하고 새 본문을 기록한 **뒤** ref_check를 자동 실행한다(막지 않음). 응답에 `unverified_cites`와 `needs_source`를 담고 장별 집계를 갱신한다. 없는 번호면 새 장을 만든다. front matter가 붙어 오면 벗겨 내고 `warnings`에 경고를 넣는다. 빈 본문은 거부한다.
 - `book_decide(text, project_id?)` → D번호.
 - `book_issue_add(text, chapter_number?, origin=user|agent, project_id?)` → 없는 장 번호는 거부한다.
 - `book_issue_close(id="I3"|"3", note?, project_id?)`
@@ -219,6 +227,8 @@ data/index.sqlite
   - 참고문헌 섹션은 import_bibliography로 넘긴다. 그다음 citation 이슈를 refs와 연결한다.
   - 그림·표·수식은 자리표시자(`[그림 N]`, `[표 N]`, `[수식]`)로 남긴다. 원본은 **무엇보다 먼저** original/에 복사한다.
   - 재실행: 같은 project_id는 거부한다. `replace=true`면 기존 프로젝트를 trash/로 옮긴다. refs는 이미 있는 key를 건드리지 않는다.
+    - **replace는 다시 올리기가 아니다.** 결정·직접 남긴 미해결·닫은 미해결·판 이력까지 휴지통으로 간다. 같은 책의 새 판은 다시 올리기(설계안 `docs/decisions/reupload-design.md`, 미구현)로 한다. 그 전까지 아버지 원고는 replace로 다시 올리지 않는다.
+  - docx의 표는 지금 `[표 N]`만 남기고 칸의 글을 버린다(PDF는 문단으로 들어온다). "제N부 들어가며"는 부 제목으로 읽혀 부 이름을 덮고, 그 본문은 unsplit.md로 간다. 둘 다 검토 대기 #69·#70이다.
   - 리포트: 장·부 수, 분할 못 한 구간, 목차로 판단해 버린 제목 줄, 빠진 장 번호, 코멘트→이슈(kind별, ref_key 비율, 장 밖 코멘트), 참고문헌→refs(파싱 실패 줄, key 충돌), `ch-NN.md ↔ 제목` 매핑표. 코멘트 분류 전체 표는 `original/import-report.md`에 있다. 평소에는 리포트를 낸 뒤 멈추고 사용자의 매핑 확인을 기다린다.
 - `book_export(path?, project_id?)` → 부 H1·장 H2·소제목 H3로 합쳐 docx를 만든다. path는 파일 이름만 받고 `exports/`에 저장한다. 코멘트와 그림은 복원하지 않는다.
 
@@ -375,7 +385,10 @@ docker compose -f deploy/compose.yaml …                                      #
 
 `fixtures/`에는 원고 docx 1개(파일명에 "닿으려는_종")와 대화 기록 md 3개(그중 하나는 `대화_전체_기록.md`)를 둔다. 실제 원고이므로 리포에 커밋하지 않는다(.gitignore). 읽기만 한다.
 - 실제 내용: 원고 `261002-닿으려는_종_전면개정_그림추가.pdf`(PDF, 297쪽, docx 없음), `대화_전체_기록.md`, `대화기록_닿으려는종.md`, `도시_유전자_민주주의_대화.md`, `사피엔스_총균쇠_대화.md`. 원본은 사용자의 Downloads에 있고, fixtures는 사본이다.
-- 실데이터는 default 사용자의 `book` 프로젝트다. 리포트 사본은 `data/realdata/`에 있다.
+- 최신본 docx(2026-10-06 받음): `261005-인류가_선택한_진화_시대가_선택한_도시_원고.docx`. 책 제목이 바뀌었고, 코멘트 129건(작성자 모두 Claude), 표 37, 그림 10이다.
+  - 로컬 `father-trial` 사용자의 `book`에 시험 임포트해 두었다(지우지 않음). 서버와 default에는 넣지 않았다.
+  - 비교 결과는 `data/realdata/2026-10-06-father-trial-*.md`에 있다.
+- 실데이터는 default 사용자의 `book` 프로젝트다(10/02 PDF 판). 리포트 사본은 `data/realdata/`에 있다.
 - 합성 fixture는 `tests/fixtures/synthetic/`에 **커밋해 둔다**(사용자 결정 #11: 비밀이 아니고 재현성이 더 중요하다). `magus synth tests/fixtures/synthetic`로 다시 만든다(`src/magus/synthetic.py`). 실데이터(루트 `fixtures/`, gitignore)와는 계속 분리한다. 합성 PDF는 실원고 레이아웃을 흉내 낸다. 합성으로 돌린 리포트에는 "합성 fixture"라고 표시한다. 합성 데이터를 임포트할 때는 `USER_ID=synthetic`을 쓴다.
 
 ## 문서화 규약
