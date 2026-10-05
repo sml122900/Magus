@@ -8,6 +8,7 @@ kind
 
 출처 확인 표현: "확인 필요", "인용 확인 필요", "서지", "원문 대조"와 그 실제 변형
 ("확인필요", "확인할 필요", "원문과 대조해", "원문으로 대조해" — 실원고 코멘트에서 확인).
+태그(#72, 최신본): [점검·인용]·[점검·서지]는 출처 확인, [점검·통계|수치|연도|사실|사례|계산]은 fact다. 태그가 표현보다 먼저다.
 """
 
 from __future__ import annotations
@@ -24,6 +25,12 @@ _MARKER = re.compile(
 )
 # "서지"는 다른 낱말 속("일어서지")에 흔히 들어 있다. 앞에 한글이 없고, 뒤가 한글이 아니거나 서지 관련 낱말일 때만 인정한다.
 _SEOJI = re.compile(r"(?<![가-힣])서지(?:(?![가-힣])|(?=정보|사항|확인|누락|오류|표기|데이터|학))")
+# 최신본 코멘트의 태그: "[점검·인용] …", "[점검·통계] …". "확인 필요"가 없어도 확인 요청이다(#72).
+# 인용·서지는 출처 확인(문헌이 지목되면 citation, 아니면 fact), 나머지 여섯은 사실·수치 확인(fact).
+# 모르는 태그([점검·표현] 등)와 [사진]은 지금처럼 본문의 표현으로 가른다.
+_CHECK_TAG = re.compile(r"^\s*\[\s*점검\s*[·・.‧ ]\s*(?P<what>[^\]\s]{1,8})\s*\]")
+CHECK_SOURCE = frozenset({"인용", "서지"})
+CHECK_FACT = frozenset({"통계", "수치", "연도", "사실", "사례", "계산"})
 COMMENT_ANCHOR_SPLIT = "\n— 원문: "
 NO_TERMS: frozenset[str] = frozenset()
 
@@ -70,6 +77,12 @@ def classify_comment(
     text: str, anchor: str | None = None, exclude: frozenset[str] = NO_TERMS
 ) -> tuple[IssueKind, str | None]:
     """(kind, ref_key 후보)."""
+    if m := _CHECK_TAG.match(text):  # [점검·수치] 같은 태그가 무엇을 확인하라는지 먼저 본다(#72)
+        if m.group("what") in CHECK_SOURCE:
+            cite = comment_citation(text, anchor, exclude)
+            return ("citation", cite.key) if cite else ("fact", None)
+        if m.group("what") in CHECK_FACT:
+            return "fact", None
     if not is_citation_comment(text):
         return "general", None
     if cite := comment_citation(text, anchor, exclude):

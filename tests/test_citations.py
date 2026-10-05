@@ -45,6 +45,19 @@ def test_make_ref_key_folds_diacritics():
         ("서지 정보 누락", None, ("fact", None)),  # 출처 확인 요청인데 문헌 지목 없음
         ("원문 대조: Hu et al. 2023 p.12", None, ("citation", "hu2023")),
         ("이 문단은 너무 길다", "Clack(2012)", ("general", None)),
+        # 최신본의 [점검·…] 태그(#72): "확인 필요"가 없어도 확인 요청이다
+        ("[점검·인용] Xu et al. 2020의 기후 틈새 수치를 원문으로.", None, ("citation", "xu2020")),
+        ("[점검·인용] \"경계 지대\"라는 표현의 출처.", "숲 가장자리(Potts, 1998)", ("citation", "potts1998")),
+        ("[점검·인용] 인용문의 출처를 밝힐 것.", "긴 인용문", ("fact", None)),  # 문헌이 지목되지 않음
+        ("[점검·서지] 감사원 보고서의 정확한 제목·발간일 확인.", None, ("fact", None)),
+        ("[점검·통계] 동해 명태 어획량의 연도별 수치.", "Clack(2012)", ("fact", None)),  # 문헌이 있어도 수치 확인
+        ("[점검·수치] 해발고도 출처 통일.", None, ("fact", None)),
+        ("[점검 · 연도] 윤중제 준공(1968)", None, ("fact", None)),
+        ("[점검·사실] 마추픽추 건설 시기", None, ("fact", None)),
+        ("[점검·사례] 2010년 파키스탄 홍수", None, ("fact", None)),
+        ("[점검·계산] 배수 계산 다시", None, ("fact", None)),
+        ("[사진] 저자가 찍은 태백 사진으로 교체", None, ("general", None)),
+        ("[점검·표현] 문장이 길다", None, ("general", None)),  # 모르는 태그는 본문 표현으로 가른다
     ],
 )
 def test_classify_comment(comment, anchor, expected):
