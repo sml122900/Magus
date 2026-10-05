@@ -75,14 +75,26 @@ class AuthConfig:
 
 
 def parse_allowed(text: str) -> dict[str, str]:
+    """`sub=user_id` 쉼표 목록. 같은 sub가 두 번(뒤의 것이 조용히 이긴다)이거나 같은 이름이 두 번(두 계정이 한 공간을 쓴다)이면
+    시작하지 않는다. 오류에는 항목 순서만 쓰고 sub(사용자 id)는 쓰지 않는다(로그에 남는다)."""
     out: dict[str, str] = {}
-    for item in (part.strip() for part in text.split(",")):
-        if not item:
-            continue
+    seen_sub: dict[str, int] = {}
+    seen_name: dict[str, int] = {}
+    items = [part.strip() for part in text.split(",")]
+    for n, item in enumerate((i for i in items if i), 1):
         sub, sep, user_id = item.rpartition("=")
-        if not sep or not sub.strip():
-            raise ValueError(f"ALLOWED_USERS 항목 {item!r}: 'sub=user_id' 형식이어야 한다")
-        out[sub.strip()] = safe_id(user_id.strip(), "ALLOWED_USERS의 user_id")
+        sub = sub.strip()
+        if not sep or not sub:
+            raise ValueError(f"ALLOWED_USERS의 {n}번째 항목: 'sub=user_id' 형식이어야 합니다")
+        name = safe_id(user_id.strip(), "ALLOWED_USERS의 user_id")
+        if sub in seen_sub:
+            raise ValueError(f"ALLOWED_USERS의 {seen_sub[sub]}번째와 {n}번째 항목이 같은 sub입니다. "
+                             "한 계정은 한 번만 적으세요(두 번이면 어느 공간으로 들어갈지가 순서로 정해집니다)")
+        if name in seen_name:
+            raise ValueError(f"ALLOWED_USERS의 {seen_name[name]}번째와 {n}번째 항목이 같은 이름(user_id)입니다. "
+                             "두 계정이 한 공간을 쓰게 되므로 시작하지 않습니다. 이름을 서로 다르게 적으세요")
+        seen_sub[sub], seen_name[name] = n, n
+        out[sub] = name
     return out
 
 

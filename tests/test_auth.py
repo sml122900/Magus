@@ -134,6 +134,28 @@ def test_server_refuses_to_start_with_other_audience(data_dir: Path):
     assert "streamable-http" not in done.stderr  # 듣기 전에 멈췄다
 
 
+def test_allow_list_refuses_duplicate_sub_or_name(data_dir: Path):
+    """같은 sub가 두 번이면 뒤의 것이 조용히 이기고, 같은 이름이 두 번이면 두 계정이 한 공간을 쓴다. 둘 다 시작하지 않는다.
+    이유는 한국어로 남기되 sub(사용자 id)는 쓰지 않는다. 지금 서버 모양(서로 다른 sub 둘, default·father)은 통과한다."""
+    assert parse_allowed("user_01AAA=default,user_01BBB=father") == {"user_01AAA": "default", "user_01BBB": "father"}
+    for text, why in (("user_01AAA=default, user_01BBB=father, user_01AAA=father2", "1번째와 3번째 항목이 같은 sub"),
+                      ("user_01AAA=default,user_01BBB=default", "1번째와 2번째 항목이 같은 이름"),
+                      (" user_01AAA = default ,user_01AAA=default", "같은 sub")):
+        with pytest.raises(ValueError, match=why) as caught:
+            parse_allowed(text)
+        assert "user_01" not in str(caught.value)
+    with pytest.raises(ValueError, match="2번째 항목: 'sub=user_id' 형식") as caught:
+        parse_allowed("user_01AAA=default,user_01CCC")
+    assert "user_01" not in str(caught.value)
+    env = {**os.environ, "DATA_DIR": str(data_dir), "EMBEDDINGS": "none", "PYTHONIOENCODING": "utf-8",
+           "PUBLIC_URL": "http://127.0.0.1:9", "AUTH_ISSUER": ISSUER, "ALLOWED_USERS": "user_01AAA=default,user_01BBB=default",
+           "SESSION_SECRET": "s" * 40}
+    done = subprocess.run([sys.executable, "-m", "magus", "serve", "--transport", "http", "--port", str(_free_port())],
+                          env=env, capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert done.returncode == 2 and "설정 오류로 시작하지 않습니다: ALLOWED_USERS의 1번째와 2번째 항목이 같은 이름" in done.stderr
+    assert "user_01" not in done.stderr and "streamable-http" not in done.stderr
+
+
 @pytest.fixture
 def jwks_url(keys):
     """인증 서버의 JWKS 엔드포인트 흉내(로컬 HTTP). PyJWKClient는 http(s)만 받는다."""

@@ -127,7 +127,7 @@
 | `AUTH_ISSUER` | — | 원격 모드: 인증 서버 issuer(WorkOS AuthKit). 있으면 HTTP에서 토큰 검증을 켠다 |
 | `AUTH_JWKS_URL` | issuer 메타데이터의 jwks_uri | 서명 키 주소 |
 | `AUTH_AUDIENCE` | `PUBLIC_URL/mcp` | 비워 둔다. `PUBLIC_URL/mcp`와 다르면 시작하지 않는다. 토큰 aud는 그 값 하나만 받는다(문자열, 또는 원소 하나인 목록. 결정 #79, `docs/decisions/shared-auth-audience.md`) |
-| `ALLOWED_USERS` | — | `sub=user_id` 쉼표 목록(sub는 WorkOS 사용자 id `user_…`, 이메일 아님). 여기 없는 sub는 403. 비우면 모두 403(첫 배포에서 id를 얻는 단계). 공개 가입은 없다 |
+| `ALLOWED_USERS` | — | `sub=user_id` 쉼표 목록(sub는 WorkOS 사용자 id `user_…`, 이메일 아님). 여기 없는 sub는 403. 비우면 모두 403(첫 배포에서 id를 얻는 단계). 같은 sub나 같은 이름이 두 번이면 서버가 시작하지 않는다(오류에는 항목 순서만, id는 쓰지 않음). 공개 가입은 없다 |
 | `PORT` | 8000 | `magus serve --transport http`의 기본 포트 |
 | `MAX_UPLOAD_MB` | 50 | 받은함 업로드 한 개 한도 |
 | `MAX_USER_MB` | 1000 | 사용자별 저장 용량(사용자 폴더 전체) |
