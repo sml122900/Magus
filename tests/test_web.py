@@ -266,56 +266,126 @@ def test_book_import_defaults_follow_whether_a_book_exists(server_proc):
     # 용어 통일(#85): 저자에게는 확인 요청·수정본·생각으로 보인다
     assert '<th class="num">열린 확인 요청</th><th class="num">수정본·올린 시각</th>' in has_book
     assert "(수정본) 장 제목이 많이 달라도" in has_book and "새 판" not in has_book and "미해결" not in has_book
-    assert '<a href="/issues">확인 요청</a>' in has_book and '<a href="/ideas">생각</a>' in has_book
+    assert '<a href="/issues">확인 요청</a>' in has_book and '<a href="/shelf">책장</a>' in has_book  # 생각·문헌·문체는 책장 하나로
     assert "border:1px solid var(--mute)" in has_book and "--input" not in has_book  # 입력칸 테두리 대비 4.75
 
 
-def test_shelf_pages_are_read_only_lists(server_proc):
-    """생각·문헌·문체 화면(읽기 전용). 넣는 것은 Claude 대화로 한다: 빈 책장에는 예문 한 줄, 화면에는 로그아웃 말고 POST 폼이 없다."""
+def _seed_shelf(data_dir: Path) -> None:
     from magus.store import Idea, LocalStore, Passage, Ref, StyleEntry
+
+    store = LocalStore(data_dir)  # 서버와 같은 데이터 폴더에 직접 넣는다(서버는 매 요청 인덱스를 읽는다)
+    store.add_ideas("alice", [
+        Idea("20261001000000000-aaaaaa", "물가는 궁지다", "thought", "me", "산책", created_at="2026-10-01T05:07:00.000Z"),
+        Idea("20261001000000001-aaaaab", "그 관점은 흥미롭습니다", "conversation", "ai", "대화", "20261001000000000-aaaaaa"),
+        Idea("20261002000000000-aaaaac", "긴 생각 " + "가" * 400, "thought", "me"),
+        *(Idea(f"2026090{n // 100}00000{n:05d}-bbbbbb", f"오래된 생각 {n}", "thought", "me") for n in range(120)),
+    ])
+    store.put_ref("alice", Ref("clack2012", "verified", {"first_author": "Clack", "authors": "Clack, J. A.", "year": "2012",
+                                                         "title": "Gaining ground", "container": "Indiana University Press"}),
+                  passages=[Passage("tetrapods came ashore", "1장의 근거", "p.45")])
+    store.put_ref("alice", Ref("diamond1997", "unverified", {"first_author": "Diamond", "year": "1997", "title": "Guns"}))
+    store.create_project("alice", "책", project_id="b")
+    store.write_chapter("alice", "b", 1, "물고기가 올라왔다(Clack, 2012).", "x", title="물가")
+    tags = {"호흡": "짧음", "시점": "1인칭", "열기": "장면", "장치": ["반복"], "어미": "-다", "톤": "건조"}
+    store.add_style("alice", StyleEntry("20261003000000000-cccccc", "짧다. 끊긴다.", "짧은 호흡", tags, "유홍준"))
+    store.add_style("alice", StyleEntry("20261003000000001-cccccd", "물결이 길게 이어지는 문장", "긴 호흡", {**tags, "호흡": "긺", "장치": []}))
+    store.close()
+
+
+def test_shelf_books_and_board_lists(server_proc):
+    """책장: 생각·문체·문헌이 책 세 권으로 꽂히고(낭독기 이름 "생각, 항목 N개"), 책을 누르면 게시판형 목록이 열린다.
+    한 줄 = 제목(없으면 내용 앞부분을 흐리게) · 작성 시각 · 보조 정보, 누르면 그 자리에서 펼친다(details). 예전 주소는 넘긴다."""
+    from magus.ids import local_time
 
     base, data_dir, _ = server_proc({})
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         c.get("/login?next=/book")
-        empty = {path: c.get(path).text for path in ("/ideas", "/refs", "/styles")}
-        assert 'Claude에게 이렇게 말하면 쌓입니다. 예: "생각에 기록해 줘: …"' in empty["/ideas"]
-        assert "아직 등록한 문헌이 없습니다." in empty["/refs"] and "아직 모은 문장이 없습니다." in empty["/styles"]
+        empty = {path: c.get(path).text for path in ("/shelf/ideas", "/shelf/refs", "/shelf/styles")}
+        assert 'Claude에게 이렇게 말하면 쌓입니다. 예: "생각에 기록해 줘: …"' in empty["/shelf/ideas"]  # 기존 안내 문구 그대로
+        assert "아직 등록한 문헌이 없습니다." in empty["/shelf/refs"] and "아직 모은 문장이 없습니다." in empty["/shelf/styles"]
+        assert 'aria-label="생각, 항목 0개"' in c.get("/shelf").text
+        _seed_shelf(data_dir)
 
-        store = LocalStore(data_dir)  # 서버와 같은 데이터 폴더에 직접 넣는다(서버는 매 요청 인덱스를 읽는다)
-        store.add_ideas("alice", [
-            Idea("20261001000000000-aaaaaa", "물가는 궁지다", "thought", "me", "산책"),
-            Idea("20261001000000001-aaaaab", "그 관점은 흥미롭습니다", "conversation", "ai", "대화", "20261001000000000-aaaaaa"),
-            Idea("20261002000000000-aaaaac", "긴 생각 " + "가" * 400, "thought", "me"),
-            *(Idea(f"2026090{n // 100}00000{n:05d}-bbbbbb", f"오래된 생각 {n}", "thought", "me") for n in range(120)),
-        ])
-        store.put_ref("alice", Ref("clack2012", "verified", {"first_author": "Clack", "authors": "Clack, J. A.", "year": "2012",
-                                                             "title": "Gaining ground", "container": "Indiana University Press"}),
-                      passages=[Passage("tetrapods came ashore", "1장의 근거", "p.45")])
-        store.put_ref("alice", Ref("diamond1997", "unverified", {"first_author": "Diamond", "year": "1997", "title": "Guns"}))
-        store.create_project("alice", "책", project_id="b")
-        store.write_chapter("alice", "b", 1, "물고기가 올라왔다(Clack, 2012).", "x", title="물가")
-        tags = {"호흡": "짧음", "시점": "1인칭", "열기": "장면", "장치": ["반복"], "어미": "-다", "톤": "건조"}
-        store.add_style("alice", StyleEntry("20261003000000000-cccccc", "짧다. 끊긴다.", "짧은 호흡", tags, "유홍준"))
-        store.add_style("alice", StyleEntry("20261003000000001-cccccd", "길게 이어지는 문장", "긴 호흡", {**tags, "호흡": "긺", "장치": []}))
-        store.close()
+        shelf = c.get("/shelf").text
+        for label in ("생각, 항목 123개", "문체, 항목 2개", "문헌, 항목 2개"):
+            assert f'aria-label="{label}"' in shelf
+        assert 'aria-current=page>책장</a>' in shelf and '<span class="spine-title" aria-hidden="true">생각</span>' in shelf
+        assert re.search(r'class="book" href="/shelf/ideas" style="--c:#[0-9a-f]{6};--fg:#[0-9a-f]{6};', shelf)
+        for old, new in (("/ideas?author=ai", "/shelf/ideas?author=ai"), ("/refs", "/shelf/refs"), ("/styles?tag=x", "/shelf/styles?tag=x")):
+            moved = c.get(old, follow_redirects=False)
+            assert moved.status_code == 302 and moved.headers["location"] == new
 
-        ideas = c.get("/ideas").text
+        ideas = c.get("/shelf/ideas").text
         assert ideas.index("긴 생각") < ideas.index("그 관점은") < ideas.index("물가는 궁지다")  # 최신 것부터
-        assert '<span class="tag">AI</span><br><small><a href="#idea-20261001000000000-aaaaaa">응답한 생각</a>' in ideas
-        assert "<details><summary>더 보기</summary>" in ideas and "1–100 / 123" in ideas and "다음</a>" in ideas
-        assert "오래된 생각 0" not in ideas and "오래된 생각 0<" in c.get("/ideas?page=2").text
-        only_ai = c.get("/ideas?author=ai").text
+        assert '<span class="t none">물가는 궁지다</span>' in ideas  # 제목이 없으면 내용 앞부분을 흐리게
+        when = local_time("2026-10-01T05:07:00.000Z", "%Y-%m-%d %H:%M")
+        assert f'<time class="when" datetime="2026-10-01T05:07:00.000Z">{when}</time><span class="aux">나</span>' in ideas
+        assert '<span class="aux"><span class="tag">AI</span></span>' in ideas
+        assert 'AI의 답입니다. <a href="/shelf/ideas/20261001000000000-aaaaaa">응답한 생각</a>' in ideas
+        assert '<a href="/shelf/ideas/20261001000000000-aaaaaa">이 항목의 주소</a>' in ideas
+        first = ideas.split("<summary>")[1].split("</summary>")[0]
+        assert "가" * 70 in first and "가" * 80 not in first and "가" * 400 in ideas  # 줄에는 앞부분만, 펼치면 전부
+        assert "1–100 / 123" in ideas and "다음</a>" in ideas and "오래된 생각 0<" not in ideas
+        assert "오래된 생각 0<" in c.get("/shelf/ideas?page=2").text
+        only_ai = c.get("/shelf/ideas?author=ai").text
         assert "그 관점은" in only_ai and "물가는 궁지다" not in only_ai
-        refs = c.get("/refs").text
-        assert refs.index("🟢 확인") < refs.index("Diamond(1997)")  # 확인한 문헌부터
-        assert "「tetrapods came ashore」<br><small>1장의 근거 · p.45</small>" in refs and "<td>제1장</td>" in refs
+
+        refs = c.get("/shelf/refs").text
+        assert refs.index("Clack(2012) 『Gaining ground』") < refs.index("Diamond(1997)")  # 확인한 문헌부터
+        assert "🟢 확인 · 인용된 장 1" in refs and "<p>인용된 장: 제1장</p>" in refs
+        assert '<p>「tetrapods came ashore」<br><span class="muted">1장의 근거 · p.45</span></p>' in refs
         assert '인용 현황은 <a href="/checklist?project=b&">인용 체크리스트</a>' in refs
-        assert "Gaining ground" not in c.get("/refs?status=unverified").text
-        styles = c.get("/styles").text
-        assert '<a class="tag" href="?tag=%EC%A7%A7%EC%9D%8C">짧음</a>' in styles and "<td>유홍준</td>" in styles
-        short = c.get("/styles?tag=짧음").text
+        assert "Gaining ground" not in c.get("/shelf/refs?status=unverified").text
+        styles = c.get("/shelf/styles").text
+        assert '<a class="tag" href="/shelf/styles?tag=%EC%A7%A7%EC%9D%8C">짧음</a>' in styles and "출처: 유홍준" in styles
+        assert '<span class="t">「짧다. 끊긴다.」</span>' in styles
+        short = c.get("/shelf/styles?tag=짧음").text
         assert "짧다. 끊긴다." in short and "길게 이어지는" not in short and "태그 「짧음」만" in short
-        for page in (ideas, refs, styles):
-            assert page.count('method="post"') == 1  # 로그아웃뿐
-        assert 'aria-current=page>문체</a>' in styles and '<a href="/ideas">생각</a>' in styles
-        assert '예: "이 문장을 문체에 넣어 줘: 「…」' in empty["/styles"] and "<h1>생각</h1>" in ideas
+
+        # 고유 주소: 그 항목이 있는 쪽을 열고, 그 항목을 펼친 채 보인다
+        oldest = "2026090000000" + "00000-bbbbbb"  # 오래된 생각 0(둘째 쪽)
+        old = c.get(f"/shelf/ideas/{oldest}").text
+        assert f'<details id="i-{oldest}" open data-here>' in old and "101–123 / 123" in old
+        assert old.count(" open data-here") == 1 and "scrollIntoView" in old
+        assert '<details id="i-clack2012" open data-here>' in c.get("/shelf/refs/clack2012").text
+        assert c.get("/shelf/ideas/20260101000000000-ffffff").status_code == 404
+        assert c.get("/shelf/nothing").status_code == 404
+        for page in (ideas, refs, styles, shelf):
+            assert page.count('method="post"') == 1  # 로그아웃뿐(읽기 전용)
+        assert "<h1>생각</h1>" in ideas and 'aria-current=page>책장</a>' in styles
+
+
+def test_shelf_search_marks_hits(server_proc):
+    """검색(GET ?q=): 두 글자 이상은 FTS(많이 맞은 것부터), 한 글자는 글자 그대로 포함(최근 것부터). 맞은 부분은 <mark>.
+    문체는 구절·출처로도, 문헌은 서지로도 찾는다(웹 전용 레인). 책장 전체 검색은 카테고리별로 묶는다."""
+    from magus.search import hybrid_search
+    from magus.store import Idea, LocalStore
+
+    base, data_dir, _ = server_proc({})
+    with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
+        c.get("/login?next=/book")
+        _seed_shelf(data_dir)
+        store = LocalStore(data_dir)
+        store.add_ideas("alice", [Idea("20261004000000000-dddddd", "물고기가 강을 거슬러 오른다", "thought", "me"),
+                                  Idea("20261004000000001-dddddd", "<script>alert(1)</script> 꺾쇠 생각", "thought", "me")])
+        store.close()
+        fish = c.get("/shelf/ideas", params={"q": "물고기"}).text
+        assert "<mark>물고기</mark>가 강을 거슬러 오른다" in fish and "물가는 궁지다" not in fish
+        assert "「물고기」 찾은 항목 1개 · 많이 맞은 것부터" in fish and 'value="물고기"' in fish
+        one = c.get("/shelf/ideas", params={"q": "물"}).text  # 한 글자: 2글자 조각 색인으로는 못 찾는다
+        assert "<mark>물</mark>고기가" in one and "<mark>물</mark>가는 궁지다" in one and "한 글자는 그 글자가 들어간" in one
+        assert "찾는 말이 들어간 항목이 없습니다." in c.get("/shelf/ideas", params={"q": "없는말"}).text
+        assert "<mark>물결</mark>이 길게" in c.get("/shelf/styles", params={"q": "물결"}).text  # 구절
+        assert "<mark>유홍준</mark>" in c.get("/shelf/styles", params={"q": "유홍준"}).text  # 출처
+        assert "<mark>Gaining</mark> ground" in c.get("/shelf/refs", params={"q": "gaining"}).text  # 서지
+        hit = c.get("/shelf/refs", params={"q": "ashore"}).text
+        assert re.search(r'<small class="hit">[^<]*tetrapods came <mark>ashore</mark></small>', hit)  # 제목 밖에서 맞으면 맞은 곳 한 줄
+        both = c.get("/shelf", params={"q": "물"}).text
+        assert re.search(r"<h2>생각 <small>\d+개</small>", both) and "<h2>문체 <small>1개</small></h2>" in both
+        assert "찾은 카테고리 2곳" in both and "<h2>문헌 <small>0개</small></h2><p>없음</p>" in both
+        evil = c.get("/shelf/ideas", params={"q": "<script>"}).text
+        assert "<script>alert" not in evil and "&lt;script&gt;alert(1)&lt;/script&gt;" in c.get("/shelf/ideas").text
+        assert 'value="&lt;script&gt;"' in evil
+    store = LocalStore(data_dir)
+    assert not hybrid_search(store, "alice", "물결", ["style"], 5)  # 문체 자문(style_search)은 여전히 구절을 보지 않는다
+    store.close()

@@ -278,7 +278,7 @@ async def test_concurrent_requests_keep_their_own_user(keys, auth_server):  # no
 
 
 def test_shelf_pages_show_only_own_shelf(server_proc, fake_issuer):  # noqa: F811
-    """생각·문헌·문체 화면도 세션 사용자의 책장만 보인다(같은 문헌 key·같은 project id여도)."""
+    """책장 화면·목록·검색·고유 주소도 세션 사용자의 것만 보인다(같은 문헌 key·같은 항목 id·같은 project id여도)."""
     issuer, issuer_state, _ = fake_issuer
     base, data_dir, _ = server_proc({
         "PUBLIC_URL": "http://127.0.0.1:{port}", "AUTH_ISSUER": issuer, "ALLOWED_USERS": "sub-alice=alice,sub-bob=bob",
@@ -287,12 +287,32 @@ def test_shelf_pages_show_only_own_shelf(server_proc, fake_issuer):  # noqa: F81
     store = LocalStore(data_dir)
     for n, (user, word) in enumerate((("alice", "앨리스"), ("bob", "밥"))):
         _fill(store, user, word, n + 1)
+        _fill_more(store, user, word)
+    store.add_ideas("bob", [Idea(id="20261006000000009-cccccc", text="밥만의 생각 바다", kind="thought", author="me")])
     store.close()
-    pages = {}
+    lists = ("/shelf/ideas?project=book", "/shelf/refs?project=book", "/shelf/styles", "/shelf?q=바다", "/shelf/ideas?q=바다",
+             "/shelf/refs?q=서지", "/shelf/styles?q=구절", "/shelf/refs/clack2012")
+    pages: dict[str, dict[str, httpx2.Response]] = {}
     for user in ("alice", "bob"):
         with httpx2.Client(base_url=base, timeout=120) as c:
             assert _login(c, issuer_state, f"sub-{user}").status_code == 303
-            pages[user] = {path: c.get(f"{path}?project=book").text for path in ("/ideas", "/refs", "/styles")}
+            pages[user] = {path: c.get(path) for path in (*lists, "/shelf", *(f"/shelf/ideas/2026100600000000{n}-aaaaaa" for n in (1, 2)),
+                                                          "/shelf/ideas/20261006000000009-cccccc")}
     for user, word, other in (("alice", "앨리스", "밥"), ("bob", "밥", "앨리스")):
-        for path, page in pages[user].items():
-            assert word in page and f"{other}의" not in page, (user, path)
+        for path, response in pages[user].items():
+            assert f"{other}의" not in response.text, (user, path)
+        for path in lists:
+            assert pages[user][path].status_code == 200 and word in pages[user][path].text, (user, path)
+    assert "밥만의" not in "".join(r.text for r in pages["alice"].values())
+    assert 'aria-label="생각, 항목 1개"' in pages["alice"]["/shelf"].text and 'aria-label="생각, 항목 2개"' in pages["bob"]["/shelf"].text
+    # 남의 항목 id로 들어가면 없는 항목(404)이다. 자기 항목은 펼쳐진 채 보인다
+    assert pages["alice"]["/shelf/ideas/20261006000000002-aaaaaa"].status_code == 404
+    assert pages["bob"]["/shelf/ideas/20261006000000001-aaaaaa"].status_code == 404
+    assert pages["alice"]["/shelf/ideas/20261006000000009-cccccc"].status_code == 404
+    assert "open data-here" in pages["alice"]["/shelf/ideas/20261006000000001-aaaaaa"].text
+    assert "open data-here" in pages["bob"]["/shelf/ideas/20261006000000009-cccccc"].text
+
+
+def _fill_more(store: LocalStore, user: str, word: str) -> None:
+    """책장 검색용: 문체 구절·문헌 서지에도 사용자 표시를 넣는다(웹 전용 레인)."""
+    store.add_style(user, StyleEntry(id="20261006000000005-dddddd", passage=f"{word}의 구절 둘", reason="호흡", tags=TAGS))

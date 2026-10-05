@@ -1,7 +1,8 @@
 """저자에게 보이는 글에 옛 이름·내부 이름이 남지 않았는지(#85·#87).
 
 Claude는 도구 설명·도구 응답·서버 instructions에 있는 말을 저자에게 그대로 옮긴다. 그래서 이 세 곳 모두에서
-코어 이름(Casper·Melchior·Balthasar)과 옛 이름('영감'·'책 지도'·'미해결'·'이슈'·'새 판'·'책장')을 찾는다.
+코어 이름(Casper·Melchior·Balthasar)과 옛 이름('영감'·'책 지도'·'미해결'·'이슈'·'새 판')을 찾는다.
+'책장'은 용어집 이름이 됐다(#92: 생각·문체·문헌과 카테고리를 모아 보는 화면).
 예외는 instructions 규칙 7의 "이런 말은 쓰지 않는다" 문장(AVOID) 하나뿐이다.
 """
 
@@ -21,7 +22,7 @@ from magus.store import LocalStore
 
 pytestmark = pytest.mark.anyio
 
-FORBIDDEN = re.compile(r"Casper|Melchior|Balthasar|영감|책 지도|미해결|이슈|새 판|책장")
+FORBIDDEN = re.compile(r"Casper|Melchior|Balthasar|영감|책 지도|미해결|이슈|새 판")
 SYNTH = Path(__file__).parent / "fixtures" / "synthetic"
 TAGS = {"호흡": "짧음", "시점": "1인칭", "열기": "장면", "장치": [], "어미": "-다", "톤": "건조"}
 

@@ -134,4 +134,4 @@ def test_web_hides_trash_and_shows_who_chose_tags(server_proc):  # noqa: F811
         ideas = c.get("/ideas").text
         styles = c.get("/styles").text
     assert "바다는 모든" in ideas and "도시는 만남의 밀도" not in ideas
-    assert styles.count("<small>AI가 뽑은 태그</small>") == 1 and styles.count("<small>저자가 정한 태그</small>") == 1
+    assert styles.count('<p class="muted">AI가 뽑은 태그</p>') == 1 and styles.count('<p class="muted">저자가 정한 태그</p>') == 1

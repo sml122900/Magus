@@ -22,7 +22,9 @@ IssueStale = Literal["comment_removed", "anchor_missing"]  # 다시 올린 뒤 "
 ChapterStatus = Literal["draft", "revising", "done"]
 CHAPTER_STATUSES: tuple[str, ...] = ("draft", "revising", "done")
 RefStatus = Literal["unverified", "verified"]
-Lane = Literal["ref_picked", "ref_full", "idea_me", "idea_ai", "style"]
+# style_passage·ref_bib는 웹 책장 검색 전용이다(문체 구절·문헌 서지). 도구 검색(style_search·ref_search)은 쓰지 않고 임베딩도 하지 않는다.
+Lane = Literal["ref_picked", "ref_full", "idea_me", "idea_ai", "style", "style_passage", "ref_bib"]
+WEB_ONLY_LANES: tuple[str, ...] = ("style_passage", "ref_bib")
 TagsBy = Literal["ai", "author"]  # 문체 태그를 누가 정했나: Claude가 뽑음(ai) / 저자가 말함(author). 기록 전 항목은 None
 TrashKind = Literal["idea", "style"]  # 휴지통에 옮길 수 있는 책장 항목(#88)
 
@@ -450,7 +452,12 @@ class Store(Protocol):
     # 검색 청크 (모든 책장 공용)
     def search_fts(self, user_id: str, lanes: list[Lane], match: str, limit: int) -> list[Chunk]: ...
     def search_vector(self, user_id: str, lanes: list[Lane], vector: list[float], limit: int) -> list[Chunk]: ...
-    def chunks_missing_embedding(self, user_id: str, limit: int = 256) -> list[Chunk]: ...
+    def search_substring(self, user_id: str, lanes: list[Lane], needle: str, limit: int) -> list[Chunk]:
+        """청크 글에 needle이 그대로 들어 있는 것(최근 청크부터). 2글자 조각 색인이 못 찾는 한 글자 검색어용(웹 책장)."""
+        ...
+    def chunks_missing_embedding(self, user_id: str, limit: int = 256) -> list[Chunk]:
+        """임베딩이 빈 청크. 웹 검색 전용 레인(WEB_ONLY_LANES)은 벡터 검색을 하지 않으니 빼고 준다."""
+        ...
     def set_embeddings(self, user_id: str, vectors: dict[int, list[float]]) -> None: ...
 
     # 인덱스

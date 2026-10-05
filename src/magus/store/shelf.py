@@ -20,7 +20,9 @@ import numpy as np
 
 from magus.balthasar.style import search_text as style_search_text
 from magus.ids import safe_id, utcnow
-from magus.store.base import Author, Chunk, Idea, Lane, Passage, Ref, RefStatus, StyleEntry, TrashItem, TrashKind
+from magus.store.base import (
+    WEB_ONLY_LANES, Author, Chunk, Idea, Lane, Passage, Ref, RefStatus, StyleEntry, TrashItem, TrashKind,
+)
 from magus.store.fileio import locked, read_json, read_text, write_json, write_text
 from magus.textindex import chunk_text, index_text
 
@@ -134,6 +136,7 @@ class ShelfMixin:
         )
         self._replace_chunks(user_id, "ref", record["key"], "ref_picked", [p["text"] for p in passages])
         self._replace_chunks(user_id, "ref", record["key"], "ref_full", chunk_text(full) if full.strip() else [])
+        self._replace_chunks(user_id, "ref", record["key"], "ref_bib", [bib_text(record)])  # 웹 책장 검색 전용
 
     # ---- Casper: 영감 ----------------------------------------------------------------
 
@@ -203,6 +206,8 @@ class ShelfMixin:
         self._replace_chunks(
             user_id, "style", entry.id, "style", [style_search_text(entry.reason, entry.tags)], fts_extra=entry.work or ""
         )
+        # 웹 책장 검색 전용 레인(구절·출전). style_search는 이 레인을 보지 않으므로 위의 원칙은 그대로다.
+        self._replace_chunks(user_id, "style", entry.id, "style_passage", [f"{entry.passage}\n{entry.work or ''}".strip()])
 
     @locked
     def get_styles(self, user_id: str, ids: list[str]) -> dict[str, StyleEntry]:
@@ -231,10 +236,9 @@ class ShelfMixin:
         data = read_json(src)
         write_json(self._trash_dir(user_id, kind) / f"{item_id}.json", {**data, "_trash": mark})  # 먼저 쓰고 지운다
         src.unlink()
-        lane: Lane = "style" if kind == "style" else ("idea_me" if data.get("author") == "me" else "idea_ai")
         table = "style_entries" if kind == "style" else "ideas"
         self._db.execute(f"DELETE FROM {table} WHERE user_id = ? AND id = ?", (user_id, item_id))
-        self._replace_chunks(user_id, kind, item_id, lane, [])
+        self._drop_chunks(user_id, kind, item_id)
         return data
 
     @locked
@@ -321,6 +325,25 @@ class ShelfMixin:
             tokens = index_text(f"{text}\n{fts_extra}" if fts_extra else text)
             self._db.execute("INSERT INTO chunks_fts (rowid, tokens) VALUES (?, ?)", (chunk_id, tokens))
 
+    def _drop_chunks(self, user_id: str, owner_type: str, owner_id: str) -> None:
+        """그 항목의 청크를 레인과 관계없이 모두 뺀다(휴지통)."""
+        old = [r[0] for r in self._db.execute(
+            "SELECT id FROM chunks WHERE user_id = ? AND owner_type = ? AND owner_id = ?", (user_id, owner_type, owner_id))]
+        if old:
+            marks = ",".join("?" * len(old))
+            self._db.execute(f"DELETE FROM chunks_fts WHERE rowid IN ({marks})", old)
+            self._db.execute(f"DELETE FROM chunks WHERE id IN ({marks})", old)
+
+    @locked
+    def search_substring(self, user_id: str, lanes: list[Lane], needle: str, limit: int) -> list[Chunk]:
+        marks = ",".join("?" * len(lanes))
+        rows = self._db.execute(
+            f"SELECT id, owner_type, owner_id, lane, text FROM chunks "
+            f"WHERE user_id = ? AND lane IN ({marks}) AND instr(lower(text), lower(?)) > 0 ORDER BY id DESC LIMIT ?",
+            (user_id, *lanes, needle, limit),
+        )
+        return [Chunk(r["id"], r["owner_type"], r["owner_id"], r["lane"], r["text"]) for r in rows]
+
     @locked
     def search_fts(self, user_id: str, lanes: list[Lane], match: str, limit: int) -> list[Chunk]:
         marks = ",".join("?" * len(lanes))
@@ -359,10 +382,11 @@ class ShelfMixin:
 
     @locked
     def chunks_missing_embedding(self, user_id: str, limit: int = 256) -> list[Chunk]:
+        skip = ",".join("?" * len(WEB_ONLY_LANES))
         rows = self._db.execute(
             "SELECT id, owner_type, owner_id, lane, text FROM chunks WHERE user_id = ? AND embedding IS NULL "
-            "ORDER BY id LIMIT ?",
-            (user_id, limit),
+            f"AND lane NOT IN ({skip}) ORDER BY id LIMIT ?",
+            (user_id, *WEB_ONLY_LANES, limit),
         )
         return [Chunk(r["id"], r["owner_type"], r["owner_id"], r["lane"], r["text"]) for r in rows]
 
@@ -373,6 +397,13 @@ class ShelfMixin:
                 "UPDATE chunks SET embedding = ? WHERE id = ? AND user_id = ?",
                 [(np.asarray(v, dtype=np.float32).tobytes(), cid, user_id) for cid, v in vectors.items()],
             )
+
+
+def bib_text(record: dict[str, Any]) -> str:
+    """문헌 서지를 한 덩어리 글로(웹 책장 검색 전용 레인 ref_bib): key, 저자, 연도, 제목, 실린 곳, 한글 표기."""
+    bib = record.get("bib") or {}
+    parts = [record.get("key", ""), *(str(v) for v in bib.values() if isinstance(v, (str, int))), *record.get("aliases", [])]
+    return "\n".join(p for p in dict.fromkeys(parts) if p)
 
 
 def _style(r: sqlite3.Row) -> StyleEntry:

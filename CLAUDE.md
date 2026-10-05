@@ -67,6 +67,8 @@
 | 문헌 | 원문을 읽고 등록한 책·논문 | refs | Melchior, ref_* |
 | 결정 | 정해 둔 방침 | | book_decide |
 | 수정본 | Word에서 고친 원고를 다시 올린 것. 번호 E2, E3…는 "수정본 번호". 첫 업로드 E1은 "처음 올린 원고" | 새 판, 다시 올리기 | book_import new_edition |
+| 책장 | 생각·문체·문헌과 카테고리를 모아 보는 화면(웹 `/shelf`, #92) | 세 책장(옛 메뉴 생각·문헌·문체) | webshelf.py |
+| 카테고리 | 책장에 꽂힌 묶음 하나. 생각·문체·문헌은 기본 카테고리다. 원고를 가리키는 "책"과 섞이지 않게 "책"이라고 부르지 않는다 | 서랍(설계안 #91) | category_* |
 
 - Claude에게는 서버 instructions 규칙 7~9로 전한다: 이 이름으로 답하기, "전체 보여 줘"·"수정본 올렸어" 같은 말을 도구로 옮기기, 넣을 곳을 말하지 않은 "저장해 줘"에는 먼저 묻기(아래 "서버 instructions").
 
@@ -325,7 +327,7 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
 - idea_add·style_add·ref_add: "저자가 '생각'('문체', '문헌')에 넣으라고 분명히 말했을 때만 부른다. '저장해 줘'처럼 넣을 곳이 정해지지 않았으면 부르지 말고 생각·문체·문헌 중 어디인지 먼저 묻는다."
 - book_write_chapter: "저자가 'Magus 원고에 저장'하라고 분명히 말했을 때만 부른다."(규칙 4)
 - idea_delete·style_delete: "저자가 그 항목을 지우라고 분명히 말했을 때만 부른다. 여러 개면 목록을 보여 주고 확인받는다."
-- 도구 설명·도구 응답·instructions에는 코어 이름(Casper·Melchior·Balthasar)과 옛 이름(영감·책 지도·미해결·이슈·새 판·책장)을 쓰지 않는다. 예외는 규칙 7의 "쓰지 않는다" 문장(`instructions.AVOID`) 하나다. `tests/test_author_terms.py`가 모든 도구를 한 번씩 불러 설명·입력 스키마·응답·instructions를 검사한다.
+- 도구 설명·도구 응답·instructions에는 코어 이름(Casper·Melchior·Balthasar)과 옛 이름(영감·책 지도·미해결·이슈·새 판)을 쓰지 않는다. '책장'은 #92로 용어집 이름이 됐다. 예외는 규칙 7의 "쓰지 않는다" 문장(`instructions.AVOID`) 하나다. `tests/test_author_terms.py`가 모든 도구를 한 번씩 불러 설명·입력 스키마·응답·instructions를 검사한다.
 
 ## 서버 instructions
 

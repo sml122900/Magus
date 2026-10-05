@@ -4,6 +4,13 @@
 > 마지막 갱신: 2026-10-06 KST — 비밀 대화 시험 결과 기록(되묻기 성공, 선택지에 원고가 섞임 → #90 수정, 커밋만), 사용자 서랍 설계안 #91(검토 대기, `docs/decisions/user-drawers.md`).
 > 2026-10-06 01시 KST — 토큰 aud 검사 강화(결정 #79)를 `p1-auth-audience`로 서버에 반영하고, 서버의 옛 git 이력을 새 이력으로 바꿨다(0-3절).
 
+## 0-9. 야간 자율 작업(2026-10-06 밤, 세션 magus-25) — 진행 중
+
+- 요청: 책장·카테고리 커스터마이징(A 책장 화면·게시판형 목록·검색 → B 카테고리·색·제목 → C 캡처 점검·예시 공간 → D 시간 남으면 #84 → E 아침 보고). 질문 없이 진행, 결정은 4절 검토 대기에.
+- **서버에는 접속하지 않는다. 서버 배포 태그는 여전히 `p1-trash`(74bbbf4)다.** 오늘 밤 태그(`shelf-web`·`shelf-categories`·`questions`)는 GitHub 백업용이다.
+- A 완료: `/shelf`(책 세 권) + 게시판형 목록·고유 주소·검색(웹 전용 레인 style_passage·ref_bib, 인덱스 v14), 용어집 책장·카테고리(#92). 태그 `shelf-web`.
+- 예시 공간 `demo-shelf`(합성 데이터, data/users/demo-shelf). 실행: `USER_ID=demo-shelf DATA_DIR=./data .venv/Scripts/python -m magus serve --transport http --port 8765` → http://127.0.0.1:8765/shelf
+
 ## 0-8. 최근 보고 (2026-10-06, 서버 배포 `p1-trash` + 시험 기록 정리, 세션 magus-25)
 
 - 결정 #87~#89(4절). 태그 `p1-trash` = `74bbbf4`(annotated). master·태그 push(`2d9777f..74bbbf4`, 2커밋: 1360ebe·74bbbf4). 금지 경로·비밀·실제 id 패턴 0건. 테스트 241개 통과.
