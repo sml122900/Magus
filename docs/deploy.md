@@ -122,12 +122,15 @@ sudo crontab -e
 
 ```sh
 sudo crontab -e
-0 4 * * * cd /opt/magus/deploy && docker compose --profile backup run --rm backup >> /var/log/magus-backup.log 2>&1
+0 4 * * * cd /opt/magus/deploy && docker compose --profile backup run --rm backup </dev/null >> /var/log/magus-backup.log 2>&1
 ```
 
+- 시간대를 바꾼 뒤라면 `sudo systemctl restart cron`(cron은 시작할 때의 시간대로 돈다).
 - 처음 한 번은 손으로 돌려 본다: `sudo docker compose --profile backup run --rm backup` → `backup ok`.
+  - 첫 실행이 R2에 저장소를 만든다(init). 2026-10-05: 24초, 스냅샷 7.7MiB.
 - 하는 일: `restic backup /data`(index.sqlite 제외) → `forget --keep-daily 30 --prune` → `check --read-data-subset=1/30`.
-- 이미지 버전 고정: 처음 돌린 뒤 `docker image inspect restic/restic:latest`로 버전을 보고, compose.yaml의 `restic/restic:latest`를 그 버전으로 바꾼다.
+- 이미지 버전: compose.yaml에 `restic/restic:0.19.1`로 고정했다(2026-10-05). 올릴 때는 새 버전으로 한 번 손으로 돌려 `backup ok`를 본 뒤 바꾼다.
+- 스크립트에서 `docker compose exec`·`run`을 부를 때는 `</dev/null`을 붙인다. 붙이지 않으면 표준입력을 읽어, 뒤에 이어지는 명령을 먹어 버린다.
 
 ## 5. 복구
 

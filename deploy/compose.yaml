@@ -35,7 +35,7 @@ services:
       - caddy-config:/config
 
   backup:
-    image: restic/restic:latest   # 운영에서는 버전을 고정한다(docs/deploy.md)
+    image: restic/restic:0.19.1   # 고정(2026-10-05 첫 백업에서 확인). 올릴 때는 docs/deploy.md 4절
     profiles: [backup]
     env_file: .env
     volumes:
@@ -44,7 +44,7 @@ services:
     entrypoint: ["/bin/sh", "/backup.sh"]
 
   restore:
-    image: restic/restic:latest
+    image: restic/restic:0.19.1
     profiles: [backup]
     env_file: .env
     volumes:
