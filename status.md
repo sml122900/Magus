@@ -1,7 +1,7 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-05 KST — P1 5단계 배포(서버·HTTPS·SSH 키 전용·알림·alive·데이터 이전·백업·서버 복구 시험 같음). 웹 로그인 확인 대기. 태그 없음.
+> 마지막 갱신: 2026-10-05 KST — P1 6단계 완료(claude.ai 커스텀 커넥터 웹·모바일 성공, `p1-step6`). 다음은 7단계(아버지 온보딩). 7단계 전 확인 항목이 남아 있다.
 
 ## 0-1. 최근 보고 (2026-10-05, WorkOS 설정)
 
@@ -37,7 +37,18 @@
 
 ## 1. 지금 바로 할 일
 
-- **6단계 진행 중 — 웹 완료, 대기: 모바일 시험과 다음 날 재접속(토큰 갱신) 확인, 사용자.** `p1-step6` 태그는 이 둘 뒤에 단다(사용자 지시).
+- **다음: 7단계 아버지 온보딩**(`docs/onboarding-father.md` 초안). 아래 "7단계 전 확인"을 먼저 끝낸다.
+- **7단계 전 확인**
+  - [ ] 하루 이상 지난 뒤 웹·모바일 재접속 시 재로그인 없이 동작하는지(WorkOS 토큰 갱신). 사용자가 실사용 중 확인한다.
+  - [ ] WorkOS Staging으로 계속 쓸지, Production으로 옮길지(#49).
+    - 옮기면 issuer와 사용자 id가 바뀐다. 아버지 계정을 만들기 전에 정해야 비용이 가장 작다.
+  - [ ] 아버지 원고 docx 크기가 업로드 한도 50MB(#54) 안인지.
+- 대기(사용자 결정)
+  - `docs/reports`(실원고 파생 보고서 2개)를 원격 저장소에 올릴지. push 전 점검의 나머지는 이상이 없었다.
+  - 테스트 메모 `20261005141301887-3e167c`를 지울지.
+- 다음(급하지 않음): 웹 페이지의 "장 40" 표기를 outline 표기(`35장 + 서장·맺음·부록 1~3`)와 같게 맞춘다(사용자 요청).
+- **6단계 결과(2026-10-05, 완료, `p1-step6`)**
+  - 모바일 Claude 앱(사용자): 웹과 같은 시험이 모두 성공했다.
   - 웹 결과(2026-10-05 23:05~23:13, 사용자): 넷 다 성공했다.
     - book_outline: 35장 + 서장·맺음·부록 1~3, 8부, 249,065자, 미확인 297, 미연결 0, 미해결 86(citation 44 · fact 40 · general 2).
     - 제12장 ref_check: 28편, 문단 번호 포함.
@@ -58,7 +69,6 @@
   - 웹 로그인 성공: `/book`에 "닿으려는 종"(book, 40장)이 보이고 상단이 default다. PKCE 충돌 없음.
   - 텔레그램 "알림 시험"을 받았다. healthchecks magus-alive가 up이다(22:50·22:55 핑).
   - `p1-step5` 태그(`9b420a3`).
-- 다음(6단계 뒤): 웹 페이지의 "장 40" 표기를 outline 표기(`35장 + 서장·맺음·부록 1~3`)와 같게 맞춘다(사용자 요청, 급하지 않음).
 - **5단계 배포 결과(2026-10-05)**
   - 서버: Docker 29.1.3, Compose 2.40.3, ufw 22·80·443, 시간대 Asia/Seoul, unattended-upgrades 켬, 스왑은 Vultr 기본 2.3G.
   - SSH: 비밀번호 로그인 끔(`/etc/ssh/sshd_config.d/00-magus.conf`, 50-cloud-init보다 먼저 읽힘). 기존 세션을 열어 둔 채 새 세션 키 접속을 확인한 뒤 닫았다.
@@ -92,7 +102,7 @@
 
 ## 2. 현재 단계
 
-**P1 진행 중 — 5단계 배포 완료, 웹 로그인 확인 대기**(`p1-step1`~`p1-step4`, `p1-step5`는 로그인 뒤). P0는 `step1`~`step7`, `p0-realdata`, `p0-report1`과 그 뒤 결정 반영 커밋까지 끝났다.
+**P1 진행 중 — 6단계 완료, 다음은 7단계(아버지 온보딩)**(`p1-step1`~`p1-step6`). 7단계 전 확인 항목이 1절에 있다. P0는 `step1`~`step7`, `p0-realdata`, `p0-report1`과 그 뒤 결정 반영 커밋까지 끝났다.
 
 ## 3. 단계별 체크리스트
 
@@ -108,13 +118,16 @@
 - [x] **P1 4단계 웹 페이지** — 2026-10-03, `p1-step4`
   - `src/magus/web.py`, `src/magus/signing.py`, `src/magus/store/{base,local}.py`(export_path), `src/magus/book/tools.py`(내려받기 링크), `src/magus/cli.py`(웹 등록)
   - `tests/test_web.py`, 브라우저 확인(Claude in Chrome)
-- [ ] P1 5단계 배포·도메인·HTTPS·백업·복구 테스트·알림 — **배포 완료 2026-10-05**, 웹 로그인 확인 뒤 `p1-step5`
+- [x] **P1 5단계 배포·도메인·HTTPS·백업·복구 테스트·알림** — 2026-10-05, `p1-step5`(웹 로그인 확인 포함)
   - 배포: `deploy/alive.sh`, `deploy/compose.yaml`(TZ·restic 0.19.1), `deploy/restore-test.sh`(</dev/null), `deploy/.env.example`(R2_*), 서버 `/opt/magus`
   - 서버 복구 시험 같음(docs/deploy.md 기록 표)
   - `Dockerfile`, `.dockerignore`, `.gitattributes`, `deploy/{compose.yaml,Caddyfile,backup.sh,restore-test.sh,.env.example}`, `src/magus/alerts.py`, `src/magus/cli.py`(outline·alert-test)
   - `docs/decisions/hosting.md`, `docs/deploy.md`, `tests/test_alerts.py`, `tests/test_restore.py`
-- [ ] P1 6단계 Claude.ai 커넥터 등록, `docs/connect-claude.md`(초안만 있음)
-- [ ] P1 7단계 아버지 온보딩 체크리스트
+- [x] **P1 6단계 Claude.ai 커넥터 등록** — 2026-10-05, `p1-step6`
+  - 웹·모바일에서 book_outline, ref_check, book_read_chapter, idea_add 성공(CIMD, 인증 실패 0)
+  - `docs/connect-claude.md`(실제 화면 순서), `docs/daily/2026-10-05.md`
+  - 남은 확인: 하루 이상 지난 뒤 재접속(토큰 갱신). 1절 "7단계 전 확인"으로 옮겼다.
+- [ ] P1 7단계 아버지 온보딩 체크리스트 — 다음. 초안은 `docs/onboarding-father.md`
 
 ## 4. 검토 대기 결정
 
@@ -246,6 +259,11 @@
   - `/fixtures/`(루트)와 `data/`는 gitignore. `tests/fixtures/`와 `docs/reports/`는 커밋한다.
 
 ## 6. 마지막 세션 요약
+
+**2026-10-05 (4)** — P1 6단계 완료
+- 사용자가 모바일 시험도 성공했다. 토큰 갱신은 실사용 중 확인하기로 하고 7단계 전 확인 항목으로 옮겼다.
+- 읽기 전용 점검을 했다. 검토 대기 결정 #45~#64 표를 만들었고, push 전 점검에서 비밀·원본이 이력에 없음을 확인했다(`docs/reports`만 결정 대기).
+- 일지 `docs/daily/2026-10-05.md`를 커밋했다(`18df6e2`). status를 갱신한 커밋에 `p1-step6` 태그를 단다.
 
 **2026-10-05 (3)** — P1 5단계 배포
 - env 점검(값 출력 없음)과 자가 점검(테스트 190·ruff·DNS·WorkOS 메타·compose 해석)을 했다.
