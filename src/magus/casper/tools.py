@@ -20,7 +20,7 @@ from magus.store import Idea, Store
 from magus.store.base import IdeaKind, Lane
 from magus.store.formats import one_line
 
-ASK = "'저장해 줘'처럼 넣을 곳이 정해지지 않았으면 부르지 말고 생각·문체·문헌 중 어디인지 먼저 묻는다. "
+ASK = "'저장해 줘'처럼 넣을 곳이 정해지지 않았으면 부르지 말고 생각·문체·문헌 세 곳 중 어디인지 먼저 묻는다(원고는 선택지에 넣지 않는다). "
 DELETE_RULE = '저자가 그 항목을 지우라고 분명히 말했을 때만 부른다. 여러 개면 목록을 보여 주고 확인받는다. '
 
 

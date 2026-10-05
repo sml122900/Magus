@@ -16,6 +16,7 @@
 - 다음 할 일: **7단계 아버지 온보딩**(`docs/onboarding-father.md`). 시작 전 확인은 status.md "7단계 전 확인"을 따른다. 그 전에 사용자가 claude.ai에서 book_outline을 한 번 확인한다.
   - 7단계 뒤 첫 작업: 저자 확인 질문지 `book_questions`(#84 승인, `docs/decisions/author-questions.md`).
   - 사용자 격리: 아버지 계정 추가 전에 점검했다(status.md 0-6절, `tests/test_isolation.py`).
+- 다음 배포에 함께(커밋만): #90 되묻기 선택지에서 원고 빼기. 검토 대기: #91 사용자 서랍 설계안(`docs/decisions/user-drawers.md`).
 - 서버(2026-10-06 03:25부터): master `p1-trash`(`74bbbf4`: 휴지통 #88·도구 설명 가드와 내부 이름 빼기 #87·문체 tags_by #89, 그 전 `p1-ui-terms` 포함). 되돌리기 기준은 `2d9777f`(이미지 `magus:rollback-2d9777f`, status.md 0-8절).
   - 다음 배포도 docs/deploy.md "업데이트" 절차(`git fetch … master && git checkout -B master FETCH_HEAD`)로 한다.
 - 알려진 문제: `tests/test_http.py::test_request_size_limit`가 Windows에서 간헐적으로 실패한다(413 응답 전에 연결이 리셋됨). 서버 동작은 정상이다(status.md 7절).

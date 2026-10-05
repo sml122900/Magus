@@ -331,7 +331,8 @@ def build_tools(
             book_write_chapter,
             name="book_write_chapter",
             description=(
-                "저자가 'Magus 원고에 저장'하라고 분명히 말했을 때만 부른다. 그 밖에는 장 수정안을 대화에서 제안하고 저자가 Word 원고에 반영한다. "
+                "저자가 'Magus 원고에 저장'하라고 분명히 말했을 때만 부른다. 넣을 곳을 되묻는 선택지에도 원고를 넣지 않는다. "
+                "그 밖에는 장 수정안을 대화에서 제안하고 저자가 Word 원고에 반영한다. "
                 "장 하나를 Magus 원고에 저장한다(원고 본문의 원본은 저자의 Word 파일이라, 다음 수정본을 올리면 저자 파일 내용으로 바뀐다). "
                 "content는 본문만(front matter 없이). 이전 본문은 versions/에 보관되고 버전이 1 오른다. "
                 "note에 무엇을 바꿨는지 쓴다. 없는 번호면 새 장을 만든다(title로 제목 지정). "
