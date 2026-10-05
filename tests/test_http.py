@@ -23,7 +23,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "synthetic"
 TOOLS = {
     "files_list", "book_outline", "book_issues", "book_read_chapter", "book_write_chapter", "book_decide", "book_issue_add",
     "book_issue_close", "book_import", "book_export", "ref_import_bibliography", "ref_add", "ref_search", "ref_check",
-    "idea_add", "idea_add_conversation", "idea_search", "style_add", "style_search",
+    "idea_add", "idea_add_conversation", "idea_search", "idea_delete", "style_add", "style_search", "style_delete",
 }
 # 로그에 나오면 안 되는 내용(본문·발췌·생각·문체 구절)
 SECRET = ("비밀본문가나다", "비밀발췌라마바", "비밀생각사아자", "비밀구절차카타")
@@ -102,9 +102,13 @@ async def test_all_tools_over_http_and_log_has_no_content(http_server, data_dir:
             ("style_add", {"passage": SECRET[3], "reason": "짧은 리듬", "tags": tags}),
             ("style_search", {"query": "짧은 리듬"}),
         ]
-        assert {name for name, _ in calls} == TOOLS
-        for name, args in calls:
+        out = {name: _text(await client.call_tool(name, args)) for name, args in calls}
+        deletes = [("idea_delete", {"id": out["idea_add"].split()[2], "note": "시험"}),  # 휴지통으로 옮긴 내용도 로그에는 없다
+                   ("style_delete", {"id": out["style_add"].split()[2], "note": "시험"})]
+        for name, args in deletes:
             _text(await client.call_tool(name, args))
+        calls += deletes
+        assert {name for name, _ in calls} == TOOLS
         assert "clack2012 (verified)" in _text(await client.call_tool("ref_search", {"query": "라마바"}))
         assert (await client.call_tool("book_read_chapter", {"number": 99})).is_error
         # 원격에서는 서버의 파일 경로를 받지 않는다(받은함 이름만)

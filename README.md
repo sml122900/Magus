@@ -154,7 +154,7 @@ PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버
 
 같은 일을 명령줄로도 할 수 있습니다(아래 "명령").
 
-## 도구 (19개)
+## 도구 (21개)
 
 | 도구 | 하는 일 |
 |---|---|
@@ -173,7 +173,8 @@ PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버
 | `idea_add(text, kind, origin?)` | 내 생각 하나를 기록합니다(author=me). |
 | `idea_add_conversation(markdown? / path?)` | 대화 기록을 me·ai 발화로 나눠 저장합니다. |
 | `idea_search(query, author, k)` | 생각을 찾습니다. 기본은 내 생각만입니다. |
-| `style_add(passage, reason, tags, work?)` | 문체 표본을 기록합니다. tags는 `{호흡, 시점, 열기, 장치: [], 어미, 톤}`입니다. |
+| `idea_delete(id, note)` · `style_delete(id, note)` | 생각·문체 하나를 휴지통으로 옮깁니다(지우지 않음). 저자가 지우라고 분명히 말했을 때만 씁니다. 되살리기는 운영자 CLI `magus trash restore`. |
+| `style_add(passage, reason, tags, work?, tags_by?)` | 좋아하는 구절을 문체에 기록합니다. tags는 `{호흡, 시점, 열기, 장치: [], 어미, 톤}`이고, 누가 정했는지(`tags_by`: ai·author)를 남깁니다. |
 | `style_search(query, k)` | 문체로 찾습니다(이유와 태그 기준). |
 
 서버 instructions(Claude에게 주는 규칙)는 등록된 도구에 맞춰 자동으로 조립됩니다.
@@ -215,6 +216,7 @@ magus import <파일> --project-id book --replace # 다시 임포트(기존 것�
 magus conversation fixtures/대화_전체_기록.md     # 대화 기록 → 생각
 magus cite-report --project-id book             # 책 전체 인용 집계(개발자용)
 magus author-report --project-id book --out private/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + 같은 이름 docx)
+magus trash list                                # 생각·문체 휴지통 보기(put·restore idea|style <id>)
 magus terms --project-id book --add 마닐라 "모스크바 회사"   # 인용으로 보지 않을 낱말(지명·사건). 인자 없으면 목록
 magus alias hayashi2016 "하야시(2016)"          # 저자가 확정한 본문 표기를 문헌에 잇는다(음역 추정·a/b 모호 확정)
 magus inbox --add <파일>                         # 받은함에 넣기(로컬 개발용). --remove <이름>, 인자 없으면 목록

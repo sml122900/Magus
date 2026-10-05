@@ -23,6 +23,8 @@ ChapterStatus = Literal["draft", "revising", "done"]
 CHAPTER_STATUSES: tuple[str, ...] = ("draft", "revising", "done")
 RefStatus = Literal["unverified", "verified"]
 Lane = Literal["ref_picked", "ref_full", "idea_me", "idea_ai", "style"]
+TagsBy = Literal["ai", "author"]  # 문체 태그를 누가 정했나: Claude가 뽑음(ai) / 저자가 말함(author). 기록 전 항목은 None
+TrashKind = Literal["idea", "style"]  # 휴지통에 옮길 수 있는 책장 항목(#88)
 
 
 @dataclass(frozen=True)
@@ -228,6 +230,19 @@ class StyleEntry:
     tags: dict[str, Any] = field(default_factory=dict)
     work: str | None = None
     created_at: str = ""
+    tags_by: TagsBy | None = None  # 태그를 누가 정했나(#89). 웹 /styles에 보인다
+
+
+@dataclass(frozen=True)
+class TrashItem:
+    """휴지통의 생각·문체 하나(trash/shelf/<casper|balthasar>/<id>.json). 지우지 않고 옮겨 둔 것이라 되살릴 수 있다(#88)."""
+
+    kind: TrashKind
+    id: str
+    trashed_at: str
+    note: str
+    preview: str
+    with_id: str | None = None  # 함께 옮겨진 AI 발화면 그 발화가 응답한 생각의 id
 
 
 @dataclass(frozen=True)
@@ -421,6 +436,16 @@ class Store(Protocol):
         ...
     def get_styles(self, user_id: str, ids: list[str]) -> dict[str, StyleEntry]: ...
     def list_styles(self, user_id: str) -> list[StyleEntry]: ...
+
+    # 휴지통(생각·문체, #88) — 지우지 않고 trash/shelf/로 옮긴다. 검색·목록·웹에서 빠지고 되살릴 수 있다
+    def trash_idea(self, user_id: str, idea_id: str, note: str) -> list[Idea]:
+        """그 생각과, 그 생각에 응답한 AI 발화(parent_id)를 함께 옮긴다. 없으면 []."""
+        ...
+    def trash_style(self, user_id: str, style_id: str, note: str) -> StyleEntry | None: ...
+    def list_trash(self, user_id: str) -> list[TrashItem]: ...
+    def restore_trash(self, user_id: str, kind: TrashKind, item_id: str) -> list[str]:
+        """되살린 id들(생각이면 함께 옮긴 AI 발화 포함). 휴지통에 없으면 ValueError."""
+        ...
 
     # 검색 청크 (모든 책장 공용)
     def search_fts(self, user_id: str, lanes: list[Lane], match: str, limit: int) -> list[Chunk]: ...

@@ -265,7 +265,7 @@ def build_tools(
             book_issue_add,
             name="book_issue_add",
             description=(
-                "열린 문제(미해결)를 남긴다. chapter_number로 장을 지정할 수 있다. "
+                "확인 요청(열린 문제)을 남긴다. chapter_number로 장을 지정할 수 있다. "
                 "사용자가 남기라고 한 것이면 origin=user, 에이전트가 스스로 발견한 것이면 origin=agent."
             ),
             structured_output=False,
@@ -273,7 +273,7 @@ def build_tools(
         Tool.from_function(
             book_issue_close,
             name="book_issue_close",
-            description="미해결을 닫는다. id는 'I3' 또는 '3'. note에 어떻게 해결했는지 쓴다. 번호는 닫아도 다시 쓰지 않는다.",
+            description="확인 요청을 닫는다. id는 'I3' 또는 '3'. note에 어떻게 해결했는지 쓴다. 번호는 닫아도 다시 쓰지 않는다.",
             structured_output=False,
         ),
         Tool.from_function(
@@ -291,13 +291,13 @@ def build_tools(
             description=(
                 "받은함의 원고 파일(docx, 없으면 pdf)을 새 프로젝트로 임포트한다. path에는 받은함 파일 이름을 준다(files_list로 확인). "
                 "'제N부'·'제N장' 제목으로 장을 나누고, "
-                "Word 코멘트는 미해결(import_comment, kind=citation|fact|general)로, 참고문헌은 refs(unverified)로 넣는다. "
+                "Word 코멘트는 확인 요청(import_comment, kind=citation|fact|general)으로, 참고문헌은 문헌(unverified)으로 넣는다. "
                 "표는 칸의 글까지 markdown 표로 싣고, 그림·수식은 [그림 N]·[수식] 자리표시자로 남기며 원본은 original/에 복사한다. "
-                "원고를 Word에서 고친 뒤 같은 책을 다시 올릴 때는 new_edition=true와 그 책의 project_id를 준다: "
-                "본문이 바뀐 장만 바꾸고(판 E2, E3… 기록), 같은 코멘트는 다시 넣지 않으며, 원고에서 사라진 코멘트는 "
-                "'해결됐을 수 있음'으로 표시만 한다. 결정·직접 남긴 미해결·책장은 그대로다. 장 제목이 30% 미만으로 겹치면 "
+                "원고를 Word에서 고친 수정본을 올릴 때는 new_edition=true와 그 책의 project_id를 준다: "
+                "본문이 바뀐 장만 바꾸고(수정본 번호 E2, E3… 기록), 같은 코멘트는 다시 넣지 않으며, 원고에서 사라진 코멘트는 "
+                "'해결됐을 수 있음'으로 표시만 한다. 결정·직접 남긴 확인 요청·생각·문체·문헌은 그대로다. 장 제목이 30% 미만으로 겹치면 "
                 "다른 책으로 보고 멈춘다(맞으면 force=true). "
-                "replace=true는 기존 프로젝트(결정·미해결 포함)를 휴지통으로 옮기고 새로 만드니 다시 올리기에 쓰지 않는다. "
+                "replace=true는 기존 프로젝트(결정·확인 요청 포함)를 휴지통으로 옮기고 새로 만드니 수정본에 쓰지 않는다. "
                 "title·subtitle을 비우면 원고(파일 속성 제목의 '제목 — 부제', 표지)에서 제목·부제·영문 제목을 따로 읽는다. "
                 "리포트(장·부 수, 분할 못 한 구간, 코멘트 분류, 참고문헌 파싱)와 장 매핑표를 돌려준다."
             ),
@@ -307,9 +307,10 @@ def build_tools(
             book_outline,
             name="book_outline",
             description=(
-                "모든 원고 작업의 첫 호출. 첫 줄에 프로젝트, 장 목록(장별 상태·글자수·미해결 수·미확인 인용 수 집계), "
-                "직접 남긴(user·agent) 열린 미해결, 최근 결정 10개, 최근 변경 5개를 3,000 토큰 이하로 돌려준다. "
-                "코멘트 유래 미해결은 건수만 싣는다(book_issues로 조회). 본문은 담지 않는다. "
+                "모든 원고 작업의 첫 호출(저자가 '전체'라고 부르는 책 전체 현황). 첫 줄에 프로젝트, "
+                "장 목록(장별 상태·글자수·확인 요청 수·미확인 인용 수 집계), "
+                "직접 남긴(user·agent) 열린 확인 요청, 최근 결정 10개, 최근 변경 5개를 3,000 토큰 이하로 돌려준다. "
+                "코멘트 유래 확인 요청은 건수만 싣는다(book_issues로 조회). 본문은 담지 않는다. "
                 "project_id를 생략하면 가장 최근 프로젝트."
             ),
             structured_output=False,
@@ -321,7 +322,7 @@ def build_tools(
                 "장 하나를 읽는다. number는 장 번호다: 제N장은 N, 서장 0, 맺음 90, 부록 N은 90+N, 제N부 들어가며는 100+N"
                 "(outline에서 번호 없는 장 옆 괄호의 숫자). "
                 "JSON: content(본문 markdown만), title, status, part_number, version, last_note, "
-                "unverified_cites, open_issues(이 장의 열린 미해결. ¶N은 코멘트가 걸린 문단 번호(content의 빈 줄로 나눈 N번째 문단). [AI 확인 요청]은 AI가 원고에 단 코멘트라 저자에게도 그렇게 알린다). "
+                "unverified_cites, open_issues(이 장의 열린 확인 요청. ¶N은 코멘트가 걸린 문단 번호(content의 빈 줄로 나눈 N번째 문단). [AI 확인 요청]은 AI가 원고에 단 코멘트라 저자에게도 그렇게 알린다). "
                 "필요한 장만 읽는다. " + UNVERIFIED_CITES_MEANING
             ),
             structured_output=False,
@@ -330,8 +331,8 @@ def build_tools(
             book_write_chapter,
             name="book_write_chapter",
             description=(
-                "장 하나를 Magus 원고에 저장한다. 원고 본문의 원본은 저자의 Word 파일이다. 장 수정안은 대화에서 제안하고, "
-                "이 도구는 저자가 Magus 원고에 저장하라고 명시했을 때만 쓴다(다음 업로드 때 저자 파일 내용으로 바뀐다). "
+                "저자가 'Magus 원고에 저장'하라고 분명히 말했을 때만 부른다. 그 밖에는 장 수정안을 대화에서 제안하고 저자가 Word 원고에 반영한다. "
+                "장 하나를 Magus 원고에 저장한다(원고 본문의 원본은 저자의 Word 파일이라, 다음 수정본을 올리면 저자 파일 내용으로 바뀐다). "
                 "content는 본문만(front matter 없이). 이전 본문은 versions/에 보관되고 버전이 1 오른다. "
                 "note에 무엇을 바꿨는지 쓴다. 없는 번호면 새 장을 만든다(title로 제목 지정). "
                 "제목·상태는 title·status 인자로만 바꾼다. status는 draft|revising|done. 빈 본문은 거부한다. "
@@ -343,11 +344,11 @@ def build_tools(
             book_issues,
             name="book_issues",
             description=(
-                "미해결 목록(조회 전용). status=open|closed|all, chapter_number, origin=import_comment|user|agent, "
+                "확인 요청 목록(조회 전용). status=open|closed|all, chapter_number, origin=import_comment|user|agent, "
                 "kind=citation(문헌 지목)|fact(사실·수치 확인)|general로 거른다. 한 줄에 하나: 번호·상태·장·출처·종류(citation이면 →ref_key 후보)·내용. "
                 "출처는 user·agent·원고 코멘트(작성자)·AI 확인 요청(작성자)이다. AI 확인 요청은 AI가 원고에 단 코멘트라 "
                 "저자에게 전할 때도 AI의 확인 요청이라고 밝힌다. "
-                "possibly_resolved=true면 새 판을 올린 뒤 원고에서 코멘트나 걸린 문장이 사라져 '해결됐을 수 있음'으로 표시된 것만 "
+                "possibly_resolved=true면 수정본을 올린 뒤 원고에서 코멘트나 걸린 문장이 사라져 '해결됐을 수 있음'으로 표시된 것만 "
                 "보인다(자동으로 닫지 않는다. 저자에게 확인하고 book_issue_close로 닫는다). "
                 f"limit 기본 50, 최대 {ISSUE_LIST_MAX}."
             ),

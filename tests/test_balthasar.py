@@ -55,7 +55,7 @@ async def test_style_add_and_search_by_style_not_topic(settings: Settings, store
                 },
             )
         )
-        assert added.startswith("기록함 ") and "장치: 반복, 대구" in added
+        assert added.startswith("문체에 기록함 ") and "장치: 반복, 대구" in added
         await client.call_tool(
             "style_add",
             {

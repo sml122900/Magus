@@ -14,6 +14,7 @@ from magus.store.base import (
     Ref,
     Store,
     StyleEntry,
+    TrashItem,
 )
 from magus.store.local import LocalStore
 
@@ -34,4 +35,5 @@ __all__ = [
     "Ref",
     "Store",
     "StyleEntry",
+    "TrashItem",
 ]

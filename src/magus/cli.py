@@ -51,6 +51,11 @@ def main(argv: list[str] | None = None) -> None:
     terms.add_argument("--project-id", required=True)
     terms.add_argument("--add", nargs="*", default=[])
     terms.add_argument("--remove", nargs="*", default=[])
+    trash = sub.add_parser("trash", help="생각·문체 휴지통(운영자용, USER_ID 사용자): list | put idea|style <id> --note … | restore idea|style <id>")
+    trash.add_argument("action", choices=["list", "put", "restore"])
+    trash.add_argument("kind", nargs="?", choices=["idea", "style"])
+    trash.add_argument("id", nargs="?")
+    trash.add_argument("--note", default="", help="put: 휴지통으로 옮기는 이유")
     synth = sub.add_parser("synth", help="합성 fixture(원고 docx·pdf, 대화 기록 md)를 만든다")
     synth.add_argument("folder", type=Path)
     sub.add_parser("seed-demo", help="1단계 확인용 가짜 프로젝트 생성")
@@ -193,6 +198,26 @@ def main(argv: list[str] | None = None) -> None:
             after_refs_changed(store, settings.user_id)  # 장별 미확인 수·이슈 연결을 새 용어로 다시 계산
             current = store.get_non_citation_terms(settings.user_id, args.project_id)
         print("\n".join(current) or "(없음)")
+    elif args.cmd == "trash":  # 지우지 않고 옮긴다. 되살리기는 이 CLI로만 한다(#88)
+        user = settings.user_id
+        if args.action != "list" and not (args.kind and args.id):
+            parser.exit(2, "put·restore에는 idea|style과 id가 필요합니다\n")
+        try:
+            if args.action == "put":
+                moved = ([i.id for i in store.trash_idea(user, args.id, args.note)] if args.kind == "idea"
+                         else [e.id for e in [store.trash_style(user, args.id, args.note)] if e])
+                if not moved:
+                    parser.exit(2, f"없음: {args.kind} {args.id}\n")
+                print(f"휴지통으로 옮김({user}): {args.kind} {', '.join(moved)}")
+            elif args.action == "restore":
+                print(f"되살림({user}): {args.kind} {', '.join(store.restore_trash(user, args.kind, args.id))}")
+        except ValueError as e:
+            parser.exit(2, f"{e}\n")
+        items = store.list_trash(user)
+        print(f"휴지통({user}) {len(items)}개")
+        for t in items:
+            print(f"- {t.kind} {t.id} · {t.trashed_at} · {t.note or '-'}" + (f" · 함께 옮긴 생각 {t.with_id}" if t.with_id else "")
+                  + f" · “{t.preview[:40]}”")
     elif args.cmd == "conversation":
         from magus.casper.tools import add_conversation
 

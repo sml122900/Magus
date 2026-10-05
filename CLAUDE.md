@@ -171,7 +171,7 @@
   - key는 첫 저자 성(소문자 영문) + 연도다. 예: `daeschler2006`, `galor2022`. 한글 표기(갤러, 다이아몬드 등)는 aliases에 넣는다.
 - ref_passages(id, user_id, ref_id, text, reason, locator?)
 - ideas(id, user_id, text, kind: thought|ai|article|conversation|tv|other, origin?, author: me|ai, parent_id?, created_at)
-- style_entries(id, user_id, passage, reason, work?, tags json, created_at)
+- style_entries(id, user_id, passage, reason, work?, tags json, created_at, tags_by?: ai|author) — tags_by는 태그를 누가 정했나(#89. Claude가 뽑음 ai / 저자가 말함 author, 기록 전 항목은 비어 있음). SCHEMA_VERSION 13
 - chunks(id, user_id, owner_type, owner_id, lane: ref_picked|ref_full|idea_me|idea_ai|style, text, embedding blob?) + chunks_fts
 
 ### 디스크 구조 (원본)
@@ -187,6 +187,7 @@ data/users/<user_id>/projects/<project_id>/original/{원고 사본, unsplit.md, 
 data/users/<user_id>/projects/<project_id>/removed/ch-NN-E<판>/   # 새 판에 없는 장(본문 + 이전본). 지우지 않는다
 data/users/<user_id>/projects/<project_id>/exports/*.docx       # book_export
 data/users/<user_id>/trash/<project_id>-<시각>/                   # book_import replace=True로 밀려난 프로젝트
+data/users/<user_id>/trash/shelf/{casper,balthasar}/<id>.json    # 휴지통의 생각·문체(#88). 원래 파일 + "_trash": {at, note, with?}
 data/users/<user_id>/inbox/                                       # 받은함(업로드한 원고·논문·대화 기록). 도구는 파일 이름으로 가리킨다
 data/index.sqlite
 ```
@@ -222,7 +223,7 @@ data/index.sqlite
 ## MCP 도구 (이름 고정)
 
 ### 받은함 (`magus/inbox.py`) — P1
-- `files_list()` → 받은함 목록(이름·크기·올린 시각·쓰임)과 사용량/한도. *(P1에서 추가된 도구, 모두 19개)*
+- `files_list()` → 받은함 목록(이름·크기·올린 시각·쓰임)과 사용량/한도. *(P1에서 추가된 도구. 휴지통 도구 둘(#88)까지 모두 21개)*
 - 파일 인자(book_import의 path, ref_add의 file_path, idea_add_conversation의 path)는 **받은함 파일 이름**을 받는다.
   - 원격(HTTP)에서는 이름만 받는다. 경로를 주면 "받은함에 없다" 오류다(서버 파일을 읽지 못하게).
   - 로컬(stdio) 개발용으로는 받은함에 없으면 로컬 경로(절대 또는 FILES_DIR 기준)도 받는다.
@@ -306,16 +307,30 @@ data/index.sqlite
   - 지원 마커(한 파일 안 혼용 가능): `**사용자:**`/`**Claude:**`(변형: `**사용자**:`, 나/User, ChatGPT/AI), `질문:`/`답변:`(괄호 설명 허용: `**답변(수정된 평가):**`), 제목형 `## 질문 N` / `### 답변`, `> 인용 블록` 뒤의 `**Claude 요지**`. 사용자 발화 전체가 인용 블록이면 `>`를 뗀다.
   - 사용자 발화 하나는 ideas(author=me, kind=conversation)가 되고, 바로 뒤의 AI 발화는 ideas(author=ai, parent_id=그 사용자 발화)가 된다. 대화 사이 구분 제목(`## 대화 N`, `---`)은 발화에서 떼어 낸다.
   - 리포트: me N건, ai N건, 분리 실패 구간(서문 본문, 빈 마커, 고아 AI 발화. 저장하지 않는다).
+- `idea_delete(id, note)` → 생각을 휴지통으로 옮긴다(지우지 않음, #88). 그 생각에 응답한 AI 발화도 함께 옮긴다. 설명 첫 문장: 저자가 지우라고 분명히 말했을 때만, 여러 개면 목록을 보여 주고 확인받는다.
 - `idea_search(query, author=me|ai|all, k=10)` → 기본값은 me다. all이면 me를 먼저 정렬한다. ai 결과에는 응답한 사용자 발화를 함께 보여 준다.
 
 ### 문체 — Balthasar (`magus/balthasar/`)
 - `style_add(passage, reason, work?, tags)` → tags 스키마는 `{호흡, 시점, 열기, 장치: [], 어미, 톤}`이다. 여섯 키가 모두 필요하고(장치만 빈 목록 허용), 모르는 키는 거부한다. 태그는 호출자(Claude)가 추출해 넘기고, 서버는 검증만 한다. **임베딩 대상과 FTS 색인 대상 모두 reason + tags를 이은 문자열이지 passage가 아니다**(구절을 색인하면 문체가 아니라 주제가 검색된다. 테스트로 고정). 키워드 색인에는 work(출전)도 더한다("유홍준 그 문장", 사용자 결정 #24). 임베딩 대상에는 넣지 않는다.
-- `style_search(query, k=5)` → passage, reason, tags를 돌려준다.
+  - `tags_by=ai|author`(기본 ai): 태그를 Claude가 뽑았는지 저자가 정했는지 남긴다(#89). 응답·style_search에 `(태그는 AI가 뽑음)`, 웹 `/styles`에 "AI가 뽑은 태그"로 보인다.
+  - reason은 저자가 말한 이유만 쓴다. 말하지 않았으면 지어내지 않고 `(저자가 이유를 밝히지 않음)`으로 남긴다(설명에 적었다).
+- `style_search(query, k=5)` → id, passage, reason, tags를 돌려준다.
+- `style_delete(id, note)` → 문체를 휴지통으로 옮긴다(#88). 설명 첫 문장은 idea_delete와 같다.
+- 휴지통의 생각·문체는 검색·목록·웹 화면·reindex에서 빠진다. 되살리기는 운영자 CLI `magus trash restore idea|style <id>`만 한다(생각이면 함께 옮긴 AI 발화도).
+
+### 쓰기 도구 설명의 첫 문장(#87)
+
+Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로는 보장되지 않아 설명 첫 문장에도 적었다.
+- idea_add·style_add·ref_add: "저자가 '생각'('문체', '문헌')에 넣으라고 분명히 말했을 때만 부른다. '저장해 줘'처럼 넣을 곳이 정해지지 않았으면 부르지 말고 생각·문체·문헌 중 어디인지 먼저 묻는다."
+- book_write_chapter: "저자가 'Magus 원고에 저장'하라고 분명히 말했을 때만 부른다."(규칙 4)
+- idea_delete·style_delete: "저자가 그 항목을 지우라고 분명히 말했을 때만 부른다. 여러 개면 목록을 보여 주고 확인받는다."
+- 도구 설명·도구 응답·instructions에는 코어 이름(Casper·Melchior·Balthasar)과 옛 이름(영감·책 지도·미해결·이슈·새 판·책장)을 쓰지 않는다. 예외는 규칙 7의 "쓰지 않는다" 문장(`instructions.AVOID`) 하나다. `tests/test_author_terms.py`가 모든 도구를 한 번씩 불러 설명·입력 스키마·응답·instructions를 검사한다.
 
 ## 서버 instructions
 
 6절의 규칙 문장은 `src/magus/instructions.py`의 `RULES`에 **원문 그대로** 들어 있다. 사용자 승인 없이 고치지 않는다.
 - 예외: **규칙 4는 사용자 결정 #74(2026-10-06)로 바꿨다.** "장 수정안은 대화에서 제안하고, 저자가 Word 원고에 반영한다. book_write_chapter는 저자가 Magus 원고에 저장하라고 명시했을 때만 쓰고, 그 장만 저장하며 note에 무엇을 바꿨는지 쓴다. 결정은 book_decide에, 열린 문제는 book_issue_add에 남긴다."
+- 예외: **사용자 결정 #87(2026-10-06)로 머리말에서 '책장'을 빼고("이 서버는 사용자의 생각·문헌·문체와 원고를 관리한다."), 규칙 7 끝을 "…'책 지도'·'미해결'·'이슈'·'새 판'·'영감'·'책장'·'refs' 같은 말은 쓰지 않는다. 코어 이름(Casper·Melchior·Balthasar)이나 도구 이름을 저자에게 말하지 않는다."로 바꿨다.**
 - 예외: **사용자 결정 #85(2026-10-06, 용어 통일)로 머리말의 '영감'을 '생각'으로 바꾸고 규칙 7~9를 더했다.** 7 저자에게 보이는 이름(용어집), 8 저자의 말 해석("전체 보여 줘" → book_outline, "전체 읽어 줘" → 한 장씩 안내, "수정본 올렸어" → files_list의 최신 원고를 new_edition으로), 9 넣을 곳을 말하지 않은 "저장해 줘"·"기록해 줘"·"등록해 줘"·"넣어 줘"에는 쓰기 도구를 바로 부르지 않고 생각·문체·문헌 중 어디인지 먼저 묻기. 원문은 `tests/test_instructions.py`의 SPEC.
 - **instructions는 등록된 도구만 언급한다.** `build_instructions(등록된 도구 이름)`은 규칙 문장에 나오는 도구(`book_|ref_|idea_|style_|files_` 이름)가 모두 등록된 규칙만 넣고, 번호는 다시 매긴다. 도구를 부르지 않는 규칙 7은 언제나 실린다. 도구가 모두 등록되면 SPEC과 똑같아진다(`tests/test_instructions.py`).
 - 새 도구를 추가하면 그 도구가 필요한 규칙이 자동으로 instructions에 들어간다. 따로 손댈 것은 없다.
@@ -424,6 +439,7 @@ magus reindex                             # 파일 → index.sqlite 재생성 + 
 magus cite-report --project-id book       # 책 전체 인용 집계(확인 순서)
 magus author-report --project-id book --out private/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + docx)
 magus terms --project-id book [--add …] [--remove …]                         # 비인용 용어 보기·고치기
+magus trash list | put idea|style <id> --note … | restore idea|style <id>   # 생각·문체 휴지통(운영자, USER_ID 사용자, #88)
 magus alias <key> <표기>                                                      # 저자가 확정한 표기를 aliases에(예: keynes1930b "케인스(1930)")
 magus inbox [--add 파일…] [--remove 이름…]                                    # 받은함(로컬 개발용, 원격은 웹 업로드)
 magus outline [--project-id …]                                               # book_outline과 같은 출력(USER_ID). 복구 확인용

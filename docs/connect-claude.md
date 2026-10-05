@@ -41,7 +41,7 @@
    - "제31장 요약해 줘"(book_read_chapter 1회) → 요약과 함께 그 장의 열린 확인 요청(I78)과 미확인 인용 8편을 말한다
    - "idea_add로 … 기록해 줘" → `기록함 [me] <id> · thought`
      - 서버의 default는 실제 원고 사본이다. 시험 메모를 남기지 않으려면 진짜 떠오른 생각으로 시험한다.
-     - 생각 항목을 지우는 도구는 아직 없다. 운영자가 지울 수 있다(아래).
+     - 생각을 지우려면 Claude에게 지우라고 분명히 말한다(idea_delete, 휴지통으로 옮김). 되살리기는 운영자가 한다(아래).
    - "ref_search로 '인구'를 찾아 줘" → verified 문헌이 아직 없으므로 `결과 없음. verified 문헌의 발췌·전문에서만 찾는다.`가 정상이다.
 7. 모바일: 같은 계정의 Claude 앱에서는 웹에서 추가한 커넥터가 그대로 보인다. 6을 다시 해 본다(**미확인**).
 8. **토큰 갱신 확인**(알려진 위험): 다음 날 같은 대화에서 다시 불러 본다. 로그인을 다시 하라고 하면 기록한다(**미확인**).
@@ -74,15 +74,18 @@ cd /opt/magus/deploy && sudo docker compose logs --since 30m magus | grep -E "au
 | `tool=… status=ok` | 도구 호출 성공 | — |
 | (아무것도 없음) | 토큰이 서버까지 오지 않았다. WorkOS 단계(CIMD·리디렉션·동의)에서 멈췄다 | WorkOS 대시보드의 로그, Claude 화면의 오류 문구 |
 
-### 생각 항목 지우기(운영자, 도구가 생기기 전까지)
+### 생각·문체 휴지통(운영자)
+
+지우지 않고 `data/users/<user_id>/trash/shelf/`로 옮긴다(#88). 검색·목록·웹 화면에서 빠지고 되살릴 수 있다. 저자는 Claude에게 지우라고 말하면 된다(idea_delete·style_delete).
 
 ```sh
 cd /opt/magus/deploy
-sudo rm data/users/<user_id>/shelf/casper/<id>.json      # 원본 파일을 지운다
-sudo docker compose exec -T magus /app/.venv/bin/magus reindex </dev/null   # 인덱스(검색)에서도 빠진다
+sudo docker compose exec -T -e USER_ID=<user_id> magus /app/.venv/bin/magus trash list </dev/null
+sudo docker compose exec -T -e USER_ID=<user_id> magus /app/.venv/bin/magus trash put idea <id> --note "이유" </dev/null
+sudo docker compose exec -T -e USER_ID=<user_id> magus /app/.venv/bin/magus trash restore idea <id> </dev/null
 ```
 
-그 항목에 딸린 AI 발화(`parent_id`가 그 id)가 있으면 함께 지운다. idea_add로 넣은 것은 딸린 것이 없다.
+생각을 옮기면 그 생각에 응답한 AI 발화(`parent_id`가 그 id)도 함께 옮기고, 되살리면 함께 돌아온다.
 
 ## 아버지용
 

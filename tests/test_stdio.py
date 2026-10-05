@@ -74,7 +74,7 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
         # 6단계
         tags = {"호흡": "짧음", "시점": "1인칭", "열기": "장면", "장치": ["반복"], "어미": "-다", "톤": "건조"}
         styled = _text(await client.call_tool("style_add", {"passage": "고래는 돌아갔다.", "reason": "짧은 문장의 리듬", "tags": tags}))
-        assert styled.startswith("기록함 ")
+        assert styled.startswith("문체에 기록함 ")
         assert "구절: “고래는 돌아갔다.”" in _text(await client.call_tool("style_search", {"query": "짧은 리듬"}))
 
 

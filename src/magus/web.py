@@ -54,6 +54,7 @@ ISSUE_KIND_NAMES = {"citation": "문헌 확인", "fact": "사실·수치 확인"
 NAV = (("/book", "원고"), ("/inbox", "받은함"), ("/checklist", "인용 체크리스트"), ("/issues", "확인 요청"),
        ("/ideas", "생각"), ("/refs", "문헌"), ("/styles", "문체"))
 PAGE_SIZE = 100  # 세 책장 목록의 한 쪽
+TAGS_BY = {"ai": "AI가 뽑은 태그", "author": "저자가 정한 태그"}
 SAY = "Claude에게 이렇게 말하면 쌓입니다. 예: "  # 빈 책장 안내(받은함 예문과 같은 방식)
 
 # 화면 스타일은 여기 한 곳(결정 #56: 템플릿 엔진·외부 글꼴·CDN 없음). 토큰과 참고 문서에서 바꾼 점은 docs/decisions/web-style.md.
@@ -735,7 +736,9 @@ class Web:
         shown, pager = _paged(chosen, request)
 
         def tags(s) -> str:
-            return " ".join(f'<a class="tag" href="?tag={urllib.parse.quote(t)}">{html.escape(t)}</a>' for t in _style_tags(s))
+            pills = " ".join(f'<a class="tag" href="?tag={urllib.parse.quote(t)}">{html.escape(t)}</a>' for t in _style_tags(s))
+            by = TAGS_BY.get(s.tags_by or "")  # 태그를 누가 정했나(#89). 기록 전 항목은 표시하지 않는다
+            return pills + (f"<br><small>{by}</small>" if by else "")
 
         rows = "".join(
             f"<tr><td>「{_fold(s.passage, 300)}」</td><td>{html.escape(s.work or '')}</td>"

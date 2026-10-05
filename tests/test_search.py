@@ -124,9 +124,9 @@ async def test_server_uses_embedder_for_idea_search(settings: Settings, store: L
 async def test_every_tool_is_user_scoped(settings: Settings, store: LocalStore, tmp_path):
     """완료 기준: 모든 쿼리가 user_id로 필터된다(다른 user_id로 호출하면 빈 결과)."""
     seed_demo(store, settings.user_id)
-    _idea(store, "앨리스의 생각: 바다")
+    alice_idea = _idea(store, "앨리스의 생각: 바다")
     async with Client(build_server(settings, store)) as client:
-        await client.call_tool("style_add", {"passage": "짧다.", "reason": "짧은 호흡", "tags": {"호흡": "짧음", "시점": "1인칭", "열기": "장면", "장치": [], "어미": "-다", "톤": "건조"}})
+        alice_style = (await client.call_tool("style_add", {"passage": "짧다.", "reason": "짧은 호흡", "tags": {"호흡": "짧음", "시점": "1인칭", "열기": "장면", "장치": [], "어미": "-다", "톤": "건조"}})).content[0].text.split()[2]
         await client.call_tool("ref_add", {"bib": {"authors": "Clack, J.", "year": "2012", "title": "Gaining ground"}, "passages": [{"text": "네발동물", "reason": "근거"}]})
     bob = dataclasses.replace(settings, user_id="bob")
     empty_markers = ("없습니다", "결과 없음", "0건", "비어 있다")
@@ -146,10 +146,12 @@ async def test_every_tool_is_user_scoped(settings: Settings, store: LocalStore, 
         "ref_search": {"query": "네발동물"},
         "idea_search": {"query": "바다", "author": "all"},
         "style_search": {"query": "짧은 호흡"},
+        "idea_delete": {"id": alice_idea, "note": "x"},  # 같은 id라도 bob의 휴지통 일이다(앨리스 것은 못 옮긴다)
+        "style_delete": {"id": alice_style, "note": "x"},
     }
     async with Client(build_server(bob, store)) as client:
         names = {t.name for t in (await client.list_tools()).tools}
-        assert len(names) == 19
+        assert len(names) == 21
         for name, args in calls.items():
             result = await client.call_tool(name, args)
             text = result.content[0].text
@@ -157,3 +159,4 @@ async def test_every_tool_is_user_scoped(settings: Settings, store: LocalStore, 
             assert "앨리스" not in text and "네발동물”" not in text, (name, text)
     # 쓰기 도구(ref_import_bibliography, ref_add, idea_*, style_add)는 bob 자신의 책장에만 쓴다
     assert store.list_refs("bob") == [] and store.list_ideas("bob") == [] and store.list_styles("bob") == []
+    assert alice_idea in {i.id for i in store.list_ideas(settings.user_id)} and alice_style in {s.id for s in store.list_styles(settings.user_id)}

@@ -1,4 +1,4 @@
-"""문헌(ref_*) MCP 도구 — Melchior · 황금. 검증된 근거만."""
+"""문헌(ref_*) MCP 도구 — Melchior · 황금. 검증된 근거만. 저자에게 보이는 글(설명·응답)에는 "문헌"만 쓴다(#85·#87)."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from magus.search import Embedder, hybrid_search
 from magus.store import Passage, Store
 from magus.store.base import Lane
 from magus.store.formats import one_line
+from magus.casper.tools import ASK
 
 
 class PassageIn(BaseModel):
@@ -37,7 +38,7 @@ def build_tools(
         linked = after_refs_changed(store, user)
         return (
             report.render()
-            + f"\ncitation 이슈 연결 변경 {linked}건. 모두 status=unverified다. 실제로 읽고 발췌한 문헌만 ref_add로 verified가 된다."
+            + f"\n문헌 확인 요청과의 연결 변경 {linked}건. 모두 status=unverified다. 실제로 읽고 발췌한 문헌만 ref_add로 verified가 된다."
         )
 
     def ref_add(
@@ -69,7 +70,7 @@ def build_tools(
         return (
             f"{ref.key}: {before or '새 문헌'} → verified · 발췌 {added}건 추가(총 {total}건) · "
             f"전문 {'있음' if ref.has_fulltext else '없음'} · aliases {list(ref.aliases) or '없음'}\n"
-            f"citation 이슈 연결 변경 {linked}건 · 이 문헌을 인용하는 장: {where or '없음'}"
+            f"문헌 확인 요청과의 연결 변경 {linked}건 · 이 문헌을 인용하는 장: {where or '없음'}"
         )
 
     def ref_search(query: str, scope: Literal["picked", "full", "both"] = "both", k: int = 8) -> str:
@@ -127,7 +128,8 @@ def build_tools(
             ref_add,
             name="ref_add",
             description=(
-                "사용자가 실제로 읽은 문헌을 verified로 넣는다. bib: {authors|author, year, title, …} 또는 {key}. "
+                "저자가 '문헌'에 넣으라고 분명히 말했을 때만 부른다. " + ASK
+                + "저자가 실제로 읽은 문헌을 verified로 넣는다. bib: {authors|author, year, title, …} 또는 {key}. "
                 "저자·연도를 모르면 bib를 비우고 file_path만 줘도 된다: 전문 첫머리의 제목으로 참고문헌에서 찾는다. "
                 "passages: [{text, reason, locator?}] 하나 이상 필수(직접 고른 발췌와 고른 이유). "
                 "file_path(받은함 파일 이름, txt/md/pdf/docx. files_list로 확인. 예: kremer1993.pdf) "

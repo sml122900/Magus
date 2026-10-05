@@ -20,7 +20,7 @@ import numpy as np
 
 from magus.balthasar.style import search_text as style_search_text
 from magus.ids import safe_id, utcnow
-from magus.store.base import Author, Chunk, Idea, Lane, Passage, Ref, RefStatus, StyleEntry
+from magus.store.base import Author, Chunk, Idea, Lane, Passage, Ref, RefStatus, StyleEntry, TrashItem, TrashKind
 from magus.store.fileio import locked, read_json, read_text, write_json, write_text
 from magus.textindex import chunk_text, index_text
 
@@ -193,10 +193,10 @@ class ShelfMixin:
 
     def _index_style(self, user_id: str, entry: StyleEntry) -> None:
         self._db.execute(
-            "INSERT OR REPLACE INTO style_entries (id, user_id, passage, reason, work, tags, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO style_entries (id, user_id, passage, reason, work, tags, created_at, tags_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (entry.id, user_id, entry.passage, entry.reason, entry.work, json.dumps(entry.tags, ensure_ascii=False),
-             entry.created_at),
+             entry.created_at, entry.tags_by),
         )
         # 문체 검색의 대상은 reason + tags다. passage를 색인하면 문체가 아니라 주제가 검색된다.
         # work(출전)는 키워드 색인에만 더한다: "유홍준 그 문장"처럼 출전으로 찾는 경우가 있다(사용자 결정 #24).
@@ -215,6 +215,78 @@ class ShelfMixin:
     @locked
     def list_styles(self, user_id: str) -> list[StyleEntry]:
         return [_style(r) for r in self._db.execute("SELECT * FROM style_entries WHERE user_id = ? ORDER BY id", (user_id,))]
+
+    # ---- 휴지통(생각·문체, #88) -------------------------------------------------------
+    # 지우지 않고 trash/shelf/<casper|balthasar>/<id>.json으로 옮긴다. 파일에 "_trash"(시각·이유·함께 옮긴 생각)를 덧붙인다.
+    # shelf/ 밖이라 reindex·검색·목록·웹에서 빠진다. 되살리면 "_trash"를 떼고 제자리로 돌려 다시 색인한다.
+
+    def _trash_dir(self, user_id: str, kind: TrashKind) -> Path:
+        return self._user_dir(user_id) / "trash" / "shelf" / ("casper" if kind == "idea" else "balthasar")
+
+    def _shelf_dir(self, user_id: str, kind: TrashKind) -> Path:
+        return self._casper_dir(user_id) if kind == "idea" else self._balthasar_dir(user_id)
+
+    def _move_to_trash(self, user_id: str, kind: TrashKind, item_id: str, mark: dict[str, Any]) -> dict[str, Any]:
+        src = self._shelf_dir(user_id, kind) / f"{item_id}.json"
+        data = read_json(src)
+        write_json(self._trash_dir(user_id, kind) / f"{item_id}.json", {**data, "_trash": mark})  # 먼저 쓰고 지운다
+        src.unlink()
+        lane: Lane = "style" if kind == "style" else ("idea_me" if data.get("author") == "me" else "idea_ai")
+        table = "style_entries" if kind == "style" else "ideas"
+        self._db.execute(f"DELETE FROM {table} WHERE user_id = ? AND id = ?", (user_id, item_id))
+        self._replace_chunks(user_id, kind, item_id, lane, [])
+        return data
+
+    @locked
+    def trash_idea(self, user_id: str, idea_id: str, note: str) -> list[Idea]:
+        safe_id(idea_id, "idea id")
+        if not (self._casper_dir(user_id) / f"{idea_id}.json").exists():
+            return []
+        replies = [i.id for i in self.list_ideas(user_id) if i.parent_id == idea_id]
+        at, moved = utcnow(), []
+        with self._db:
+            for item, with_id in [(idea_id, None), *((r, idea_id) for r in replies)]:
+                mark = {"at": at, "note": note, **({"with": with_id} if with_id else {})}
+                moved.append(Idea(**self._move_to_trash(user_id, "idea", item, mark)))
+        return moved
+
+    @locked
+    def trash_style(self, user_id: str, style_id: str, note: str) -> StyleEntry | None:
+        safe_id(style_id, "style id")
+        if not (self._balthasar_dir(user_id) / f"{style_id}.json").exists():
+            return None
+        with self._db:
+            return StyleEntry(**self._move_to_trash(user_id, "style", style_id, {"at": utcnow(), "note": note}))
+
+    @locked
+    def list_trash(self, user_id: str) -> list[TrashItem]:
+        items = []
+        for kind in ("idea", "style"):
+            for path in sorted(self._trash_dir(user_id, kind).glob("*.json")):  # type: ignore[arg-type]
+                data = read_json(path)
+                mark = data.get("_trash") or {}
+                items.append(TrashItem(kind, path.stem, mark.get("at", ""), mark.get("note", ""),  # type: ignore[arg-type]
+                                       str(data.get("text") or data.get("passage") or "")[:80], mark.get("with")))
+        return sorted(items, key=lambda i: i.trashed_at, reverse=True)
+
+    @locked
+    def restore_trash(self, user_id: str, kind: TrashKind, item_id: str) -> list[str]:
+        safe_id(item_id, f"{kind} id")
+        trash = self._trash_dir(user_id, kind)
+        if not (trash / f"{item_id}.json").exists():
+            raise ValueError(f"휴지통에 {kind} {item_id}가 없다")
+        names = [item_id] + ([p.stem for p in sorted(trash.glob("*.json")) if (read_json(p).get("_trash") or {}).get("with") == item_id]
+                             if kind == "idea" else [])
+        with self._db:
+            for name in names:
+                data = {k: v for k, v in read_json(trash / f"{name}.json").items() if k != "_trash"}
+                write_json(self._shelf_dir(user_id, kind) / f"{name}.json", data)
+                (trash / f"{name}.json").unlink()
+                if kind == "idea":
+                    self._index_idea(user_id, Idea(**data))
+                else:
+                    self._index_style(user_id, StyleEntry(**data))
+        return names
 
     def _reindex_shelf(self, user_id: str) -> None:
         for bib in sorted(self._melchior_dir(user_id).glob("*/bib.json")):
@@ -306,7 +378,7 @@ class ShelfMixin:
 def _style(r: sqlite3.Row) -> StyleEntry:
     return StyleEntry(
         id=r["id"], passage=r["passage"], reason=r["reason"], tags=json.loads(r["tags"]), work=r["work"],
-        created_at=r["created_at"],
+        created_at=r["created_at"], tags_by=r["tags_by"],
     )
 
 
