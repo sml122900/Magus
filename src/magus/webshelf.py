@@ -168,7 +168,7 @@ a.book.add:hover,a.book.add:focus-visible{background:rgb(255 255 255/.6);color:v
 a.book:hover,a.book:focus-visible{transform:none;outline:3px solid var(--primary);outline-offset:3px}}
 .board{list-style:none;margin:12px 0;padding:0;background:var(--canvas);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
 .board>li{border-bottom:1px solid var(--line)}.board>li:last-child{border-bottom:0}
-.board summary{display:grid;grid-template-columns:minmax(0,1fr) 9em 13em;align-items:baseline;gap:4px 16px;
+.board summary{display:grid;grid-template-columns:minmax(0,1fr) 9em 15em;align-items:baseline;gap:4px 16px;
 padding:12px 16px 12px 44px;min-height:48px;cursor:pointer;list-style:none;position:relative}
 .board summary::-webkit-details-marker{display:none}
 .board summary::before{content:"▸";position:absolute;left:16px;top:10px;color:var(--ink2);font-size:20px;line-height:1.4}
@@ -500,21 +500,23 @@ class ShelfPages:
                     "<p>책을 누르면 그 카테고리의 목록이 열립니다."
                     + (" 점선 자리를 누르면 카테고리를 새로 만듭니다." if room else f" 카테고리는 {MAX_CATEGORIES}개까지 만들 수 있습니다.") + "</p>")
             return self._shelf_page("책장", body, session)
-        groups, total = [], 0
+        groups, missing = [], []
         kinds = [*KINDS.values(), *(category_kind(c) for c in self.store.list_categories(uid))]
         for kind in kinds:
             rows = await run_in_threadpool(self._rows, uid, kind, None, q)
-            total += bool(rows)
+            if not rows:  # 찾는 말이 없는 카테고리는 묶음을 만들지 않고 한 줄로만 알린다(카테고리가 많을 때 화면이 길어지지 않게)
+                missing.append(html.escape(kind.name))
+                continue
             more = (f' <small><a href="/shelf/{kind.key}?q={urllib.parse.quote(q)}">{html.escape(kind.name)}에서 {len(rows)}개 모두 보기</a></small>'
                     if len(rows) > GROUP_SIZE else "")
             groups.append(
                 f'<section class="group"><h2>{html.escape(kind.name)} <small>{len(rows)}개</small>{more}</h2>'
-                + (f'<ol class="board">{"".join(row_html(r, q) for r in rows[:GROUP_SIZE])}</ol>' if rows else "<p>없음</p>")
-                + "</section>"
+                f'<ol class="board">{"".join(row_html(r, q) for r in rows[:GROUP_SIZE])}</ol></section>'
             )
         head = (f'<p class="crumb"><a href="/shelf">← 책장</a></p>{form}'
-                f"<p>「{html.escape(q)}」 " + ("찾은 카테고리 " + str(total) + "곳" if total else "찾는 말이 들어간 항목이 없습니다.")
-                + (" · 한 글자는 그 글자가 들어간 항목을 최근 것부터 보입니다." if one_char(q) else "") + "</p>")
+                f"<p>「{html.escape(q)}」 " + (f"찾은 카테고리 {len(groups)}곳" if groups else "찾는 말이 들어간 항목이 없습니다.")
+                + (" · 한 글자는 그 글자가 들어간 항목을 최근 것부터 보입니다." if one_char(q) else "") + "</p>"
+                + (f'<p class="muted">찾는 말이 없는 카테고리: {" · ".join(missing)}</p>' if groups and missing else ""))
         return self._shelf_page("책장", head + "".join(groups), session)
 
     def _done_message(self, uid: str, request: Request) -> str:
@@ -550,10 +552,12 @@ class ShelfPages:
                                     session, 404)
         crumb = '<p class="crumb"><a href="/shelf">← 책장</a></p>'
         writable = kind.key == "ideas" or kind.category is not None
-        write = self._write_form(session, kind, request.query_params.get("error") == "empty") if writable else ""
-        if not await run_in_threadpool(self._has_any, uid, kind):
+        error = request.query_params.get("error") == "empty"
+        if not await run_in_threadpool(self._has_any, uid, kind):  # 비어 있으면 바로 적기 폼을 펼쳐 둔다
             summary = await run_in_threadpool(self._summary, uid, kind, {})
+            write = self._write_form(session, kind, error, opened=True) if writable else ""
             return self._shelf_page(kind.name, f'{crumb}{summary}{write}<p class="msg">{kind.empty}</p>', session)
+        write = self._write_form(session, kind, error) if writable else ""
         params = request.query_params
         q = "" if item else clean_query(params.get("q"))
         filters = {} if item else {k: params.get(k, "") for k in ("author", "status", "tag", "project")}
@@ -614,7 +618,7 @@ class ShelfPages:
             mine = sum(1 for i in items if i.author == "me")
             template = TEMPLATE_BY_KEY.get(c.template)
             base = f"/shelf/{c.id}"
-            return (f"<p>{html.escape(c.name)} {len(items)}개(나 {mine} · AI {len(items) - mine}) · "
+            return (f"<p>{html.escape(c.name)} {len(items)}개" + (f"(나 {mine} · AI {len(items) - mine})" if items else "") + " · "
                     f"{html.escape(template.name if template else c.template)} 템플릿{edit}"
                     f' · <a href="/shelf/trash/{c.id}">휴지통으로</a></p>'
                     + (f'<p><a href="{base}">전체</a> · <a href="{base}?author=me">나</a> · <a href="{base}?author=ai">AI</a></p>'
@@ -622,6 +626,8 @@ class ShelfPages:
         if kind.key == "ideas":
             ideas = self.store.list_ideas(uid)
             mine = sum(1 for i in ideas if i.author == "me")
+            if not ideas:
+                return f"<p>생각 0개{edit}</p>"
             return (f"<p>생각 {len(ideas)}개(나 {mine} · AI {len(ideas) - mine}) · "
                     '<a href="/shelf/ideas">전체</a> · <a href="/shelf/ideas?author=me">나</a> · '
                     f'<a href="/shelf/ideas?author=ai">AI</a>{edit}</p>')
@@ -757,12 +763,12 @@ class ShelfPages:
         return rows
 
     # --- 바로 적기(생각·저자의 카테고리) ---
-    def _write_form(self, session: tuple[str, str], kind: Kind, error: bool) -> str:
+    def _write_form(self, session: tuple[str, str], kind: Kind, error: bool, opened: bool = False) -> str:
         fields = kind.category.fields if kind.category else ()
         extra = "".join(f'<label class="block">{html.escape(f)} <input name="f:{html.escape(f)}" maxlength="{FIELD_MAX}"></label>'
                         for f in fields)
         return (
-            f'<details class="card write"{" open" if error else ""}><summary>새로 적기</summary>'
+            f'<details class="card write"{" open" if error or opened else ""}><summary>새로 적기</summary>'
             + ('<p class="msg err">내용을 적어 주세요.</p>' if error else "")
             + f'<form method="post" action="/shelf/write/{kind.key}">{self._csrf_input(session)}'
             f'<label class="block">제목(비워 둬도 됩니다) <input name="title" maxlength="{TITLE_MAX}"></label>'

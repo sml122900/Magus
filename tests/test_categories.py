@@ -239,7 +239,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         assert store.get_shelf_settings("alice").my_colors == ("#4a6741",)  # 내 색에 저장
         store.close()
         empty = c.get(f"/shelf/{cid}").text
-        assert '<details class="card write">' in empty and 'name="f:시기"' in empty and "아직 적은 것이 없습니다." in empty
+        assert '<details class="card write" open>' in empty and 'name="f:시기"' in empty and "아직 적은 것이 없습니다." in empty
         # 바로 적기(누가 = 저자, CSRF)
         assert c.post(f"/shelf/write/{cid}", data={"csrf": "틀림", "content": "x"}).status_code == 403
         assert "error=empty" in str(c.post(f"/shelf/write/{cid}", data={"csrf": csrf, "content": "  "}).url)

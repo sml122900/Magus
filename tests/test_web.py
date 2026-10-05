@@ -383,7 +383,7 @@ def test_shelf_search_marks_hits(server_proc):
         assert re.search(r'<small class="hit">[^<]*tetrapods came <mark>ashore</mark></small>', hit)  # 제목 밖에서 맞으면 맞은 곳 한 줄
         both = c.get("/shelf", params={"q": "물"}).text
         assert re.search(r"<h2>생각 <small>\d+개</small>", both) and "<h2>문체 <small>1개</small></h2>" in both
-        assert "찾은 카테고리 2곳" in both and "<h2>문헌 <small>0개</small></h2><p>없음</p>" in both
+        assert "찾은 카테고리 2곳" in both and "<h2>문헌" not in both and "찾는 말이 없는 카테고리: 문헌" in both
         evil = c.get("/shelf/ideas", params={"q": "<script>"}).text
         assert "<script>alert" not in evil and "&lt;script&gt;alert(1)&lt;/script&gt;" in c.get("/shelf/ideas").text
         assert 'value="&lt;script&gt;"' in evil
