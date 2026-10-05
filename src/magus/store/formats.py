@@ -88,6 +88,12 @@ def dump_issues(issues: list[Issue]) -> str:
             meta.append(f"- paragraph: {i.paragraph}")
         if i.anchor:
             meta.append(f"- anchor: {one_line(i.anchor)}")
+        if i.comment_fp:
+            meta.append(f"- comment_fp: {i.comment_fp}")
+        if i.stale:
+            meta.append(f"- stale: {i.stale}")
+        if i.stale_edition is not None:
+            meta.append(f"- stale_edition: {i.stale_edition}")
         if i.closed_note:
             meta.append(f"- closed_note: {one_line(i.closed_note)}")
         out.append(f"## I{i.id} · {i.status}\n" + "\n".join(meta) + f"\n\n{i.text.strip()}\n")
@@ -121,6 +127,9 @@ def parse_issues(text: str) -> list[Issue]:
                 comment_date=meta.get("comment_date") or None,
                 anchor=meta.get("anchor") or None,
                 paragraph=int(meta["paragraph"]) if meta.get("paragraph", "").isdigit() else None,
+                comment_fp=meta.get("comment_fp") or None,
+                stale=meta.get("stale") if meta.get("stale") in ("comment_removed", "anchor_missing") else None,  # type: ignore[arg-type]
+                stale_edition=int(meta["stale_edition"]) if meta.get("stale_edition", "").isdigit() else None,
                 text="\n".join(lines).strip(),
             )
         )

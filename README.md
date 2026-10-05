@@ -147,7 +147,7 @@ PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버
 4. **문헌 검증**: 읽은 문헌은 `ref_add`로 발췌와 함께 넣습니다. 그러면 그 문헌을 인용한 곳이 verified가 됩니다.
    - 장을 고치면 `book_write_chapter`가 미확인 인용을 알려 줍니다.
    - 원고 본문의 원본은 저자의 Word 파일입니다(결정 #68, `docs/decisions/author-file-is-source.md`). 수정안은 대화에서 받아 Word에 반영하고, `book_write_chapter`는 Magus 안에 저장하라고 할 때만 씁니다.
-   - 원고가 바뀌면 다시 올립니다. 다시 올리기 기능은 설계 중입니다(`docs/decisions/reupload-design.md`). 그 전에 `replace`로 다시 임포트하면 결정과 미해결까지 휴지통으로 갑니다.
+   - 원고가 바뀌면 같은 책의 새 판으로 다시 올립니다(`book_import new_edition=true`, 웹 "이 책의 새 판으로 올리기", `docs/decisions/reupload-design.md`). `replace`는 결정과 미해결까지 휴지통으로 보내니 다시 올리기에 쓰지 않습니다.
 5. **문체**: 좋아하는 문장은 `style_add`로 넣고, 문체 작업 전에 `style_search`로 꺼냅니다.
 
 같은 일을 명령줄로도 할 수 있습니다(아래 "명령").
@@ -162,7 +162,7 @@ PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버
 | `book_issues(status, chapter_number?, origin?, kind?, limit)` | 미해결 목록(조회 전용). |
 | `book_decide(text)` · `book_issue_add(text, chapter_number?, origin)` · `book_issue_close(id, note?)` | 결정과 열린 문제를 기록합니다. 번호는 다시 쓰지 않습니다. |
 | `files_list()` | 받은함(올린 파일) 목록과 사용량. 파일 인자에는 여기 나온 이름만 줍니다. |
-| `book_import(path, project_id?, title?, replace?)` | 받은함의 docx(또는 pdf) 원고를 장 단위로 나눕니다. 코멘트는 미해결, 참고문헌은 refs가 됩니다. |
+| `book_import(path, project_id?, title?, subtitle?, replace?, new_edition?, force?)` | 받은함의 docx(또는 pdf) 원고를 장 단위로 나눕니다. 코멘트는 미해결, 참고문헌은 refs가 됩니다. Word에서 고친 같은 책은 `new_edition=true`로 새 판으로 올립니다(바뀐 장만 바뀌고 결정·미해결·책장은 그대로). |
 | `book_export(path?)` | 장을 합쳐 docx로 만듭니다. |
 | `ref_import_bibliography(text)` | 참고문헌 목록을 refs(unverified)로 넣습니다. |
 | `ref_add(bib, passages, file_path?/full_text?, aliases?)` | 읽은 문헌을 발췌와 함께 verified로 넣습니다. 저자·연도 없이 파일만 주면 첫머리의 제목으로 참고문헌에서 찾습니다. |

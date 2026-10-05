@@ -27,7 +27,9 @@ def main(argv: list[str] | None = None) -> None:
     imp.add_argument("--project-id")
     imp.add_argument("--title")
     imp.add_argument("--subtitle", help="부제. 비우면 원고에서 읽는다")
-    imp.add_argument("--replace", action="store_true", help="같은 project_id가 있으면 휴지통으로 옮기고 다시 만든다")
+    imp.add_argument("--replace", action="store_true", help="같은 project_id가 있으면 휴지통으로 옮기고 다시 만든다(결정·미해결도)")
+    imp.add_argument("--new-edition", action="store_true", help="같은 책의 새 판으로 올린다(바뀐 장만, 결정·미해결 유지)")
+    imp.add_argument("--force", action="store_true", help="--new-edition: 장 제목 겹침이 30%% 미만이어도 올린다")
     imp.add_argument("--synthetic", action="store_true", help="리포트에 '합성 fixture'라고 표시")
     convo = sub.add_parser("conversation", help="대화 기록 md를 영감 책장(Casper)에 넣고 리포트를 출력")
     convo.add_argument("path", type=Path)
@@ -120,6 +122,18 @@ def main(argv: list[str] | None = None) -> None:
             mode = f"인증: {settings.auth.issuer}, 허용 {len(settings.auth.allowed)}명" if settings.auth else "인증 없음 — 로컬 전용"
             log.info("streamable-http: http://%s:%d%s (stateless, %s)", args.host, args.port, transports.MCP_PATH, mode)
             transports.run_http(server, args.host, args.port, verifier, settings.max_request_bytes)
+    elif args.cmd == "import" and args.new_edition:
+        from magus.book.reupload import reupload_manuscript
+
+        if not args.project_id:
+            parser.exit(2, "--new-edition에는 --project-id가 필요합니다.\n")
+        try:
+            again = reupload_manuscript(
+                store, settings.user_id, args.path, args.project_id, title=args.title, subtitle=args.subtitle, force=args.force
+            )
+        except ValueError as e:
+            parser.exit(2, f"{e}\n")
+        print(again.full())
     elif args.cmd == "import":
         from magus.book.importer import import_manuscript
 

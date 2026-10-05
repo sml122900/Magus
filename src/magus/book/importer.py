@@ -10,18 +10,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from magus.book.comments import author_kind, classify_comment
-from magus.book.docx_reader import Block, Manuscript, read_docx
+from magus.book.comments import author_kind, classify_comment, comment_fingerprint
+from magus.book.docx_reader import Block, Comment, Manuscript, read_docx
 from magus.book.pdf_reader import read_pdf
 from magus.melchior.bibliography import BibReport, import_bibliography
 from magus.melchior.check import after_refs_changed
-from magus.store import BookTitles, Part, Store
-from magus.store.base import PART_INTRO_BASE, reading_order
+from magus.ids import utcnow
+from magus.store import BookTitles, Edition, Part, Store
+from magus.store.base import PART_INTRO_BASE, AuthorKind, IssueKind, reading_order
 from magus.store.formats import one_line
 
 _SEP = r"[\s:：.\-–—·]"
@@ -312,14 +314,19 @@ def detect_titles(manuscript: Manuscript, cover: list[Block]) -> BookTitles:
     return BookTitles(title, subtitle, *(latin + [None, None])[:2])
 
 
-def book_titles(manuscript: Manuscript, split: Split, title: str | None, subtitle: str | None, path: Path) -> BookTitles:
-    """사람이 준 제목·부제가 먼저, 없으면 원고에서 읽은 것, 그것도 없으면 파일 이름."""
+def cover_blocks(manuscript: Manuscript, split: Split) -> list[Block]:
+    """첫 제목 앞의 블록(표지·목차)."""
     cover = []
-    for b in manuscript.blocks:  # 첫 제목 앞(표지·목차)
+    for b in manuscript.blocks:
         if split.region_of_block.get(b.index) != "unsplit":
             break
         cover.append(b)
-    found = detect_titles(manuscript, cover)
+    return cover
+
+
+def book_titles(manuscript: Manuscript, split: Split, title: str | None, subtitle: str | None, path: Path) -> BookTitles:
+    """사람이 준 제목·부제가 먼저, 없으면 원고에서 읽은 것, 그것도 없으면 파일 이름."""
+    found = detect_titles(manuscript, cover_blocks(manuscript, split))
     return BookTitles(
         (title or "").strip() or found.title or path.stem,
         (subtitle or "").strip() or found.subtitle,
@@ -358,7 +365,11 @@ def import_manuscript(
     ai_names: list[str] = []
     if project_id and store.get_project(user_id, project_id):
         if not replace:
-            raise ValueError(f"프로젝트 {project_id!r}가 이미 있다. 새 project_id를 쓰거나 replace=True로 다시 임포트한다.")
+            raise ValueError(
+                f"프로젝트 {project_id!r}가 이미 있다. 같은 책을 Word에서 고쳐 다시 올리는 것이면 새 판으로 올린다"
+                "(book_import new_edition=true, 웹 '이 책의 새 판으로 올리기'). 다른 책이면 새 project_id를 쓴다. "
+                "replace=True는 결정·미해결까지 휴지통으로 보내고 새로 만든다."
+            )
         terms = store.get_non_citation_terms(user_id, project_id)  # 사람이 정한 비인용 용어는 다시 임포트해도 유지
         ai_names = store.get_ai_authors(user_id, project_id)  # AI 작성자 이름 목록도 같다
         store.archive_project(user_id, project_id)
@@ -374,10 +385,9 @@ def import_manuscript(
     store.set_parts(user_id, project.id, split.parts)
     empty: list[int] = []
     for ch in split.chapters:
-        body = ch.markdown()
-        if not body:
+        body = chapter_body(ch)
+        if body == EMPTY_BODY:
             empty.append(ch.number)
-            body = "[본문 없음: 임포트 때 이 장 제목 아래에서 글을 찾지 못했다]"
         store.write_chapter(
             user_id,
             project.id,
@@ -387,33 +397,27 @@ def import_manuscript(
             title=ch.title,
             part_number=ch.part_number,
             label=ch.label,
+            edition=1,
         )
-    # 장 밖의 글(표지·목차·부 서문). 목차의 점선은 줄여서 보관한다.
-    unsplit_md = re.sub(r"\s*[.…·]{4,}\s*", " … ", blocks_to_markdown(split.unsplit))
+    unsplit_md = unsplit_markdown(split)
     files["unsplit"] = store.save_original(user_id, project.id, "unsplit.md", unsplit_md.encode("utf-8"))
 
     comment_counts: Counter = Counter()
     outside: Counter = Counter()
     authors: Counter = Counter()
-    paragraphs = {ch.number: ch.paragraphs() for ch in split.chapters}
     rows: list[tuple[int, int | None, str, str | None, str]] = []
-    for c in sorted(manuscript.comments, key=lambda c: (c.block_index is None, c.block_index or 0, int(c.id) if c.id.isdigit() else 0)):
-        region = split.region_of_block.get(c.block_index) if c.block_index is not None else None
-        chapter = region if isinstance(region, int) else None
-        if chapter is None:
-            outside[region or "위치 모름"] += 1
+    for e in comment_entries(manuscript, split, exclude, ai_names):
+        c = e.comment
+        if e.chapter is None:
+            outside[e.region or "위치 모름"] += 1
         else:
-            comment_counts[chapter] += 1
-        kind, ref_key = classify_comment(c.text, c.anchor, exclude)
-        paragraph = paragraphs.get(chapter, {}).get(c.block_index) if chapter is not None else None
-        anchor = one_line(c.anchor)[:120]
-        text = (c.text or "(빈 코멘트)") + (f"\n— 원문: “{anchor}”" if anchor else "")
+            comment_counts[e.chapter] += 1
         issue = store.add_issue(
-            user_id, project.id, text, origin="import_comment", chapter_number=chapter, kind=kind, ref_key=ref_key,
-            author=c.author, author_kind=author_kind(c.author, ai_names), comment_date=c.date,
-            anchor=c.anchor, paragraph=paragraph,
+            user_id, project.id, e.issue_text, origin="import_comment", chapter_number=e.chapter, kind=e.kind,
+            ref_key=e.ref_key, author=c.author, author_kind=e.author_kind, comment_date=c.date,
+            anchor=c.anchor, paragraph=e.paragraph, comment_fp=e.fp,
         )
-        rows.append((issue.id, chapter, kind, ref_key, one_line(c.text)[:40]))
+        rows.append((issue.id, e.chapter, e.kind, e.ref_key, one_line(c.text)[:40]))
         if c.author:
             authors[c.author + ("(AI)" if issue.by_ai else "")] += 1
 
@@ -450,4 +454,67 @@ def import_manuscript(
         files=files,
     )
     files["report"] = store.save_original(user_id, project.id, "import-report.md", report.full().encode("utf-8"))
+    data = path.read_bytes()
+    store.add_edition(  # 첫 임포트가 판 E1이다(#76). 다시 올리면 E2, E3…
+        user_id, project.id,
+        Edition(1, path.name, utcnow(), hashlib.sha256(data).hexdigest(), changed=len(split.chapters), added=len(split.chapters)),
+    )
     return report
+
+
+EMPTY_BODY = "[본문 없음: 임포트 때 이 장 제목 아래에서 글을 찾지 못했다]"
+
+
+def chapter_body(ch: ChapterPlan) -> str:
+    return ch.markdown() or EMPTY_BODY
+
+
+def unsplit_markdown(split: Split) -> str:
+    """장 밖의 글(표지·목차·부 서문). 목차의 점선은 줄여서 보관한다."""
+    return re.sub(r"\s*[.…·]{4,}\s*", " … ", blocks_to_markdown(split.unsplit))
+
+
+@dataclass
+class CommentEntry:
+    """원고 코멘트 하나를 미해결로 만들 준비: 위치(장·문단), 분류, 작성자 판정, 지문."""
+
+    comment: Comment
+    region: int | str | None  # 장 번호 | "unsplit" | "bib" | None(위치 모름)
+    kind: IssueKind
+    ref_key: str | None
+    paragraph: int | None
+    author_kind: AuthorKind | None
+    fp: str
+
+    @property
+    def chapter(self) -> int | None:
+        return self.region if isinstance(self.region, int) else None
+
+    @property
+    def issue_text(self) -> str:
+        anchor = one_line(self.comment.anchor)[:120]
+        return (self.comment.text or "(빈 코멘트)") + (f"\n— 원문: “{anchor}”" if anchor else "")
+
+
+def comment_entries(
+    manuscript: Manuscript, split: Split, exclude: frozenset[str], ai_names: list[str]
+) -> list[CommentEntry]:
+    """문서 순서대로. 같은 지문(작성자·날짜·본문이 같은 코멘트)이 또 나오면 '-2', '-3'을 붙여 가른다."""
+    paragraphs = {ch.number: ch.paragraphs() for ch in split.chapters}
+    seen: Counter = Counter()
+    out = []
+    for c in sorted(manuscript.comments, key=lambda c: (c.block_index is None, c.block_index or 0, int(c.id) if c.id.isdigit() else 0)):
+        region = split.region_of_block.get(c.block_index) if c.block_index is not None else None
+        chapter = region if isinstance(region, int) else None
+        kind, ref_key = classify_comment(c.text, c.anchor, exclude)
+        fp = comment_fingerprint(c.author, c.date, c.text)
+        seen[fp] += 1
+        out.append(
+            CommentEntry(
+                c, region, kind, ref_key,
+                paragraphs.get(chapter, {}).get(c.block_index) if chapter is not None else None,
+                author_kind(c.author, ai_names),
+                fp if seen[fp] == 1 else f"{fp}-{seen[fp]}",
+            )
+        )
+    return out

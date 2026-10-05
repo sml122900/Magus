@@ -18,6 +18,7 @@ IssueKind = Literal["citation", "fact", "general"]
 ISSUE_KINDS: tuple[str, ...] = ("citation", "fact", "general")
 AuthorKind = Literal["ai", "person"]  # 원고 코멘트 작성자: AI인가 사람인가(#71)
 ANCHOR_MAX = 1000  # 미해결에 남기는 걸린 문장의 최대 길이(#73)
+IssueStale = Literal["comment_removed", "anchor_missing"]  # 다시 올린 뒤 "해결됐을 수 있음"(#76)
 ChapterStatus = Literal["draft", "revising", "done"]
 CHAPTER_STATUSES: tuple[str, ...] = ("draft", "revising", "done")
 RefStatus = Literal["unverified", "verified"]
@@ -82,6 +83,8 @@ class ChapterMeta:
     label: str | None = None  # 번호 없는 장의 표시 이름(서장·맺음·부록 N). 없으면 "제N장"
     unverified_cite_keys: tuple[str, ...] = ()  # 파생값. 장 사이 합집합이 책 전체 고유 미확인 문헌이다
     uncertain_cite_keys: tuple[str, ...] = ()  # 파생값. 한글 표기인데 refs와 잇지 못한 것(미확인 수에는 넣지 않음)
+    # 본문이 어느 업로드 판(E1, E2…)과 같은가(#76). Magus에서 book_write_chapter로 고치면 비워진다(= Magus에서 고친 본문).
+    edition: int | None = None
 
     @property
     def display(self) -> str:
@@ -145,10 +148,35 @@ class Issue:
     # 본문의 "— 원문: “…”"은 표시용 120자다. 다시 올리기에서 걸린 문장이 남아 있는지 이것으로 본다.
     anchor: str | None = None
     paragraph: int | None = None
+    # 다시 올리기(#76): 같은 코멘트를 두 번 넣지 않으려는 지문(작성자 + 날짜 + 본문)과 "해결됐을 수 있음" 표시.
+    comment_fp: str | None = None
+    stale: IssueStale | None = None  # 자동으로 닫지 않는다. 표시만 하고 닫는 것은 저자다
+    stale_edition: int | None = None  # 몇 판에서 그렇게 됐나
 
     @property
     def by_ai(self) -> bool:
         return self.author_kind == "ai"
+
+
+STALE_REASONS: dict[str, str] = {
+    "comment_removed": "원고에서 코멘트가 지워짐",
+    "anchor_missing": "걸린 문장이 원고에 없음",
+}
+
+
+@dataclass(frozen=True)
+class Edition:
+    """원고 업로드 한 번 = 판 하나(E1, E2…). project.json의 editions에 쌓인다(#76)."""
+
+    number: int
+    file: str  # 올린 원고 파일 이름. 사본은 original/에 있다
+    uploaded_at: str
+    sha256: str = ""
+    changed: int = 0  # 본문이 바뀐 장(새 장 포함)
+    added: int = 0
+    removed: int = 0
+    unchanged: int = 0
+    legacy: bool = False  # 판 기록이 생기기 전에 임포트한 것을 E1로 본 기록
 
 
 @dataclass(frozen=True)
@@ -293,11 +321,23 @@ class Store(Protocol):
         status: ChapterStatus | None = None,
         part_number: int | None = None,
         label: str | None = None,
+        edition: int | None = None,
     ) -> ChapterMeta:
         """이전 본문을 versions/에 보관한 뒤 새 본문을 쓴다. 없는 번호면 새 장을 만든다.
+        edition은 업로드로 쓸 때만 준다(그 판의 본문). 주지 않으면(book_write_chapter) 앞머리의 edition이 비워진다.
         content는 본문만이다. front matter가 붙어 오면 벗겨 내고, 메타는 인자로만 바꾼다.
         status는 CHAPTER_STATUSES 중 하나여야 하고, 빈 본문은 거부한다(ValueError)."""
         ...
+    def set_chapter_edition(self, user_id: str, project_id: str, number: int, edition: int) -> None:
+        """본문이 그대로인 장에 '이 판과 같다'고만 적는다. 버전·갱신 시각은 그대로다(다시 올리기)."""
+        ...
+    def remove_chapter(self, user_id: str, project_id: str, number: int, edition: int) -> str:
+        """새 판에 없는 장: 본문과 이전본을 removed/ch-NN-E{edition}/로 옮기고 인덱스에서 뺀다. 지우지 않는다."""
+        ...
+    def list_editions(self, user_id: str, project_id: str) -> list[Edition]:
+        """판 기록(오래된 것부터). 판 기록 전에 임포트한 프로젝트는 빈 목록."""
+        ...
+    def add_edition(self, user_id: str, project_id: str, edition: Edition) -> None: ...
     def recent_changes(self, user_id: str, project_id: str, limit: int = 5) -> list[Change]: ...
 
     # 결정·미해결
@@ -322,7 +362,11 @@ class Store(Protocol):
         comment_date: str | None = None,
         anchor: str | None = None,
         paragraph: int | None = None,
+        comment_fp: str | None = None,
     ) -> Issue: ...
+    def update_issues(self, user_id: str, project_id: str, issues: list[Issue]) -> None:
+        """같은 번호의 미해결을 이 내용으로 바꾼다(issues.md를 한 번만 다시 쓴다). 다시 올리기에서 쓴다."""
+        ...
     def close_issue(self, user_id: str, project_id: str, issue_id: int, note: str | None = None) -> Issue | None:
         """없는 번호면 None. 이미 닫힌 이슈는 note만 갱신한다."""
         ...

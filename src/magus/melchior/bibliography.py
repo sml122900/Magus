@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Any
 
 from magus.melchior.citations import make_ref_key
@@ -143,10 +144,54 @@ def ref_from_bib(bib: dict[str, Any]) -> Ref:
     return Ref(key=key, status="unverified", bib=bib, aliases=tuple(dict.fromkeys(aliases)))
 
 
+def _same_document(a: Ref, b: Ref) -> bool:
+    """첫 저자·연도가 같고 제목이 거의 같으면(공백·부호 무시, 80% 이상) 같은 문헌이다. 파싱 못 한 줄은 원문 줄로 본다."""
+    if "first_author" not in a.bib or "first_author" not in b.bib:
+        return _norm(a.bib.get("raw")) == _norm(b.bib.get("raw"))
+    if (_norm(a.bib.get("first_author")), str(a.bib.get("year"))) != (_norm(b.bib.get("first_author")), str(b.bib.get("year"))):
+        return False
+    ta, tb = (_norm(r.bib.get("title")).replace(" ", "") for r in (a, b))
+    short, long = sorted((ta, tb), key=len)
+    if len(short) >= 8 and long.startswith(short):  # 부제를 붙이거나 뗀 것("Gaining ground" ↔ "Gaining ground: The origin …")
+        return True
+    return ta == tb or SequenceMatcher(None, ta, tb).ratio() >= 0.8
+
+
+def _keyed(ref: Ref, key: str) -> Ref:
+    return Ref(key=key, status=ref.status, bib=ref.bib, aliases=ref.aliases)
+
+
+def _assign_keys(store: Store, user_id: str, refs: list[Ref]) -> list[tuple[Ref, Ref | None]]:
+    """(key를 정한 ref, 이미 있는 같은 문헌). 다시 올려도 같은 문헌은 같은 key를 받는다(#76 key 안정화).
+
+    같은 첫 저자·연도(같은 기본 key) 문헌이 목록에 하나뿐이고 기존 접미사 key도 없으면 예전처럼 기본 key를 쓴다
+    (제목이 달라도 같은 문헌으로 보고 '기존 서지와 다름'만 남긴다, 결정 #6).
+    둘 이상이면(예: Hsieh 2019 두 편) 기존 refs와 제목으로 짝을 짓는다. 짝이 없는 것만 비어 있는 다음 접미사(-2, -3)를 받는다.
+    목록 순서가 바뀌어도 key가 문헌을 따라간다."""
+    known = {r.key: r for r in store.list_refs(user_id)}
+    groups: dict[str, list[int]] = {}
+    for n, ref in enumerate(refs):
+        groups.setdefault(ref.key, []).append(n)
+    out: list[tuple[Ref, Ref | None] | None] = [None] * len(refs)
+    for base, members in groups.items():
+        variants = [base, *(k for k in (f"{base}-{n}" for n in range(2, 100)) if k in known)]
+        stored = [known[k] for k in variants if k in known]
+        if len(members) == 1 and len(stored) <= 1:
+            out[members[0]] = (refs[members[0]], stored[0] if stored else None)
+            continue
+        free = iter(k for k in (base, *(f"{base}-{n}" for n in range(2, 1000))) if k not in known)
+        taken: set[str] = set()
+        for n in members:
+            match = next((r for r in stored if r.key not in taken and _same_document(r, refs[n])), None)
+            key = match.key if match else next(free)
+            taken.add(key)
+            out[n] = (_keyed(refs[n], key), match)
+    return [o for o in out if o is not None]
+
+
 def import_bibliography(store: Store, user_id: str, text: str) -> BibReport:
     report = BibReport()
-    seen: set[str] = set()
-    identities: dict[tuple[str, ...], str] = {}
+    lines, refs = [], []
     for line in (raw.strip() for raw in text.splitlines()):
         if not line or _HEADING.match(line):
             continue
@@ -154,20 +199,23 @@ def import_bibliography(store: Store, user_id: str, text: str) -> BibReport:
         bib = parse_bib_line(line)
         if bib is None:
             report.failed.append(line)
-            ref = Ref(key="raw-" + hashlib.sha1(line.encode()).hexdigest()[:8], status="unverified", bib={"raw": line})
+            refs.append(Ref(key="raw-" + hashlib.sha1(line.encode()).hexdigest()[:8], status="unverified", bib={"raw": line}))
         else:
-            ref = ref_from_bib(bib)
+            refs.append(ref_from_bib(bib))
+        lines.append(line)
+    identities: dict[tuple[str, ...], str] = {}
+    titled: dict[tuple[str, str], str] = {}  # (연도, 제목): 첫 저자 표기가 달라도 같은 문헌(IEA ↔ International Energy Agency)
+    for line, base, (ref, existing) in zip(lines, (r.key for r in refs), _assign_keys(store, user_id, refs), strict=True):
         if (same := identities.get(_identity(ref))) is not None:
             report.duplicates.append(f"{same} = {line[:70]}")
-        if ref.key in seen:  # 같은 목록 안에서 key가 겹치면(예: 같은 성·연도) 뒤의 것에 -2, -3을 붙인다
-            n = 2
-            while f"{ref.key}-{n}" in seen:
-                n += 1
-            report.collisions.append(f"{ref.key} → {ref.key}-{n}: {line[:60]}")
-            ref = Ref(key=f"{ref.key}-{n}", status=ref.status, bib=ref.bib, aliases=ref.aliases)
-        seen.add(ref.key)
+        elif len(title := _norm(ref.bib.get("title"))) >= 8 and (same := titled.get((str(ref.bib.get("year")), title))):
+            report.duplicates.append(f"{same} = {line[:70]} (제목·연도가 같고 저자 표기만 다름)")
         identities.setdefault(_identity(ref), ref.key)
-        if existing := store.get_ref(user_id, ref.key):
+        if len(title) >= 8:
+            titled.setdefault((str(ref.bib.get("year")), title), ref.key)
+        if ref.key != base:  # 같은 기본 key(같은 성·연도)가 겹치면 뒤의 것에 -2, -3이 붙는다
+            report.collisions.append(f"{base} → {ref.key}: {line[:60]}")
+        if existing is not None:
             report.existing.append(ref.key)
             if diff := _differences(existing, ref):
                 report.differs.append(f"{ref.key}: {'; '.join(diff)}")

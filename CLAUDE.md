@@ -127,6 +127,8 @@
     - outline 장 줄에는 번호 없는 장의 번호를 괄호로 적는다(`서장(0)`, `제2부 들어가며(102)`). 도구에 줄 번호다.
   - **status 값은 `draft` | `revising` | `done` 중 하나다.** 쓸 때 그 밖의 값이 오면 거부한다(Store는 ValueError, 도구는 스키마 enum으로 막는다).
 - chapter_versions(id, user_id, chapter_id, version, path, note, created_at) — 보관된 **이전** 본문들
+- chapters.edition: 본문이 같은 업로드 판(E1, E2…). 업로드가 쓰면 그 판 번호, book_write_chapter로 고치면 비워진다(= Magus에서 고친 본문, #76).
+- editions(project.json `editions`): 업로드 한 번 = 판 하나. `{number, file, uploaded_at, sha256, changed, added, removed, unchanged, legacy?}`. 첫 임포트가 E1이다. 판 기록 전 임포트는 다시 올릴 때 legacy E1로 적는다.
 - decisions(user_id, project_id, id, text, created_at) — id는 프로젝트별 일련번호 `D{n}`
 - issues(user_id, project_id, id, text, status: open|closed, origin: import_comment|user|agent, chapter_number?, created_at, closed_note?, kind: citation|fact|general, ref_key?, ref_id?, author?, author_kind?: ai|person, comment_date?, anchor?, paragraph?) — id는 프로젝트별 일련번호 `I{n}`
   - **걸린 문장 전문(`anchor`, 1,000자까지)과 장 본문의 문단 번호(`paragraph`)를 둔다(#73).** 문단 번호는 ref_check의 paragraphs와 같은 번호다(빈 줄로 나눈 N번째, 소제목 포함). 본문 끝의 `— 원문: “…”`은 표시용 120자다. book_issues·book_read_chapter는 `¶N`으로 보인다. 다시 올리기에서 걸린 문장이 남았는지 이것으로 본다.
@@ -161,7 +163,8 @@ data/users/<user_id>/shelf/balthasar/<id>.json                    # style
 data/users/<user_id>/projects/<project_id>/project.json           # title, subtitle?, title_en?, subtitle_en?, created_at, parts, last_*_id
 data/users/<user_id>/projects/<project_id>/book/ch-01.md … ch-35.md
 data/users/<user_id>/projects/<project_id>/{decisions.md, issues.md, versions/}
-data/users/<user_id>/projects/<project_id>/original/{원고 사본, unsplit.md, import-report.md}
+data/users/<user_id>/projects/<project_id>/original/{원고 사본, unsplit.md, import-report.md, E2-<원고>, E2-unsplit.md, E2-reupload-report.md …}
+data/users/<user_id>/projects/<project_id>/removed/ch-NN-E<판>/   # 새 판에 없는 장(본문 + 이전본). 지우지 않는다
 data/users/<user_id>/projects/<project_id>/exports/*.docx       # book_export
 data/users/<user_id>/trash/<project_id>-<시각>/                   # book_import replace=True로 밀려난 프로젝트
 data/users/<user_id>/inbox/                                       # 받은함(업로드한 원고·논문·대화 기록). 도구는 파일 이름으로 가리킨다
@@ -217,8 +220,10 @@ data/index.sqlite
   - 장 목록은 부 제목 아래에 묶고, 각 줄에는 집계만 싣는다: `제N장 제목 · 상태 · N자 · 미해결 n · 미확인인용 n`. 장별 미해결 수에는 코멘트 유래까지 모두 센다.
   - 미해결 전문은 origin이 `user`·`agent`인 것만 싣는다. `import_comment`는 `코멘트 유래 미해결 N건(citation · fact · general 수) — book_issues(kind)로 조회` 한 줄로만 보인다.
   - 최근 결정 10개, 최근 변경 5개도 싣는다.
+  - 머리에 판 줄을 싣는다(#76): `판 E2 · 마지막 업로드 10-06 14:20(원고.docx) · 그 뒤 Magus에서 고친 장 0`. 마지막 업로드 뒤 7일(`STALE_UPLOAD_DAYS`)이 지나면 "최신본을 올려 새 판으로 올리도록 저자에게 먼저 묻는다"를 붙인다. 서버는 Word 파일이 바뀌었는지 모르므로 시각만 알린다.
+  - 다시 올린 뒤 "해결됐을 수 있음"인 미해결이 있으면 `그중 해결됐을 수 있음 N건` 줄을 싣는다.
   - 예산 배분 순서는 머리 → 목차 → 직접 남긴 미해결 → 결정 → 변경이다. 넘치는 것은 "외 N건"으로 접는다.
-- `book_issues(status=open|closed|all, chapter_number?, origin?, kind?, limit=50, project_id?)` → 미해결 목록(조회 전용). 한 줄에 `I번호 · 상태 · 장 · origin · kind(→ref_key) · 내용(300자)`를 담는다. limit 최대 200. *(사용자 요청으로 추가된 도구)*
+- `book_issues(status=open|closed|all, chapter_number?, origin?, kind?, limit=50, project_id?, possibly_resolved=false)` → 미해결 목록(조회 전용). 한 줄에 `I번호 · 상태 · 장 ¶문단 · 출처 · kind(→ref_key) · 내용(300자)`를 담는다. 출처는 user·agent·원고 코멘트(작성자)·AI 확인 요청(작성자). 다시 올린 뒤 표시된 것은 `해결됐을 수 있음(이유, E2)`이 붙고, possibly_resolved=true면 그것만 보인다. limit 최대 200. *(사용자 요청으로 추가된 도구)*
 - `book_read_chapter(number, project_id?)` → JSON을 돌려준다. `content`(본문 markdown만), `title`, `status`, `part_number`, `version`, `last_note`, `unverified_cites`, `open_issues`(그 장의 열린 미해결). *(1단계 검토 반영으로 미리 구현)*
   - **`unverified_cites`**: 인용 게이트 결과 중 verified가 아닌 것(`{key, status: unverified|unknown, count, cited_as}`). `[]`는 검사했고 미확인 인용이 없다는 뜻이다(null은 검사 전, 4단계 이후에는 나오지 않는다). `needs_source`는 `[출처 필요: …]` 표시 수다.
 - `book_write_chapter(number, content, note, title?, status?, project_id?)` → **#68 이후 기본 흐름이 아니다**(저자가 Magus에 저장하라고 할 때만). 위치는 다시 올리기 설계안 7절을 따른다. content는 본문만 받는다. 이전 본문을 versions/에 저장하고 새 본문을 기록한 **뒤** ref_check를 자동 실행한다(막지 않음). 응답에 `unverified_cites`와 `needs_source`를 담고 장별 집계를 갱신한다. 없는 번호면 새 장을 만든다. front matter가 붙어 오면 벗겨 내고 `warnings`에 경고를 넣는다. 빈 본문은 거부한다.
@@ -235,7 +240,15 @@ data/index.sqlite
   - 참고문헌 섹션은 import_bibliography로 넘긴다. 그다음 citation 이슈를 refs와 연결한다.
   - 그림·수식은 자리표시자(`[그림 N]`, `[수식]`)로 남긴다. docx 표는 칸의 글까지 markdown 표(`| 칸 |`)로 싣는다(#69, 칸이 모두 비면 `[표 N]`). export에서는 Word 표로 나간다. 원본은 **무엇보다 먼저** original/에 복사한다.
   - 재실행: 같은 project_id는 거부한다. `replace=true`면 기존 프로젝트를 trash/로 옮긴다. refs는 이미 있는 key를 건드리지 않는다.
-    - **replace는 다시 올리기가 아니다.** 결정·직접 남긴 미해결·닫은 미해결·판 이력까지 휴지통으로 간다. 같은 책의 새 판은 다시 올리기(설계안 `docs/decisions/reupload-design.md`, 미구현)로 한다. 그 전까지 아버지 원고는 replace로 다시 올리지 않는다.
+    - **replace는 다시 올리기가 아니다.** 결정·직접 남긴 미해결·닫은 미해결·판 이력까지 휴지통으로 간다. 같은 책의 새 판은 `new_edition=true`로 올린다(아래).
+  - **다시 올리기 = 같은 책의 새 판**(`book_import(path, project_id, new_edition=true, force?)`, CLI `--new-edition`, 웹 "이 책의 새 판으로 올리기", `magus/book/reupload.py`, #76)
+    - 같은 책은 사용자가 project_id로 고른다. 장 제목이 기존 판과 30% 미만으로 겹치면 멈춘다(맞으면 force).
+    - 장 대응은 같은 번호 = 같은 장이다. 제목이 바뀌면 리포트에 적는다. 본문이 바뀐 장만 다시 쓰고(이전본은 versions/, note `판 E2 업로드: …`), 그대로인 장은 버전을 올리지 않고 판 번호만 적는다. 새 판에 없는 장은 removed/로 옮긴다. Magus에서 고친 장이 덮이면 리포트에 ⚠로 남긴다.
+    - 원고 코멘트는 지문(`comment_fp` = 작성자 + 날짜 + 본문)으로 기존 미해결과 잇는다. 같은 코멘트는 다시 넣지 않고(번호·상태 유지, 닫힌 것은 닫힌 채), 새 코멘트만 새 미해결이 된다. 지문이 없는 옛 미해결은 코멘트 본문으로 잇는다.
+    - 원고에서 코멘트가 사라진 열린 미해결은 `stale`로 표시만 한다: 걸린 문장이 아직 있으면 `comment_removed`, 없으면 `anchor_missing`. **자동으로 닫지 않는다.** 닫는 것은 저자다.
+    - 결정·직접 남긴 미해결·책장(영감·문헌·문체)은 건드리지 않는다(해시 테스트, `tests/test_reupload.py`). 참고문헌은 새 문헌만 더한다.
+    - **참고문헌 key 안정화**: 같은 기본 key(첫 저자 성 + 연도)가 목록에 둘 이상이면 기존 refs와 제목으로 짝을 짓고, 짝이 없는 것만 빈 접미사(-2, -3)를 받는다. 목록 순서가 바뀌어도 key가 문헌을 따라간다(최신본에서 hsieh2019가 다른 논문을 가리키게 되던 문제). 하나뿐이면 예전처럼 "기존 서지와 다름"만 남긴다(#6).
+    - 리포트는 `original/E{n}-reupload-report.md`에 남는다.
   - 리포트: 장·부 수, 분할 못 한 구간, 목차로 판단해 버린 제목 줄, 빠진 장 번호, 코멘트→이슈(kind별, ref_key 비율, 장 밖 코멘트), 참고문헌→refs(파싱 실패 줄, key 충돌), `ch-NN.md ↔ 제목` 매핑표. 코멘트 분류 전체 표는 `original/import-report.md`에 있다. 평소에는 리포트를 낸 뒤 멈추고 사용자의 매핑 확인을 기다린다.
 - `book_export(path?, project_id?)` → 부 H1·장 H2·소제목 H3로 합쳐 docx를 만든다. path는 파일 이름만 받고 `exports/`에 저장한다. 코멘트와 그림은 복원하지 않는다.
 
@@ -375,7 +388,8 @@ uv sync                                   # 의존성 (Desktop이 magus.exe를 �
 magus serve                               # stdio 서버 (Claude Desktop이 띄움)
 magus serve --transport http [--port 8000] # streamable-http(stateless) http://127.0.0.1:8000/mcp, 인증 전에는 루프백만
 npx -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8000/mcp --transport http --method tools/list   # MCP Inspector(CLI)
-magus import <docx|pdf> --project-id <id> [--replace] [--synthetic]
+magus import <docx|pdf> --project-id <id> [--title …] [--subtitle …] [--replace] [--synthetic]
+magus import <docx|pdf> --project-id <id> --new-edition [--force]   # 같은 책의 새 판(#76)
 magus conversation <md> [--origin …]      # 대화 기록 → Casper
 magus synth <폴더>                        # 합성 fixture 만들기
 magus seed-demo                           # 데모 프로젝트 + 책장 표본

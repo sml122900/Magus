@@ -35,6 +35,7 @@ from magus.auth import JwtVerifier
 from magus.book.export import export_docx
 from magus.book.importer import import_manuscript
 from magus.book.outline import chapter_count
+from magus.book.reupload import reupload_manuscript
 from magus.config import Settings
 from magus.ids import local_time
 from magus.inbox import INBOX_TYPES, LimitError, mb, save_upload, size_text
@@ -42,6 +43,7 @@ from magus.melchior.author_report import cite_label
 from magus.melchior.report import build_cite_report
 from magus.signing import sign, unsign
 from magus.store import Store
+from magus.store.base import STALE_REASONS
 
 log = logging.getLogger("magus.web")
 SESSION_COOKIE, OAUTH_COOKIE = "magus_session", "magus_oauth"
@@ -339,6 +341,10 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
         uid = session[0]
         projects = self.store.list_projects(uid)
 
+        def edition_of(project_id: str) -> str:
+            editions = self.store.list_editions(uid, project_id)
+            return f"E{editions[-1].number} · {local_time(editions[-1].uploaded_at)}" if editions else "-"
+
         def issue_counts(project_id: str) -> str:
             issues = self.store.list_issues(uid, project_id, "open")
             ai = sum(1 for i in issues if i.by_ai)
@@ -349,27 +355,31 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
             + f"</td><td>{html.escape(p.id)}</td>"
             f"<td>{html.escape(chapter_count(self.store.list_chapters(uid, p.id)))}</td>"
             f'<td><a href="/issues?project={urllib.parse.quote(p.id)}">{issue_counts(p.id)}</a></td>'
-            f"<td>{local_time(p.updated_at)}</td>"
+            f"<td>{edition_of(p.id)}</td><td>{local_time(p.updated_at)}</td>"
             f'<td><form method="post" action="/book/export" class="inline">{self._csrf_input(session)}'
             f'<input type="hidden" name="project_id" value="{html.escape(p.id)}"><button>docx 내보내기</button></form> '
             f'<a href="/checklist?project={urllib.parse.quote(p.id)}">인용 체크리스트</a></td></tr>'
             for p in projects
-        ) or '<tr><td colspan="6">아직 원고가 없습니다. 받은함에 docx(또는 pdf)를 올리고 아래에서 임포트하세요.</td></tr>'
+        ) or '<tr><td colspan="7">아직 원고가 없습니다. 받은함에 docx(또는 pdf)를 올리고 아래에서 임포트하세요.</td></tr>'
         options = "".join(
             f'<option value="{html.escape(f.name)}">{html.escape(f.name)}</option>'
             for f in self.store.list_inbox(uid) if Path(f.name).suffix.lower() in (".docx", ".pdf")
         )
         message = f'<div class="msg{" err" if error else ""}">{html.escape(flash)}</div>' if flash else ""
         body = f"""{message}
-<table><tr><th>제목</th><th>id</th><th>장</th><th>열린 미해결</th><th>갱신</th><th></th></tr>{rows}</table>
-<h2>임포트</h2>
+<table><tr><th>제목</th><th>id</th><th>장</th><th>열린 미해결</th><th>판·올린 시각</th><th>갱신</th><th></th></tr>{rows}</table>
+<h2>원고 올리기</h2>
 <form method="post" action="/book/import">{self._csrf_input(session)}
 <p><label>받은함 원고 <select name="name">{options or '<option value="">(받은함에 docx·pdf 없음)</option>'}</select></label></p>
-<p><label>프로젝트 id <input name="project_id" value="book" pattern="[A-Za-z0-9_-]+" required></label>
+<p><label><input type="radio" name="mode" value="edition"{' checked' if projects else ''}> <b>이 책의 새 판으로 올리기</b></label>
+ — Word에서 고친 원고를 다시 올릴 때. 바뀐 장만 바뀌고, 결정·미해결·책장은 그대로입니다.<br>
+<label><input type="radio" name="mode" value="new"{'' if projects else ' checked'}> 새 책으로 가져오기</label> — 처음 올리는 원고</p>
+<p><label>프로젝트 id <input name="project_id" value="{html.escape(projects[0].id if projects else 'book')}" pattern="[A-Za-z0-9_-]+" required></label>
 <label>제목 <input name="title" placeholder="비우면 파일에서"></label>
-<label>부제 <input name="subtitle" placeholder="비우면 파일에서"></label>
-<label><input type="checkbox" name="replace" value="1"> 같은 id가 있으면 바꾸기(기존 것은 휴지통으로)</label></p>
-<p><button>임포트</button> (큰 원고는 몇십 초 걸립니다)</p></form>"""
+<label>부제 <input name="subtitle" placeholder="비우면 파일에서"></label></p>
+<p><label><input type="checkbox" name="force" value="1"> (새 판) 장 제목이 많이 달라도 같은 책으로 올리기</label><br>
+<label><input type="checkbox" name="replace" value="1"> (새 책) 같은 id가 있으면 바꾸기 — 결정·미해결까지 휴지통으로 갑니다. 다시 올리기에는 쓰지 마세요</label></p>
+<p><button>올리기</button> (큰 원고는 몇십 초 걸립니다)</p></form>"""
         return self._page("원고", body, session)
 
     async def do_import(self, request: Request) -> Response:
@@ -385,11 +395,19 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
             path = self.store.inbox_path(uid, name) if name else None
             if path is None:
                 raise FileNotFoundError(f"받은함에 {name!r}이 없다")
+            project_id = str(form.get("project_id") or "") or None
+            title, subtitle = str(form.get("title") or "") or None, str(form.get("subtitle") or "") or None
+            if form.get("mode") == "edition":  # 같은 책의 새 판(#76)
+                if not project_id:
+                    raise ValueError("새 판으로 올릴 책의 프로젝트 id를 적어 주세요.")
+                again = await run_in_threadpool(
+                    reupload_manuscript, self.store, uid, path, project_id,
+                    title=title, subtitle=subtitle, force=form.get("force") == "1",
+                )
+                return await self.book(request, again.summary())
             report = await run_in_threadpool(
                 import_manuscript, self.store, uid, path,
-                project_id=str(form.get("project_id") or "") or None, title=str(form.get("title") or "") or None,
-                subtitle=str(form.get("subtitle") or "") or None,
-                replace=form.get("replace") == "1",
+                project_id=project_id, title=title, subtitle=subtitle, replace=form.get("replace") == "1",
             )
         except (ValueError, FileNotFoundError) as e:
             return await self.book(request, str(e), True)
@@ -449,7 +467,8 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
         rows = "".join(
             f"<tr><td>I{i.id}{'' if i.status == 'open' else ' (닫힘)'}</td>"
             f"<td>{html.escape(names.get(i.chapter_number, f'{i.chapter_number}장') if i.chapter_number is not None else '장 밖')}</td>"
-            f"<td>{who(i)}</td><td>{ISSUE_KIND_NAMES[i.kind]}</td>"
+            f"<td>{who(i)}</td><td>{ISSUE_KIND_NAMES[i.kind]}"
+            + (f"<br><small>해결됐을 수 있음: {STALE_REASONS[i.stale]}</small>" if i.stale else "") + "</td>"
             f"<td>{html.escape(i.text).replace(chr(10), '<br>')}</td></tr>"
             for i in issues
         )

@@ -6,11 +6,13 @@ import math
 import re
 from collections import Counter
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from magus.ids import local_time
-from magus.store import ChapterMeta, Store
+from magus.store import ChapterMeta, Project, Store
 
 TOKEN_BUDGET = 3000
+STALE_UPLOAD_DAYS = 7  # 마지막 업로드 뒤 이만큼 지나면 최신본을 올렸는지 묻게 한다(#76, 아버지 작업 주기를 보고 바꾼다)
 _MARGIN = 100  # 섹션 구분자와 추정 오차를 위한 여유분
 _OTHER_PROJECTS_SHOWN = 5
 
@@ -57,7 +59,33 @@ def _fit(head: str, items: list[str], budget: int, more: Callable[[int], str]) -
     return text, estimate_tokens(text)
 
 
-def build_outline(store: Store, user_id: str, project_id: str | None = None, budget: int = TOKEN_BUDGET) -> str:
+def edition_line(store: Store, user_id: str, project: Project, chapters: list[ChapterMeta], now: datetime | None = None) -> str:
+    """'판 E2 · 마지막 업로드 10-06 14:20(원고.docx) · 그 뒤 Magus에서 고친 장 0'(#76).
+    원고 본문의 원본은 저자 파일이다(#68). 마지막 업로드가 STALE_UPLOAD_DAYS보다 오래되면 최신본을 올렸는지 묻게 한다.
+    서버는 Word 파일이 바뀌었는지 알 수 없어 시각만 알리고 판단은 저자에게 묻는다."""
+    editions = store.list_editions(user_id, project.id)
+    edited = sum(1 for c in chapters if (c.edition is None if editions else c.version > 1))
+    if editions:
+        last = editions[-1]
+        line = f"판 E{last.number} · 마지막 업로드 {local_time(last.uploaded_at)}({_clip(last.file, 40)})"
+        at = last.uploaded_at
+    else:
+        line = f"판 기록 없음(다시 올리기 기능 전 임포트) · 임포트 {local_time(project.created_at)}"
+        at = project.created_at
+    line += f" · 그 뒤 Magus에서 고친 장 {edited}"
+    try:
+        days = ((now or datetime.now(UTC)) - datetime.fromisoformat(at.replace("Z", "+00:00"))).days
+    except ValueError:
+        return line
+    if days >= STALE_UPLOAD_DAYS:
+        line += (f" — 업로드 뒤 {days}일 지남. 그사이 저자가 Word에서 고쳤다면, 최신본을 받은함에 올려 "
+                 "새 판으로 올리도록(book_import new_edition) 저자에게 먼저 묻는다")
+    return line
+
+
+def build_outline(
+    store: Store, user_id: str, project_id: str | None = None, budget: int = TOKEN_BUDGET, now: datetime | None = None
+) -> str:
     project = store.get_project(user_id, project_id)
     if project is None:
         if project_id:
@@ -96,6 +124,7 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
         f"{chapter_count(chapters)} · {len(parts)}부 · {sum(c.char_count for c in chapters):,}자 · "
         f"미확인 문헌 {unique_unverified}편 · 미연결 {unlinked} · 열린 미해결 {len(issues)}"
     )
+    header_lines.append(edition_line(store, user_id, project, chapters, now))
     header = "\n".join(header_lines)
 
     # 목차 줄에는 집계만 싣는다. 장별 미해결 수에는 코멘트 유래까지 모두 센다.
@@ -123,6 +152,8 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
         by_ai = sum(1 for i in issues if i.origin == "import_comment" and i.by_ai)  # 누가 말했는지 보존한다(#71)
         ai = f" · 그중 AI 확인 요청 {by_ai}건(AI가 원고에 단 코멘트)" if by_ai else ""
         issue_head += f"\n- 코멘트 유래 미해결 {from_comments}건({split}){ai} — book_issues(kind)로 조회"
+        if stale := sum(1 for i in issues if i.stale):  # 다시 올린 뒤 원고에서 코멘트·걸린 문장이 사라진 것(#76). 닫지 않았다
+            issue_head += f"\n- 그중 해결됐을 수 있음 {stale}건(새 판에서 코멘트나 걸린 문장이 사라짐) — book_issues(possibly_resolved=true)로 확인"
     issue_items = [
         f"- I{i.id}"
         + (f" · {name(i.chapter_number)}" if i.chapter_number is not None else "")

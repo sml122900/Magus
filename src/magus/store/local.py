@@ -13,7 +13,7 @@ import shutil
 import sqlite3
 import threading
 from collections.abc import Iterable
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -30,6 +30,7 @@ from magus.store.shelf import ShelfMixin
 from magus.store.base import (
     ANCHOR_MAX,
     BookTitles,
+    Edition,
     CHAPTER_STATUSES,
     AuthorKind,
     Change,
@@ -243,6 +244,7 @@ class LocalStore(ShelfMixin):
         status: ChapterStatus | None = None,
         part_number: int | None = None,
         label: str | None = None,
+        edition: int | None = None,
     ) -> ChapterMeta:
         if number < 0:
             raise ValueError("장 번호는 0 이상")
@@ -270,6 +272,7 @@ class LocalStore(ShelfMixin):
             "status": status or prev.get("status") or "draft",
             "part_number": part_number if part_number is not None else _int(prev.get("part_number")),
             "version": _int(prev.get("version"), 1) + 1 if old is not None else 1,
+            "edition": edition,  # 업로드로 쓴 본문만 판 번호를 단다. Magus에서 고치면 비워진다(#76)
             "updated_at": now,
             "last_note": note,
         }
@@ -281,6 +284,50 @@ class LocalStore(ShelfMixin):
             self._touch(user_id, project_id, now)
         row = self._db.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
         return _chapter_meta(row)
+
+    @_locked
+    def set_chapter_edition(self, user_id: str, project_id: str, number: int, edition: int) -> None:
+        path = self._require_project(user_id, project_id) / "book" / f"ch-{number:02d}.md"
+        meta, body = formats.parse_chapter(path.read_text(encoding="utf-8"))
+        if meta.get("edition") == str(edition):
+            return
+        keys = list(meta)
+        meta["edition"] = str(edition)
+        if "edition" not in keys and "version" in keys:  # 앞머리 순서를 write_chapter와 같게(version 다음)
+            meta = {k: meta[k] for k in [*keys[: keys.index("version") + 1], "edition", *keys[keys.index("version") + 1 :]]}
+        _write_text(path, formats.dump_chapter(meta, body))
+        with self._db:
+            self._index_chapter(user_id, project_id, number, path)
+
+    @_locked
+    def remove_chapter(self, user_id: str, project_id: str, number: int, edition: int) -> str:
+        pdir = self._require_project(user_id, project_id)
+        target = pdir / "removed" / f"ch-{number:02d}-E{edition}"
+        target.mkdir(parents=True, exist_ok=True)
+        current = pdir / "book" / f"ch-{number:02d}.md"
+        if current.exists():
+            shutil.move(str(current), str(target / current.name))
+        for f in (pdir / "versions").glob(f"ch-{number:02d}.v*.md"):  # 같은 번호의 새 장이 이전본을 덮지 않게
+            if _VERSION_FILE.fullmatch(f.name):
+                shutil.move(str(f), str(target / f.name))
+        with self._db:
+            self._db.execute(
+                "DELETE FROM chapters WHERE user_id = ? AND project_id = ? AND number = ?", (user_id, project_id, number)
+            )
+            self._touch(user_id, project_id, utcnow())
+        return self._rel(target)
+
+    @_locked
+    def list_editions(self, user_id: str, project_id: str) -> list[Edition]:
+        data = _read_json(self._require_project(user_id, project_id) / "project.json")
+        return [Edition(**e) for e in data.get("editions", [])]
+
+    @_locked
+    def add_edition(self, user_id: str, project_id: str, edition: Edition) -> None:
+        path = self._require_project(user_id, project_id) / "project.json"
+        data = _read_json(path)
+        data["editions"] = [*data.get("editions", []), {k: v for k, v in asdict(edition).items() if v not in (None, False)}]
+        _write_json(path, data)
 
     @_locked
     def recent_changes(self, user_id: str, project_id: str, limit: int = 5) -> list[Change]:
@@ -339,6 +386,7 @@ class LocalStore(ShelfMixin):
         comment_date: str | None = None,
         anchor: str | None = None,
         paragraph: int | None = None,
+        comment_fp: str | None = None,
     ) -> Issue:
         if not text.strip():
             raise ValueError("미해결 내용이 비어 있다")
@@ -358,6 +406,7 @@ class LocalStore(ShelfMixin):
             comment_date=comment_date or None,
             anchor=formats.one_line(anchor)[:ANCHOR_MAX] or None if anchor else None,
             paragraph=paragraph,
+            comment_fp=comment_fp,
         )
         _write_text(path, formats.dump_issues([*issues, issue]))
         with self._db:
@@ -378,6 +427,20 @@ class LocalStore(ShelfMixin):
             self._index_issues(user_id, project_id, [closed])
             self._touch(user_id, project_id, utcnow())
         return closed
+
+    @_locked
+    def update_issues(self, user_id: str, project_id: str, issues: list[Issue]) -> None:
+        if not issues:
+            return
+        path = self._require_project(user_id, project_id) / "issues.md"
+        new = {i.id: replace(i, anchor=formats.one_line(i.anchor)[:ANCHOR_MAX] if i.anchor else None) for i in issues}
+        current = formats.parse_issues(_read_text(path))
+        if missing := set(new) - {i.id for i in current}:
+            raise ValueError(f"없는 미해결: {sorted(missing)}")
+        _write_text(path, formats.dump_issues([new.get(i.id, i) for i in current]))
+        with self._db:
+            self._index_issues(user_id, project_id, list(new.values()))
+            self._touch(user_id, project_id, utcnow())
 
     @_locked
     def set_issue_refs(self, user_id: str, project_id: str, ref_ids: dict[int, str | None]) -> None:
@@ -475,7 +538,7 @@ class LocalStore(ShelfMixin):
             Issue(
                 r["id"], r["text"], r["status"], r["origin"], r["chapter_number"], r["created_at"], r["closed_note"],
                 r["kind"], r["ref_key"], r["ref_id"], r["author"], r["author_kind"], r["comment_date"], r["anchor"],
-                r["paragraph"],
+                r["paragraph"], r["comment_fp"], r["stale"], r["stale_edition"],
             )
             for r in rows
         ]
@@ -568,12 +631,13 @@ class LocalStore(ShelfMixin):
             """
             INSERT INTO chapters
                 (user_id, project_id, number, label, title, status, part_number, path, char_count, version, last_note,
-                 updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 updated_at, edition)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (user_id, project_id, number) DO UPDATE SET
                 label = excluded.label, title = excluded.title, status = excluded.status,
                 part_number = excluded.part_number, path = excluded.path, char_count = excluded.char_count,
-                version = excluded.version, last_note = excluded.last_note, updated_at = excluded.updated_at
+                version = excluded.version, last_note = excluded.last_note, updated_at = excluded.updated_at,
+                edition = excluded.edition
             RETURNING id
             """,
             (
@@ -589,6 +653,7 @@ class LocalStore(ShelfMixin):
                 _int(meta.get("version"), 1),
                 meta.get("last_note", ""),
                 meta.get("updated_at") or _mtime(path),
+                _int(meta.get("edition")),
             ),
         ).fetchone()[0]
 
@@ -613,11 +678,12 @@ class LocalStore(ShelfMixin):
         self._db.executemany(
             "INSERT OR REPLACE INTO issues "
             "(user_id, project_id, id, text, status, origin, chapter_number, created_at, closed_note, kind, ref_key, "
-            "ref_id, author, author_kind, comment_date, anchor, paragraph) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "ref_id, author, author_kind, comment_date, anchor, paragraph, comment_fp, stale, stale_edition) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (user_id, project_id, i.id, i.text, i.status, i.origin, i.chapter_number, i.created_at, i.closed_note,
-                 i.kind, i.ref_key, i.ref_id, i.author, i.author_kind, i.comment_date, i.anchor, i.paragraph)
+                 i.kind, i.ref_key, i.ref_id, i.author, i.author_kind, i.comment_date, i.anchor, i.paragraph,
+                 i.comment_fp, i.stale, i.stale_edition)
                 for i in issues
             ],
         )
@@ -654,4 +720,5 @@ def _chapter_meta(r: sqlite3.Row) -> ChapterMeta:
         label=r["label"],
         unverified_cite_keys=tuple(json.loads(r["unverified_cite_keys"])),
         uncertain_cite_keys=tuple(json.loads(r["uncertain_cite_keys"])),
+        edition=r["edition"],
     )

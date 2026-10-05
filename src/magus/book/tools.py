@@ -17,10 +17,11 @@ from magus.book.comments import source_label
 from magus.book.export import export_docx
 from magus.book.importer import import_manuscript
 from magus.book.outline import build_outline
+from magus.book.reupload import reupload_manuscript
 from magus.melchior.check import CheckResult, check_chapter, check_text, terms_of
 from magus.inbox import FileResolver, ResolveFile
 from magus.store import Issue, Project, Store
-from magus.store.base import ChapterStatus
+from magus.store.base import STALE_REASONS, ChapterStatus
 from magus.store.formats import one_line, strip_front_matter
 
 FRONT_MATTER_WARNING = (
@@ -55,6 +56,8 @@ def _issue_line(i: Issue, labels: dict[int, str]) -> str:
     if i.kind == "citation" and i.ref_key:
         kind += f" ⇒ {i.ref_id}" if i.ref_id and i.ref_id != i.ref_key else ("" if i.ref_id else " ⇒ refs 없음")
     parts += [source_label(i), kind]
+    if i.stale:  # 다시 올린 뒤 원고에서 코멘트·걸린 문장이 사라짐(#76). 닫지 않고 표시만 한다
+        parts.append(f"해결됐을 수 있음({STALE_REASONS[i.stale]}{f', E{i.stale_edition}' if i.stale_edition else ''})")
     line = "- " + " · ".join(parts) + f" · {one_line(i.text)[:300]}"
     return line + (f" · 닫음: {one_line(i.closed_note)}" if i.closed_note else "")
 
@@ -97,7 +100,8 @@ def build_tools(
                 "char_count": m.char_count,
                 **_gate(check_text(store, user, chapter.content, exclude=terms_of(store, user, project.id))),
                 "open_issues": [
-                    f"I{i.id}{f' ¶{i.paragraph}' if i.paragraph else ''}{' [AI 확인 요청]' if i.by_ai else ''} "
+                    f"I{i.id}{f' ¶{i.paragraph}' if i.paragraph else ''}{' [AI 확인 요청]' if i.by_ai else ''}"
+                    f"{' [해결됐을 수 있음: ' + STALE_REASONS[i.stale] + ']' if i.stale else ''} "
                     f"{one_line(i.text)[:120]}"
                     for i in open_issues
                 ],
@@ -144,6 +148,7 @@ def build_tools(
         kind: Literal["citation", "fact", "general"] | None = None,
         limit: int = 50,
         project_id: str | None = None,
+        possibly_resolved: bool = False,
     ) -> str:
         project = resolve_project(project_id)
         issues = store.list_issues(
@@ -154,12 +159,14 @@ def build_tools(
             origin=origin,
             kind=kind,
         )
+        if possibly_resolved:
+            issues = [i for i in issues if i.stale]
         limit = max(1, min(limit, ISSUE_LIST_MAX))
         filters = [f"status={status}"] + [
             f"{name}={value}"
             for name, value in (("chapter", chapter_number), ("origin", origin), ("kind", kind))
             if value is not None
-        ]
+        ] + (["해결됐을 수 있음만"] if possibly_resolved else [])
         head = f"미해결 {len(issues)}건 ({', '.join(filters)})"
         if len(issues) > limit:
             head += f" — 앞 {limit}건만 표시. 조건을 좁히거나 limit을 늘리세요(최대 {ISSUE_LIST_MAX})."
@@ -215,8 +222,22 @@ def build_tools(
         title: str | None = None,
         subtitle: str | None = None,
         replace: bool = False,
+        new_edition: bool = False,
+        force: bool = False,
     ) -> str:
         user = current_user()
+        if new_edition:
+            if not project_id:
+                raise ToolError("새 판으로 올릴 책의 project_id를 주세요(book_outline 첫 줄의 괄호 안).")
+            try:
+                again = reupload_manuscript(
+                    store, user, resolve_file(user, path)[0], project_id, title=title, subtitle=subtitle, force=force
+                )
+            except (ValueError, FileNotFoundError) as e:
+                raise ToolError(str(e)) from e
+            return "\n\n".join(
+                [again.summary(), "### 바뀐 장", again.change_table(), f"이 리포트는 {again.files['report']}에 있다."]
+            )
         try:
             report = import_manuscript(
                 store, user, resolve_file(user, path)[0], project_id=project_id, title=title, subtitle=subtitle,
@@ -272,7 +293,11 @@ def build_tools(
                 "'제N부'·'제N장' 제목으로 장을 나누고, "
                 "Word 코멘트는 미해결(import_comment, kind=citation|fact|general)로, 참고문헌은 refs(unverified)로 넣는다. "
                 "표는 칸의 글까지 markdown 표로 싣고, 그림·수식은 [그림 N]·[수식] 자리표시자로 남기며 원본은 original/에 복사한다. "
-                "같은 project_id가 이미 있으면 replace=true일 때만 기존 것을 휴지통으로 옮기고 다시 만든다. "
+                "원고를 Word에서 고친 뒤 같은 책을 다시 올릴 때는 new_edition=true와 그 책의 project_id를 준다: "
+                "본문이 바뀐 장만 바꾸고(판 E2, E3… 기록), 같은 코멘트는 다시 넣지 않으며, 원고에서 사라진 코멘트는 "
+                "'해결됐을 수 있음'으로 표시만 한다. 결정·직접 남긴 미해결·책장은 그대로다. 장 제목이 30% 미만으로 겹치면 "
+                "다른 책으로 보고 멈춘다(맞으면 force=true). "
+                "replace=true는 기존 프로젝트(결정·미해결 포함)를 휴지통으로 옮기고 새로 만드니 다시 올리기에 쓰지 않는다. "
                 "title·subtitle을 비우면 원고(파일 속성 제목의 '제목 — 부제', 표지)에서 제목·부제·영문 제목을 따로 읽는다. "
                 "리포트(장·부 수, 분할 못 한 구간, 코멘트 분류, 참고문헌 파싱)와 장 매핑표를 돌려준다."
             ),
@@ -322,6 +347,8 @@ def build_tools(
                 "kind=citation(문헌 지목)|fact(사실·수치 확인)|general로 거른다. 한 줄에 하나: 번호·상태·장·출처·종류(citation이면 →ref_key 후보)·내용. "
                 "출처는 user·agent·원고 코멘트(작성자)·AI 확인 요청(작성자)이다. AI 확인 요청은 AI가 원고에 단 코멘트라 "
                 "저자에게 전할 때도 AI의 확인 요청이라고 밝힌다. "
+                "possibly_resolved=true면 새 판을 올린 뒤 원고에서 코멘트나 걸린 문장이 사라져 '해결됐을 수 있음'으로 표시된 것만 "
+                "보인다(자동으로 닫지 않는다. 저자에게 확인하고 book_issue_close로 닫는다). "
                 f"limit 기본 50, 최대 {ISSUE_LIST_MAX}."
             ),
             structured_output=False,

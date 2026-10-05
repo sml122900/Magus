@@ -13,6 +13,7 @@ kind
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 from magus.melchior.citations import Citation, find_citations
@@ -50,6 +51,13 @@ def author_kind(author: str | None, extra: list[str] | tuple[str, ...] = ()) -> 
     names = {n.strip().lower() for n in (*AI_AUTHOR_NAMES, *extra) if n.strip()}
     words = set(re.findall(r"[a-z0-9]+|[가-힣]+", name))
     return "ai" if name in names or words & names else "person"
+
+
+def comment_fingerprint(author: str | None, date: str | None, text: str) -> str:
+    """같은 Word 코멘트인지 가리는 지문(#76): 작성자 + 날짜 + 본문(공백 정리). Word의 코멘트 id는 저장할 때마다
+    다시 매겨질 수 있어 쓰지 않는다. 다시 올릴 때 이 지문이 같으면 새 미해결을 만들지 않는다."""
+    raw = "\x1f".join([(author or "").strip(), (date or "").strip(), " ".join((text or "").split())])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def source_label(issue: Issue) -> str:
