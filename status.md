@@ -43,7 +43,9 @@
     - `docker compose run -e AUTH_AUDIENCE=<trip_ai>`: 종료 2, 한국어 이유 출력.
   - 옛 이력 정리: `21b4e2a`, 보고서 객체 2개 없음, 객체 1,867 → 668. `/root/magus.bundle`도 새 bundle로 바꿨다.
   - 되돌리기: `21b4e2a`는 gc로 지웠다. 같은 상태의 새 이력 커밋은 `78c9668`이다. 이미지 `magus:rollback-21b4e2a`(반영 전 이미지)를 남겼다. 절차는 서버 `/root/deploy-20261006-auth-audience/ROLLBACK.txt`.
-- 대기: claude.ai 새 대화에서 Magus 도구 한 번 불러 확인(사용자). 확인되면 서버의 `magus:rollback-21b4e2a` 이미지를 지운다.
+    - **이미지 `magus:rollback-21b4e2a` 보관 중, 다음 배포 때 삭제**(2026-10-06 사용자 지시). 삭제: `docker image rm magus:rollback-21b4e2a`.
+    - 서버 디스크(2026-10-06): `/` 23G 중 8.2G 사용(38%). docker 이미지 5개 2.05GB(그중 magus 둘이 각 1.15GB), 빌드 캐시 1.15GB.
+- 대기: claude.ai 새 대화에서 Magus 도구 한 번 불러 확인(사용자). 되돌리기 이미지는 확인과 관계없이 다음 배포 때 지운다.
 
 ## 0-2. 최근 보고 (2026-10-06, 작업 방식 결정 + 최신본 시험 임포트 + 다시 올리기 설계안)
 
@@ -129,6 +131,7 @@
     - `p1-step5` 9b420a3 → eff78d5, `p1-step6` 2164715 → 49daa60
     - 태그 종류(annotated/lightweight)는 정리 전과 같다.
   - **서버 이력 교체 완료(2026-10-06)**: 서버는 새 이력의 `p1-auth-audience`(`896633c`, 브랜치 `fix/auth-audience`)다. 옛 객체·보고서 객체는 gc로 지웠다(0-3절).
+    - **서버 되돌리기 기준 커밋: `78c9668`**(2026-10-06 반영 직전 상태와 트리가 같다. 반영 전 이미지 `magus:rollback-21b4e2a` 보관 중, 다음 배포 때 삭제). `HEAD~1`을 쓰지 않는다(CLAUDE.md 호스팅).
     - 다음에 master를 배포할 때는 `git fetch /root/magus.bundle master && git checkout -B master FETCH_HEAD`로 한다(docs/deploy.md "업데이트"). 그 master에 `p1-auth-audience`가 들어 있어야 한다.
 - **다음: 7단계 아버지 온보딩**(`docs/onboarding-father.md` 초안). 아래 "7단계 전 확인"을 먼저 끝낸다.
 - **7단계 전 확인**
@@ -492,7 +495,7 @@
 - 서버에 그 태그만 반영했다. master는 배포하지 않았다. 서버 옛 이력은 교체하고 gc했다. data 해시 같음.
 - master에 병합하고 브랜치·태그·master를 push했다. 결정 문서 `docs/decisions/shared-auth-audience.md`.
 - 실수 1건: 처음에 메인 작업 트리에서 `git switch`를 해 magus-25의 작업 트리를 약 1분 decf79c로 옮겼다. 바로 master로 되돌렸고(미커밋 수정 4개 그대로), magus-25에 알렸다. 그 뒤로는 별도 worktree에서만 작업했다.
-- 남긴 것: 사용자의 claude.ai 확인, 확인 뒤 서버 `magus:rollback-21b4e2a` 이미지 삭제.
+- 남긴 것: 사용자의 claude.ai 확인. 서버 `magus:rollback-21b4e2a` 이미지는 다음 배포 때 삭제(사용자 지시).
 
 **2026-10-06** — 작업 방식 결정 #68, 최신본 시험 임포트, 다시 올리기 설계안(로컬 전용, 서버 변경 없음)
 - #68을 기록했다(`docs/decisions/author-file-is-source.md`). CLAUDE.md·README·store-interface.md를 결정에 맞게 고쳤다.

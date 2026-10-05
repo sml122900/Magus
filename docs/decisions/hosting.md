@@ -53,6 +53,10 @@
 - **알림**
   - 서버 오류(ERROR 로그)는 텔레그램 봇으로 보낸다(`magus/alerts.py`, 웹훅도 지원). 내용은 logsafe가 거른 종류·위치뿐이다.
   - 백업이 안 돌면 healthchecks.io(무료 20개)가 알린다. 핑이 오지 않거나 `/fail`이 오면 운영자에게 텔레그램으로 간다.
+  - 생존 확인 magus-alive(2026-10-06 서버에서 실제 방식 확인): 호스트 root cron `*/5 * * * * /opt/magus/deploy/alive.sh`가 유일한 발신처다(systemd 타이머·다른 사용자 cron·컨테이너 안 스케줄 없음).
+    - `alive.sh`는 **바깥 주소** `https://$MAGUS_DOMAIN/healthz`(DNS·HTTPS 인증서·Caddy·앱)를 `curl -fsS -m 10`으로 본다. 성공하면 `HEALTHCHECK_ALIVE_URL`로, 실패하면 `HEALTHCHECK_ALIVE_URL/fail`로 핑한다(재시도 3번).
+    - 서버가 통째로 멈추거나 바깥으로 나가지 못하면 핑이 끊겨 healthchecks.io가 유예(5분) 뒤 알린다.
+    - 한계: 요청이 서버 자신에서 나가므로, 바깥에서 들어오는 길만 막힌 경우(VPS 앞단 방화벽·라우팅)는 잡지 못한다. 그때는 6단계처럼 claude.ai에서 부르면 드러난다.
 - **예상 비용**: VM $5 + 도메인. R2·알림은 무료 한도 안이다. Vultr 자동 백업(+$1)은 선택이다.
 
 ## Result

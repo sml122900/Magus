@@ -353,6 +353,7 @@ data/index.sqlite
 - 저장: 파일 + SQLite를 유지한다(Store 인터페이스 뒤. Postgres는 P2).
 - 호스팅: **Vultr 서울 VPS($5) + Docker Compose + Caddy(자동 HTTPS)**(`docs/decisions/hosting.md`). 서버리스는 쓰지 않는다.
   - 이미지: `Dockerfile`(python:3.12-slim, uv, 비root uid 10001, /data 볼륨, healthz 헬스체크). 구성: `deploy/compose.yaml`(magus·caddy·backup·restore).
+  - **서버 되돌리기 기준 커밋은 status.md에 기록된 값을 따른다**(`HEAD~1`을 쓰지 않는다). 배포할 때마다 반영 전 커밋을 status.md와 `docs/deploy.md` 반영 기록에 적는다.
 - 백업: 매일 04:00 restic → Cloudflare R2(`deploy/backup.sh`). `index.sqlite`는 빼고(재생성), `forget --keep-daily 30 --keep-monthly 12 --prune`(일별 30 + 월별 12), `check --read-data-subset=1/30`. R2 버킷에 수명 주기 규칙은 걸지 않는다.
   - 복구: `docs/deploy.md` 5절. 정기 시험은 `deploy/restore-test.sh <사용자…>`(복구본 reindex 뒤 outline 비교). 로컬 훈련 결과와 기록 표도 그 문서에 있다.
 - 알림: `magus/alerts.py`(텔레그램 `ALERT_TELEGRAM_*` 또는 웹훅 `ALERT_WEBHOOK_URL`). logsafe의 ERROR를 받아 백그라운드로 보낸다. 백업 누락은 healthchecks.io(`HEALTHCHECK_URL`, magus-backup)가, 서버·HTTPS 정지는 `deploy/alive.sh`(호스트 cron 5분, `HEALTHCHECK_ALIVE_URL`, magus-alive)가 알린다. 시험은 `magus alert-test`.
@@ -458,6 +459,10 @@ private/reports/YYYY-MM-DD-<주제>.md # 저자에게 보내는 보고서(같은
 - **브랜치·태그**
   - P0는 `master`에 바로 커밋한다. 단계를 완료하면 태그를 단다(`step1`, `step2`, …).
   - 파서 실험처럼 되돌릴 가능성이 큰 작업만 브랜치를 쓴다. 끝나면 squash merge한다.
+  - **동시 세션**: 같은 리포에서 Claude Code 세션을 둘 이상 쓸 때는 각자 별도 git worktree에서 작업한다(예: `git worktree add .worktrees/<이름> <브랜치>`, `/.worktrees/`는 `.git/info/exclude`에 넣는다).
+    - 메인 작업 트리에서 `git switch`·`checkout`·`reset`을 하지 않는다. 다른 세션의 작업 트리가 바뀐다(2026-10-06, 약 1분 동안 다른 세션의 트리가 바뀌었다).
+    - worktree에서 테스트할 때는 메인 `.venv`의 python에 `PYTHONPATH=<worktree>/src`를 준다(편집 설치는 메인 `src`를 가리킨다).
+    - master에 들일 때는 worktree에 병합 브랜치를 만들어 테스트하고, 메인 트리를 쓰는 세션에 병합을 부탁한다.
 - **원격 저장소**: `origin` = https://github.com/sml122900/Magus (**Private**, 2026-10-05부터)
   - 인증은 Git Credential Manager가 한다. 토큰을 명령이나 파일에 적지 않는다.
   - **단계 태그를 찍으면 push까지 한다**: `git push origin master --tags`. 그다음 `git ls-remote --tags origin`으로 확인한다.
