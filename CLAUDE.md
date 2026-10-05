@@ -14,6 +14,8 @@
   - 최신본을 `father-trial`에 새로 임포트해 수치를 쟀고, `reupload-trial`에서 4판 → 최신본 다시 올리기를 시험했다(기존 미해결 86 유지 + 새 43, 바뀐 장 6만 교체).
 - **운영 규칙(#78)**: 같은 책을 다시 올릴 때는 새 판(`new_edition`)으로 한다. 아버지 원고를 `replace`로 다시 임포트하지 않는다. replace는 결정·직접 남긴 미해결·닫은 미해결까지 휴지통으로 보낸다.
 - 다음 할 일: **7단계 아버지 온보딩**(`docs/onboarding-father.md`). 시작 전 확인은 status.md "7단계 전 확인"을 따른다. 그 전에 사용자가 claude.ai에서 book_outline을 한 번 확인한다.
+  - 7단계 뒤 첫 작업: 저자 확인 질문지 `book_questions`(#84 승인, `docs/decisions/author-questions.md`).
+  - 사용자 격리: 아버지 계정 추가 전에 점검했다(status.md 0-6절, `tests/test_isolation.py`).
 - 서버(2026-10-06 01:40부터): master `p1-reupload`(`4df2720`, #69~#77·#76·#79 포함). 되돌리기 기준은 `896633c`(이미지 `magus:rollback-896633c`, status.md 0-5절). 옛 이력은 지난 배포 때 gc했다.
   - 다음 배포도 docs/deploy.md "업데이트" 절차(`git fetch … master && git checkout -B master FETCH_HEAD`)로 한다.
 - 알려진 문제: `tests/test_http.py::test_request_size_limit`가 Windows에서 간헐적으로 실패한다(413 응답 전에 연결이 리셋됨). 서버 동작은 정상이다(status.md 7절).

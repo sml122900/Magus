@@ -1,8 +1,32 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-06 01:45 KST(서버 시각) — 결정 #80~#83, `docs/worktree-rule` 병합(`e396d3f`), 태그 `p1-reupload`(`4df2720`) push, **서버 배포 완료**(0-5절), 아버지 자료용 데이터(`private/reports/2026-10-06-father-materials-data.md`). 대기: claude.ai 새 대화에서 book_outline 확인(사용자).
+> 마지막 갱신: 2026-10-06 KST — #84(저자 확인 질문지) 승인, 구현은 7단계 뒤 첫 작업. 사용자 격리 점검과 시험 추가(`tests/test_isolation.py`, 문제 없음). 대기: claude.ai에서 book_outline 확인(사용자).
 > 2026-10-06 01시 KST — 토큰 aud 검사 강화(결정 #79)를 `p1-auth-audience`로 서버에 반영하고, 서버의 옛 git 이력을 새 이력으로 바꿨다(0-3절).
+
+## 0-6. 최근 보고 (2026-10-06, 사용자 격리 점검 — 아버지 계정 추가 전, 세션 magus-25)
+
+- 코드 읽기와 시험만 했다. 서버는 바꾸지 않았다. 막혀 있지 않은 곳은 찾지 못했다(고칠 것 없음).
+- 사용자 공간이 정해지는 길
+  - MCP: `Authorization: Bearer` → `ForbiddenGate`(auth.py: 유효하지만 목록 밖이면 403) → SDK가 `JwtVerifier.verify_token`(서명·exp·iss·aud 하나, 결정 #79) → `user_of` = `ALLOWED_USERS`의 sub → user_id(시작할 때 읽음) → `AccessToken.claims["magus_user_id"]`(서버가 넣는다. 토큰 안의 같은 이름 클레임은 쓰지 않는다)
+  - → 도구는 모두 `current_user()`(server.py, 유일한 결정 지점)로 user_id를 얻는다 → Store 메서드는 user_id를 인자로 받는다
+  - → 파일: `_user_dir`(local.py, `safe_id`), 프로젝트 `safe_id`, 문헌 key `safe_ref_key`(shelf.py), 받은함 `safe_filename` + `_inbox_file`(폴더 밖이면 거부), 원격은 `FileResolver`가 받은함 이름만(local_paths는 stdio만)
+  - → 인덱스: 모든 쿼리에 `user_id` 조건(여러 줄 SQL의 다음 줄 포함 확인). FTS는 `chunks` JOIN 뒤 `c.user_id`, 벡터·임베딩 갱신도 user_id
+  - 웹: `/login` → WorkOS(PKCE, resource) → `/auth/callback`에서 같은 `JwtVerifier.check` + `user_of` → 세션 쿠키 `{uid, sid}`(HMAC, 용도 "session", 12시간) → 요청마다 `Web.user_of`가 서명·만료와 **uid가 지금 허용 목록에 있는지** 본다 → 페이지는 모두 세션 uid로 Store를 부른다(`?project=`도 그 사용자 안에서만 찾음)
+  - 내려받기: `export_link`가 `{u, p, f}`를 용도 "download"로 서명(24시간) → `/download`는 서명 + 같은 사용자 세션 둘 다 요구, 파일은 세션 사용자 공간에서만 찾는다(`export_path`)
+- 항목별 결과(시험)
+  - A의 MCP 호출로 B의 원고·미해결·문헌·영감·받은함: **이미 있음**(test_search::test_every_tool_is_user_scoped, test_auth::test_remote_auth_rejects_and_isolates_users) + **추가**(같은 id·key·파일 이름을 쓰는 두 사용자, reindex 뒤 포함: test_isolation::test_same_ids_in_two_users_never_mix)
+  - 파일 이름 인자에 ../·절대 경로·다른 사용자 이름: **일부 있음**(test_inbox 이름 검사) + **추가**(book_import·ref_add·idea_add_conversation의 경로 7가지, 문헌 key 경로, project_id 경로, book_export 경로 → 밥의 공간 해시 그대로: test_file_arguments_cannot_reach_other_spaces)
+  - A의 웹 세션으로 B의 페이지: **일부 있음**(받은함만) + **추가**(둘 다 project id `synth`일 때 /book·/issues·/checklist·/inbox, 남의 받은함 파일 임포트·삭제, 경로 이름 업로드, 남의 프로젝트 내보내기: test_web_pages_are_per_user_even_with_same_project_id)
+  - 내려받기 링크를 다른 사용자가 쓰기·만들기: **이미 있음**(test_web: 밥이 앨리스 링크 403, 서명 위조·만료·용도) + **추가**(목록에서 빠진 뒤 링크도 로그인으로)
+  - FTS·SQLite 결과 섞임: **추가**(FTS와 벡터 검색, 같은 문헌 key) + SQL 문 전수 확인
+  - 허용 목록 밖 sub 403: **이미 있음**(MCP·웹). 목록에서 지운 뒤 기존 토큰·세션: **추가**(재시작 뒤 토큰 403, 세션·링크는 로그인으로, 남은 사용자 세션은 그대로: test_removed_user_loses_token_and_session, test_web_session_ends_when_user_is_removed)
+  - 토큰 클레임으로 사용자 고르기(`magus_user_id`·`user_id` 클레임 넣기): **추가**(무시된다: test_token_claims_cannot_choose_the_user)
+  - 동시 요청에서 사용자 맥락 섞임: **추가**(실제 HTTP, 두 사용자 40회 동시: test_concurrent_requests_keep_their_own_user)
+  - 시험이 실제로 잡는지: FTS의 user_id 조건 빼기, 원격에서 로컬 경로 허용, 웹 세션이 허용 목록을 안 보기 — 세 변조 모두에서 해당 시험이 실패함을 확인했다(코드는 바꾸지 않음).
+- 남는 위험(코드 문제 아님, 운영 절차): `ALLOWED_USERS`에 아버지 sub를 실수로 `=default`로 넣거나, 두 sub를 같은 user_id로 넣으면 공간을 함께 쓴다. 온보딩 A절의 "아버지가 다시 로그인해 `/book`이 비어 있는 것을 확인"이 이것을 잡는다. 시작할 때 같은 user_id가 두 번이면 경고하는 것은 검토 대기 후보(낮음).
+- 목록에서 지우기는 `.env`를 고치고 `docker compose up -d`(재시작)해야 효과가 난다. 그 전까지는 기존 토큰·세션이 통한다.
+- 테스트 230개 통과(격리 시험 7개 추가), ruff 통과. 커밋만 하고 push는 다음 태그 때.
 
 ## 0-5. 최근 보고 (2026-10-06, 서버 배포 `p1-reupload` + 아버지 자료용 데이터, 세션 magus-25)
 
@@ -156,6 +180,7 @@
 - **7단계 전 확인**
   - [x] #69~#74, #77, #76 기본 부분 구현(2026-10-06, 로컬). 최신본 재임포트·다시 올리기 시험 통과.
   - [x] `docs/onboarding-father.md`를 최신 수치와 새 흐름(Word가 원본, 새 판으로 다시 올리기)으로 고쳤다(2026-10-06). 아버지께 드릴 자료는 채팅 Claude가 다시 만든다.
+  - [x] **사용자 격리 점검**(2026-10-06, 0-6절): 막혀 있지 않은 곳 없음, 시험 7개 추가.
   - [x] **서버에 master 배포**(2026-10-06 `p1-reupload`, 0-5절). 남은 것: claude.ai에서 book_outline 확인, 아버지 임포트 뒤 `/book`·`/issues` 화면 보기.
   - [x] 아버지 docx 크기: 최신본 1.4MB(한도 50MB 안).
   - [ ] 아버지 docx를 받으면 업로드 전에 크기를 확인한다(한도 `MAX_UPLOAD_MB` 50MB, #54). 넘으면 서버 `.env`에서 한도를 올리고 `up -d`.
@@ -255,7 +280,7 @@
 
 ## 4. 검토 대기 결정
 
-**P1 검토 대기**: #65~#67, #84(설계안). 다음 보고에서 #45~#64와 같은 열(무엇을·고른 것·대안·이유·바꾸는 비용)의 표로 따로 올린다.
+**P1 검토 대기**: #65~#67. 다음 보고에서 #45~#64와 같은 열(무엇을·고른 것·대안·이유·바꾸는 비용)의 표로 따로 올린다.
 - #69~#78은 2026-10-06에 확정됐다(아래 "2026-10-06 확정"). 구현 기록은 6절 마지막 세션 요약에 있다.
 
 65. **허용 목록이 비어 있으면 시작은 하고 모두 거부한다**(이전: 시작 거부)
@@ -348,13 +373,13 @@
     - 대안: PyJWT strict_aud(원소 하나인 목록도 거부해 지금 로그인을 깨뜨릴 수 있음), 서비스별 WorkOS 환경(전제와 다름), azp로 구분(두 서비스 모두 Claude라 같음), 경고만 내고 무시(조용히 다르게 돔).
     - 서버 반영: 2026-10-06 00:53 KST, `p1-auth-audience`(0-3절).
 
-**2026-10-06 검토 대기(#84)**
+**2026-10-06 확정(#84, 사용자 승인)**
 
-84. **저자 확인 질문지(`book_questions`) 설계안**(`docs/decisions/author-questions.md`, 초안·미구현)
+84. **저자 확인 질문지(`book_questions`) 설계안 승인. 구현은 7단계(아버지 온보딩) 뒤 첫 작업으로 한다**(`docs/decisions/author-questions.md`)
     - 조사: 1절 질문 18곳 중 MCP·웹으로 바로 얻을 수 있는 것은 케인스 a/b·미연결뿐이다. 연도 불일치·추정 연결·같은 저자 두 편·중복 서지는 일부(장마다 ref_check 또는 올릴 때 리포트에만), "참고문헌에만 있음"은 CLI 보고서에만 있다.
     - 판별은 check.py(장마다), report.py(hint·uncited), author_report.py(same_author·이름 언급), bibliography.py(중복 서지, 올릴 때만)에 흩어져 있고 책 단위로 저장되지 않는다.
     - 제안: 판별을 questions.py로 모으고 `book_questions`(조회) → `book_answer`(alias·비인용 용어·결정 기록·`book/answers.md`) 순서. 질문은 매번 계산하고 답만 파일에 남긴다. 다시 올리기 리포트에 "새로 생긴 질문" 절, 웹 `/questions` 조회. Word 코멘트로 돌려주기는 P2.
-    - 시기 의견: 7단계 전에는 필요하지 않다. 온보딩 뒤 첫 작업으로 권한다.
+    - 시기(사용자 결정): 7단계 뒤 첫 작업. 범위는 설계안의 "비용·시기 요약"(questions.py + book_questions → book_answer + answers.md → 웹 /questions 조회·다시 올리기 리포트 절). Word 코멘트는 P2.
 
 **2026-10-06 확정(#80~#83, 사용자 결정 — 세 번째 요청)**
 
@@ -399,6 +424,7 @@
   - #76: 범위를 바꿔 확정. #77(제목·부제), #78(replace 금지 운영 규칙)은 새로 기록했다.
 - 2026-10-06 토큰 aud 지시: #79(확정, #51 대체). 지시가 "질문하지 말고 진행, 결정은 status.md에"라 바로 확정으로 기록했다.
 - 2026-10-06 세 번째 요청: #80(#71 ai|person·지워진 코멘트 자동으로 닫지 않음 승인), #81(상트페테르부르크 비인용 용어), #82(셰 등(2019)은 저자 질문, 미연결 유지), #83(시험 공간 셋은 온보딩 끝까지 보관).
+- 2026-10-06: #84 승인(구현은 7단계 뒤 첫 작업).
 
 **P1 확정 결정(#45~#64, 2026-10-05 / #68, 2026-10-06)**
 
@@ -518,6 +544,11 @@
   - `/fixtures/`(루트), `data/`, `/private/`(저자용 보고서 등 실원고 파생 자료)는 gitignore. `tests/fixtures/`(합성)는 커밋한다.
 
 ## 6. 마지막 세션 요약
+
+**2026-10-06 (6)** — #84 승인 기록, 사용자 격리 점검(세션 magus-25, 로컬·서버 변경 없음)
+- #84는 승인. 구현은 7단계 뒤 첫 작업이다. 그 요청 사이에 #84 구현을 시작하라는 지시가 있었으나, 이어진 요청으로 시기가 바뀌어 코드는 건드리지 않았다.
+- 격리 경로를 처음부터 끝까지 읽고, 빠진 시험 7개를 `tests/test_isolation.py`에 넣었다. 세 가지 변조로 시험이 실제로 잡는 것도 확인했다. 문제는 찾지 못했다.
+- 남긴 것: claude.ai 확인(사용자), 다음 태그 때 push.
 
 **2026-10-06 (5)** — "저자 확인 질문지" 기능 조사(읽기만, 구현 없음, 세션 magus-25)
 - father-trial에서 지금 도구·화면으로 질문 18곳과 부록 A~D를 얼마나 얻는지 재고, 판별 위치를 정리했다. 설계안 초안 `docs/decisions/author-questions.md`, 검토 대기 #84.
