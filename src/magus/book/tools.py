@@ -195,7 +195,7 @@ def build_tools(
         user = current_user()
         location = export_docx(store, user, project, path)
         where = f"내려받기(24시간 안, 같은 계정으로 로그인 필요): {export_link(user, location)}" if export_link else location
-        return f"docx를 만들었다: {where}\n(코멘트·그림은 복원하지 않는다. 자리표시자 [그림 N]·[표 N]·[수식]이 그대로 남는다.)"
+        return f"docx를 만들었다: {where}\n(코멘트·그림은 복원하지 않는다. 자리표시자 [그림 N]·[수식]이 그대로 남는다. 표는 Word 표로 나간다.)"
 
     def book_import(
         path: str, project_id: str | None = None, title: str | None = None, replace: bool = False
@@ -254,7 +254,7 @@ def build_tools(
                 "받은함의 원고 파일(docx, 없으면 pdf)을 새 프로젝트로 임포트한다. path에는 받은함 파일 이름을 준다(files_list로 확인). "
                 "'제N부'·'제N장' 제목으로 장을 나누고, "
                 "Word 코멘트는 미해결(import_comment, kind=citation|fact|general)로, 참고문헌은 refs(unverified)로 넣는다. "
-                "그림·표·수식은 [그림 N]·[표 N]·[수식] 자리표시자로 남기고 원본은 original/에 복사한다. "
+                "표는 칸의 글까지 markdown 표로 싣고, 그림·수식은 [그림 N]·[수식] 자리표시자로 남기며 원본은 original/에 복사한다. "
                 "같은 project_id가 이미 있으면 replace=true일 때만 기존 것을 휴지통으로 옮기고 다시 만든다. "
                 "리포트(장·부 수, 분할 못 한 구간, 코멘트 분류, 참고문헌 파싱)와 장 매핑표를 돌려준다."
             ),

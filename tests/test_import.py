@@ -41,7 +41,9 @@ def test_chapters_parts_and_toc_dedup(store: LocalStore, report):
 def test_placeholders_and_subheadings(store: LocalStore, report):
     body = lambda n: store.read_chapter("alice", "synth", n).content  # noqa: E731
     assert "## 데본기의 물가" in body(1)
-    assert "[표 1]" in body(2) and "[그림 1]" in body(3) and "[수식]" in body(4)
+    # 표는 칸의 글까지 markdown 표로 싣는다(#69). 그림·수식은 자리표시자다.
+    assert "| 구분 | 숨쉬기 |\n|---|---|\n| 물고기 | 아가미 |\n| 네발동물 | 폐 |" in body(2)
+    assert "[그림 1]" in body(3) and "[수식]" in body(4)
     assert (report.figures, report.tables, report.equations) == (1, 1, 1)
     assert "목차" not in body(1)
 

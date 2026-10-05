@@ -2,7 +2,7 @@
 
 python-docx의 고수준 API 대신 zip 안의 XML을 직접 읽는다. 코멘트 범위(commentRangeStart/End)가 문단과 표를
 가로지를 수 있고, 목차·내용 컨트롤(sdt)·삭제된 변경 내용 같은 구조를 정확히 다뤄야 하기 때문이다.
-그림·표·수식은 자리표시자([그림 N], [표 N], [수식])로 남긴다.
+그림·수식은 자리표시자([그림 N], [수식])로 남긴다. 표는 칸의 글까지 markdown 표로 싣는다(#69, 칸이 모두 비면 [표 N]).
 """
 
 from __future__ import annotations
@@ -103,15 +103,28 @@ class _Walker:
         self.blocks.append(Block(index, "para", text, (style or "").lower(), level, is_list))
 
     def table(self, tbl: etree._Element) -> None:
-        # 표 안의 글은 본문에 싣지 않고 자리표시자만 남긴다. 표 안에 걸린 코멘트의 앵커 글은 모은다.
+        # 표는 markdown 표(| 칸 |)로 싣는다(#69). 칸 안의 여러 문단·안쪽 표는 공백으로 잇는다.
+        # 가로로 합친 칸(gridSpan)은 빈 칸으로 채워 줄마다 칸 수를 맞춘다. 칸이 모두 비면 자리표시자만 남긴다.
         self.tables += 1
         index = len(self.blocks)
-        for p in tbl.iter(_w("p")):
-            parts: list[str] = []
-            self._visit(p, parts, index)
-            for buf in self.open.values():
-                buf.append("\n")
-        self.blocks.append(Block(index, "table", f"[표 {self.tables}]"))
+        rows: list[list[str]] = []
+        for tr in tbl.findall(_w("tr")):
+            row: list[str] = []
+            for tc in tr.findall(_w("tc")):
+                texts = []
+                for p in tc.iter(_w("p")):
+                    parts: list[str] = []
+                    self._visit(p, parts, index)
+                    for buf in self.open.values():
+                        buf.append("\n")
+                    if text := " ".join("".join(parts).split()):
+                        texts.append(text)
+                row.append(" ".join(texts))
+                span = tc.find(f"{_w('tcPr')}/{_w('gridSpan')}")
+                row += [""] * (int(span.get(_w("val"), "1")) - 1 if span is not None else 0)
+            rows.append(row)
+        text = markdown_table(rows) if any(cell for row in rows for cell in row) else f"[표 {self.tables}]"
+        self.blocks.append(Block(index, "table", text))
 
     def _emit_text(self, parts: list[str], text: str) -> None:
         parts.append(text)
@@ -150,6 +163,17 @@ class _Walker:
                     self.point_comments.add(cid)
             else:
                 self._visit(child, parts, index)
+
+
+def markdown_table(rows: list[list[str]]) -> str:
+    """첫 줄을 머리글로 쓰는 pipe 표. 칸 안의 '|'는 이스케이프한다. pandoc(export)이 Word 표로 되돌린다."""
+    width = max(len(row) for row in rows)
+
+    def line(cells: list[str]) -> str:
+        cells = [c.replace("|", "\\|") for c in cells] + [""] * (width - len(cells))
+        return "| " + " | ".join(cells) + " |"
+
+    return "\n".join([line(rows[0]), "|" + "---|" * width, *(line(row) for row in rows[1:])])
 
 
 def _style_names(xml: bytes) -> dict[str, str]:

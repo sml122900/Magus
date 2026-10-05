@@ -70,13 +70,16 @@ async def test_export_roundtrip_titles_and_paragraphs(settings: Settings, store:
     chapter_heads = [t for s, t in headings if s == "Heading 2"]
     assert chapter_heads == [f"제{c.number}장 {c.title}" for c in chapters]
     assert [t for s, t in headings if s == "Heading 1"] == ["제1부 기원", "제2부 뭍", "제3부 다시 물로"]
-    # 장마다 docx 단락 수 == 장 본문 md 블록 수(소제목 포함)
+    # 장마다 docx 단락 수 == 장 본문 md 블록 수(소제목 포함, 표 블록은 docx에서 단락이 아니라 표가 된다)
     starts = [i for i, p in enumerate(paragraphs) if p.style.name == "Heading 2"]
     for n, chapter in enumerate(chapters):
         end = next((i for i in range(starts[n] + 1, len(paragraphs)) if paragraphs[i].style.name in ("Heading 1", "Heading 2")), len(paragraphs))
         body = store.read_chapter(settings.user_id, "synth", chapter.number).content
-        assert end - starts[n] - 1 == len(_md_blocks(body)), chapter.number
+        assert end - starts[n] - 1 == len([b for b in _md_blocks(body) if not b.startswith("|")]), chapter.number
     assert any(p.text == "데본기의 물가" and p.style.name == "Heading 3" for p in paragraphs)
+    # 표(#69)는 markdown 표로 들어갔다가 Word 표로 나간다
+    [table] = docx.Document(location).tables
+    assert [[c.text for c in row.cells] for row in table.rows] == [["구분", "숨쉬기"], ["물고기", "아가미"], ["네발동물", "폐"]]
 
 
 async def test_export_and_tools_respect_user(settings: Settings, store: LocalStore):
