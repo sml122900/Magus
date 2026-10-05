@@ -23,3 +23,6 @@ data/
 .drill/
 deploy/data/
 deploy/restore/
+
+# 실원고와 그 파생 자료(저자용 보고서 등). 리포에 넣지 않는다
+/private/

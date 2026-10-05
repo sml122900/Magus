@@ -240,7 +240,7 @@ data/index.sqlite
   - 해석: key → aliases → 공저자로 동명 판별 → 연도 a/b → (한글만) 같은 연도 안 음역 추정(`magus/melchior/translit.py`). 지명·사건 접미사와 일반명사는 저자로 보지 않는다.
 - 책 전체 집계는 CLI `magus cite-report --project-id <id>`로 낸다(`magus/melchior/report.py`).
   - 내용: 고유 미확인 수, 많이 인용된 순위, 참고문헌에 없는 인용(+같은 저자 다른 연도 힌트), uncertain, 추정 연결, 미인용 항목.
-- 저자용 보고서는 CLI `magus author-report --project-id <id> --out docs/reports/<날짜>-인용-점검.md`로 만든다(`magus/melchior/author_report.py`, 같은 이름의 docx도 만든다).
+- 저자용 보고서는 CLI `magus author-report --project-id <id> --out private/reports/<날짜>-인용-점검.md`로 만든다(`magus/melchior/author_report.py`, 같은 이름의 docx도 만든다).
   - 독자는 개발자가 아니다. key 대신 "저자(연도) 『제목』", 설명은 한두 문장, 3쪽 이내. 대상 사용자·프로젝트의 데이터만 쓴다.
   - 7개 절: 한 줄 요약 / 바로 확인할 것(연도 불일치, 참고문헌에만 있는 것) / 답해 주실 질문(음역 추정, 동명 판별) / 확인 순서 상위 20 / 사실·수치 요청(fact) / 장별 미확인 수 / 앞으로의 방식.
 
@@ -355,7 +355,7 @@ magus synth <폴더>                        # 합성 fixture 만들기
 magus seed-demo                           # 데모 프로젝트 + 책장 표본
 magus reindex                             # 파일 → index.sqlite 재생성 + 파생값 재계산
 magus cite-report --project-id book       # 책 전체 인용 집계(확인 순서)
-magus author-report --project-id book --out docs/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + docx)
+magus author-report --project-id book --out private/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + docx)
 magus terms --project-id book [--add …] [--remove …]                         # 비인용 용어 보기·고치기
 magus alias <key> <표기>                                                      # 저자가 확정한 표기를 aliases에(예: keynes1930b "케인스(1930)")
 magus inbox [--add 파일…] [--remove 이름…]                                    # 받은함(로컬 개발용, 원격은 웹 업로드)
@@ -395,8 +395,10 @@ docs/
 ├── daily/YYYY-MM-DD.md      # 일지. 날짜는 로컬(KST) 기준
 ├── decisions/<name>.md      # 기술 결정 기록
 ├── troubleshooting/<name>.md# 트러블슈팅 기록
-├── reports/YYYY-MM-DD-<주제>.md # 저자에게 보내는 보고서(같은 이름의 docx 포함). 생성기로 만들고 손으로 고치지 않는다
 └── par-materials.md         # 이력서 소재 모음
+
+private/reports/YYYY-MM-DD-<주제>.md # 저자에게 보내는 보고서(같은 이름의 docx 포함). 생성기로 만들고 손으로 고치지 않는다
+                                    # 실원고 파생 자료라 리포에 넣지 않는다(.gitignore의 /private/, 2026-10-05 이력에서도 뺐다)
 ```
 
 파일명은 kebab-case 영문으로 짓는다(예: `docs/decisions/store-interface.md`).

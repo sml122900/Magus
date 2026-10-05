@@ -210,7 +210,7 @@ magus import fixtures/닿으려는_종.docx --project-id book
 magus import <파일> --project-id book --replace # 다시 임포트(기존 것은 trash/로)
 magus conversation fixtures/대화_전체_기록.md     # 대화 기록 → 영감 책장
 magus cite-report --project-id book             # 책 전체 인용 집계(개발자용)
-magus author-report --project-id book --out docs/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + 같은 이름 docx)
+magus author-report --project-id book --out private/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + 같은 이름 docx)
 magus terms --project-id book --add 마닐라 "모스크바 회사"   # 인용으로 보지 않을 낱말(지명·사건). 인자 없으면 목록
 magus alias hayashi2016 "하야시(2016)"          # 저자가 확정한 본문 표기를 문헌에 잇는다(음역 추정·a/b 모호 확정)
 magus inbox --add <파일>                         # 받은함에 넣기(로컬 개발용). --remove <이름>, 인자 없으면 목록

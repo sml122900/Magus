@@ -267,7 +267,7 @@
   .venv/Scripts/python -m ruff check --select F,B src tests
   DATA_DIR=./data .venv/Scripts/python -m magus import fixtures/<원고>.pdf --project-id book --title "닿으려는 종" --replace > data/realdata/import-report.md
   DATA_DIR=./data .venv/Scripts/python -m magus cite-report --project-id book > data/realdata/cite-report.md
-  DATA_DIR=./data .venv/Scripts/python -m magus author-report --project-id book --out docs/reports/<날짜>-인용-점검.md
+  DATA_DIR=./data .venv/Scripts/python -m magus author-report --project-id book --out private/reports/<날짜>-인용-점검.md
   DATA_DIR=./data .venv/Scripts/python -m magus terms --project-id book [--add …] [--remove …]
   DATA_DIR=./data .venv/Scripts/python -m magus alias <key> <표기>
   DATA_DIR=./data .venv/Scripts/python -m magus reindex
@@ -275,7 +275,7 @@
 - **git**
   - master에 바로 커밋하고, 단계가 끝나면 태그를 단다. 실험은 브랜치에서 하고 squash merge한다.
   - 태그: `step1`~`step7`, `p0-realdata`, `p0-report1`, `p1-step1`~`p1-step4`. P0 뒤 커밋 두 개(마무리 보완, 결정 반영)에는 태그를 달지 않았다(지시).
-  - `/fixtures/`(루트)와 `data/`는 gitignore. `tests/fixtures/`와 `docs/reports/`는 커밋한다.
+  - `/fixtures/`(루트), `data/`, `/private/`(저자용 보고서 등 실원고 파생 자료)는 gitignore. `tests/fixtures/`(합성)는 커밋한다.
 
 ## 6. 마지막 세션 요약
 
