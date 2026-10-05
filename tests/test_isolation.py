@@ -275,3 +275,24 @@ async def test_concurrent_requests_keep_their_own_user(keys, auth_server):  # no
     for word, text in results:
         other = "밥" if word == "앨리스" else "앨리스"
         assert f"{word}의 바다 생각" in text and f"{other}의 바다 생각" not in text, (word, text)
+
+
+def test_shelf_pages_show_only_own_shelf(server_proc, fake_issuer):  # noqa: F811
+    """영감·문헌·문체 화면도 세션 사용자의 책장만 보인다(같은 문헌 key·같은 project id여도)."""
+    issuer, issuer_state, _ = fake_issuer
+    base, data_dir, _ = server_proc({
+        "PUBLIC_URL": "http://127.0.0.1:{port}", "AUTH_ISSUER": issuer, "ALLOWED_USERS": "sub-alice=alice,sub-bob=bob",
+        "SESSION_SECRET": "x" * 40, "WEB_CLIENT_ID": "web-client",
+    })
+    store = LocalStore(data_dir)
+    for n, (user, word) in enumerate((("alice", "앨리스"), ("bob", "밥"))):
+        _fill(store, user, word, n + 1)
+    store.close()
+    pages = {}
+    for user in ("alice", "bob"):
+        with httpx2.Client(base_url=base, timeout=120) as c:
+            assert _login(c, issuer_state, f"sub-{user}").status_code == 303
+            pages[user] = {path: c.get(f"{path}?project=book").text for path in ("/ideas", "/refs", "/styles")}
+    for user, word, other in (("alice", "앨리스", "밥"), ("bob", "밥", "앨리스")):
+        for path, page in pages[user].items():
+            assert word in page and f"{other}의" not in page, (user, path)

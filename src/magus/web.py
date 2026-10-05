@@ -39,7 +39,7 @@ from magus.book.reupload import reupload_manuscript
 from magus.config import Settings
 from magus.ids import local_time
 from magus.inbox import INBOX_TYPES, LimitError, mb, save_upload, size_text
-from magus.melchior.author_report import cite_label
+from magus.melchior.author_report import chapters_text, cite_label
 from magus.melchior.report import build_cite_report
 from magus.signing import sign, unsign
 from magus.store import Store
@@ -51,7 +51,10 @@ SESSION_TTL, OAUTH_TTL, DOWNLOAD_TTL = 12 * 3600, 600, 24 * 3600
 LIGHTS = {"verified": ("🟢", "확인"), "unverified": ("🟡", "미확인"), "unknown": ("🔴", "참고문헌에 없음"),
           "uncertain": ("⚪", "미연결")}
 ISSUE_KIND_NAMES = {"citation": "문헌 확인", "fact": "사실·수치 확인", "general": "기타"}
-NAV = (("/book", "원고"), ("/inbox", "받은함"), ("/checklist", "인용 체크리스트"), ("/issues", "미해결"))
+NAV = (("/book", "원고"), ("/inbox", "받은함"), ("/checklist", "인용 체크리스트"), ("/issues", "미해결"),
+       ("/ideas", "영감"), ("/refs", "문헌"), ("/styles", "문체"))
+PAGE_SIZE = 100  # 세 책장 목록의 한 쪽
+SAY = "Claude에게 이렇게 말하면 쌓입니다. 예: "  # 빈 책장 안내(받은함 예문과 같은 방식)
 
 # 화면 스타일은 여기 한 곳(결정 #56: 템플릿 엔진·외부 글꼴·CDN 없음). 색은 docs/design/DESIGN-stripe.md의 토큰만 쓴다.
 # 주 사용자가 고령이라 가독성을 앞세웠다: 본문 16px·줄간격 1.6, 가는 글씨(300) 없음, 버튼·입력칸 최소 40px(좁은 화면 44px).
@@ -83,6 +86,7 @@ th,td{padding:8px 12px;text-align:left;vertical-align:top;border-bottom:1px soli
 tr:last-child td{border-bottom:0}
 th{color:var(--mute);font-size:13px;font-weight:600;white-space:nowrap}
 td small{color:var(--mute)}
+.pager{color:var(--ink2)}a.tag{text-decoration:none;margin:2px 0}a.tag:hover{color:var(--press)}
 .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .msg{padding:12px 16px;margin:16px 0;white-space:pre-wrap}
 .err{border-left:4px solid var(--ruby)}
@@ -115,6 +119,7 @@ button,input[type=file]::file-selector-button,input:not([type=radio]):not([type=
 # 받은함: 파일을 고르면 바로 올린다(자바스크립트가 꺼져 있으면 '올리기' 버튼으로). 올리는 동안 버튼 옆에 도는 표시가 보인다.
 UPLOAD_SCRIPT = """<script>
 document.querySelectorAll("form.upload input[type=file]").forEach(function (input) {
+  // 파일을 고르면 바로 올린다
   input.addEventListener("change", function () {
     if (!input.files.length) return;
     var form = input.form;
@@ -124,6 +129,46 @@ document.querySelectorAll("form.upload input[type=file]").forEach(function (inpu
   });
 });
 </script>"""
+
+
+def _fold(text: str, limit: int = 300) -> str:
+    """긴 글은 앞부분만 보이고 나머지는 '더 보기'로 접는다. 줄바꿈은 살린다."""
+    def shown(part: str) -> str:
+        return html.escape(part).replace("\n", "<br>")
+
+    if len(text) <= limit:
+        return shown(text)
+    return f"{shown(text[:limit])}…<details><summary>더 보기</summary>{shown(text)}</details>"
+
+
+def _paged(items: list, request: Request) -> tuple[list, str]:
+    """PAGE_SIZE개씩. 쪽 이동 줄(넘칠 때만)은 목록 위아래에 같은 것을 둔다. 다른 거르기 조건은 그대로 이어 간다."""
+    try:
+        page = max(1, int(request.query_params.get("page") or 1))
+    except ValueError:
+        page = 1
+    pages = max(1, -(-len(items) // PAGE_SIZE))
+    page = min(page, pages)
+    start = (page - 1) * PAGE_SIZE
+    if pages == 1:
+        return items, ""
+    keep = [(k, v) for k, v in request.query_params.multi_items() if k != "page"]
+
+    def link(n: int, label: str) -> str:
+        return f'<a href="?{html.escape(urllib.parse.urlencode([*keep, ("page", n)]))}">{label}</a>'
+
+    nav = [f"{start + 1}–{min(start + PAGE_SIZE, len(items))} / {len(items)}"]
+    nav += [link(page - 1, "이전")] if page > 1 else []
+    nav += [link(page + 1, "다음")] if page < pages else []
+    return items[start : start + PAGE_SIZE], f'<p class="pager">{" · ".join(nav)}</p>'
+
+
+def _style_tags(entry) -> list[str]:
+    """문체 태그 값들(호흡·시점·열기·어미·톤과 장치 목록)."""
+    out: list[str] = []
+    for value in entry.tags.values():
+        out += [str(v) for v in value] if isinstance(value, list) else [str(value)] if value else []
+    return list(dict.fromkeys(v for v in out if v.strip()))
 
 
 class OAuthClient:
@@ -238,6 +283,7 @@ class Web:
             ("/inbox/delete", ["POST"], self.delete), ("/book", ["GET"], self.book), ("/book/import", ["POST"], self.do_import),
             ("/book/export", ["POST"], self.do_export), ("/download/{token}", ["GET"], self.download),
             ("/checklist", ["GET"], self.checklist), ("/issues", ["GET"], self.issues),
+            ("/ideas", ["GET"], self.ideas), ("/refs", ["GET"], self.refs), ("/styles", ["GET"], self.styles),
         ]
         for path, methods, handler in routes:
             server.custom_route(path, methods=methods, include_in_schema=False)(handler)
@@ -596,3 +642,107 @@ class Web:
 <table><tr><th>상태</th><th>문헌</th><th class="num">인용</th><th>장</th></tr>{doc_rows or '<tr><td colspan="4">없음</td></tr>'}</table>
 <h2>장별</h2><table><tr><th>장</th><th>제목</th><th class="num">미확인 문헌</th><th class="num">인용 출현</th></tr>{chapter_rows}</table>"""
         return self._page("인용 체크리스트", body, session)
+
+    # --- 세 책장(읽기 전용): 넣는 것은 Claude 대화로 한다 ---
+    async def ideas(self, request: Request) -> Response:
+        """영감(Casper). 최근 것부터. 누가 말했는지(나·AI)를 구분하고, AI 답은 응답한 내 생각으로 잇는다."""
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        author = request.query_params.get("author") if request.query_params.get("author") in ("me", "ai") else None
+        everything = self.store.list_ideas(uid)
+        if not everything:
+            return self._page("영감", f'<p class="msg">아직 쌓인 생각이 없습니다. {SAY}"오늘 떠오른 생각을 기록해 줘: …"</p>', session)
+        chosen = [i for i in reversed(everything) if author is None or i.author == author]
+        shown, pager = _paged(chosen, request)
+        mine = sum(1 for i in everything if i.author == "me")
+
+        def who(i) -> str:
+            if i.author == "me":
+                return "나"
+            back = f'<br><small><a href="#idea-{html.escape(i.parent_id)}">응답한 생각</a></small>' if i.parent_id else ""
+            return f'<span class="tag">AI</span>{back}'
+
+        rows = "".join(
+            f'<tr id="idea-{html.escape(i.id)}"><td class="num">{local_time(i.created_at, "%Y-%m-%d")}</td>'
+            f"<td>{_fold(i.text)}</td><td>{who(i)}</td><td>{html.escape(i.origin or '')}</td></tr>"
+            for i in shown
+        )
+        body = (f"<p>생각 {len(everything)}개(나 {mine} · AI {len(everything) - mine}) · "
+                '<a href="?">전체</a> · <a href="?author=me">나</a> · <a href="?author=ai">AI</a></p>'
+                f"{pager}<table><tr><th class=\"num\">날짜</th><th>내용</th><th>누가</th><th>출처</th></tr>"
+                f"{rows or '<tr><td colspan=\"4\">없음</td></tr>'}</table>{pager}")
+        return self._page("영감", body, session)
+
+    async def refs(self, request: Request) -> Response:
+        """문헌(Melchior). 확인한 것부터. 쓸 부분·이유(발췌)와 지금 책에서 인용된 장. 인용 현황 전체는 인용 체크리스트로 잇는다."""
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        everything = self.store.list_refs(uid)
+        if not everything:
+            return self._page("문헌", f'<p class="msg">아직 등록한 문헌이 없습니다. {SAY}'
+                                    '"받은함의 kremer1993.pdf를 문헌으로 등록해 줘. 쓸 부분은 「…」, 이유는 …"</p>', session)
+        status = request.query_params.get("status") if request.query_params.get("status") in ("verified", "unverified") else None
+        project = self.store.get_project(uid, request.query_params.get("project") or None)
+        cited: dict[str, list[str]] = {}
+        if project is not None:
+            report = await run_in_threadpool(build_cite_report, self.store, uid, project.id)
+            cited = {key: list(dict.fromkeys(d.chapters)) for key, d in report.docs.items()}
+        chosen = sorted((r for r in everything if status is None or r.status == status), key=lambda r: (r.status != "verified", r.key))
+        shown, pager = _paged(chosen, request)
+        verified = sum(1 for r in everything if r.status == "verified")
+
+        def passages(ref) -> str:
+            found = self.store.get_passages(uid, ref.key)
+            return "<br>".join(
+                f"「{_fold(p.text, 200)}」<br><small>{html.escape(p.reason)}"
+                + (f" · {html.escape(p.locator)}" if p.locator else "") + "</small>"
+                for p in found
+            ) or "-"
+
+        rows = "".join(
+            f"<tr><td>{LIGHTS[r.status][0]} {LIGHTS[r.status][1]}</td>"
+            f"<td>{html.escape(cite_label(r, r.key))}"
+            + (f"<br><small>{html.escape(str(r.bib.get('container')))}</small>" if r.bib.get("container") else "")
+            + f"</td><td>{passages(r)}</td><td>{html.escape(chapters_text(cited.get(r.key, [])) or '-')}</td></tr>"
+            for r in shown
+        )
+        q = f"project={urllib.parse.quote(project.id)}&" if project else ""
+        checklist = f' · 인용 현황은 <a href="/checklist?{q}">인용 체크리스트</a>' if project else ""
+        body = (f"<p>문헌 {len(everything)}편(확인 {verified} · 미확인 {len(everything) - verified}){checklist}</p>"
+                f'<p><a href="?{q}">전체</a> · <a href="?{q}status=verified">{LIGHTS["verified"][0]} {LIGHTS["verified"][1]}</a>'
+                f' · <a href="?{q}status=unverified">{LIGHTS["unverified"][0]} {LIGHTS["unverified"][1]}</a></p>'
+                f"{pager}<table><tr><th>상태</th><th>문헌</th><th>쓸 부분·이유</th><th>인용된 장</th></tr>"
+                f"{rows or '<tr><td colspan=\"4\">없음</td></tr>'}</table>{pager}")
+        return self._page("문헌", body, session)
+
+    async def styles(self, request: Request) -> Response:
+        """문체(Balthasar). 구절·출처·이유·태그. 태그를 누르면 그 태그만 본다."""
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        everything = self.store.list_styles(uid)
+        if not everything:
+            return self._page("문체", f'<p class="msg">아직 모은 문장이 없습니다. {SAY}'
+                                    '"이 문장을 문체 책장에 넣어 줘: 「…」 — 짧게 끊어 읽히는 호흡이 좋다"</p>', session)
+        tag = (request.query_params.get("tag") or "").strip()
+        chosen = [s for s in reversed(everything) if not tag or tag in _style_tags(s)]
+        shown, pager = _paged(chosen, request)
+
+        def tags(s) -> str:
+            return " ".join(f'<a class="tag" href="?tag={urllib.parse.quote(t)}">{html.escape(t)}</a>' for t in _style_tags(s))
+
+        rows = "".join(
+            f"<tr><td>「{_fold(s.passage, 300)}」</td><td>{html.escape(s.work or '')}</td>"
+            f"<td>{_fold(s.reason, 300)}</td><td>{tags(s)}</td></tr>"
+            for s in shown
+        )
+        only = f" · 태그 「{html.escape(tag)}」만 · <a href=\"?\">전체</a>" if tag else ""
+        body = (f"<p>문장 {len(everything)}개{only}</p>"
+                f"{pager}<table><tr><th>구절</th><th>출처</th><th>이유</th><th>태그</th></tr>"
+                f"{rows or '<tr><td colspan=\"4\">없음</td></tr>'}</table>{pager}")
+        return self._page("문체", body, session)

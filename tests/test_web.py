@@ -263,3 +263,53 @@ def test_book_import_defaults_follow_whether_a_book_exists(server_proc):
     assert '<label><input type="radio" name="mode" value="edition" checked>' in has_book
     assert '<input type="radio" name="mode" value="new">' in has_book and 'value="edition" disabled' not in has_book
     assert 'aria-current=page>원고</a>' in has_book  # 지금 보고 있는 메뉴
+
+
+def test_shelf_pages_are_read_only_lists(server_proc):
+    """영감·문헌·문체 화면(읽기 전용). 넣는 것은 Claude 대화로 한다: 빈 책장에는 예문 한 줄, 화면에는 로그아웃 말고 POST 폼이 없다."""
+    from magus.store import Idea, LocalStore, Passage, Ref, StyleEntry
+
+    base, data_dir, _ = server_proc({})
+    with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
+        c.get("/login?next=/book")
+        empty = {path: c.get(path).text for path in ("/ideas", "/refs", "/styles")}
+        assert 'Claude에게 이렇게 말하면 쌓입니다. 예: "오늘 떠오른 생각을 기록해 줘: …"' in empty["/ideas"]
+        assert "아직 등록한 문헌이 없습니다." in empty["/refs"] and "아직 모은 문장이 없습니다." in empty["/styles"]
+
+        store = LocalStore(data_dir)  # 서버와 같은 데이터 폴더에 직접 넣는다(서버는 매 요청 인덱스를 읽는다)
+        store.add_ideas("alice", [
+            Idea("20261001000000000-aaaaaa", "물가는 궁지다", "thought", "me", "산책"),
+            Idea("20261001000000001-aaaaab", "그 관점은 흥미롭습니다", "conversation", "ai", "대화", "20261001000000000-aaaaaa"),
+            Idea("20261002000000000-aaaaac", "긴 생각 " + "가" * 400, "thought", "me"),
+            *(Idea(f"2026090{n // 100}00000{n:05d}-bbbbbb", f"오래된 생각 {n}", "thought", "me") for n in range(120)),
+        ])
+        store.put_ref("alice", Ref("clack2012", "verified", {"first_author": "Clack", "authors": "Clack, J. A.", "year": "2012",
+                                                             "title": "Gaining ground", "container": "Indiana University Press"}),
+                      passages=[Passage("tetrapods came ashore", "1장의 근거", "p.45")])
+        store.put_ref("alice", Ref("diamond1997", "unverified", {"first_author": "Diamond", "year": "1997", "title": "Guns"}))
+        store.create_project("alice", "책", project_id="b")
+        store.write_chapter("alice", "b", 1, "물고기가 올라왔다(Clack, 2012).", "x", title="물가")
+        tags = {"호흡": "짧음", "시점": "1인칭", "열기": "장면", "장치": ["반복"], "어미": "-다", "톤": "건조"}
+        store.add_style("alice", StyleEntry("20261003000000000-cccccc", "짧다. 끊긴다.", "짧은 호흡", tags, "유홍준"))
+        store.add_style("alice", StyleEntry("20261003000000001-cccccd", "길게 이어지는 문장", "긴 호흡", {**tags, "호흡": "긺", "장치": []}))
+        store.close()
+
+        ideas = c.get("/ideas").text
+        assert ideas.index("긴 생각") < ideas.index("그 관점은") < ideas.index("물가는 궁지다")  # 최신 것부터
+        assert '<span class="tag">AI</span><br><small><a href="#idea-20261001000000000-aaaaaa">응답한 생각</a>' in ideas
+        assert "<details><summary>더 보기</summary>" in ideas and "1–100 / 123" in ideas and "다음</a>" in ideas
+        assert "오래된 생각 0" not in ideas and "오래된 생각 0<" in c.get("/ideas?page=2").text
+        only_ai = c.get("/ideas?author=ai").text
+        assert "그 관점은" in only_ai and "물가는 궁지다" not in only_ai
+        refs = c.get("/refs").text
+        assert refs.index("🟢 확인") < refs.index("Diamond(1997)")  # 확인한 문헌부터
+        assert "「tetrapods came ashore」<br><small>1장의 근거 · p.45</small>" in refs and "<td>제1장</td>" in refs
+        assert '인용 현황은 <a href="/checklist?project=b&">인용 체크리스트</a>' in refs
+        assert "Gaining ground" not in c.get("/refs?status=unverified").text
+        styles = c.get("/styles").text
+        assert '<a class="tag" href="?tag=%EC%A7%A7%EC%9D%8C">짧음</a>' in styles and "<td>유홍준</td>" in styles
+        short = c.get("/styles?tag=짧음").text
+        assert "짧다. 끊긴다." in short and "길게 이어지는" not in short and "태그 「짧음」만" in short
+        for page in (ideas, refs, styles):
+            assert page.count('method="post"') == 1  # 로그아웃뿐
+        assert 'aria-current=page>문체</a>' in styles and '<a href="/ideas">영감</a>' in styles
