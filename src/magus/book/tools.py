@@ -284,7 +284,9 @@ def build_tools(
             book_write_chapter,
             name="book_write_chapter",
             description=(
-                "장 하나를 저장한다. content는 본문만(front matter 없이). 이전 본문은 versions/에 보관되고 버전이 1 오른다. "
+                "장 하나를 Magus 원고에 저장한다. 원고 본문의 원본은 저자의 Word 파일이다. 장 수정안은 대화에서 제안하고, "
+                "이 도구는 저자가 Magus 원고에 저장하라고 명시했을 때만 쓴다(다음 업로드 때 저자 파일 내용으로 바뀐다). "
+                "content는 본문만(front matter 없이). 이전 본문은 versions/에 보관되고 버전이 1 오른다. "
                 "note에 무엇을 바꿨는지 쓴다. 없는 번호면 새 장을 만든다(title로 제목 지정). "
                 "제목·상태는 title·status 인자로만 바꾼다. status는 draft|revising|done. 빈 본문은 거부한다. "
                 + UNVERIFIED_CITES_MEANING

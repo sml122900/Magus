@@ -49,7 +49,9 @@ async def test_decide_issue_add_close(settings: Settings, store: LocalStore, dat
 
 async def test_instructions_rule4_active(settings: Settings, store: LocalStore):
     async with Client(build_server(settings, store)) as client:
-        assert "장을 고치면 book_write_chapter로 그 장만 저장하고" in client.instructions
+        assert "book_write_chapter는 저자가 Magus 원고에 저장하라고 명시했을 때만 쓰고" in client.instructions
+        tools = {t.name: t for t in (await client.list_tools()).tools}
+        assert "명시했을 때만" in tools["book_write_chapter"].description
 
 
 def _md_blocks(markdown: str) -> list[str]:

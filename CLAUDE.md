@@ -54,7 +54,7 @@
 - **원고 본문의 원본은 저자 파일이다**(사용자 결정 #68).
   - 원고 상태(목차·결정·미해결·판 이력)는 대화 밖, Magus에 둔다. 이 원칙은 그대로다. 바뀐 것은 원고 본문의 원본이 저자 파일이라는 점이다.
   - Claude의 원고 수정안은 대화로 내고, 저자가 Word에 반영한다. Magus 안의 원고를 Claude가 고쳐 쓰는 것(book_write_chapter)은 기본 흐름이 아니다.
-  - 서버 instructions 규칙 4는 아직 반대로 적혀 있다. 바꾸는 것은 승인 대기다(status.md #74).
+  - 서버 instructions 규칙 4도 이에 맞게 바꿨다(사용자 결정 #74). book_write_chapter는 저자가 Magus 원고에 저장하라고 명시했을 때만 쓴다.
 - **에이전트는 책 전체를 들고 있지 않는다.** 한 작업의 컨텍스트는 목차·결정·미해결(book_outline) + 장 1개 + 검색 top-k로 이루어진다. 책 전체를 반환하는 도구는 만들지 않는다.
 - **인용 게이트**: refs에 `status=verified`로 있는 출처만 인용할 수 있다. 없는 출처는 본문에 `[출처 필요: 주장 요약]`으로 남긴다. 쓰기를 막지는 않는다. 표시하고 집계만 하며, 판단은 사용자가 한다.
 - **누가 말했는지 보존한다.** Casper는 사용자 발화(`author=me`)와 AI 발화(`author=ai`)를 구분해 저장하고, 검색에서는 me를 먼저 보여 준다.
@@ -275,7 +275,8 @@ data/index.sqlite
 
 ## 서버 instructions
 
-6절의 규칙 문장은 `src/magus/instructions.py`의 `RULES`에 **원문 그대로** 들어 있다. 고치지 않는다.
+6절의 규칙 문장은 `src/magus/instructions.py`의 `RULES`에 **원문 그대로** 들어 있다. 사용자 승인 없이 고치지 않는다.
+- 예외: **규칙 4는 사용자 결정 #74(2026-10-06)로 바꿨다.** "장 수정안은 대화에서 제안하고, 저자가 Word 원고에 반영한다. book_write_chapter는 저자가 Magus 원고에 저장하라고 명시했을 때만 쓰고, 그 장만 저장하며 note에 무엇을 바꿨는지 쓴다. 결정은 book_decide에, 열린 문제는 book_issue_add에 남긴다."
 - **instructions는 등록된 도구만 언급한다.** `build_instructions(등록된 도구 이름)`은 규칙 문장에 나오는 도구(`book_|ref_|idea_|style_` 이름)가 모두 등록된 규칙만 넣고, 번호는 다시 매긴다. 도구가 모두 등록되면 6절 원문과 똑같아진다(`tests/test_instructions.py`).
 - 새 도구를 추가하면 그 도구가 필요한 규칙이 자동으로 instructions에 들어간다. 따로 손댈 것은 없다.
 
