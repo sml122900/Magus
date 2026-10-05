@@ -324,7 +324,7 @@ data/index.sqlite
 - 비밀: API 키·시크릿은 환경변수로만 받는다. 저장소에는 `.env.example`만 둔다.
 - 안전장치: 인증이 꺼진 HTTP는 루프백(127.0.0.1)에만 열린다(`magus serve --transport http --host 0.0.0.0`은 거부).
 
-**작업 순서**(단계마다 테스트·status.md·커밋·태그 `p1-stepN`)
+**작업 순서**(단계마다 테스트·status.md·커밋·태그 `p1-stepN`·push)
 1. HTTP 전송, 인증 없이 로컬 실행 → MCP Inspector로 도구 호출 확인.
 2. 인증 서비스 연동: 토큰 검증, sub→user_id, 허용 목록. 잘못된 토큰·만료·허용 목록 밖 거부 테스트.
 3. 받은함 + files_list + 경로 인자 전환. 로컬 경로를 받던 테스트를 받은함 기준으로 바꾼다.
@@ -414,6 +414,11 @@ private/reports/YYYY-MM-DD-<주제>.md # 저자에게 보내는 보고서(같은
 - **브랜치·태그**
   - P0는 `master`에 바로 커밋한다. 단계를 완료하면 태그를 단다(`step1`, `step2`, …).
   - 파서 실험처럼 되돌릴 가능성이 큰 작업만 브랜치를 쓴다. 끝나면 squash merge한다.
+- **원격 저장소**: `origin` = https://github.com/sml122900/Magus (**Private**, 2026-10-05부터)
+  - 인증은 Git Credential Manager가 한다. 토큰을 명령이나 파일에 적지 않는다.
+  - **단계 태그를 찍으면 push까지 한다**: `git push origin master --tags`. 그다음 `git ls-remote --tags origin`으로 확인한다.
+  - force push는 하지 않는다. 2026-10-05에 filter-repo로 이력을 정리한 뒤 처음 올린 것이 기준이다.
+  - 실원고와 그 파생 자료(`data/`, `/fixtures/`, `/private/`)는 올리지 않는다. 처음 올리기 전에 확인한 방법: 이력 경로 검사(`git -c core.quotepath=false`), 실제 파일 해시 대조, 비밀 패턴·실제 비밀값 검색.
 
 ### 작업 명령어
 

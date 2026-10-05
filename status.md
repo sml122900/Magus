@@ -1,7 +1,7 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-05 KST — P1 결정 #45~#64 확정(#62 보관 일별 30 + 월별 12 서버 반영). 보고서 이력 정리(filter-repo). GitHub push는 저장소 주소 대기.
+> 마지막 갱신: 2026-10-05 KST — P1 결정 #45~#64 확정(#62 서버 반영), 보고서 이력 정리(filter-repo), GitHub Private 저장소에 push(origin). 다음은 7단계.
 
 ## 0-1. 최근 보고 (2026-10-05, WorkOS 설정)
 
@@ -37,12 +37,10 @@
 
 ## 1. 지금 바로 할 일
 
-- **대기: GitHub 저장소 주소, 사용자.** 지시의 원격 주소가 자리표시자(`<저장소 주소>`)로 와서 push 직전에 멈췄다(불명: 저장소 주소).
-  - 주소를 받으면 순서대로 한다.
-    1. 비공개인지 본다: 로그인 없이 `https://api.github.com/repos/<owner>/<repo>`가 404이면 비공개(또는 없음), 200이면 공개 → push하지 않고 알린다.
-    2. `git remote add origin <주소>` → `git push origin master --tags`. 인증은 Git Credential Manager 2.9의 브라우저 로그인을 쓴다(gh 없음). 토큰을 명령·파일에 적지 않는다.
-    3. `git ls-remote --tags origin`으로 태그 15개를 확인한다.
-  - push한 뒤: status.md·CLAUDE.md에 원격 저장소를 적고, 운영 규칙을 "단계 태그를 찍으면 push까지"로 바꾼다.
+- **GitHub 원격 저장소(2026-10-05)**: `origin` = https://github.com/sml122900/Magus (**Private**, 로그인 없는 API 조회 404)
+  - master, `p0-realdata-parser`, 태그 15개를 push했다. 로컬과 원격의 해시가 모두 같다(ls-remote 27줄, peel 포함).
+  - `origin/master` 트리(133개)에 `.env`·`data/`·`fixtures/`·`private/`·`docs/reports/`가 없다. 원격 이력 전체에도 없다.
+  - 운영 규칙: **단계 태그를 찍으면 `git push origin master --tags`까지 한다**(CLAUDE.md "원격 저장소"). force push는 하지 않는다.
 - **보고서 이력 정리 완료(2026-10-05)**: `docs/reports`의 저자용 보고서 2개(실원고 파생)를 git filter-repo로 모든 ref의 이력에서 뺐다.
   - 백업: `C:/project_2026/Magus-before-filter.bundle`(--all, 정리 전 17 ref). 되돌리려면 이 bundle에서 다시 clone한다.
   - 보고서는 `private/reports/`(gitignore `/private/`)에 있다. 해시는 원본과 같다.
@@ -265,7 +263,8 @@
 
 ## 5. 환경 메모
 
-- **운영 확정값(2026-10-05 사용자)**: 도메인 `magus.lifebookapplication.com`, 서버 IP `158.247.225.48`, 커넥터 `https://magus.lifebookapplication.com/mcp`. WorkOS 대시보드 설정 진행 중(사용자).
+- **운영 확정값(2026-10-05 사용자)**: 도메인 `magus.lifebookapplication.com`, 서버 IP `158.247.225.48`, 커넥터 `https://magus.lifebookapplication.com/mcp`. WorkOS Staging(#49).
+- **원격 저장소**: `origin` = https://github.com/sml122900/Magus (Private). 인증은 Git Credential Manager가 한다. 단계 태그를 찍으면 `git push origin master --tags`.
 - OS: Windows 11. 셸은 PowerShell과 Git Bash.
 - **uv** 0.12.22: `C:\Users\이성민\AppData\Roaming\Python\Python313\Scripts\uv.exe` (PATH에 없음). Desktop이 `magus.exe`를 실행 중이면 `uv sync`나 `uv add`가 실패한다. 그때는 `uv add --no-sync`와 `uv pip install`을 쓴다.
 - **Python** 3.12(.venv). **MCP SDK** mcp 2.2.0.
