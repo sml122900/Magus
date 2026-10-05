@@ -167,7 +167,7 @@ def build_tools(
             for name, value in (("chapter", chapter_number), ("origin", origin), ("kind", kind))
             if value is not None
         ] + (["해결됐을 수 있음만"] if possibly_resolved else [])
-        head = f"미해결 {len(issues)}건 ({', '.join(filters)})"
+        head = f"확인 요청 {len(issues)}건 ({', '.join(filters)})"
         if len(issues) > limit:
             head += f" — 앞 {limit}건만 표시. 조건을 좁히거나 limit을 늘리세요(최대 {ISSUE_LIST_MAX})."
         labels = {c.number: c.label for c in store.list_chapters(current_user(), project.id) if c.label}
@@ -203,7 +203,7 @@ def build_tools(
         project = resolve_project(project_id)
         number = id.strip().upper().removeprefix("I")
         if not number.isdigit():
-            raise ToolError(f"이슈 번호 형식이 아닙니다: {id!r} (예: I3 또는 3)")
+            raise ToolError(f"확인 요청 번호 형식이 아닙니다: {id!r} (예: I3 또는 3)")
         issue = store.close_issue(current_user(), project.id, int(number), note)
         if issue is None:
             raise ToolError(f"I{number}이 없습니다. book_issues로 번호를 확인하세요.")
@@ -228,7 +228,7 @@ def build_tools(
         user = current_user()
         if new_edition:
             if not project_id:
-                raise ToolError("새 판으로 올릴 책의 project_id를 주세요(book_outline 첫 줄의 괄호 안).")
+                raise ToolError("수정본으로 올릴 책의 project_id를 주세요(book_outline 첫 줄의 괄호 안).")
             try:
                 again = reupload_manuscript(
                     store, user, resolve_file(user, path)[0], project_id, title=title, subtitle=subtitle, force=force

@@ -51,18 +51,19 @@ SESSION_TTL, OAUTH_TTL, DOWNLOAD_TTL = 12 * 3600, 600, 24 * 3600
 LIGHTS = {"verified": ("🟢", "확인"), "unverified": ("🟡", "미확인"), "unknown": ("🔴", "참고문헌에 없음"),
           "uncertain": ("⚪", "미연결")}
 ISSUE_KIND_NAMES = {"citation": "문헌 확인", "fact": "사실·수치 확인", "general": "기타"}
-NAV = (("/book", "원고"), ("/inbox", "받은함"), ("/checklist", "인용 체크리스트"), ("/issues", "미해결"),
-       ("/ideas", "영감"), ("/refs", "문헌"), ("/styles", "문체"))
+NAV = (("/book", "원고"), ("/inbox", "받은함"), ("/checklist", "인용 체크리스트"), ("/issues", "확인 요청"),
+       ("/ideas", "생각"), ("/refs", "문헌"), ("/styles", "문체"))
 PAGE_SIZE = 100  # 세 책장 목록의 한 쪽
 SAY = "Claude에게 이렇게 말하면 쌓입니다. 예: "  # 빈 책장 안내(받은함 예문과 같은 방식)
 
-# 화면 스타일은 여기 한 곳(결정 #56: 템플릿 엔진·외부 글꼴·CDN 없음). 색은 docs/design/DESIGN-stripe.md의 토큰만 쓴다.
+# 화면 스타일은 여기 한 곳(결정 #56: 템플릿 엔진·외부 글꼴·CDN 없음). 토큰과 참고 문서에서 바꾼 점은 docs/decisions/web-style.md.
+# 입력칸 테두리는 --mute(흰 바탕 4.75:1)다. 참고 문서의 입력칸 색(1.82:1)은 칸이 보이지 않아 쓰지 않는다(사용자 결정 #86).
 # 주 사용자가 고령이라 가독성을 앞세웠다: 본문 16px·줄간격 1.6, 가는 글씨(300) 없음, 버튼·입력칸 최소 40px(좁은 화면 44px).
 # 대비(WCAG AA 4.5:1): ink-mute(#64748d)는 흰 바탕에서만(4.75, 회색 바탕은 4.49) 쓴다. 태그 바탕은 #b9b9f9를 40%로 흰 바탕에
 # 얹어(#4434d4 글자 6.2:1) 쓴다. ruby(#ea2261)는 흰 바탕 글자로 4.29라 오류 글자에 쓰지 않고 왼쪽 테두리에만 쓴다.
 STYLE = """
 :root{--ink:#0d253d;--ink2:#273951;--mute:#64748d;--primary:#533afd;--press:#2e2b8c;--deep:#4434d4;--canvas:#ffffff;
---soft:#f6f9fc;--line:#e3e8ee;--input:#a8c3de;--ruby:#ea2261;--tag:rgb(185 185 249/40%);--shadow:rgba(0,55,112,.08) 0 1px 3px}
+--soft:#f6f9fc;--line:#e3e8ee;--ruby:#ea2261;--tag:rgb(185 185 249/40%);--shadow:rgba(0,55,112,.08) 0 1px 3px}
 *{box-sizing:border-box}
 body{margin:0;background:var(--soft);color:var(--ink);font:400 16px/1.6 -apple-system,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
 word-break:keep-all;overflow-wrap:break-word}
@@ -100,7 +101,7 @@ button:disabled{opacity:.5;cursor:default}
 input[type=file]{font:inherit;color:var(--ink2);max-width:100%}
 input[type=file]::file-selector-button{margin-right:12px}
 input:not([type=radio]):not([type=checkbox]):not([type=file]):not([type=hidden]),select{font:inherit;color:var(--ink);background:var(--canvas);
-border:1px solid var(--input);border-radius:6px;padding:8px 12px;min-height:40px;max-width:100%}
+border:1px solid var(--mute);border-radius:6px;padding:8px 12px;min-height:40px;max-width:100%}
 input[type=radio],input[type=checkbox]{accent-color:var(--primary);width:18px;height:18px;vertical-align:-3px}
 input:focus,select:focus{border-color:var(--primary)}
 :focus-visible{outline:3px solid var(--primary);outline-offset:2px}
@@ -488,19 +489,19 @@ class Web:
         )
         message = f'<div class="msg{" err" if error else ""}">{html.escape(flash)}</div>' if flash else ""
         body = f"""{message}
-<table><tr><th>제목</th><th>id</th><th>장</th><th class="num">열린 미해결</th><th class="num">판·올린 시각</th><th class="num">갱신</th><th></th></tr>{rows}</table>
+<table><tr><th>제목</th><th>id</th><th>장</th><th class="num">열린 확인 요청</th><th class="num">수정본·올린 시각</th><th class="num">갱신</th><th></th></tr>{rows}</table>
 <h2>원고 올리기</h2>
 <form method="post" action="/book/import" class="card">{self._csrf_input(session)}
 <p><label>받은함 원고 <select name="name">{options or '<option value="">(받은함에 docx·pdf 없음)</option>'}</select></label></p>
-<p><label{'' if projects else ' class="off"'}><input type="radio" name="mode" value="edition"{' checked' if projects else ' disabled'}> <b>이 책의 새 판으로 올리기</b></label>
- — Word에서 고친 원고를 다시 올릴 때. 바뀐 장만 바뀌고, 결정·미해결·책장은 그대로입니다.<br>
+<p><label{'' if projects else ' class="off"'}><input type="radio" name="mode" value="edition"{' checked' if projects else ' disabled'}> <b>수정본으로 올리기</b></label>
+ — Word에서 고친 원고를 다시 올릴 때. 바뀐 장만 바뀌고, 결정·확인 요청·생각·문체·문헌은 그대로입니다.<br>
 <label><input type="radio" name="mode" value="new"{'' if projects else ' checked'}> 새 책으로 가져오기</label> — 처음 올리는 원고</p>
 <p><label>프로젝트 id <input name="project_id" value="{html.escape(projects[0].id if projects else 'book')}" pattern="[A-Za-z0-9_-]+" required></label>
 <label>제목 <input name="title" placeholder="비우면 파일에서"></label>
 <label>부제 <input name="subtitle" placeholder="비우면 파일에서"></label></p>
-<p><label><input type="checkbox" name="force" value="1"> (새 판) 장 제목이 많이 달라도 같은 책으로 올리기</label></p>
+<p><label><input type="checkbox" name="force" value="1"> (수정본) 장 제목이 많이 달라도 같은 책으로 올리기</label></p>
 <details><summary>드물게 쓰는 선택</summary>
-<p><label><input type="checkbox" name="replace" value="1"> (새 책) 같은 id가 있으면 바꾸기 — 결정·미해결까지 휴지통으로 갑니다. 다시 올리기에는 쓰지 마세요</label></p></details>
+<p><label><input type="checkbox" name="replace" value="1"> (새 책) 같은 id가 있으면 바꾸기 — 결정·확인 요청까지 휴지통으로 갑니다. 수정본을 올릴 때는 쓰지 마세요</label></p></details>
 <p><button class="primary">올리기</button> (큰 원고는 몇십 초 걸립니다)</p></form>"""
         return self._page("원고", body, session)
 
@@ -519,9 +520,9 @@ class Web:
                 raise FileNotFoundError(f"받은함에 {name!r}이 없다")
             project_id = str(form.get("project_id") or "") or None
             title, subtitle = str(form.get("title") or "") or None, str(form.get("subtitle") or "") or None
-            if form.get("mode") == "edition":  # 같은 책의 새 판(#76)
+            if form.get("mode") == "edition":  # 같은 책의 수정본(#76)
                 if not project_id:
-                    raise ValueError("새 판으로 올릴 책의 프로젝트 id를 적어 주세요.")
+                    raise ValueError("수정본으로 올릴 책의 프로젝트 id를 적어 주세요.")
                 again = await run_in_threadpool(
                     reupload_manuscript, self.store, uid, path, project_id,
                     title=title, subtitle=subtitle, force=form.get("force") == "1",
@@ -564,16 +565,16 @@ class Web:
         return FileResponse(path, filename=path.name,
                             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-    # --- 미해결 ---
+    # --- 확인 요청(issues) ---
     async def issues(self, request: Request) -> Response:
-        """열린 미해결 목록(조회 전용). AI가 원고에 단 코멘트에서 온 것은 'AI 확인 요청'으로 드러낸다(#71)."""
+        """열린 확인 요청 목록(조회 전용). AI가 원고에 단 코멘트에서 온 것은 'AI 확인 요청'으로 드러낸다(#71)."""
         session = self.user_of(request)
         if not session:
             return self._need_login(request)
         uid = session[0]
         project = self.store.get_project(uid, request.query_params.get("project") or None)
         if project is None:
-            return self._page("미해결", "<p>원고가 없습니다. <a href=\"/book\">원고</a>에서 임포트하세요.</p>", session)
+            return self._page("확인 요청", "<p>원고가 없습니다. <a href=\"/book\">원고</a>에서 임포트하세요.</p>", session)
         status = request.query_params.get("status") if request.query_params.get("status") in ("open", "closed", "all") else "open"
         kind = request.query_params.get("kind") if request.query_params.get("kind") in ISSUE_KIND_NAMES else None
         issues = self.store.list_issues(uid, project.id, None if status == "all" else status, kind=kind)  # type: ignore[arg-type]
@@ -598,11 +599,11 @@ class Web:
         filters = " · ".join(
             f'<a href="?project={q}&status={status}&kind={k}">{name}</a>' for k, name in ISSUE_KIND_NAMES.items()
         )
-        body = f"""<p>『{html.escape(project.title)}』 · 미해결 {len(issues)}건""" + (
+        body = f"""<p>『{html.escape(project.title)}』 · 확인 요청 {len(issues)}건""" + (
             f" · 그중 🤖 AI 확인 요청 {ai}건(AI가 원고에 단 코멘트입니다)" if ai else "") + f"""</p>
 <p><a href="?project={q}&status=open">열린 것</a> · <a href="?project={q}&status=closed">닫힌 것</a> · <a href="?project={q}&status=all">전체</a> | {filters}</p>
 <table><tr><th>번호</th><th>장</th><th>누가</th><th>종류</th><th>내용</th></tr>{rows or '<tr><td colspan="5">없음</td></tr>'}</table>"""
-        return self._page("미해결", body, session)
+        return self._page("확인 요청", body, session)
 
     # --- 인용 체크리스트 ---
     async def checklist(self, request: Request) -> Response:
@@ -645,7 +646,7 @@ class Web:
 
     # --- 세 책장(읽기 전용): 넣는 것은 Claude 대화로 한다 ---
     async def ideas(self, request: Request) -> Response:
-        """영감(Casper). 최근 것부터. 누가 말했는지(나·AI)를 구분하고, AI 답은 응답한 내 생각으로 잇는다."""
+        """생각(Casper). 최근 것부터. 누가 말했는지(나·AI)를 구분하고, AI 답은 응답한 내 생각으로 잇는다."""
         session = self.user_of(request)
         if not session:
             return self._need_login(request)
@@ -653,7 +654,7 @@ class Web:
         author = request.query_params.get("author") if request.query_params.get("author") in ("me", "ai") else None
         everything = self.store.list_ideas(uid)
         if not everything:
-            return self._page("영감", f'<p class="msg">아직 쌓인 생각이 없습니다. {SAY}"오늘 떠오른 생각을 기록해 줘: …"</p>', session)
+            return self._page("생각", f'<p class="msg">아직 쌓인 생각이 없습니다. {SAY}"생각에 기록해 줘: …"</p>', session)
         chosen = [i for i in reversed(everything) if author is None or i.author == author]
         shown, pager = _paged(chosen, request)
         mine = sum(1 for i in everything if i.author == "me")
@@ -673,7 +674,7 @@ class Web:
                 '<a href="?">전체</a> · <a href="?author=me">나</a> · <a href="?author=ai">AI</a></p>'
                 f"{pager}<table><tr><th class=\"num\">날짜</th><th>내용</th><th>누가</th><th>출처</th></tr>"
                 f"{rows or '<tr><td colspan=\"4\">없음</td></tr>'}</table>{pager}")
-        return self._page("영감", body, session)
+        return self._page("생각", body, session)
 
     async def refs(self, request: Request) -> Response:
         """문헌(Melchior). 확인한 것부터. 쓸 부분·이유(발췌)와 지금 책에서 인용된 장. 인용 현황 전체는 인용 체크리스트로 잇는다."""
@@ -728,7 +729,7 @@ class Web:
         everything = self.store.list_styles(uid)
         if not everything:
             return self._page("문체", f'<p class="msg">아직 모은 문장이 없습니다. {SAY}'
-                                    '"이 문장을 문체 책장에 넣어 줘: 「…」 — 짧게 끊어 읽히는 호흡이 좋다"</p>', session)
+                                    '"이 문장을 문체에 넣어 줘: 「…」 — 짧게 끊어 읽히는 호흡이 좋다"</p>', session)
         tag = (request.query_params.get("tag") or "").strip()
         chosen = [s for s in reversed(everything) if not tag or tag in _style_tags(s)]
         shown, pager = _paged(chosen, request)

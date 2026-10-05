@@ -43,7 +43,7 @@ def test_outline_fits_budget_and_lists_every_direct_issue(store: LocalStore):
     assert estimate_tokens(text) <= TOKEN_BUDGET
     # 목차: 35장 모두, 집계만 담은 줄. 장별 미해결 수에는 코멘트 유래도 들어간다(1장: 코멘트 3 + 사용자 1).
     first = next(line for line in text.splitlines() if line.startswith("- 제1장 "))
-    assert first.endswith("… · draft · 9,700자 · 미해결 4 · 미확인인용 0")  # 제목은 24자로 자른다
+    assert first.endswith("… · draft · 9,700자 · 확인 요청 4 · 미확인인용 0")  # 제목은 24자로 자른다
     for n in range(1, 36):
         assert f"\n- 제{n}장 " in text
     assert text.count("### 제") == 8
@@ -52,9 +52,9 @@ def test_outline_fits_budget_and_lists_every_direct_issue(store: LocalStore):
         assert f"사용자 미해결 {n}:" in text
     for n in range(AGENT_ISSUES):
         assert f"에이전트 미해결 {n}:" in text
-    assert "- 코멘트 유래 미해결 86건(citation " in text
+    assert "- 코멘트 유래 확인 요청 86건(citation " in text
     assert "원문 쪽수와 연도를 대조할 것" not in text
-    assert "외 " not in text.split("## 열린 미해결")[1].split("## 최근 변경")[0]
+    assert "외 " not in text.split("## 열린 확인 요청")[1].split("## 최근 변경")[0]
     # 남는 예산은 결정과 변경에 간다. 가장 최근 것은 반드시 실린다.
     assert "- D15 " in text and "- 35장 v1 " in text
 
@@ -66,9 +66,9 @@ def test_outline_demo(store: LocalStore):
     assert text.splitlines()[0] == "프로젝트: 데모: 물에서 뭍으로 (demo)"
     assert "프로젝트는" not in text  # 프로젝트가 하나면 안내 줄 없음
     assert "### 제1부 물가" in text and "### 제2부 뭍" in text
-    assert "- 제1장 물가의 망설임 · draft · 68자 · 미해결 1 · 미확인인용 0" in text
+    assert "- 제1장 물가의 망설임 · draft · 68자 · 확인 요청 1 · 미확인인용 0" in text
     assert "2장 v2" in text and "2장 끝에 한 문장 추가" in text
-    assert "- 코멘트 유래 미해결 1건(citation 1) — book_issues(kind)로 조회" in text
+    assert "- 코멘트 유래 확인 요청 1건(citation 1) — book_issues(kind)로 조회" in text
     assert "Daeschler 2006 원문 확인 필요" not in text
     assert "I2 · 3장 · 3장 폐의 기원 출처 찾기" in text and "I3 · 2부 제목 후보 더 생각하기" in text
     assert "D2" in text
@@ -102,7 +102,7 @@ def test_outline_names_special_chapters_and_comment_kinds(store: LocalStore):
         store.add_issue("alice", p.id, "확인 필요", origin="import_comment", chapter_number=93, kind=kind)
     text = build_outline(store, "alice", p.id)
     assert "- 부록 3 v1 " in text and "- 93장 v1" not in text
-    assert "- 코멘트 유래 미해결 3건(citation 1 · fact 2) — book_issues(kind)로 조회" in text
+    assert "- 코멘트 유래 확인 요청 3건(citation 1 · fact 2) — book_issues(kind)로 조회" in text
 
 
 def test_outline_header_counts_unique_docs_across_book(store: LocalStore):

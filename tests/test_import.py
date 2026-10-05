@@ -104,7 +104,7 @@ def test_import_reindex_roundtrip(store: LocalStore, report):
 def test_outline_of_imported_project(store: LocalStore, report):
     text = build_outline(store, "alice", "synth")
     assert estimate_tokens(text) <= TOKEN_BUDGET
-    assert "- 코멘트 유래 미해결 13건(citation " in text
+    assert "- 코멘트 유래 확인 요청 13건(citation " in text
     assert "### 제2부 뭍" in text and "- 제4장 닿으려는 손 · draft" in text
 
 

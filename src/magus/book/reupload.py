@@ -38,7 +38,7 @@ from magus.store import BookTitles, Edition, Issue, Store
 from magus.store.base import STALE_REASONS, ChapterMeta
 
 SAME_BOOK_MIN = 0.3  # 장 제목 겹침이 이보다 적으면 다른 책으로 보고 멈춘다
-UPLOAD_NOTE = "판 E{n} 업로드: {name}"
+UPLOAD_NOTE = "수정본 E{n} 업로드: {name}"
 _QUOTES = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'", "「": '"', "」": '"'})
 _ANCHOR_SHOWN = re.compile(r"— 원문: “(?P<a>.*)”\s*$", re.S)
 
@@ -117,8 +117,8 @@ class ReuploadReport:
         renamed = [c for c in self.changed if c.title_from]
         stale = " · ".join(f"{STALE_REASONS[k]} {self.stale[k]}" for k in STALE_REASONS if self.stale[k])
         lines = [
-            f"## 새 판 E{self.edition} — {self.title} ({self.project_id})",
-            f"- 원본: {self.source} · 판 E{self.previous} → E{self.edition} · 장 제목 겹침 {self.overlap:.0%}",
+            f"## 수정본 E{self.edition} — {self.title} ({self.project_id})",
+            f"- 원본: {self.source} · 수정본 번호 E{self.previous} → E{self.edition} · 장 제목 겹침 {self.overlap:.0%}",
             *([f"- 제목 바뀜: {self.titles_changed}"] if self.titles_changed else []),
             *([f"- 부 바뀜: {self.parts_changed}"] if self.parts_changed else []),
             f"- 장: 본문 바뀜 {len(self.changed)} · 그대로 {self.unchanged} · 새 장 {len(self.added)}"
@@ -126,13 +126,13 @@ class ReuploadReport:
             + f" · 빠진 장 {len(self.removed)}"
             + (f"({names(self.removed)}, removed/에 보관)" if self.removed else ""),
             *(["  - 제목이 바뀐 장: " + ", ".join(f"{c.display} '{c.title_from}' → '{c.title}'" for c in renamed)] if renamed else []),
-            *([f"- ⚠ Magus에서 고친 뒤 이번 판으로 덮인 장: {', '.join(self.overwritten_magus)} (이전본은 versions/에 있다)"]
+            *([f"- ⚠ Magus에서 고친 뒤 이번 수정본으로 덮인 장: {', '.join(self.overwritten_magus)} (이전본은 versions/에 있다)"]
               if self.overwritten_magus else []),
-            f"- 원고 코멘트 {self.comments_total}건 → 이어진 미해결 {self.issues_kept}(장을 옮긴 것 {self.issues_moved}) · 새 미해결 {self.issues_new}"
+            f"- 원고 코멘트 {self.comments_total}건 → 이어진 확인 요청 {self.issues_kept}(장을 옮긴 것 {self.issues_moved}) · 새 확인 요청 {self.issues_new}"
             + (f" · 해결됐을 수 있음 {sum(self.stale.values())}({stale}) — 닫지 않았다" if self.stale else ""),
             *([f"  - Magus에서 닫았지만 원고에 코멘트가 남아 있는 것 {self.closed_but_in_file}건(닫힌 채 둔다)"]
               if self.closed_but_in_file else []),
-            f"- 그대로 둔 것: 결정 {self.decisions}건, 직접 남긴 미해결 {self.direct_issues}건, 책장(영감·문헌·문체)",
+            f"- 그대로 둔 것: 결정 {self.decisions}건, 직접 남긴 확인 요청 {self.direct_issues}건, 생각·문헌·문체",
             f"- {self.bib.render().splitlines()[0]}",
             *(f"  {line}" for line in self.bib.render().splitlines()[1:]),
         ]
@@ -178,7 +178,7 @@ def reupload_manuscript(
     path = Path(path)
     project = store.get_project(user_id, project_id)
     if project is None:
-        raise ValueError(f"새 판으로 올릴 프로젝트 {project_id!r}가 없다. 처음 올리는 책이면 새 판이 아니라 임포트한다.")
+        raise ValueError(f"수정본으로 올릴 프로젝트 {project_id!r}가 없다. 처음 올리는 책이면 수정본이 아니라 임포트한다.")
     manuscript = read_manuscript(path)
     split = split_manuscript(manuscript.blocks)
     if not split.chapters:
@@ -187,8 +187,8 @@ def reupload_manuscript(
     overlap = title_overlap([c.title for c in old_list], [c.title for c in split.chapters])
     if overlap < SAME_BOOK_MIN and not force:
         raise ValueError(
-            f"장 제목이 기존 판({project.title})과 {overlap:.0%}만 겹친다. 다른 책 같다. "
-            "같은 책의 새 판이 맞으면 force=true로 다시 올리고, 다른 책이면 새 project_id로 임포트한다."
+            f"장 제목이 기존 원고({project.title})와 {overlap:.0%}만 겹친다. 다른 책 같다. "
+            "같은 책의 수정본이 맞으면 force=true로 다시 올리고, 다른 책이면 새 project_id로 임포트한다."
         )
 
     editions = store.list_editions(user_id, project.id)

@@ -88,7 +88,7 @@ def test_reupload_replaces_only_changed_chapters_and_keeps_history(store: LocalS
     chapters = {c.number: c for c in store.list_chapters(U, P)}
     assert sorted(chapters) == [1, 2, 3, 4, 6]
     assert (chapters[1].version, chapters[1].edition) == (1, 2)
-    assert (chapters[2].version, chapters[2].edition, chapters[2].last_note) == (2, 2, "판 E2 업로드: e2.docx")
+    assert (chapters[2].version, chapters[2].edition, chapters[2].last_note) == (2, 2, "수정본 E2 업로드: e2.docx")
     assert chapters[4].version == 3 and store.read_chapter(U, P, 4).content == "고래는 돌아갔다."
     assert (root / "projects" / P / "removed" / "ch-05-E1" / "ch-05.md").exists()
     assert (root / "projects" / P / "original" / "E2-e2.docx").exists()
@@ -135,13 +135,13 @@ def test_reupload_replaces_only_changed_chapters_and_keeps_history(store: LocalS
 
 def test_outline_shows_edition_and_asks_for_latest_upload(store: LocalStore, tmp_path: Path, e1):
     outline = build_outline(store, U, P).splitlines()
-    assert outline[3].startswith("판 E1 · 마지막 업로드 ") and outline[3].endswith("(e1.docx) · 그 뒤 Magus에서 고친 장 1")
+    assert outline[3].startswith("처음 올린 원고 E1 · 마지막 업로드 ") and outline[3].endswith("(e1.docx) · 그 뒤 Magus에서 고친 장 1")
     reupload_manuscript(store, U, edition(tmp_path / "e2.docx", 2), P)
     text = build_outline(store, U, P)
     assert "(e2.docx) · 그 뒤 Magus에서 고친 장 0" in text and "지남" not in text
-    assert "- 그중 해결됐을 수 있음 2건(새 판에서 코멘트나 걸린 문장이 사라짐)" in text
+    assert "- 그중 해결됐을 수 있음 2건(수정본에서 코멘트나 걸린 문장이 사라짐)" in text
     later = build_outline(store, U, P, now=datetime.now(UTC) + timedelta(days=8))
-    assert "업로드 뒤 8일 지남. 그사이 저자가 Word에서 고쳤다면, 최신본을 받은함에 올려 새 판으로 올리도록" in later
+    assert "업로드 뒤 8일 지남. 그사이 저자가 Word에서 고쳤다면, 최신본을 받은함에 올려 수정본으로 올리도록" in later
 
 
 def test_same_file_again_changes_nothing(store: LocalStore, tmp_path: Path, e1):
@@ -154,7 +154,7 @@ def test_same_file_again_changes_nothing(store: LocalStore, tmp_path: Path, e1):
 
 def test_different_book_needs_force(store: LocalStore, tmp_path: Path, e1):
     other = Manuscript().heading("제1장 전혀 다른").para("글.").heading("제2장 책").para("글.").bibliography().save(tmp_path / "x.docx")
-    with pytest.raises(ValueError, match="장 제목이 기존 판.*0%만 겹친다"):
+    with pytest.raises(ValueError, match="장 제목이 기존 원고.*0%만 겹친다"):
         reupload_manuscript(store, U, other, P)
     assert reupload_manuscript(store, U, other, P, force=True).edition == 2
 
@@ -168,7 +168,7 @@ def test_project_imported_before_editions_and_without_fingerprints(store: LocalS
     issues_md = (pdir / "issues.md").read_text(encoding="utf-8")
     (pdir / "issues.md").write_text("\n".join(x for x in issues_md.splitlines() if not x.startswith(("- comment_fp:", "- author", "- comment_date:"))), encoding="utf-8")
     store.reindex()
-    assert "판 기록 없음(다시 올리기 기능 전 임포트)" in build_outline(store, U, P)
+    assert "수정본 기록 없음(수정본 기능 전 임포트)" in build_outline(store, U, P)
 
     report = reupload_manuscript(store, U, edition(tmp_path / "e2.docx", 2), P)
     assert (report.previous, report.edition, report.issues_kept, report.issues_new) == (1, 2, 3, 1)
@@ -186,8 +186,8 @@ async def test_book_import_new_edition_tool(settings, store: LocalStore, tmp_pat
         done = (await client.call_tool("book_import", {"path": "e2.docx", "project_id": P, "new_edition": True})).content[0].text
         stale = (await client.call_tool("book_issues", {"project_id": P, "possibly_resolved": True})).content[0].text
     assert refused.is_error and "new_edition=true" in refused.content[0].text
-    assert done.startswith("## 새 판 E2 — 가상 책 (b)") and "### 바뀐 장" in done
-    assert stale.startswith("미해결 2건 (status=open, 해결됐을 수 있음만)")
+    assert done.startswith("## 수정본 E2 — 가상 책 (b)") and "### 바뀐 장" in done
+    assert stale.startswith("확인 요청 2건 (status=open, 해결됐을 수 있음만)")
     assert "해결됐을 수 있음(원고에서 코멘트가 지워짐, E2)" in stale and "해결됐을 수 있음(걸린 문장이 원고에 없음, E2)" in stale
 
 

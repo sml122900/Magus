@@ -389,7 +389,7 @@ class LocalStore(ShelfMixin):
         comment_fp: str | None = None,
     ) -> Issue:
         if not text.strip():
-            raise ValueError("미해결 내용이 비어 있다")
+            raise ValueError("확인 요청 내용이 비어 있다")
         path = self._require_project(user_id, project_id) / "issues.md"
         issues = formats.parse_issues(_read_text(path))
         issue = Issue(

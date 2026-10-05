@@ -4,10 +4,12 @@
 
 | 책장 | 표시명 | 하는 일 |
 |---|---|---|
-| 영감 | **Casper · 몰약** | 생각과 대화를 보존합니다. 내가 한 말(me)과 AI가 한 말(ai)을 구분합니다. |
+| 생각 | **Casper · 몰약** | 생각과 대화를 보존합니다. 내가 한 말(me)과 AI가 한 말(ai)을 구분합니다. |
 | 문헌 | **Melchior · 황금** | 실제로 읽고 발췌한(verified) 문헌만 인용할 수 있게 합니다. 나머지는 표시하고 집계합니다. |
 | 문체 | **Balthasar · 유향** | 내가 좋아하는 문장을 이유·태그와 함께 기록하고, 문체로 찾습니다. |
-| 원고 | book | 장 단위로 저장하고 버전을 남깁니다. 결정과 미해결 사항도 기록합니다. |
+| 원고 | book | 장 단위로 저장하고 버전을 남깁니다. 결정과 확인 요청도 기록합니다. |
+
+저자에게 보이는 이름(사용자 결정 #85)은 **전체**(책 전체 현황, `book_outline`) · **확인 요청**(issues) · **생각** · **문체** · **문헌** · **결정** · **수정본**(Word에서 고쳐 다시 올린 원고, 번호 E2·E3…)입니다. 웹 화면, 도구 응답, Claude의 답이 이 이름을 씁니다. 도구 이름(`book_*`·`idea_*` 등)과 코드 모듈 이름은 그대로입니다.
 
 세 현자는 토론하지 않습니다. 선물을 바칠 뿐이고, 받고 결정하는 것은 저자입니다.
 
@@ -89,10 +91,10 @@ Microsoft Store판은 `%LOCALAPPDATA%\Packages\Claude_…\LocalCache\Roaming\Cla
 
 | 말하기 | 불리는 도구 | 기대 결과 |
 |---|---|---|
-| "Magus의 book_outline을 호출해 줘" | `book_outline` | 첫 줄 `프로젝트: 닿으려는 종 (book)`<br>둘째 줄 `35장 + 서장·맺음·부록 1~3 · 8부 · 249,065자 · 미확인 문헌 297편 · 미연결 0 · 열린 미해결 86`<br>미해결 절 `코멘트 유래 미해결 86건(citation 44 · fact 40 · general 2)` |
+| "Magus의 book_outline을 호출해 줘" | `book_outline` | 첫 줄 `프로젝트: 닿으려는 종 (book)`<br>둘째 줄 `35장 + 서장·맺음·부록 1~3 · 8부 · 249,065자 · 미확인 문헌 297편 · 미연결 0 · 열린 확인 요청 86`<br>확인 요청 절 `코멘트 유래 확인 요청 86건(citation 44 · fact 40 · general 2)` |
 | "제12장 인용 중 확인 안 된 것 알려줘" | `ref_check(12)` 한 번 | `unverified` 28편, `unique_unchecked: 28`, `verified: []`<br>문헌마다 문단 번호가 붙는다. 예: marchetti1994 `paragraphs: [16, 41]`, pachecocobos2019 `[28, 29]` |
-| "제31장 읽고 세 문장으로 요약해 줘" | `book_read_chapter(31)` 한 번 | 제목 `대치동은 왜 아이를 줄이나`, 3,386자, 미확인 문헌 8편, 열린 미해결 1건(I78)<br>책 전체나 다른 장을 요구하지 않아야 한다. 본문에 "제13장에서 보았듯"이 있어도 13장을 읽지 않는다<br>규칙 1에 따라 `book_outline`을 먼저 부르는 것은 괜찮다 |
-| "사실·수치 확인 요청만 보여 줘" | `book_issues(kind="fact")` | `미해결 40건 (status=open, kind=fact)`<br>첫 항목 `I3 · open · 1장 · import_comment · fact · 확인 필요: 폐가 부레보다…` |
+| "제31장 읽고 세 문장으로 요약해 줘" | `book_read_chapter(31)` 한 번 | 제목 `대치동은 왜 아이를 줄이나`, 3,386자, 미확인 문헌 8편, 열린 확인 요청 1건(I78)<br>책 전체나 다른 장을 요구하지 않아야 한다. 본문에 "제13장에서 보았듯"이 있어도 13장을 읽지 않는다<br>규칙 1에 따라 `book_outline`을 먼저 부르는 것은 괜찮다 |
+| "사실·수치 확인 요청만 보여 줘" | `book_issues(kind="fact")` | `확인 요청 40건 (status=open, kind=fact)`<br>첫 항목 `I3 · open · 1장 · import_comment · fact · 확인 필요: 폐가 부레보다…` |
 
 "미확인 문헌 297편"은 책 전체에서 한 번씩 센 고유 문헌 수입니다. 저자 보고서 1절의 "문헌 297편"과 같은 숫자입니다.
 장마다 센 수는 목차의 각 장 줄(`미확인인용 n`)에만 있습니다.
@@ -147,7 +149,7 @@ PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버
 4. **문헌 검증**: 읽은 문헌은 `ref_add`로 발췌와 함께 넣습니다. 그러면 그 문헌을 인용한 곳이 verified가 됩니다.
    - 장을 고치면 `book_write_chapter`가 미확인 인용을 알려 줍니다.
    - 원고 본문의 원본은 저자의 Word 파일입니다(결정 #68, `docs/decisions/author-file-is-source.md`). 수정안은 대화에서 받아 Word에 반영하고, `book_write_chapter`는 Magus 안에 저장하라고 할 때만 씁니다.
-   - 원고가 바뀌면 같은 책의 새 판으로 다시 올립니다(`book_import new_edition=true`, 웹 "이 책의 새 판으로 올리기", `docs/decisions/reupload-design.md`). `replace`는 결정과 미해결까지 휴지통으로 보내니 다시 올리기에 쓰지 않습니다.
+   - 원고가 바뀌면 수정본으로 올립니다(`book_import new_edition=true`, 웹 "수정본으로 올리기", `docs/decisions/reupload-design.md`). `replace`는 결정과 확인 요청까지 휴지통으로 보내니 수정본에 쓰지 않습니다.
 5. **문체**: 좋아하는 문장은 `style_add`로 넣고, 문체 작업 전에 `style_search`로 꺼냅니다.
 
 같은 일을 명령줄로도 할 수 있습니다(아래 "명령").
@@ -156,13 +158,13 @@ PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버
 
 | 도구 | 하는 일 |
 |---|---|
-| `book_outline(project_id?)` | 책의 지도. 3,000토큰 이하이고 본문은 없습니다. 장별 상태·글자수·미해결·미확인 인용 집계, 직접 남긴 미해결, 최근 결정과 변경을 줍니다. |
-| `book_read_chapter(number)` | 장 하나. 본문(content)과 메타를 별도 필드로 줍니다. 미확인 인용과 그 장의 미해결도 함께 줍니다. |
+| `book_outline(project_id?)` | 책 전체 현황(저자에게는 "전체"). 3,000토큰 이하이고 본문은 없습니다. 장별 상태·글자수·확인 요청·미확인 인용 집계, 직접 남긴 확인 요청, 최근 결정과 변경을 줍니다. |
+| `book_read_chapter(number)` | 장 하나. 본문(content)과 메타를 별도 필드로 줍니다. 미확인 인용과 그 장의 확인 요청도 함께 줍니다. |
 | `book_write_chapter(number, content, note, title?, status?)` | 장 하나를 저장합니다. 이전본은 versions/에 남고, 쓴 뒤 인용 게이트 결과를 돌려줍니다. |
-| `book_issues(status, chapter_number?, origin?, kind?, limit)` | 미해결 목록(조회 전용). |
+| `book_issues(status, chapter_number?, origin?, kind?, limit)` | 확인 요청 목록(조회 전용). |
 | `book_decide(text)` · `book_issue_add(text, chapter_number?, origin)` · `book_issue_close(id, note?)` | 결정과 열린 문제를 기록합니다. 번호는 다시 쓰지 않습니다. |
 | `files_list()` | 받은함(올린 파일) 목록과 사용량. 파일 인자에는 여기 나온 이름만 줍니다. |
-| `book_import(path, project_id?, title?, subtitle?, replace?, new_edition?, force?)` | 받은함의 docx(또는 pdf) 원고를 장 단위로 나눕니다. 코멘트는 미해결, 참고문헌은 refs가 됩니다. Word에서 고친 같은 책은 `new_edition=true`로 새 판으로 올립니다(바뀐 장만 바뀌고 결정·미해결·책장은 그대로). |
+| `book_import(path, project_id?, title?, subtitle?, replace?, new_edition?, force?)` | 받은함의 docx(또는 pdf) 원고를 장 단위로 나눕니다. 코멘트는 확인 요청, 참고문헌은 문헌(unverified)이 됩니다. Word에서 고친 같은 책은 `new_edition=true`로 수정본으로 올립니다(바뀐 장만 바뀌고 결정·확인 요청·생각·문체·문헌은 그대로). |
 | `book_export(path?)` | 장을 합쳐 docx로 만듭니다. |
 | `ref_import_bibliography(text)` | 참고문헌 목록을 refs(unverified)로 넣습니다. |
 | `ref_add(bib, passages, file_path?/full_text?, aliases?)` | 읽은 문헌을 발췌와 함께 verified로 넣습니다. 저자·연도 없이 파일만 주면 첫머리의 제목으로 참고문헌에서 찾습니다. |
@@ -210,7 +212,7 @@ PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버
 magus serve                                     # MCP 서버(stdio). Claude Desktop이 실행합니다.
 magus import fixtures/닿으려는_종.docx --project-id book
 magus import <파일> --project-id book --replace # 다시 임포트(기존 것은 trash/로)
-magus conversation fixtures/대화_전체_기록.md     # 대화 기록 → 영감 책장
+magus conversation fixtures/대화_전체_기록.md     # 대화 기록 → 생각
 magus cite-report --project-id book             # 책 전체 인용 집계(개발자용)
 magus author-report --project-id book --out private/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + 같은 이름 docx)
 magus terms --project-id book --add 마닐라 "모스크바 회사"   # 인용으로 보지 않을 낱말(지명·사건). 인자 없으면 목록
@@ -269,7 +271,7 @@ magus conversation fixtures/대화_전체_기록.md
 users/<user_id>/projects/<project_id>/
   book/ch-01.md …        장 본문(맨 위에 앞머리 메타, 그 아래 markdown)
   versions/              이전 버전
-  decisions.md issues.md 결정, 미해결
+  decisions.md issues.md 결정, 확인 요청
   original/              원본 원고 사본, unsplit.md, import-report.md
   exports/               book_export 결과
 users/<user_id>/shelf/

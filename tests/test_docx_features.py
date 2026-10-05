@@ -178,7 +178,7 @@ def test_comment_author_is_kept_in_file_and_index(store: LocalStore, tmp_path: P
     assert "- author: Claude\n- author_kind: ai\n- comment_date: 2026-10-02T01:02:03Z" in issues_md
     store.reindex()
     assert [i.author_kind for i in store.list_issues("alice", "b")] == ["ai", "person"]
-    assert "코멘트 유래 미해결 2건(citation 1 · general 1) · 그중 AI 확인 요청 1건(AI가 원고에 단 코멘트)" in build_outline(store, "alice", "b")
+    assert "코멘트 유래 확인 요청 2건(citation 1 · general 1) · 그중 AI 확인 요청 1건(AI가 원고에 단 코멘트)" in build_outline(store, "alice", "b")
 
 
 @pytest.mark.anyio

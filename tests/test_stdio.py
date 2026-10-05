@@ -49,7 +49,7 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
         assert '"title": "물가의 망설임"' in ch1
         written = _text(await client.call_tool("book_write_chapter", {"number": 7, "content": "닿으려는 것.", "note": "고침", "project_id": "synth"}))
         assert '"version": 2' in written
-        assert _text(await client.call_tool("book_issues", {"project_id": "synth"})).startswith("미해결 13건")
+        assert _text(await client.call_tool("book_issues", {"project_id": "synth"})).startswith("확인 요청 13건")
 
         # 3단계
         assert _text(await client.call_tool("book_decide", {"text": "결정", "project_id": "synth"})).startswith("D1")

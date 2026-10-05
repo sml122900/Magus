@@ -237,7 +237,7 @@ class ImportReport:
             f"- 목차 등으로 판단해 버린 제목 줄: {len(self.discarded)}개"
             + (f" — {', '.join(self.discarded[:8])}" + (" …" if len(self.discarded) > 8 else "") if self.discarded else ""),
             f"- 빠진 장 번호: {', '.join(map(str, self.gaps)) or '없음'} · 본문 없는 장: {', '.join(map(str, self.empty_chapters)) or '없음'}",
-            f"- 코멘트 → 이슈 {len(self.comment_rows)}건: citation {citation}(문헌 지목, refs 연결 {self.comments_linked})"
+            f"- 코멘트 → 확인 요청 {len(self.comment_rows)}건: citation {citation}(문헌 지목, refs 연결 {self.comments_linked})"
             f" · fact {kinds.get('fact', 0)}(사실·수치 확인) · general {kinds.get('general', 0)}"
             + (f" · 장 밖 코멘트 {dict(self.comments_outside)}" if self.comments_outside else "")
             + (" · 작성자 " + ", ".join(f"{who} {n}" for who, n in self.comment_authors.most_common()) if self.comment_authors else ""),
@@ -255,7 +255,7 @@ class ImportReport:
         return "\n".join(rows)
 
     def comment_table(self) -> str:
-        rows = ["| 이슈 | 장 | kind | ref_key 후보 | 앞 40자 |", "|---|---|---|---|---|"]
+        rows = ["| 확인 요청 | 장 | kind | ref_key 후보 | 앞 40자 |", "|---|---|---|---|---|"]
         rows += [
             f"| I{iid} | {ch if ch is not None else '-'} | {kind} | {key or '-'} | {head.replace('|', '/')} |"
             for iid, ch, kind, key, head in self.comment_rows
@@ -366,9 +366,9 @@ def import_manuscript(
     if project_id and store.get_project(user_id, project_id):
         if not replace:
             raise ValueError(
-                f"프로젝트 {project_id!r}가 이미 있다. 같은 책을 Word에서 고쳐 다시 올리는 것이면 새 판으로 올린다"
-                "(book_import new_edition=true, 웹 '이 책의 새 판으로 올리기'). 다른 책이면 새 project_id를 쓴다. "
-                "replace=True는 결정·미해결까지 휴지통으로 보내고 새로 만든다."
+                f"프로젝트 {project_id!r}가 이미 있다. 같은 책을 Word에서 고쳐 다시 올리는 것이면 수정본으로 올린다"
+                "(book_import new_edition=true, 웹 '수정본으로 올리기'). 다른 책이면 새 project_id를 쓴다. "
+                "replace=True는 결정·확인 요청까지 휴지통으로 보내고 새로 만든다."
             )
         terms = store.get_non_citation_terms(user_id, project_id)  # 사람이 정한 비인용 용어는 다시 임포트해도 유지
         ai_names = store.get_ai_authors(user_id, project_id)  # AI 작성자 이름 목록도 같다

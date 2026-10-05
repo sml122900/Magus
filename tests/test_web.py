@@ -249,11 +249,11 @@ def test_remote_requires_session_secret(tmp_path: Path):
 
 
 def test_book_import_defaults_follow_whether_a_book_exists(server_proc):
-    """책이 없으면 '새 책으로 가져오기'가 기본이고 '새 판'은 비활성. 책이 있으면 '새 판'이 기본. '바꾸기'는 접힌 영역 안."""
+    """책이 없으면 '새 책으로 가져오기'가 기본이고 '수정본'은 비활성. 책이 있으면 '수정본'이 기본. '바꾸기'는 접힌 영역 안."""
     base, _, _ = server_proc({})
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         empty = c.get("/login?next=/book").text
-        assert '<label class="off"><input type="radio" name="mode" value="edition" disabled>' in empty
+        assert '<label class="off"><input type="radio" name="mode" value="edition" disabled> <b>수정본으로 올리기</b></label>' in empty
         assert '<input type="radio" name="mode" value="new" checked>' in empty
         assert re.search(r'<details><summary>드물게 쓰는 선택</summary>.*?name="replace".*?</details>', empty, re.S)
         csrf = _csrf(empty)
@@ -263,17 +263,22 @@ def test_book_import_defaults_follow_whether_a_book_exists(server_proc):
     assert '<label><input type="radio" name="mode" value="edition" checked>' in has_book
     assert '<input type="radio" name="mode" value="new">' in has_book and 'value="edition" disabled' not in has_book
     assert 'aria-current=page>원고</a>' in has_book  # 지금 보고 있는 메뉴
+    # 용어 통일(#85): 저자에게는 확인 요청·수정본·생각으로 보인다
+    assert '<th class="num">열린 확인 요청</th><th class="num">수정본·올린 시각</th>' in has_book
+    assert "(수정본) 장 제목이 많이 달라도" in has_book and "새 판" not in has_book and "미해결" not in has_book
+    assert '<a href="/issues">확인 요청</a>' in has_book and '<a href="/ideas">생각</a>' in has_book
+    assert "border:1px solid var(--mute)" in has_book and "--input" not in has_book  # 입력칸 테두리 대비 4.75
 
 
 def test_shelf_pages_are_read_only_lists(server_proc):
-    """영감·문헌·문체 화면(읽기 전용). 넣는 것은 Claude 대화로 한다: 빈 책장에는 예문 한 줄, 화면에는 로그아웃 말고 POST 폼이 없다."""
+    """생각·문헌·문체 화면(읽기 전용). 넣는 것은 Claude 대화로 한다: 빈 책장에는 예문 한 줄, 화면에는 로그아웃 말고 POST 폼이 없다."""
     from magus.store import Idea, LocalStore, Passage, Ref, StyleEntry
 
     base, data_dir, _ = server_proc({})
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         c.get("/login?next=/book")
         empty = {path: c.get(path).text for path in ("/ideas", "/refs", "/styles")}
-        assert 'Claude에게 이렇게 말하면 쌓입니다. 예: "오늘 떠오른 생각을 기록해 줘: …"' in empty["/ideas"]
+        assert 'Claude에게 이렇게 말하면 쌓입니다. 예: "생각에 기록해 줘: …"' in empty["/ideas"]
         assert "아직 등록한 문헌이 없습니다." in empty["/refs"] and "아직 모은 문장이 없습니다." in empty["/styles"]
 
         store = LocalStore(data_dir)  # 서버와 같은 데이터 폴더에 직접 넣는다(서버는 매 요청 인덱스를 읽는다)
@@ -312,4 +317,5 @@ def test_shelf_pages_are_read_only_lists(server_proc):
         assert "짧다. 끊긴다." in short and "길게 이어지는" not in short and "태그 「짧음」만" in short
         for page in (ideas, refs, styles):
             assert page.count('method="post"') == 1  # 로그아웃뿐
-        assert 'aria-current=page>문체</a>' in styles and '<a href="/ideas">영감</a>' in styles
+        assert 'aria-current=page>문체</a>' in styles and '<a href="/ideas">생각</a>' in styles
+        assert '예: "이 문장을 문체에 넣어 줘: 「…」' in empty["/styles"] and "<h1>생각</h1>" in ideas

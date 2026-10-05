@@ -126,15 +126,15 @@ async def test_book_issues_lists_and_filters(settings: Settings, store: LocalSto
     store.add_issue(settings.user_id, "demo", "에이전트가 남긴 것", origin="agent", chapter_number=3)
     async with Client(build_server(settings, store)) as client:
         everything = _text(await client.call_tool("book_issues", {}))
-        assert everything.splitlines()[0] == "미해결 4건 (status=open)"
+        assert everything.splitlines()[0] == "확인 요청 4건 (status=open)"
         assert "- I1 · open · 1장 · 원고 코멘트 · citation→daeschler2006 ⇒ refs 없음 · Daeschler 2006 원문 확인 필요" in everything
         comments = _text(await client.call_tool("book_issues", {"origin": "import_comment"}))
-        assert comments.splitlines()[0] == "미해결 1건 (status=open, origin=import_comment)"
+        assert comments.splitlines()[0] == "확인 요청 1건 (status=open, origin=import_comment)"
         ch3 = _text(await client.call_tool("book_issues", {"chapter_number": 3, "kind": "general"}))
         assert [line.split(" · ")[0] for line in ch3.splitlines()[1:]] == ["- I2", "- I4"]
         limited = _text(await client.call_tool("book_issues", {"limit": 2}))
         assert "앞 2건만 표시" in limited and len(limited.splitlines()) == 3
-        assert _text(await client.call_tool("book_issues", {"status": "closed"})) == "미해결 0건 (status=closed)"
+        assert _text(await client.call_tool("book_issues", {"status": "closed"})) == "확인 요청 0건 (status=closed)"
         assert (await client.call_tool("book_issues", {"origin": "robot"})).is_error
 
 

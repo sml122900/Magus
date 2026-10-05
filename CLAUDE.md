@@ -12,10 +12,11 @@
   - 다시 올리기가 핵심 기능이 됐다. 기본 부분을 구현했다(#76, `magus/book/reupload.py`, 설계·확정 범위는 `docs/decisions/reupload-design.md`).
 - **7단계 준비(2026-10-06, 로컬)**: #69 표, #70 제N부 들어가며, #71 코멘트 작성자·AI 확인 요청, #72 [점검] 분류, #73 걸린 문장 전문, #74 규칙 4, #77 제목·부제, #76 다시 올리기 기본을 구현했다(status.md 0-4절).
   - 최신본을 `father-trial`에 새로 임포트해 수치를 쟀고, `reupload-trial`에서 4판 → 최신본 다시 올리기를 시험했다(기존 미해결 86 유지 + 새 43, 바뀐 장 6만 교체).
-- **운영 규칙(#78)**: 같은 책을 다시 올릴 때는 새 판(`new_edition`)으로 한다. 아버지 원고를 `replace`로 다시 임포트하지 않는다. replace는 결정·직접 남긴 미해결·닫은 미해결까지 휴지통으로 보낸다.
+- **운영 규칙(#78)**: 같은 책을 다시 올릴 때는 수정본(`new_edition`)으로 한다. 아버지 원고를 `replace`로 다시 임포트하지 않는다. replace는 결정·직접 남긴 미해결·닫은 미해결까지 휴지통으로 보낸다.
 - 다음 할 일: **7단계 아버지 온보딩**(`docs/onboarding-father.md`). 시작 전 확인은 status.md "7단계 전 확인"을 따른다. 그 전에 사용자가 claude.ai에서 book_outline을 한 번 확인한다.
   - 7단계 뒤 첫 작업: 저자 확인 질문지 `book_questions`(#84 승인, `docs/decisions/author-questions.md`).
   - 사용자 격리: 아버지 계정 추가 전에 점검했다(status.md 0-6절, `tests/test_isolation.py`).
+- **다음 배포에 함께 나갈 것(커밋만 함, 사용자가 캡처를 확인한 뒤 한 번에 배포)**: 웹 화면 스타일, 세 책장 화면(`/ideas`·`/refs`·`/styles`), 용어 통일(#85, 저자에게 보이는 이름), 입력칸 테두리 대비(#86).
 - 서버(2026-10-06 01:40부터): master `p1-reupload`(`4df2720`, #69~#77·#76·#79 포함). 되돌리기 기준은 `896633c`(이미지 `magus:rollback-896633c`, status.md 0-5절). 옛 이력은 지난 배포 때 gc했다.
   - 다음 배포도 docs/deploy.md "업데이트" 절차(`git fetch … master && git checkout -B master FETCH_HEAD`)로 한다.
 - 알려진 문제: `tests/test_http.py::test_request_size_limit`가 Windows에서 간헐적으로 실패한다(413 응답 전에 연결이 리셋됨). 서버 동작은 정상이다(status.md 7절).
@@ -51,6 +52,23 @@
 
 - **MCP 도구 이름은 바꾸지 않는다**: `idea_*`, `ref_*`, `style_*`, `book_*`. 마기 이름은 코드 모듈, 로그, README, 앞으로 만들 UI에만 쓴다.
 - 디스크의 shelf 하위 폴더 이름도 모듈 이름을 따른다: `shelf/casper`, `shelf/melchior`, `shelf/balthasar`.
+
+### 저자에게 보이는 이름 (사용자 결정 #85, 2026-10-06)
+
+**저자에게 보이는 글은 이 이름으로 쓴다**: 웹 화면, 도구 응답 문장, 서버 instructions의 사용자 대상 표현, 저자 대상 문서(onboarding-father·connect-claude·README).
+코드·도구 이름(`book_*`·`idea_*` 등)·모듈 이름(Casper 등)·도구 설명·내부 설계 문서(decisions 등)·파일 형식(issues.md 등)은 바꾸지 않는다.
+
+| 이름 | 뜻 | 기존에 섞여 쓰인 말 | 내부 |
+|---|---|---|---|
+| 전체 | 책 전체 현황(구성·상태). 원고 전문이 아니다 | 책 지도 | book_outline |
+| 확인 요청 | 출처·사실을 확인해야 하는 곳. AI가 단 것은 "AI 확인 요청" | 미해결, 이슈 | issues |
+| 생각 | 떠오른 아이디어 메모 | 영감 | Casper, idea_* |
+| 문체 | 좋아서 모은 구절 | 문체 취향, 문체 책장 | Balthasar, style_* |
+| 문헌 | 원문을 읽고 등록한 책·논문 | refs | Melchior, ref_* |
+| 결정 | 정해 둔 방침 | | book_decide |
+| 수정본 | Word에서 고친 원고를 다시 올린 것. 번호 E2, E3…는 "수정본 번호". 첫 업로드 E1은 "처음 올린 원고" | 새 판, 다시 올리기 | book_import new_edition |
+
+- Claude에게는 서버 instructions 규칙 7~9로 전한다: 이 이름으로 답하기, "전체 보여 줘"·"수정본 올렸어" 같은 말을 도구로 옮기기, 넣을 곳을 말하지 않은 "저장해 줘"에는 먼저 묻기(아래 "서버 instructions").
 
 ## 절대 원칙
 
@@ -218,13 +236,13 @@ data/index.sqlite
 ### 책 (`magus/book/`)
 - `book_outline(project_id?)` → **3,000 토큰 이하**. 모든 원고 작업은 이 도구로 시작한다.
   - 첫 줄은 `프로젝트: 제목 (id)`다. 부제·영문 제목이 있으면 둘째 줄에 `부제: … · 영문: … — …`을 싣는다(#77). 프로젝트가 2개 이상이면 안내 줄을 붙인다.
-  - 집계 줄: `35장 + 서장·부 들어가며 2·맺음·부록 1~3 · 8부 · N자 · 미확인 문헌 N편 · 미연결 N · 열린 미해결 N`. 미확인 문헌은 **책 전체 고유 수**(여러 장에 나오는 문헌은 한 번)이고 저자 보고서 1절의 문헌 수와 같다. 장별 수는 각 장 줄에만 싣는다.
+  - 집계 줄: `35장 + 서장·부 들어가며 2·맺음·부록 1~3 · 8부 · N자 · 미확인 문헌 N편 · 미연결 N · 열린 확인 요청 N`. 미확인 문헌은 **책 전체 고유 수**(여러 장에 나오는 문헌은 한 번)이고 저자 보고서 1절의 문헌 수와 같다. 장별 수는 각 장 줄에만 싣는다.
   - 미연결(uncertain: 한글 표기인데 refs와 못 이음)은 미확인 수에 넣지 않지만 숨기지 않는다. 머리줄에 따로 세고, ref_check에는 별도 목록(`uncertain`, `unique_uncertain`)으로 준다(사용자 결정 #29).
-  - 장 목록은 부 제목 아래에 묶고, 각 줄에는 집계만 싣는다: `제N장 제목 · 상태 · N자 · 미해결 n · 미확인인용 n`. 장별 미해결 수에는 코멘트 유래까지 모두 센다.
-  - 미해결 전문은 origin이 `user`·`agent`인 것만 싣는다. `import_comment`는 `코멘트 유래 미해결 N건(citation · fact · general 수) — book_issues(kind)로 조회` 한 줄로만 보인다.
+  - 장 목록은 부 제목 아래에 묶고, 각 줄에는 집계만 싣는다: `제N장 제목 · 상태 · N자 · 확인 요청 n · 미확인인용 n`. 장별 확인 요청 수에는 코멘트 유래까지 모두 센다.
+  - 확인 요청 전문은 origin이 `user`·`agent`인 것만 싣는다(절 제목 `## 열린 확인 요청`). `import_comment`는 `코멘트 유래 확인 요청 N건(citation · fact · general 수) — book_issues(kind)로 조회` 한 줄로만 보인다.
   - 최근 결정 10개, 최근 변경 5개도 싣는다.
-  - 머리에 판 줄을 싣는다(#76): `판 E2 · 마지막 업로드 10-06 14:20(원고.docx) · 그 뒤 Magus에서 고친 장 0`. 마지막 업로드 뒤 7일(`STALE_UPLOAD_DAYS`)이 지나면 "최신본을 올려 새 판으로 올리도록 저자에게 먼저 묻는다"를 붙인다. 서버는 Word 파일이 바뀌었는지 모르므로 시각만 알린다.
-  - 다시 올린 뒤 "해결됐을 수 있음"인 미해결이 있으면 `그중 해결됐을 수 있음 N건` 줄을 싣는다.
+  - 머리에 수정본 줄을 싣는다(#76): `수정본 E2 · 마지막 업로드 10-06 14:20(원고.docx) · 그 뒤 Magus에서 고친 장 0`(첫 업로드는 `처음 올린 원고 E1`, 기록 전 임포트는 `수정본 기록 없음(…)`). 마지막 업로드 뒤 7일(`STALE_UPLOAD_DAYS`)이 지나면 "최신본을 올려 수정본으로 올리도록 저자에게 먼저 묻는다"를 붙인다. 서버는 Word 파일이 바뀌었는지 모르므로 시각만 알린다.
+  - 수정본을 올린 뒤 "해결됐을 수 있음"인 확인 요청이 있으면 `그중 해결됐을 수 있음 N건` 줄을 싣는다.
   - 예산 배분 순서는 머리 → 목차 → 직접 남긴 미해결 → 결정 → 변경이다. 넘치는 것은 "외 N건"으로 접는다.
 - `book_issues(status=open|closed|all, chapter_number?, origin?, kind?, limit=50, project_id?, possibly_resolved=false)` → 미해결 목록(조회 전용). 한 줄에 `I번호 · 상태 · 장 ¶문단 · 출처 · kind(→ref_key) · 내용(300자)`를 담는다. 출처는 user·agent·원고 코멘트(작성자)·AI 확인 요청(작성자). 다시 올린 뒤 표시된 것은 `해결됐을 수 있음(이유, E2)`이 붙고, possibly_resolved=true면 그것만 보인다. limit 최대 200. *(사용자 요청으로 추가된 도구)*
 - `book_read_chapter(number, project_id?)` → JSON을 돌려준다. `content`(본문 markdown만), `title`, `status`, `part_number`, `version`, `last_note`, `unverified_cites`, `open_issues`(그 장의 열린 미해결). *(1단계 검토 반영으로 미리 구현)*
@@ -243,12 +261,12 @@ data/index.sqlite
   - 참고문헌 섹션은 import_bibliography로 넘긴다. 그다음 citation 이슈를 refs와 연결한다.
   - 그림·수식은 자리표시자(`[그림 N]`, `[수식]`)로 남긴다. docx 표는 칸의 글까지 markdown 표(`| 칸 |`)로 싣는다(#69, 칸이 모두 비면 `[표 N]`). export에서는 Word 표로 나간다. 원본은 **무엇보다 먼저** original/에 복사한다.
   - 재실행: 같은 project_id는 거부한다. `replace=true`면 기존 프로젝트를 trash/로 옮긴다. refs는 이미 있는 key를 건드리지 않는다.
-    - **replace는 다시 올리기가 아니다.** 결정·직접 남긴 미해결·닫은 미해결·판 이력까지 휴지통으로 간다. 같은 책의 새 판은 `new_edition=true`로 올린다(아래).
-  - **다시 올리기 = 같은 책의 새 판**(`book_import(path, project_id, new_edition=true, force?)`, CLI `--new-edition`, 웹 "이 책의 새 판으로 올리기", `magus/book/reupload.py`, #76)
+    - **replace는 수정본 올리기가 아니다.** 결정·직접 남긴 확인 요청·닫은 확인 요청·판 이력까지 휴지통으로 간다. 같은 책의 수정본은 `new_edition=true`로 올린다(아래).
+  - **수정본 = 같은 책의 새 업로드**(`book_import(path, project_id, new_edition=true, force?)`, CLI `--new-edition`, 웹 "수정본으로 올리기", `magus/book/reupload.py`, #76)
     - 같은 책은 사용자가 project_id로 고른다. 장 제목이 기존 판과 30% 미만으로 겹치면 멈춘다(맞으면 force).
-    - 장 대응은 같은 번호 = 같은 장이다. 제목이 바뀌면 리포트에 적는다. 본문이 바뀐 장만 다시 쓰고(이전본은 versions/, note `판 E2 업로드: …`), 그대로인 장은 버전을 올리지 않고 판 번호만 적는다. 새 판에 없는 장은 removed/로 옮긴다. Magus에서 고친 장이 덮이면 리포트에 ⚠로 남긴다.
+    - 장 대응은 같은 번호 = 같은 장이다. 제목이 바뀌면 리포트에 적는다. 본문이 바뀐 장만 다시 쓰고(이전본은 versions/, note `수정본 E2 업로드: …`), 그대로인 장은 버전을 올리지 않고 판 번호만 적는다. 새 판에 없는 장은 removed/로 옮긴다. Magus에서 고친 장이 덮이면 리포트에 ⚠로 남긴다.
     - 원고 코멘트는 지문(`comment_fp` = 작성자 + 날짜 + 본문)으로 기존 미해결과 잇는다. 같은 코멘트는 다시 넣지 않고(번호·상태 유지, 닫힌 것은 닫힌 채), 새 코멘트만 새 미해결이 된다. 지문이 없는 옛 미해결은 코멘트 본문으로 잇는다.
-    - 원고에서 코멘트가 사라진 열린 미해결은 `stale`로 표시만 한다: 걸린 문장이 아직 있으면 `comment_removed`, 없으면 `anchor_missing`. **자동으로 닫지 않는다.** 닫는 것은 저자다.
+    - 원고에서 코멘트가 사라진 열린 확인 요청은 `stale`로 표시만 한다: 걸린 문장이 아직 있으면 `comment_removed`, 없으면 `anchor_missing`. **자동으로 닫지 않는다.** 닫는 것은 저자다.
     - 결정·직접 남긴 미해결·책장(영감·문헌·문체)은 건드리지 않는다(해시 테스트, `tests/test_reupload.py`). 참고문헌은 새 문헌만 더한다.
     - **참고문헌 key 안정화**: 같은 기본 key(첫 저자 성 + 연도)가 목록에 둘 이상이면 기존 refs와 제목으로 짝을 짓고, 짝이 없는 것만 빈 접미사(-2, -3)를 받는다. 목록 순서가 바뀌어도 key가 문헌을 따라간다(최신본에서 hsieh2019가 다른 논문을 가리키게 되던 문제). 하나뿐이면 예전처럼 "기존 서지와 다름"만 남긴다(#6).
     - 리포트는 `original/E{n}-reupload-report.md`에 남는다.
@@ -299,7 +317,8 @@ data/index.sqlite
 
 6절의 규칙 문장은 `src/magus/instructions.py`의 `RULES`에 **원문 그대로** 들어 있다. 사용자 승인 없이 고치지 않는다.
 - 예외: **규칙 4는 사용자 결정 #74(2026-10-06)로 바꿨다.** "장 수정안은 대화에서 제안하고, 저자가 Word 원고에 반영한다. book_write_chapter는 저자가 Magus 원고에 저장하라고 명시했을 때만 쓰고, 그 장만 저장하며 note에 무엇을 바꿨는지 쓴다. 결정은 book_decide에, 열린 문제는 book_issue_add에 남긴다."
-- **instructions는 등록된 도구만 언급한다.** `build_instructions(등록된 도구 이름)`은 규칙 문장에 나오는 도구(`book_|ref_|idea_|style_` 이름)가 모두 등록된 규칙만 넣고, 번호는 다시 매긴다. 도구가 모두 등록되면 6절 원문과 똑같아진다(`tests/test_instructions.py`).
+- 예외: **사용자 결정 #85(2026-10-06, 용어 통일)로 머리말의 '영감'을 '생각'으로 바꾸고 규칙 7~9를 더했다.** 7 저자에게 보이는 이름(용어집), 8 저자의 말 해석("전체 보여 줘" → book_outline, "전체 읽어 줘" → 한 장씩 안내, "수정본 올렸어" → files_list의 최신 원고를 new_edition으로), 9 넣을 곳을 말하지 않은 "저장해 줘"·"기록해 줘"·"등록해 줘"·"넣어 줘"에는 쓰기 도구를 바로 부르지 않고 생각·문체·문헌 중 어디인지 먼저 묻기. 원문은 `tests/test_instructions.py`의 SPEC.
+- **instructions는 등록된 도구만 언급한다.** `build_instructions(등록된 도구 이름)`은 규칙 문장에 나오는 도구(`book_|ref_|idea_|style_|files_` 이름)가 모두 등록된 규칙만 넣고, 번호는 다시 매긴다. 도구를 부르지 않는 규칙 7은 언제나 실린다. 도구가 모두 등록되면 SPEC과 똑같아진다(`tests/test_instructions.py`).
 - 새 도구를 추가하면 그 도구가 필요한 규칙이 자동으로 instructions에 들어간다. 따로 손댈 것은 없다.
 
 ## 작업 순서 (단계마다 pytest 통과 + Claude Desktop 확인 방법을 보고한다)
@@ -344,12 +363,12 @@ data/index.sqlite
   - 경로 인자(book_import, ref_add, idea_add_conversation)는 받은함의 파일 이름을 받는다. 새 도구 `files_list()`로 받은함을 본다.
   - book_export는 exports/에 만들고, 로그인이 필요하고 만료가 있는 다운로드 URL을 돌려준다.
 - 웹(`magus/web.py`): 같은 프로세스의 Starlette 라우트로 서버에서 그린 최소 HTML이다(디자인은 P1 범위가 아니다).
-  - 페이지: `/login`, `/inbox`(업로드·목록·삭제), `/book`(임포트·docx 내보내기), `/checklist`(문헌 신호등 🟢확인 🟡미확인 🔴참고문헌에 없음 ⚪미연결 + 장별), `/issues`(미해결 목록, AI 확인 요청 🤖 표시, #71), `/download/{token}`.
-  - 세 책장(읽기 전용, 넣는 것은 Claude 대화로): `/ideas`(영감: 날짜·내용·나/AI·출처, AI 답은 응답한 생각으로 이음), `/refs`(문헌: 신호등·서지·쓸 부분·이유·인용된 장, 인용 현황은 `/checklist`로), `/styles`(문체: 구절·출처·이유·태그, 태그로 거르기). 100개씩 쪽 나눔, 빈 책장에는 Claude에게 말할 예문 한 줄.
-  - **화면 스타일**(2026-10-06): `web.py`의 `STYLE` 상수 한 곳. 색은 `docs/design/DESIGN-stripe.md` 토큰만 쓰고 작업 화면에 맞게 조정했다(시스템 한글 글꼴, 본문 16px·줄간격 1.6, 가는 글씨 없음, 그라데이션 없음, 흰 상단 바). 화면 문구는 바꾸지 않는다.
-    - 대비 AA: ink-mute는 흰 바탕에서만, 태그 바탕은 #b9b9f9 40%, ruby는 오류 왼쪽 테두리에만(글자로는 4.29:1).
+  - 페이지: `/login`, `/inbox`(업로드·목록·삭제), `/book`(임포트·docx 내보내기), `/checklist`(문헌 신호등 🟢확인 🟡미확인 🔴참고문헌에 없음 ⚪미연결 + 장별), `/issues`(메뉴 "확인 요청": 목록, AI 확인 요청 🤖 표시, #71), `/download/{token}`.
+  - 세 책장(읽기 전용, 넣는 것은 Claude 대화로): `/ideas`(메뉴 "생각": 날짜·내용·나/AI·출처, AI 답은 응답한 생각으로 이음), `/refs`(문헌: 신호등·서지·쓸 부분·이유·인용된 장, 인용 현황은 `/checklist`로), `/styles`(문체: 구절·출처·이유·태그, 태그로 거르기). 100개씩 쪽 나눔, 빈 책장에는 Claude에게 말할 예문 한 줄.
+  - **화면 스타일**(2026-10-06): `web.py`의 `STYLE` 상수 한 곳. 토큰과 참고 문서에서 바꾼 점은 `docs/decisions/web-style.md`(참고 문서는 외부 디자인 분석 문서, `private/design/`, 리포 밖). 시스템 한글 글꼴, 본문 16px·줄간격 1.6, 굵기 400/600, 그라데이션 없음, 흰 상단 바. 화면 문구는 사용자 결정으로만 바꾼다(#85 용어집).
+    - 대비 AA: ink-mute는 흰 바탕에서만, 태그 바탕은 #b9b9f9 40%, ruby는 오류 왼쪽 테두리에만(글자로는 4.29:1). 입력칸 테두리는 ink-mute(4.75:1, 사용자 결정 #86).
     - 채운 버튼은 화면마다 하나(받은함·원고의 '올리기'). 받은함은 파일을 고르면 바로 올린다(자바스크립트가 꺼지면 '올리기').
-    - `/book` 원고 올리기: 책이 없으면 '새 책으로 가져오기'가 기본이고 '새 판'은 비활성. '바꾸기'(replace)는 접힌 영역 '드물게 쓰는 선택' 안.
+    - `/book` 원고 올리기: 책이 없으면 '새 책으로 가져오기'가 기본이고 '수정본으로 올리기'는 비활성. '바꾸기'(replace)는 접힌 영역 '드물게 쓰는 선택' 안.
     - `/book`의 장 수는 outline과 같은 표기다(`35장 + 서장·…`).
   - 로그인
     - 원격: 인증 서버에 OAuth 인가 코드 + PKCE(S256) + `resource=PUBLIC_URL/mcp`로 로그인한다. 토큰은 MCP와 같은 JwtVerifier로 검증한다.
@@ -379,7 +398,7 @@ data/index.sqlite
 4. 웹 페이지 4개. 업로드 → 임포트 → 체크리스트까지 브라우저로 한 바퀴 돈다.
 5. 배포 + 도메인 + HTTPS + 백업 + 복구 테스트 + 알림.
 6. Claude.ai 커넥터 등록 → 웹·모바일에서 book_outline, idea_add, ref_search를 실행한다. `docs/connect-claude.md`(사용자용·아버지용).
-7. 아버지 온보딩 체크리스트: 커넥터 등록, docx 업로드·임포트, 첫 세션 대본(책 지도 → 제12장 인용 점검 → 논문 1편 등록).
+7. 아버지 온보딩 체크리스트: 커넥터 등록, docx 업로드·임포트, 첫 세션 대본(전체 → 제12장 인용 점검 → 논문 1편 등록).
 
 **완료 기준**
 - 사용자 계정으로 웹·모바일 Claude에서 모든 도구가 동작한다.
@@ -398,7 +417,7 @@ magus serve                               # stdio 서버 (Claude Desktop이 띄�
 magus serve --transport http [--port 8000] # streamable-http(stateless) http://127.0.0.1:8000/mcp, 인증 전에는 루프백만
 npx -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8000/mcp --transport http --method tools/list   # MCP Inspector(CLI)
 magus import <docx|pdf> --project-id <id> [--title …] [--subtitle …] [--replace] [--synthetic]
-magus import <docx|pdf> --project-id <id> --new-edition [--force]   # 같은 책의 새 판(#76)
+magus import <docx|pdf> --project-id <id> --new-edition [--force]   # 같은 책의 수정본(#76)
 magus conversation <md> [--origin …]      # 대화 기록 → Casper
 magus synth <폴더>                        # 합성 fixture 만들기
 magus seed-demo                           # 데모 프로젝트 + 책장 표본

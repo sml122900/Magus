@@ -64,17 +64,18 @@ def _fit(head: str, items: list[str], budget: int, more: Callable[[int], str]) -
 
 
 def edition_line(store: Store, user_id: str, project: Project, chapters: list[ChapterMeta], now: datetime | None = None) -> str:
-    """'판 E2 · 마지막 업로드 10-06 14:20(원고.docx) · 그 뒤 Magus에서 고친 장 0'(#76).
+    """'수정본 E2 · 마지막 업로드 10-06 14:20(원고.docx) · 그 뒤 Magus에서 고친 장 0'(#76). 첫 업로드는 '처음 올린 원고 E1'.
     원고 본문의 원본은 저자 파일이다(#68). 마지막 업로드가 STALE_UPLOAD_DAYS보다 오래되면 최신본을 올렸는지 묻게 한다.
     서버는 Word 파일이 바뀌었는지 알 수 없어 시각만 알리고 판단은 저자에게 묻는다."""
     editions = store.list_editions(user_id, project.id)
     edited = sum(1 for c in chapters if (c.edition is None if editions else c.version > 1))
     if editions:
         last = editions[-1]
-        line = f"판 E{last.number} · 마지막 업로드 {local_time(last.uploaded_at)}({_clip(last.file, 40)})"
+        name = f"수정본 E{last.number}" if last.number > 1 else "처음 올린 원고 E1"  # 저자에게 보이는 이름(용어집)
+        line = f"{name} · 마지막 업로드 {local_time(last.uploaded_at)}({_clip(last.file, 40)})"
         at = last.uploaded_at
     else:
-        line = f"판 기록 없음(다시 올리기 기능 전 임포트) · 임포트 {local_time(project.created_at)}"
+        line = f"수정본 기록 없음(수정본 기능 전 임포트) · 임포트 {local_time(project.created_at)}"
         at = project.created_at
     line += f" · 그 뒤 Magus에서 고친 장 {edited}"
     try:
@@ -83,7 +84,7 @@ def edition_line(store: Store, user_id: str, project: Project, chapters: list[Ch
         return line
     if days >= STALE_UPLOAD_DAYS:
         line += (f" — 업로드 뒤 {days}일 지남. 그사이 저자가 Word에서 고쳤다면, 최신본을 받은함에 올려 "
-                 "새 판으로 올리도록(book_import new_edition) 저자에게 먼저 묻는다")
+                 "수정본으로 올리도록(book_import new_edition) 저자에게 먼저 묻는다")
     return line
 
 
@@ -126,7 +127,7 @@ def build_outline(
     unlinked = len({key for c in chapters for key in c.uncertain_cite_keys})
     header_lines.append(
         f"{chapter_count(chapters)} · {len(parts)}부 · {sum(c.char_count for c in chapters):,}자 · "
-        f"미확인 문헌 {unique_unverified}편 · 미연결 {unlinked} · 열린 미해결 {len(issues)}"
+        f"미확인 문헌 {unique_unverified}편 · 미연결 {unlinked} · 열린 확인 요청 {len(issues)}"
     )
     header_lines.append(edition_line(store, user_id, project, chapters, now))
     header = "\n".join(header_lines)
@@ -143,21 +144,21 @@ def build_outline(
         # 번호 없는 장은 도구에 줄 번호를 괄호로 밝힌다(서장(0), 제2부 들어가며(102), 부록 1(91))
         toc_items.append(
             f"- {c.display}{f'({c.number})' if c.label else ''} {_clip(c.title, 24)} · {c.status} · {c.char_count:,}자 · "
-            f"미해결 {issues_per_chapter[c.number]} · 미확인인용 {c.unverified_cite_count}"
+            f"확인 요청 {issues_per_chapter[c.number]} · 미확인인용 {c.unverified_cite_count}"
         )
 
     # 전문을 싣는 미해결은 사람(user)과 에이전트(agent)가 남긴 것만이다. 코멘트 유래는 건수만 싣는다.
     direct = [i for i in issues if i.origin != "import_comment"]
     from_comments = len(issues) - len(direct)
-    issue_head = f"## 열린 미해결 (직접 남긴 것 {len(direct)}건)"
+    issue_head = f"## 열린 확인 요청 (직접 남긴 것 {len(direct)}건)"
     if from_comments:
         kinds = Counter(i.kind for i in issues if i.origin == "import_comment")
         split = " · ".join(f"{k} {kinds[k]}" for k in ("citation", "fact", "general") if kinds[k])
         by_ai = sum(1 for i in issues if i.origin == "import_comment" and i.by_ai)  # 누가 말했는지 보존한다(#71)
         ai = f" · 그중 AI 확인 요청 {by_ai}건(AI가 원고에 단 코멘트)" if by_ai else ""
-        issue_head += f"\n- 코멘트 유래 미해결 {from_comments}건({split}){ai} — book_issues(kind)로 조회"
+        issue_head += f"\n- 코멘트 유래 확인 요청 {from_comments}건({split}){ai} — book_issues(kind)로 조회"
         if stale := sum(1 for i in issues if i.stale):  # 다시 올린 뒤 원고에서 코멘트·걸린 문장이 사라진 것(#76). 닫지 않았다
-            issue_head += f"\n- 그중 해결됐을 수 있음 {stale}건(새 판에서 코멘트나 걸린 문장이 사라짐) — book_issues(possibly_resolved=true)로 확인"
+            issue_head += f"\n- 그중 해결됐을 수 있음 {stale}건(수정본에서 코멘트나 걸린 문장이 사라짐) — book_issues(possibly_resolved=true)로 확인"
     issue_items = [
         f"- I{i.id}"
         + (f" · {name(i.chapter_number)}" if i.chapter_number is not None else "")

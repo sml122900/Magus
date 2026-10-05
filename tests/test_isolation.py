@@ -278,7 +278,7 @@ async def test_concurrent_requests_keep_their_own_user(keys, auth_server):  # no
 
 
 def test_shelf_pages_show_only_own_shelf(server_proc, fake_issuer):  # noqa: F811
-    """영감·문헌·문체 화면도 세션 사용자의 책장만 보인다(같은 문헌 key·같은 project id여도)."""
+    """생각·문헌·문체 화면도 세션 사용자의 책장만 보인다(같은 문헌 key·같은 project id여도)."""
     issuer, issuer_state, _ = fake_issuer
     base, data_dir, _ = server_proc({
         "PUBLIC_URL": "http://127.0.0.1:{port}", "AUTH_ISSUER": issuer, "ALLOWED_USERS": "sub-alice=alice,sub-bob=bob",
