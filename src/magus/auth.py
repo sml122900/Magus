@@ -1,6 +1,8 @@
 """원격 모드 인증. Magus는 OAuth 2.1 **리소스 서버**만 한다(자체 OAuth 서버 없음).
 
 - 인증 서버(관리형 서비스)가 발급한 JWT 액세스 토큰을 검증한다: JWKS 서명, exp, iss, aud.
+  - aud는 이 서버의 리소스(PUBLIC_URL + /mcp) **하나**여야 한다. 문자열이면 그 값, 목록이면 그 값 하나뿐일 때만 받는다.
+    같은 인증 환경(WorkOS)을 쓰는 다른 서비스(trip_ai)의 토큰이나, 여러 서비스용 토큰을 막기 위해서다(결정 #79).
 - `sub` → user_id는 허용 목록(`ALLOWED_USERS`)으로만 정한다. 목록에 없는 sub는 거부한다.
   - 토큰이 무효하면 401(SDK가 WWW-Authenticate와 resource_metadata를 붙인다).
   - 토큰은 유효한데 허용 목록에 없으면 403(`ForbiddenGate`). 401이면 클라이언트가 로그인을 되풀이한다.
@@ -10,7 +12,7 @@
 - PUBLIC_URL: 바깥에서 보이는 서버 주소(예: https://magus.example.com). 리소스 = PUBLIC_URL + /mcp
 - AUTH_ISSUER: 인증 서버 issuer(토큰의 iss와 정확히 같아야 한다)
 - AUTH_JWKS_URL: 서명 키(JWKS) 주소. 없으면 issuer의 메타데이터(.well-known)에서 jwks_uri를 찾는다
-- AUTH_AUDIENCE: 토큰 aud로 받아들일 값(쉼표로 여럿). 없으면 리소스 URL
+- AUTH_AUDIENCE: 비워 둔다(= 리소스 URL). 값이 있는데 리소스 URL과 한 글자라도 다르면 시작하지 않는다
 - ALLOWED_USERS: "sub=user_id" 쉼표 목록(예: "user_01H…=default,user_01J…=father")
 """
 
@@ -41,7 +43,6 @@ USER_ID_CLAIM = "magus_user_id"
 class AuthConfig:
     public_url: str
     issuer: str
-    audiences: tuple[str, ...]
     allowed: Mapping[str, str]  # sub → user_id
     jwks_url: str | None = None
 
@@ -61,9 +62,16 @@ class AuthConfig:
         if not allowed:
             # 비어 있으면 모두 거부한다(열리는 쪽이 아니다). 첫 로그인(403)으로 user id를 얻는 단계에 쓴다(docs/deploy.md).
             log.warning("ALLOWED_USERS가 비어 있다: 모든 사용자를 거부한다(403). 첫 로그인으로 id를 얻은 뒤 채운다")
-        resource = public_url.rstrip("/") + "/mcp"
-        audiences = tuple(a.strip() for a in (env.get("AUTH_AUDIENCE") or resource).split(",") if a.strip())
-        return cls(public_url.rstrip("/"), issuer, audiences, allowed, (env.get("AUTH_JWKS_URL") or "").strip() or None)
+        config = cls(public_url.rstrip("/"), issuer, allowed, (env.get("AUTH_JWKS_URL") or "").strip() or None)
+        audience = (env.get("AUTH_AUDIENCE") or "").strip()
+        if audience and audience != config.resource:
+            # 받는 aud를 넓히는 설정은 없다(결정 #79, #51 대체). 잘못 넣은 값으로 조용히 열리지 않게 시작을 막는다
+            raise ValueError(
+                f"AUTH_AUDIENCE={audience!r}가 PUBLIC_URL/mcp({config.resource})와 달라 시작하지 않습니다. "
+                "토큰 aud는 이 서버 주소 하나만 받습니다. AUTH_AUDIENCE를 지우거나 PUBLIC_URL/mcp와 똑같이 쓰세요. "
+                "로그인이 401이면 WorkOS에 등록한 리소스 주소가 PUBLIC_URL/mcp와 글자까지 같은지 확인하세요"
+            )
+        return config
 
 
 def parse_allowed(text: str) -> dict[str, str]:
@@ -118,11 +126,14 @@ class JwtVerifier:
                 token,
                 self._key(token),
                 algorithms=ALGORITHMS,
-                audience=list(self.config.audiences),
+                audience=self.config.resource,
                 issuer=self.config.issuer,
                 leeway=LEEWAY,
-                options={"require": ["exp", "iss", "sub"]},
+                options={"require": ["exp", "iss", "sub", "aud"]},
             )
+            # PyJWT는 aud 목록에 우리 주소가 하나라도 있으면 통과시킨다. 다른 서비스 주소가 섞인 토큰도 막는다
+            if not only_audience(claims["aud"], self.config.resource):
+                raise jwt.InvalidAudienceError("aud에 이 서버 말고 다른 값이 있다")
         except (jwt.PyJWTError, ValueError) as e:
             claims, reason = None, explain(e, token, self.config)
             log.warning("auth=invalid reason=%s", reason)
@@ -142,16 +153,13 @@ class JwtVerifier:
         user_id = self.user_of(claims)
         if user_id is None:
             return None  # ForbiddenGate가 먼저 403을 준다. 여기서는 인증 실패로 둔다
-        aud = claims.get("aud")
-        audiences = aud if isinstance(aud, list) else [aud]
-        resource = self.config.resource if self.config.resource in audiences else None
         scopes = str(claims.get("scope") or claims.get("scp") or "").split()
         return AccessToken(
             token=token,
             client_id=str(claims.get("azp") or claims.get("client_id") or "-"),
             scopes=scopes,
             expires_at=int(claims["exp"]),
-            resource=resource,
+            resource=self.config.resource,  # check가 aud = 이 리소스 하나임을 확인했다
             subject=str(claims["sub"]),
             claims={"iss": claims.get("iss"), USER_ID_CLAIM: user_id},
         )
@@ -183,7 +191,7 @@ def explain(error: Exception, token: str, config: AuthConfig) -> str:
     if hint == "iss 불일치":
         return f"{hint} (토큰 iss={short(unverified.get('iss'))}, 기대={config.issuer})"
     if hint == "aud 불일치":
-        return f"{hint} (토큰 aud={short(unverified.get('aud'))}, 기대={', '.join(config.audiences)})"
+        return f"{hint} (토큰 aud={describe_audience(unverified.get('aud'))}, 기대={config.resource})"
     if hint == "만료":
         exp = unverified.get("exp")
         when = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(exp))) if isinstance(exp, int | float) else "?"
@@ -193,6 +201,26 @@ def explain(error: Exception, token: str, config: AuthConfig) -> str:
     if hint == "필수 클레임 없음":
         return f"{hint} ({error})"
     return hint
+
+
+def only_audience(aud: Any, resource: str) -> bool:
+    """aud가 resource 하나뿐인가: 문자열이면 같은 값, 목록이면 원소가 그 값 하나."""
+    return aud == resource or aud == [resource]
+
+
+def describe_audience(aud: Any) -> str:
+    """로그용 aud 모양: '문자열 "…"', '목록 2개 ["…", "…"]'. aud는 비밀이 아니다(토큰 자체·sub는 남기지 않는다).
+    값은 검증 전 입력이라 JSON 문자열로 적어 줄바꿈 같은 제어 문자가 로그 줄을 가르지 못하게 한다."""
+    quote = lambda value: json.dumps(str(value)[:120], ensure_ascii=False)  # noqa: E731
+    if aud is None:
+        return "없음"
+    if isinstance(aud, str):
+        return f"문자열 {quote(aud)}"
+    if isinstance(aud, list):
+        shown = ", ".join(quote(item) for item in aud[:5])
+        more = f" 외 {len(aud) - 5}개" if len(aud) > 5 else ""
+        return f"목록 {len(aud)}개 [{shown}]{more}"
+    return f"{type(aud).__name__} {quote(aud)}"
 
 
 def discover_jwks_url(issuer: str) -> str:

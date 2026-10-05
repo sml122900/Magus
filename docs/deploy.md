@@ -85,6 +85,8 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 2. **로그인 시도(403 예상)**: 브라우저에서 `https://magus.lifebookapplication.com/login` → WorkOS 로그인으로 간다.
    - 403 화면이 나오고, 거기에 **사용자 id가 보인다**("운영자에게 아래 사용자 id를 알려 주세요").
    - 401 화면("로그인 토큰을 받아들이지 못했습니다")이면 허용 목록 문제가 아니라 설정 문제다. `sudo docker compose logs magus | grep "token rejected"`로 원인을 본다. 원인은 iss 불일치·aud 불일치·만료·서명 중 하나로 나온다.
+     - **aud 불일치**면 WorkOS에 등록한 리소스 주소가 `PUBLIC_URL/mcp`(`https://magus.lifebookapplication.com/mcp`)와 글자까지 같은지 확인한다(끝 `/`, http/https, 대소문자). 로그에 받은 aud의 모양(문자열/목록, 값)이 나온다.
+     - `AUTH_AUDIENCE`로 받는 aud를 늘리지 않는다. 같은 WorkOS 환경을 쓰는 다른 서비스(trip_ai)의 토큰이 통과하게 된다. 서버는 `AUTH_AUDIENCE`가 `PUBLIC_URL/mcp`와 다르면 시작하지 않는다(`docs/decisions/shared-auth-audience.md`, 결정 #79).
 3. **id 복사**: 403 화면의 id를 복사한다. 같은 값이 WorkOS 대시보드 Users의 그 사용자 id다(둘 중 아무 데서나).
 4. **목록에 넣기**: `.env`에 `ALLOWED_USERS=user_…=default`를 쓴다.
 5. **재시작**: `sudo docker compose up -d`.
@@ -99,7 +101,18 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
   - 아버지 원고는 docx 원본을 아버지 받은함에 새로 올려 임포트한다(PDF 임포트본을 옮기지 않는다).
   - 절차는 [onboarding-father.md](onboarding-father.md)에 있다.
 
-업데이트: 로컬에서 새 번들을 만들어 `/root/magus.bundle`에 올린 뒤 `cd /opt/magus && sudo git pull /root/magus.bundle master && cd deploy && sudo docker compose up -d --build`.
+업데이트: 로컬에서 새 번들을 만들어 `/root/magus.bundle`에 올린 뒤 아래를 실행한다.
+
+- 지금(2026-10-06부터) 서버는 브랜치 `fix/auth-audience`(태그 `p1-auth-audience`)에 있다. 옛 이력은 지웠다.
+- 다음에 master를 배포할 때는 pull 대신 `cd /opt/magus && sudo git fetch /root/magus.bundle master && sudo git checkout -B master FETCH_HEAD && cd deploy && sudo docker compose up -d --build`.
+  - 그 master에 `p1-auth-audience`가 병합돼 있어야 한다(`git merge-base --is-ancestor p1-auth-audience FETCH_HEAD`). 아니면 aud 검사가 옛 판으로 되돌아간다.
+- 반영 전에 되돌릴 커밋(`git rev-parse HEAD`)과 data 해시 목록을 적어 둔다. 되돌릴 때는 그 커밋으로 `reset --hard` 후 다시 빌드한다(`HEAD~1`을 쓰지 않는다).
+
+반영 기록
+
+| 날짜(KST) | 반영 | 반영 전 → 후 | 확인 |
+|---|---|---|---|
+| 2026-10-06 00:53 | `p1-auth-audience`(토큰 aud 검사, 결정 #79) + 이력 교체 | `21b4e2a`(옛 이력) → `896633c`. 같은 상태의 새 이력 커밋은 `78c9668` | `/healthz` ok, `/mcp` 401 + resource_metadata, 컨테이너 안에서 trip_ai·섞인 aud 거부, 다른 `AUTH_AUDIENCE`로 시작 실패(종료 2), data 798개 해시 같음, `docs/reports` 객체 없음. 서버 기록은 `/root/deploy-20261006-auth-audience/`(ROLLBACK.txt) |
 
 ## 3. 알림 확인
 

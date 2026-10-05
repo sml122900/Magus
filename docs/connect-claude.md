@@ -68,7 +68,7 @@ cd /opt/magus/deploy && sudo docker compose logs --since 30m magus | grep -E "au
 | 로그 | 뜻 | 조치 |
 |---|---|---|
 | `auth=invalid reason=iss 불일치 (토큰 iss=…, 기대=…)` | 토큰의 issuer가 `AUTH_ISSUER`와 다르다 | 같은 WorkOS 환경(Staging)인지, 끝의 `/` |
-| `auth=invalid reason=aud 불일치 (토큰 aud=…, 기대=…)` | 토큰의 aud가 `PUBLIC_URL/mcp`가 아니다 | WorkOS 리소스 설정. 필요하면 `AUTH_AUDIENCE`에 실제 aud를 더한다 |
+| `auth=invalid reason=aud 불일치 (토큰 aud=…, 기대=…)` | 토큰의 aud가 `PUBLIC_URL/mcp` 하나가 아니다(다른 주소, 또는 다른 주소가 섞인 목록) | WorkOS에 등록한 리소스 주소가 `PUBLIC_URL/mcp`와 글자까지 같은지 확인한다. `AUTH_AUDIENCE`로 받는 aud를 늘리지 않는다(같은 WorkOS 환경의 다른 서비스 토큰이 통과한다. 결정 #79) |
 | `auth=invalid reason=만료` / `서명` / `서명 키(kid) 없음…` | 만료, 키 불일치 | 다시 연결. 계속되면 `AUTH_JWKS_URL` |
 | `auth=forbidden sub_hash=…` | 토큰은 유효하지만 허용 목록 밖이다 | 웹 `/login`의 403 화면에서 id를 보고 `ALLOWED_USERS`에 넣는다 |
 | `tool=… status=ok` | 도구 호출 성공 | — |

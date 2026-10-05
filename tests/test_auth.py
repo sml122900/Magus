@@ -34,6 +34,7 @@ from test_http import FIXTURES, _free_port, _wait_healthy  # tests/는 패키지
 pytestmark = pytest.mark.anyio
 ISSUER = "https://issuer.test"
 ALLOWED = "sub-alice=alice,sub-bob=bob"
+TRIP_AI = "https://trip-ai.lifebookapplication.com/mcp"  # 같은 WorkOS 환경을 쓰는 자매 서비스(결정 #79)
 
 
 @pytest.fixture(scope="module")
@@ -71,6 +72,14 @@ async def test_verifier_accepts_only_valid_allowed_tokens(keys):
     assert await v.verify_token(jwt.encode({"sub": "sub-alice", "aud": "http://magus.test/mcp", "iss": ISSUER,
                                             "exp": int(time.time()) + 600}, "s" * 32, algorithm="HS256")) is None  # 대칭키 위조
     assert await v.verify_token("not-a-jwt") is None
+    # aud는 이 서버 하나여야 한다(결정 #79). 같은 WorkOS 환경을 쓰는 자매 서비스(trip_ai)의 토큰, 여러 서비스용 토큰은 거부
+    assert await v.verify_token(_token(good, aud=TRIP_AI)) is None
+    assert await v.verify_token(_token(good, aud=["http://magus.test/mcp", TRIP_AI])) is None
+    assert await v.verify_token(_token(good, aud=[TRIP_AI, "http://magus.test/mcp"])) is None
+    assert await v.verify_token(_token(good, aud=["http://magus.test/mcp", "http://magus.test/mcp"])) is None
+    assert await v.verify_token(_token(good, aud=None)) is None  # aud 없음
+    single = await v.verify_token(_token(good, aud=["http://magus.test/mcp"]))  # 원소 하나인 목록은 받는다
+    assert single is not None and single.resource == "http://magus.test/mcp"
     # 실패 이유(서버 로그·웹 401용). 토큰 값은 넣지 않고, 설정을 맞추는 데 필요한 공개 값만 적는다
     reasons = {
         "aud": v.check(_token(good, aud="https://other.example/mcp"))[1],
@@ -80,7 +89,13 @@ async def test_verifier_accepts_only_valid_allowed_tokens(keys):
         "kid": v.check(_token(good, kid="nope"))[1],
         "fmt": v.check("not-a-jwt")[1],
     }
-    assert reasons["aud"] == "aud 불일치 (토큰 aud=https://other.example/mcp, 기대=http://magus.test/mcp)"
+    assert reasons["aud"] == 'aud 불일치 (토큰 aud=문자열 "https://other.example/mcp", 기대=http://magus.test/mcp)'
+    # 거부할 때 받은 aud의 모양(문자열/목록, 값)을 남긴다. 토큰 자체와 sub는 남기지 않는다
+    mixed = v.check(_token(good, aud=["http://magus.test/mcp", TRIP_AI], sub="sub-mixed"))[1]
+    assert mixed == f'aud 불일치 (토큰 aud=목록 2개 ["http://magus.test/mcp", "{TRIP_AI}"], 기대=http://magus.test/mcp)'
+    assert v.check(_token(good, aud=None))[1] == '필수 클레임 없음 (Token is missing the "aud" claim)'
+    injected = v.check(_token(good, aud="x\nauth=ok"))[1]  # 검증 전 값이라 줄바꿈이 로그 줄을 가르지 못하게 한다
+    assert "\n" not in injected and 'aud=문자열 "x\\nauth=ok"' in injected
     assert reasons["iss"] == f"iss 불일치 (토큰 iss=https://evil.test, 기대={ISSUER})"
     assert reasons["exp"].startswith("만료 (exp=") and reasons["sig"] == "서명 (kid=k1, alg=RS256)"
     assert reasons["kid"].startswith("서명 키(kid) 없음") and reasons["fmt"] == "JWT 형식 아님"
@@ -98,9 +113,25 @@ def test_config_requires_allow_list_and_public_url():
     assert parse_allowed(" a=default , user_01H=father ") == {"a": "default", "user_01H": "father"}
     with pytest.raises(ValueError):
         parse_allowed("a=../etc")
-    config = AuthConfig.from_env({"AUTH_ISSUER": ISSUER, "PUBLIC_URL": "https://m.example/", "ALLOWED_USERS": "a=b",
-                                  "AUTH_AUDIENCE": "https://m.example/mcp, client_123"})
-    assert config.resource == "https://m.example/mcp" and config.audiences == ("https://m.example/mcp", "client_123")
+    base = {"AUTH_ISSUER": ISSUER, "PUBLIC_URL": "https://m.example/", "ALLOWED_USERS": "a=b"}
+    assert AuthConfig.from_env(base).resource == "https://m.example/mcp"
+    assert AuthConfig.from_env({**base, "AUTH_AUDIENCE": " https://m.example/mcp "}).resource == "https://m.example/mcp"
+    # 받는 aud를 넓히거나 바꾸는 설정은 없다(결정 #79). PUBLIC_URL/mcp와 다르면 시작하지 않는다
+    for wrong in ("https://m.example/mcp, client_123", "client_123", "https://m.example/mcp/", TRIP_AI):
+        with pytest.raises(ValueError, match=r"AUTH_AUDIENCE=.*PUBLIC_URL/mcp\(https://m\.example/mcp\)와 달라 시작하지 않습니다"):
+            AuthConfig.from_env({**base, "AUTH_AUDIENCE": wrong})
+
+
+def test_server_refuses_to_start_with_other_audience(data_dir: Path):
+    """AUTH_AUDIENCE가 PUBLIC_URL/mcp와 다르면 서버가 뜨지 않고, 이유를 한국어로 남긴다(stderr = docker compose logs)."""
+    env = {**os.environ, "DATA_DIR": str(data_dir), "EMBEDDINGS": "none", "PYTHONIOENCODING": "utf-8",
+           "PUBLIC_URL": "http://127.0.0.1:9", "AUTH_ISSUER": ISSUER, "ALLOWED_USERS": ALLOWED,
+           "SESSION_SECRET": "s" * 40, "AUTH_AUDIENCE": f"http://127.0.0.1:9/mcp,{TRIP_AI}"}
+    done = subprocess.run([sys.executable, "-m", "magus", "serve", "--transport", "http", "--port", str(_free_port())],
+                          env=env, capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert done.returncode == 2
+    assert "설정 오류로 시작하지 않습니다: AUTH_AUDIENCE=" in done.stderr and "PUBLIC_URL/mcp(http://127.0.0.1:9/mcp)" in done.stderr
+    assert "streamable-http" not in done.stderr  # 듣기 전에 멈췄다
 
 
 @pytest.fixture
@@ -177,8 +208,13 @@ async def test_remote_auth_rejects_and_isolates_users(keys, auth_server, data_di
 
     status, headers, _ = _post(mcp_url)  # 토큰 없음
     assert status == 401 and "resource_metadata=" in headers.get("www-authenticate", "")
-    for bad in (_token(good, aud=aud, exp_in=-120), _token(good, aud="https://other/mcp"), _token(evil, aud=aud)):
-        assert _post(mcp_url, bad)[0] == 401
+    for bad in (_token(good, aud=aud, exp_in=-120), _token(good, aud="https://other/mcp"), _token(evil, aud=aud),
+                _token(good, aud=TRIP_AI), _token(good, aud=[aud, TRIP_AI])):  # 자매 서비스용, 여러 서비스용(결정 #79)
+        status, headers, _ = _post(mcp_url, bad)
+        assert status == 401 and "resource_metadata=" in headers.get("www-authenticate", "")
+    for good_aud in (aud, [aud]):  # 문자열, 원소 하나인 목록
+        status, _, body = _post(mcp_url, _token(good, aud=good_aud))
+        assert status == 200 and "book_outline" in body
     status, _, body = _post(mcp_url, _token(good, aud=aud, sub="sub-carol"))  # 유효하지만 허용 목록 밖
     assert status == 403 and "허용 목록" in json.loads(body)["error_description"]
 
@@ -202,4 +238,6 @@ async def test_remote_auth_rejects_and_isolates_users(keys, auth_server, data_di
     log = log_path.read_text(encoding="utf-8")
     assert "tool=book_import user=alice" in log and "tool=book_outline user=bob" in log
     assert "auth=forbidden sub_hash=" in log and "sub-carol" not in log  # sub는 해시로만
+    assert f'aud 불일치 (토큰 aud=문자열 "{TRIP_AI}", 기대={aud})' in log
+    assert f'aud 불일치 (토큰 aud=목록 2개 ["{aud}", "{TRIP_AI}"], 기대={aud})' in log
     assert "앨리스의 생각" not in log
