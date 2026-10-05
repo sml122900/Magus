@@ -154,7 +154,9 @@ class ShelfMixin:
         for idea in ideas:
             safe_id(idea.id, "idea id")
             idea = replace(idea, created_at=idea.created_at or utcnow())
-            write_json(self._casper_dir(user_id) / f"{idea.id}.json", asdict(idea))
+            # 제목이 없으면 title·title_by 키를 쓰지 않는다: 제목 전(#92 전) 코드로 되돌려도 파일을 그대로 읽는다
+            record = {k: v for k, v in asdict(idea).items() if not (k in ("title", "title_by") and v is None)}
+            write_json(self._casper_dir(user_id) / f"{idea.id}.json", record)
             stored.append(idea)
         with self._db:
             for idea in stored:

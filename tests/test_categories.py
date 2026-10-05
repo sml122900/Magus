@@ -203,6 +203,9 @@ async def test_title_default_is_kept_on_server(settings: Settings, store: LocalS
                       "제목 없는 생각": (None, None), "강은 이어 주는 곳": (None, None)}
     store.reindex()
     assert {i.text: (i.title, i.title_by) for i in store.list_ideas("alice")} == titles  # 파일에서 다시 만들어도 같다
+    # 제목이 없는 생각 파일에는 title 키가 없다(제목 전 코드로 되돌려도 읽힌다)
+    files = [json.loads(p.read_text(encoding="utf-8")) for p in (store.root / "users" / "alice" / "shelf" / "casper").glob("*.json")]
+    assert sum("title" in f for f in files) == 2 and all("title_by" in f for f in files if "title" in f)
 
 
 async def test_category_limit(settings: Settings, store: LocalStore):
