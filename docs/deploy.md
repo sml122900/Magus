@@ -16,7 +16,7 @@
 - [ ] Cloudflare R2 버킷 `magus-backup`(위치 힌트 APAC)과 그 버킷 전용 API 토큰(읽기·쓰기). **수명 주기 규칙은 걸지 않는다.**
 - [ ] 텔레그램 봇(BotFather)과 운영자 chat id.
 - [ ] healthchecks.io 체크 둘, 알림은 텔레그램.
-  - `magus-alive`: 주기 5분, 유예 5분. `deploy/alive.sh`(호스트 cron)가 바깥 주소의 `/healthz`를 본 뒤 핑한다.
+  - `magus-alive`: 주기 5분, 유예 5분. `deploy/alive.sh`(호스트 root cron, 유일한 발신처)가 바깥 주소 `https://<도메인>/healthz`(DNS·HTTPS·Caddy·앱)를 본 뒤 핑한다. 실패하면 `/fail`로 핑한다(`docs/decisions/hosting.md` 알림).
   - `magus-backup`: 주기 1일, 유예 2시간. `deploy/backup.sh`가 핑한다.
 
 ## 1. 서버 준비(한 번)
@@ -129,7 +129,10 @@ sudo crontab -e
 */5 * * * * /opt/magus/deploy/alive.sh >/dev/null 2>&1
 ```
 
-손으로 한 번 돌려 healthchecks.io의 magus-alive가 초록이 되는지 본다: `sudo /opt/magus/deploy/alive.sh`.
+손으로 한 번 돌려 healthchecks.io의 magus-alive가 초록이 되는지 본다: `sudo /opt/magus/deploy/alive.sh; echo $?`(0이면 `/healthz` 200과 핑 2xx).
+
+- 2026-10-06 점검: 서버 `alive.sh`가 저장소 판과 같다(해시 `ea4684b`). `HEALTHCHECK_ALIVE_URL`은 `https://hc-ping.com/<uuid>` 형식이고, 손으로 돌려 종료 0을 확인했다. 값은 출력하지 않는다.
+- 시험할 때 `.env` 값을 셸에서 읽으려면 `alive.sh`의 `get` 함수를 그대로 쓴다. `tr -d "\x27…"`처럼 쓰면 GNU tr이 `\`·`x`·`2`·`7`을 지워 주소가 망가진다(2026-10-06 실제로 겪음, 400 invalid url format).
 
 ## 4. 백업(매일 04:00)
 
