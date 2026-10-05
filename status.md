@@ -1,7 +1,7 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-05 KST — P1 6단계 완료(claude.ai 커스텀 커넥터 웹·모바일 성공, `p1-step6`). 다음은 7단계(아버지 온보딩). 7단계 전 확인 항목이 남아 있다.
+> 마지막 갱신: 2026-10-05 KST — P1 결정 #45~#64 확정(#62 보관 일별 30 + 월별 12 서버 반영). 보고서 이력 정리(filter-repo). GitHub push는 저장소 주소 대기.
 
 ## 0-1. 최근 보고 (2026-10-05, WorkOS 설정)
 
@@ -37,6 +37,27 @@
 
 ## 1. 지금 바로 할 일
 
+- **대기: GitHub 저장소 주소, 사용자.** 지시의 원격 주소가 자리표시자(`<저장소 주소>`)로 와서 push 직전에 멈췄다(불명: 저장소 주소).
+  - 주소를 받으면 순서대로 한다.
+    1. 비공개인지 본다: 로그인 없이 `https://api.github.com/repos/<owner>/<repo>`가 404이면 비공개(또는 없음), 200이면 공개 → push하지 않고 알린다.
+    2. `git remote add origin <주소>` → `git push origin master --tags`. 인증은 Git Credential Manager 2.9의 브라우저 로그인을 쓴다(gh 없음). 토큰을 명령·파일에 적지 않는다.
+    3. `git ls-remote --tags origin`으로 태그 15개를 확인한다.
+  - push한 뒤: status.md·CLAUDE.md에 원격 저장소를 적고, 운영 규칙을 "단계 태그를 찍으면 push까지"로 바꾼다.
+- **보고서 이력 정리 완료(2026-10-05)**: `docs/reports`의 저자용 보고서 2개(실원고 파생)를 git filter-repo로 모든 ref의 이력에서 뺐다.
+  - 백업: `C:/project_2026/Magus-before-filter.bundle`(--all, 정리 전 17 ref). 되돌리려면 이 bundle에서 다시 clone한다.
+  - 보고서는 `private/reports/`(gitignore `/private/`)에 있다. 해시는 원본과 같다.
+  - 확인: 이력에 경로·파일명 0건, 보고서 내용 객체 없음, 커밋 31개 그대로(지워진 커밋 없음), 테스트 190개 통과.
+  - 태그 새 해시(정리 전 → 후). `step1`~`step7`, `p0-realdata`, `p0-realdata-parser` 브랜치는 그대로다.
+    - `p0-report1` 41fe1bd → ffadea7
+    - `p1-step1` 19d6a02 → 73733b6, `p1-step2` 7273e47 → 80fd87b, `p1-step3` c4af070 → bb3a279, `p1-step4` ca6a5cf → 20572fa
+    - `p1-step5` 9b420a3 → eff78d5, `p1-step6` 2164715 → 49daa60
+    - 태그 종류(annotated/lightweight)는 정리 전과 같다.
+  - **서버는 옛 이력이다**(`/opt/magus`, `/root/magus.bundle`에 보고서 포함). 이번에는 건드리지 않았다. **다음 배포 때 새 이력으로 바꾼다.**
+    - 새 bundle을 올린다.
+    - `cd /opt/magus && git fetch /root/magus.bundle master && git reset --hard FETCH_HEAD`(이력이 달라 pull은 안 된다. `.env`·`data/`는 무시 파일이라 그대로 남는다).
+    - `git reflog expire --expire=now --all && git gc --prune=now`로 옛 객체를 지운다.
+    - `ls docs/reports`가 없어야 한다.
+    - 서버 `backup.sh`는 #62 때문에 파일만 새것으로 바꿔 두었다. reset 뒤에도 내용이 같다.
 - **다음: 7단계 아버지 온보딩**(`docs/onboarding-father.md` 초안). 아래 "7단계 전 확인"을 먼저 끝낸다.
 - **7단계 전 확인**
   - [ ] 아버지 docx를 받으면 업로드 전에 크기를 확인한다(한도 `MAX_UPLOAD_MB` 50MB, #54). 넘으면 서버 `.env`에서 한도를 올리고 `up -d`.
@@ -44,7 +65,7 @@
   - (뺌) 하루 이상 지난 뒤 재접속(토큰 갱신)은 확인 항목에서 뺐다. 실사용 중 문제가 생기면 그때 조치한다(2026-10-05 사용자 결정).
   - (정함) WorkOS는 당분간 Staging이다(#49 확정).
 - 대기(사용자 결정)
-  - `docs/reports`(실원고 파생 보고서 2개)를 원격 저장소에 올릴지. push 전 점검의 나머지는 이상이 없었다.
+  - (처리함) `docs/reports`: 올리지 않는다. 이력에서 빼고 `private/reports/`로 옮겼다(2026-10-05 사용자 결정).
   - 테스트 메모 `20261005141301887-3e167c`를 지울지.
 - 다음(급하지 않음): 웹 페이지의 "장 40" 표기를 outline 표기(`35장 + 서장·맺음·부록 1~3`)와 같게 맞춘다(사용자 요청).
 - **6단계 결과(2026-10-05, 완료, `p1-step6`)**
@@ -90,6 +111,7 @@
   - 서버 호스트 키: ED25519 `SHA256:WchFUFNtRDD2D0JaTPPajWdFYWLfBxTmg+EgoumWuJo`.
   - 임시 배포 키는 만들었다가 쓰지 않고 지웠다(서버에 등록된 적 없음).
 - 업데이트 절차: 로컬 `git bundle create magus.bundle master --tags` → scp `/root/magus.bundle` → 서버 `git pull /root/magus.bundle master` → `docker compose up -d --build`.
+  - **단, 2026-10-05 이력 정리 뒤 첫 배포는 pull 대신 fetch + reset --hard**로 한다(위 "보고서 이력 정리").
 - 계정·설정(2026-10-05, 사용자)
   - WorkOS **Staging**(`https://dapper-palace-57-staging.authkit.app`, issuer 끝 `/` 없음). 10-05 오전의 Production 결정을 사용자 지시로 바꿨다.
   - Magic Auth 켬, 비밀번호 끔, 가입 끔, DCR·CIMD 켬, 리소스 `/mcp`(Default), 웹 리디렉션 `/auth/callback`.
