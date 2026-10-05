@@ -25,12 +25,22 @@
 # Ubuntu: Docker, 방화벽, 자동 보안 업데이트, 스왑 1GB
 sudo apt update && sudo apt install -y docker.io docker-compose-v2 git ufw unattended-upgrades
 sudo ufw allow OpenSSH && sudo ufw allow 80 && sudo ufw allow 443 && sudo ufw enable
+# 스왑: `swapon --show`에 이미 있으면 건너뛴다(Vultr Ubuntu 24.04 이미지에는 /swapfile 2.3G가 있다)
 sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 sudo timedatectl set-timezone Asia/Seoul
 ```
 
-SSH는 비밀번호 로그인을 끄고(`PasswordAuthentication no`) 키로만 들어간다.
+SSH는 비밀번호 로그인을 끄고 키로만 들어간다.
+- Vultr 이미지는 `/etc/ssh/sshd_config.d/50-cloud-init.conf`에 `PasswordAuthentication yes`를 둔다. sshd는 먼저 읽은 값을 쓰므로 그보다 앞서 읽히는 `00-magus.conf`에 적는다.
+- **기존 세션 하나를 열어 둔 채로** 바꾸고, 새 세션으로 키 접속이 되는 것을 확인한 뒤에 기존 세션을 닫는다.
+
+```sh
+printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\n' | sudo tee /etc/ssh/sshd_config.d/00-magus.conf
+sudo sshd -t && sudo systemctl reload ssh
+sudo sshd -T | grep -E '^(passwordauthentication|permitrootlogin) '   # no / without-password
+# 다른 창에서: ssh root@<서버> echo ok → 성공, ssh -o PubkeyAuthentication=no root@<서버> → "Permission denied (publickey)"
+```
 
 ## 2. 배포
 

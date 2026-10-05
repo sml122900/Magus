@@ -13,6 +13,8 @@ services:
     env_file: .env
     environment:
       DATA_DIR: /data
+      # outline·체크리스트의 시각 표시(저장은 UTC). 사용자가 한국에 있다. 없으면 UTC로 보여 9시간 어긋난다
+      TZ: Asia/Seoul
     volumes:
       - ./data:/data
     expose:
