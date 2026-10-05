@@ -51,7 +51,7 @@
 
 ### Magus 쪽 구현(서비스에 묶이지 않음)
 
-- `JwtVerifier`: JWKS(`AUTH_JWKS_URL`, 없으면 issuer 메타데이터에서 `jwks_uri` 탐색)로 서명을 검증한다. exp(여유 30초), iss, aud(기본 `PUBLIC_URL/mcp`)도 본다. 비대칭 알고리즘만 받는다(none·HS* 거부).
+- `JwtVerifier`: JWKS(`AUTH_JWKS_URL`, 없으면 issuer 메타데이터에서 `jwks_uri` 탐색)로 서명을 검증한다. exp(여유 30초), iss, aud도 본다. aud는 `PUBLIC_URL/mcp` 하나여야 한다(문자열 또는 원소 하나인 목록. 결정 #79, `shared-auth-audience.md`). 비대칭 알고리즘만 받는다(none·HS* 거부).
 - `sub` → user_id는 `ALLOWED_USERS="sub=user_id,…"`로만 정한다.
   - 토큰이 무효하면 401이다. SDK가 `WWW-Authenticate … resource_metadata`를 붙인다.
   - 토큰은 유효한데 목록에 없으면 **403**이다(`ForbiddenGate`). 401이면 Claude가 로그인을 되풀이하기 때문이다.

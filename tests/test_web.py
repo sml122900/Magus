@@ -134,7 +134,8 @@ def fake_issuer():
                 return self._json({"error": "invalid_grant"}, 400)
             now = int(time.time())
             bad = pending.get("bad", {})
-            claims = {"sub": pending["sub"], "iss": bad.get("iss", issuer), "aud": bad.get("aud", form["resource"]),
+            aud = [form["resource"], bad["aud_also"]] if "aud_also" in bad else bad.get("aud", form["resource"])
+            claims = {"sub": pending["sub"], "iss": bad.get("iss", issuer), "aud": aud,
                       "iat": now, "exp": now + bad.get("exp_in", 600)}
             token = jwt.encode(claims, bad.get("key", ISSUER_KEY), algorithm="RS256", headers={"kid": "k1"})
             issued.append(token)
@@ -202,7 +203,11 @@ def test_web_login_rejected_token_is_401_with_reason_in_log(server_proc, fake_is
     })
     other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     cases = {
-        "aud 불일치 (토큰 aud=web-client": {"aud": "web-client"},
+        'aud 불일치 (토큰 aud=문자열 "web-client"': {"aud": "web-client"},
+        # 웹 로그인도 MCP와 같은 검증기다: 자매 서비스(trip_ai) 주소가 섞인 aud는 거부(결정 #79)
+        'aud 불일치 (토큰 aud=목록 2개 ["http://127.0.0.1:': {"aud_also": "https://trip-ai.lifebookapplication.com/mcp"},
+        'aud 불일치 (토큰 aud=문자열 "https://trip-ai.lifebookapplication.com/mcp"':
+            {"aud": "https://trip-ai.lifebookapplication.com/mcp"},
         "iss 불일치 (토큰 iss=https://evil.test": {"iss": "https://evil.test"},
         "만료 (exp=": {"exp_in": -300},
         "서명 (kid=k1, alg=RS256)": {"key": other_key},

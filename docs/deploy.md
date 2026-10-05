@@ -85,6 +85,8 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 2. **로그인 시도(403 예상)**: 브라우저에서 `https://magus.lifebookapplication.com/login` → WorkOS 로그인으로 간다.
    - 403 화면이 나오고, 거기에 **사용자 id가 보인다**("운영자에게 아래 사용자 id를 알려 주세요").
    - 401 화면("로그인 토큰을 받아들이지 못했습니다")이면 허용 목록 문제가 아니라 설정 문제다. `sudo docker compose logs magus | grep "token rejected"`로 원인을 본다. 원인은 iss 불일치·aud 불일치·만료·서명 중 하나로 나온다.
+     - **aud 불일치**면 WorkOS에 등록한 리소스 주소가 `PUBLIC_URL/mcp`(`https://magus.lifebookapplication.com/mcp`)와 글자까지 같은지 확인한다(끝 `/`, http/https, 대소문자). 로그에 받은 aud의 모양(문자열/목록, 값)이 나온다.
+     - `AUTH_AUDIENCE`로 받는 aud를 늘리지 않는다. 같은 WorkOS 환경을 쓰는 다른 서비스(trip_ai)의 토큰이 통과하게 된다. 서버는 `AUTH_AUDIENCE`가 `PUBLIC_URL/mcp`와 다르면 시작하지 않는다(`docs/decisions/shared-auth-audience.md`, 결정 #79).
 3. **id 복사**: 403 화면의 id를 복사한다. 같은 값이 WorkOS 대시보드 Users의 그 사용자 id다(둘 중 아무 데서나).
 4. **목록에 넣기**: `.env`에 `ALLOWED_USERS=user_…=default`를 쓴다.
 5. **재시작**: `sudo docker compose up -d`.
