@@ -205,7 +205,7 @@ def test_web_marks_ai_comments(server_proc, tmp_path: Path):  # noqa: F811 - tes
         assert "2 (🤖 AI 확인 요청 1)" in page
         issues = c.get("/issues?project=b").text
     assert "그중 🤖 AI 확인 요청 1건(AI가 원고에 단 코멘트입니다)" in issues
-    assert "<td>🤖 AI 확인 요청(Claude)</td><td>문헌 확인</td>" in issues
+    assert '<td><span class="tag">🤖 AI 확인 요청(Claude)</span></td><td>문헌 확인</td>' in issues  # 문구는 그대로, 알약 태그
     assert "<td>원고 코멘트(편집자)</td><td>기타</td>" in issues
 
 

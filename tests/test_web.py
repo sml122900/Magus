@@ -246,3 +246,20 @@ def test_remote_requires_session_secret(tmp_path: Path):
     proc = subprocess.run([sys.executable, "-m", "magus", "serve", "--transport", "http", "--port", str(_free_port())],
                           env=env, capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert proc.returncode == 2 and "SESSION_SECRET" in proc.stderr
+
+
+def test_book_import_defaults_follow_whether_a_book_exists(server_proc):
+    """책이 없으면 '새 책으로 가져오기'가 기본이고 '새 판'은 비활성. 책이 있으면 '새 판'이 기본. '바꾸기'는 접힌 영역 안."""
+    base, _, _ = server_proc({})
+    with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
+        empty = c.get("/login?next=/book").text
+        assert '<label class="off"><input type="radio" name="mode" value="edition" disabled>' in empty
+        assert '<input type="radio" name="mode" value="new" checked>' in empty
+        assert re.search(r'<details><summary>드물게 쓰는 선택</summary>.*?name="replace".*?</details>', empty, re.S)
+        csrf = _csrf(empty)
+        c.post("/inbox/upload", data={"csrf": csrf}, files={"files": ("원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes())})
+        c.post("/book/import", data={"csrf": csrf, "name": "원고.docx", "project_id": "synth", "mode": "new"})
+        has_book = c.get("/book").text
+    assert '<label><input type="radio" name="mode" value="edition" checked>' in has_book
+    assert '<input type="radio" name="mode" value="new">' in has_book and 'value="edition" disabled' not in has_book
+    assert 'aria-current=page>원고</a>' in has_book  # 지금 보고 있는 메뉴

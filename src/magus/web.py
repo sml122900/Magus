@@ -51,6 +51,79 @@ SESSION_TTL, OAUTH_TTL, DOWNLOAD_TTL = 12 * 3600, 600, 24 * 3600
 LIGHTS = {"verified": ("🟢", "확인"), "unverified": ("🟡", "미확인"), "unknown": ("🔴", "참고문헌에 없음"),
           "uncertain": ("⚪", "미연결")}
 ISSUE_KIND_NAMES = {"citation": "문헌 확인", "fact": "사실·수치 확인", "general": "기타"}
+NAV = (("/book", "원고"), ("/inbox", "받은함"), ("/checklist", "인용 체크리스트"), ("/issues", "미해결"))
+
+# 화면 스타일은 여기 한 곳(결정 #56: 템플릿 엔진·외부 글꼴·CDN 없음). 색은 docs/design/DESIGN-stripe.md의 토큰만 쓴다.
+# 주 사용자가 고령이라 가독성을 앞세웠다: 본문 16px·줄간격 1.6, 가는 글씨(300) 없음, 버튼·입력칸 최소 40px(좁은 화면 44px).
+# 대비(WCAG AA 4.5:1): ink-mute(#64748d)는 흰 바탕에서만(4.75, 회색 바탕은 4.49) 쓴다. 태그 바탕은 #b9b9f9를 40%로 흰 바탕에
+# 얹어(#4434d4 글자 6.2:1) 쓴다. ruby(#ea2261)는 흰 바탕 글자로 4.29라 오류 글자에 쓰지 않고 왼쪽 테두리에만 쓴다.
+STYLE = """
+:root{--ink:#0d253d;--ink2:#273951;--mute:#64748d;--primary:#533afd;--press:#2e2b8c;--deep:#4434d4;--canvas:#ffffff;
+--soft:#f6f9fc;--line:#e3e8ee;--input:#a8c3de;--ruby:#ea2261;--tag:rgb(185 185 249/40%);--shadow:rgba(0,55,112,.08) 0 1px 3px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:400 16px/1.6 -apple-system,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+word-break:keep-all;overflow-wrap:break-word}
+main{max-width:1100px;margin:0 auto;padding:24px 16px 32px}
+h1,h2,h3{font-weight:600;letter-spacing:-.2px;line-height:1.3;margin:24px 0 12px}
+h1{font-size:26px;margin-top:8px}h2{font-size:20px}h3{font-size:18px}
+p{margin:12px 0}a{color:var(--primary)}a:hover{color:var(--press)}small{color:var(--ink2)}
+.site{background:var(--canvas);border-bottom:1px solid var(--line)}
+.site-in{max-width:1100px;margin:0 auto;padding:8px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px}
+.brand{font-weight:600;font-size:18px;letter-spacing:-.2px;color:var(--ink);margin-right:auto}
+.site nav{display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px}
+.site nav a{color:var(--ink2);text-decoration:none;padding:8px 0;border-bottom:2px solid transparent}
+.site nav a:hover{color:var(--primary)}
+.site nav a[aria-current=page]{color:var(--primary);border-bottom-color:var(--primary)}
+.site nav span{color:var(--mute)}
+.table-wrap,.card,.msg{background:var(--canvas);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+.table-wrap{overflow-x:auto;margin:16px 0}
+.card{padding:16px 24px;margin:16px 0}
+table{border-collapse:collapse;width:100%}
+th,td{padding:8px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{color:var(--mute);font-size:13px;font-weight:600;white-space:nowrap}
+td small{color:var(--mute)}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.msg{padding:12px 16px;margin:16px 0;white-space:pre-wrap}
+.err{border-left:4px solid var(--ruby)}
+.tag{display:inline-block;background:var(--tag);color:var(--deep);border-radius:9999px;padding:2px 10px;white-space:nowrap}
+button,input[type=file]::file-selector-button{font:inherit;font-size:16px;line-height:1.2;min-height:40px;padding:8px 16px;
+border-radius:9999px;border:1px solid var(--primary);background:var(--canvas);color:var(--primary);cursor:pointer}
+button:hover,input[type=file]::file-selector-button:hover{background:var(--soft)}
+button.primary{background:var(--primary);color:#ffffff}
+button.primary:hover{background:var(--deep)}button.primary:active{background:var(--press)}
+button:disabled{opacity:.5;cursor:default}
+input[type=file]{font:inherit;color:var(--ink2);max-width:100%}
+input[type=file]::file-selector-button{margin-right:12px}
+input:not([type=radio]):not([type=checkbox]):not([type=file]):not([type=hidden]),select{font:inherit;color:var(--ink);background:var(--canvas);
+border:1px solid var(--input);border-radius:6px;padding:8px 12px;min-height:40px;max-width:100%}
+input[type=radio],input[type=checkbox]{accent-color:var(--primary);width:18px;height:18px;vertical-align:-3px}
+input:focus,select:focus{border-color:var(--primary)}
+:focus-visible{outline:3px solid var(--primary);outline-offset:2px}
+input[type=file]:focus-visible::file-selector-button{outline:3px solid var(--primary);outline-offset:2px}
+label{display:inline-block;margin:4px 16px 4px 0;max-width:100%}select{width:auto}
+label.off{color:var(--mute)}
+details{margin:12px 0}summary{cursor:pointer;color:var(--ink2);padding:4px 0}
+form.inline{display:inline}
+form.busy{pointer-events:none}
+form.busy button::after{content:"";display:inline-block;width:14px;height:14px;margin-left:8px;vertical-align:-2px;
+border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (max-width:767px){main{padding:16px 12px 24px}h1{font-size:22px}table{min-width:640px}
+button,input[type=file]::file-selector-button,input:not([type=radio]):not([type=checkbox]):not([type=hidden]),select{min-height:44px}}
+"""
+# 받은함: 파일을 고르면 바로 올린다(자바스크립트가 꺼져 있으면 '올리기' 버튼으로). 올리는 동안 버튼 옆에 도는 표시가 보인다.
+UPLOAD_SCRIPT = """<script>
+document.querySelectorAll("form.upload input[type=file]").forEach(function (input) {
+  input.addEventListener("change", function () {
+    if (!input.files.length) return;
+    var form = input.form;
+    form.classList.add("busy");
+    form.setAttribute("aria-busy", "true");
+    form.submit();
+  });
+});
+</script>"""
 
 
 class OAuthClient:
@@ -172,17 +245,18 @@ class Web:
     # --- 공통 ---
     def _page(self, title: str, body: str, session: tuple[str, str] | None = None, status: int = 200) -> HTMLResponse:
         nav = ""
-        if session:
-            nav = (f'<nav><a href="/book">원고</a> · <a href="/inbox">받은함</a> · <a href="/checklist">인용 체크리스트</a>'
-                   f' · <a href="/issues">미해결</a> · <span>{html.escape(session[0])}</span>'
-                   f' <form method="post" action="/logout" class="inline">{self._csrf_input(session)}<button>로그아웃</button></form></nav>')
+        if session:  # 지금 보고 있는 메뉴(제목이 메뉴 이름과 같은 화면)는 aria-current로 표시한다
+            links = "".join(
+                f'<a href="{href}"{" aria-current=page" if label == title else ""}>{label}</a>' for href, label in NAV
+            )
+            nav = (f'<nav>{links}<span>{html.escape(session[0])}</span>'
+                   f'<form method="post" action="/logout" class="inline">{self._csrf_input(session)}<button>로그아웃</button></form></nav>')
+        body = body.replace("<table>", '<div class="table-wrap"><table>').replace("</table>", "</table></div>")
         return HTMLResponse(
             f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(title)} · Magus</title><style>
-body{{font-family:system-ui,"Malgun Gothic",sans-serif;max-width:60rem;margin:1rem auto;padding:0 1rem;line-height:1.5}}
-table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;padding:.3rem .4rem;text-align:left;vertical-align:top}}
-.inline{{display:inline}}.msg{{background:#f4f4f4;padding:.6rem;white-space:pre-wrap}}.err{{background:#fde8e8}}nav{{margin-bottom:1rem}}
-</style></head><body>{nav}<h1>{html.escape(title)}</h1>{body}</body></html>""",
+<title>{html.escape(title)} · Magus</title><style>{STYLE}</style></head><body>
+<header class="site"><div class="site-in"><span class="brand">Magus</span>{nav}</div></header>
+<main><h1>{html.escape(title)}</h1>{body}</main></body></html>""",
             status_code=status,
         )
 
@@ -282,7 +356,7 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
         uid = session[0]
         files = self.store.list_inbox(uid)
         rows = "".join(
-            f"<tr><td>{html.escape(f.name)}</td><td>{size_text(f.size)}</td><td>{local_time(f.modified)}</td>"
+            f'<tr><td>{html.escape(f.name)}</td><td class="num">{size_text(f.size)}</td><td class="num">{local_time(f.modified)}</td>'
             f"<td>{html.escape(INBOX_TYPES.get(Path(f.name).suffix.lower(), ''))}</td>"
             f'<td><form method="post" action="/inbox/delete" class="inline">{self._csrf_input(session)}'
             f'<input type="hidden" name="name" value="{html.escape(f.name)}"><button>지우기</button></form></td></tr>'
@@ -291,10 +365,11 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
         message = f'<p class="msg{" err" if error else ""}">{html.escape(flash)}</p>' if flash else ""
         body = f"""{message}
 <p>사용 {mb(self.store.usage_bytes(uid))} / 한도 {mb(self.settings.max_user_bytes)} · 파일 한 개 한도 {mb(self.settings.max_upload_bytes)}</p>
-<form method="post" action="/inbox/upload" enctype="multipart/form-data">{self._csrf_input(session)}
-<input type="file" name="files" multiple accept=".docx,.pdf,.md,.txt"> <button>올리기</button></form>
-<table><tr><th>이름</th><th>크기</th><th>올린 시각</th><th>쓰임</th><th></th></tr>{rows}</table>
-<p>Claude에서는 파일 이름으로 가리킵니다. 예: "받은함의 kremer1993.pdf를 문헌으로 등록해 줘. 쓸 부분은 「…」, 이유는 …"</p>"""
+<form method="post" action="/inbox/upload" enctype="multipart/form-data" class="card upload">{self._csrf_input(session)}
+<input type="file" name="files" multiple accept=".docx,.pdf,.md,.txt"> <button class="primary">올리기</button></form>
+<table><tr><th>이름</th><th class="num">크기</th><th class="num">올린 시각</th><th>쓰임</th><th></th></tr>{rows}</table>
+<p>Claude에서는 파일 이름으로 가리킵니다. 예: "받은함의 kremer1993.pdf를 문헌으로 등록해 줘. 쓸 부분은 「…」, 이유는 …"</p>
+{UPLOAD_SCRIPT}"""
         return self._page("받은함", body, session)
 
     async def upload(self, request: Request) -> Response:
@@ -354,8 +429,8 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
             f"<tr><td>{html.escape(p.title)}" + (f"<br><small>{html.escape(p.subtitle)}</small>" if p.subtitle else "")
             + f"</td><td>{html.escape(p.id)}</td>"
             f"<td>{html.escape(chapter_count(self.store.list_chapters(uid, p.id)))}</td>"
-            f'<td><a href="/issues?project={urllib.parse.quote(p.id)}">{issue_counts(p.id)}</a></td>'
-            f"<td>{edition_of(p.id)}</td><td>{local_time(p.updated_at)}</td>"
+            f'<td class="num"><a href="/issues?project={urllib.parse.quote(p.id)}">{issue_counts(p.id)}</a></td>'
+            f'<td class="num">{edition_of(p.id)}</td><td class="num">{local_time(p.updated_at)}</td>'
             f'<td><form method="post" action="/book/export" class="inline">{self._csrf_input(session)}'
             f'<input type="hidden" name="project_id" value="{html.escape(p.id)}"><button>docx 내보내기</button></form> '
             f'<a href="/checklist?project={urllib.parse.quote(p.id)}">인용 체크리스트</a></td></tr>'
@@ -367,19 +442,20 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
         )
         message = f'<div class="msg{" err" if error else ""}">{html.escape(flash)}</div>' if flash else ""
         body = f"""{message}
-<table><tr><th>제목</th><th>id</th><th>장</th><th>열린 미해결</th><th>판·올린 시각</th><th>갱신</th><th></th></tr>{rows}</table>
+<table><tr><th>제목</th><th>id</th><th>장</th><th class="num">열린 미해결</th><th class="num">판·올린 시각</th><th class="num">갱신</th><th></th></tr>{rows}</table>
 <h2>원고 올리기</h2>
-<form method="post" action="/book/import">{self._csrf_input(session)}
+<form method="post" action="/book/import" class="card">{self._csrf_input(session)}
 <p><label>받은함 원고 <select name="name">{options or '<option value="">(받은함에 docx·pdf 없음)</option>'}</select></label></p>
-<p><label><input type="radio" name="mode" value="edition"{' checked' if projects else ''}> <b>이 책의 새 판으로 올리기</b></label>
+<p><label{'' if projects else ' class="off"'}><input type="radio" name="mode" value="edition"{' checked' if projects else ' disabled'}> <b>이 책의 새 판으로 올리기</b></label>
  — Word에서 고친 원고를 다시 올릴 때. 바뀐 장만 바뀌고, 결정·미해결·책장은 그대로입니다.<br>
 <label><input type="radio" name="mode" value="new"{'' if projects else ' checked'}> 새 책으로 가져오기</label> — 처음 올리는 원고</p>
 <p><label>프로젝트 id <input name="project_id" value="{html.escape(projects[0].id if projects else 'book')}" pattern="[A-Za-z0-9_-]+" required></label>
 <label>제목 <input name="title" placeholder="비우면 파일에서"></label>
 <label>부제 <input name="subtitle" placeholder="비우면 파일에서"></label></p>
-<p><label><input type="checkbox" name="force" value="1"> (새 판) 장 제목이 많이 달라도 같은 책으로 올리기</label><br>
-<label><input type="checkbox" name="replace" value="1"> (새 책) 같은 id가 있으면 바꾸기 — 결정·미해결까지 휴지통으로 갑니다. 다시 올리기에는 쓰지 마세요</label></p>
-<p><button>올리기</button> (큰 원고는 몇십 초 걸립니다)</p></form>"""
+<p><label><input type="checkbox" name="force" value="1"> (새 판) 장 제목이 많이 달라도 같은 책으로 올리기</label></p>
+<details><summary>드물게 쓰는 선택</summary>
+<p><label><input type="checkbox" name="replace" value="1"> (새 책) 같은 id가 있으면 바꾸기 — 결정·미해결까지 휴지통으로 갑니다. 다시 올리기에는 쓰지 마세요</label></p></details>
+<p><button class="primary">올리기</button> (큰 원고는 몇십 초 걸립니다)</p></form>"""
         return self._page("원고", body, session)
 
     async def do_import(self, request: Request) -> Response:
@@ -461,7 +537,7 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
         def who(i) -> str:
             if i.origin == "import_comment":
                 name = f"({html.escape(i.author)})" if i.author else ""
-                return f"🤖 AI 확인 요청{name}" if i.by_ai else f"원고 코멘트{name}"
+                return f'<span class="tag">🤖 AI 확인 요청{name}</span>' if i.by_ai else f"원고 코멘트{name}"
             return "직접 남김" if i.origin == "user" else "Claude가 남김"
 
         rows = "".join(
@@ -506,17 +582,17 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
             f"<tr><td>{LIGHTS[d.status][0]} {LIGHTS[d.status][1]}</td>"
             f"<td>{html.escape(cite_label(refs.get(d.key), d.key))}"
             + (f"<br><small>후보: {html.escape(' / '.join(d.candidates))}</small>" if d.candidates else "")
-            + f"</td><td>{d.count}</td><td>{html.escape(', '.join(d.chapters))}</td></tr>"
+            + f'</td><td class="num">{d.count}</td><td>{html.escape(", ".join(d.chapters))}</td></tr>'
             for d in docs
         )
         chapter_rows = "".join(
-            f"<tr><td>{html.escape(disp)}</td><td>{html.escape(title)}</td><td>{unique}</td><td>{occ}</td></tr>"
+            f'<tr><td>{html.escape(disp)}</td><td>{html.escape(title)}</td><td class="num">{unique}</td><td class="num">{occ}</td></tr>'
             for disp, title, unique, occ, _ in report.per_chapter
         )
         body = f"""<p>『{html.escape(project.title)}』 · 문헌 {len(report.docs) - counts['uncertain']}편
 (확인 {counts['verified']} · 미확인 {counts['unverified']} · 참고문헌에 없음 {counts['unknown']}) · 미연결 {counts['uncertain']}
 · <a href="?project={urllib.parse.quote(project.id)}">전체</a></p>
 <p>{filters}</p>
-<table><tr><th>상태</th><th>문헌</th><th>인용</th><th>장</th></tr>{doc_rows or '<tr><td colspan="4">없음</td></tr>'}</table>
-<h2>장별</h2><table><tr><th>장</th><th>제목</th><th>미확인 문헌</th><th>인용 출현</th></tr>{chapter_rows}</table>"""
+<table><tr><th>상태</th><th>문헌</th><th class="num">인용</th><th>장</th></tr>{doc_rows or '<tr><td colspan="4">없음</td></tr>'}</table>
+<h2>장별</h2><table><tr><th>장</th><th>제목</th><th class="num">미확인 문헌</th><th class="num">인용 출현</th></tr>{chapter_rows}</table>"""
         return self._page("인용 체크리스트", body, session)
