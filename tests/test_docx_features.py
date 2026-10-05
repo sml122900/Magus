@@ -225,3 +225,58 @@ def test_anchor_full_text_and_paragraph(store: LocalStore, tmp_path: Path):
     store.reindex()
     assert store.list_issues("alice", "b")[0].anchor == long
     assert f"- paragraph: 3\n- anchor: {long}" in (store.root / "users/alice/projects/b/issues.md").read_text(encoding="utf-8")
+
+
+# ---- #77 제목과 부제를 따로 ---------------------------------------------------------------------------
+
+
+def _titled_manuscript(path: Path, core_title: str | None, cover: list[tuple[str, str | None]]) -> Path:
+    m = Manuscript()
+    m.doc.core_properties.title = core_title or ""
+    for text, style in cover:
+        m.doc.add_paragraph(text, style=style)
+    m.doc.add_paragraph("목차")
+    m.heading("제1장 물가").para("본문.")
+    return m.bibliography().save(path)
+
+
+def test_title_subtitle_and_english_titles(store: LocalStore, tmp_path: Path):
+    from magus.book.export import export_docx
+    from magus.book.outline import build_outline
+
+    path = _titled_manuscript(
+        tmp_path / "t.docx",
+        "인류가 선택한 진화, 시대가 선택한 도시 — 생존과 번영 그리고 그 이동에 관한 역사",
+        [("명태는 수온에 묶이고", None), ("인류가 선택한 진화,\n시대가 선택한 도시", None), ("생존과 번영 그리고 그 이동에 관한 역사", None),
+         ("Evolution Chosen by Humans, Cities Chosen by Eras", None),
+         ("A History of Survival, Prosperity, and Where They Moved", None), ("물고기의 첫 숨에서", None), ("2026년 10월", None)],
+    )
+    report = import_manuscript(store, "alice", path, project_id="b")
+    p = store.get_project("alice", "b")
+    assert (p.title, p.subtitle, p.title_en, p.subtitle_en) == (
+        "인류가 선택한 진화, 시대가 선택한 도시", "생존과 번영 그리고 그 이동에 관한 역사",
+        "Evolution Chosen by Humans, Cities Chosen by Eras", "A History of Survival, Prosperity, and Where They Moved",
+    )
+    assert "- 부제: 생존과 번영 그리고 그 이동에 관한 역사 · 영문: Evolution Chosen by Humans" in report.summary()
+    outline = build_outline(store, "alice", "b").splitlines()
+    assert outline[0] == "프로젝트: 인류가 선택한 진화, 시대가 선택한 도시 (b)"
+    assert outline[1].startswith("부제: 생존과 번영 그리고 그 이동에 관한 역사 · 영문: Evolution Chosen by Humans, Cities Chosen by Eras — A History")
+    store.reindex()  # 파일(project.json)이 원본이다
+    assert store.get_project("alice", "b").subtitle == "생존과 번영 그리고 그 이동에 관한 역사"
+    exported = Document(export_docx(store, "alice", store.get_project("alice", "b")))
+    assert [p.text for p in exported.paragraphs if p.style.name in ("Title", "Subtitle")] == [
+        "인류가 선택한 진화, 시대가 선택한 도시", "생존과 번영 그리고 그 이동에 관한 역사",
+    ]
+
+
+def test_title_from_cover_styles_and_explicit_arguments(store: LocalStore, tmp_path: Path):
+    path = _titled_manuscript(tmp_path / "s.docx", None, [("닿으려는 종", "Title"), ("물에서 뭍으로", "Subtitle")])
+    import_manuscript(store, "alice", path, project_id="a")
+    a = store.get_project("alice", "a")
+    assert (a.title, a.subtitle, a.title_en) == ("닿으려는 종", "물에서 뭍으로", None)
+    import_manuscript(store, "alice", path, project_id="c", title="다른 제목", subtitle="다른 부제")
+    c = store.get_project("alice", "c")
+    assert (c.title, c.subtitle) == ("다른 제목", "다른 부제")
+    path = _titled_manuscript(tmp_path / "n.docx", None, [("그냥 문단", None)])
+    import_manuscript(store, "alice", path, project_id="d")
+    assert (store.get_project("alice", "d").title, store.get_project("alice", "d").subtitle) == ("n", None)  # 파일 이름

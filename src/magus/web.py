@@ -345,7 +345,8 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
             return f"{len(issues)}" + (f" (🤖 AI 확인 요청 {ai})" if ai else "")
 
         rows = "".join(
-            f"<tr><td>{html.escape(p.title)}</td><td>{html.escape(p.id)}</td>"
+            f"<tr><td>{html.escape(p.title)}" + (f"<br><small>{html.escape(p.subtitle)}</small>" if p.subtitle else "")
+            + f"</td><td>{html.escape(p.id)}</td>"
             f"<td>{html.escape(chapter_count(self.store.list_chapters(uid, p.id)))}</td>"
             f'<td><a href="/issues?project={urllib.parse.quote(p.id)}">{issue_counts(p.id)}</a></td>'
             f"<td>{local_time(p.updated_at)}</td>"
@@ -366,6 +367,7 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
 <p><label>받은함 원고 <select name="name">{options or '<option value="">(받은함에 docx·pdf 없음)</option>'}</select></label></p>
 <p><label>프로젝트 id <input name="project_id" value="book" pattern="[A-Za-z0-9_-]+" required></label>
 <label>제목 <input name="title" placeholder="비우면 파일에서"></label>
+<label>부제 <input name="subtitle" placeholder="비우면 파일에서"></label>
 <label><input type="checkbox" name="replace" value="1"> 같은 id가 있으면 바꾸기(기존 것은 휴지통으로)</label></p>
 <p><button>임포트</button> (큰 원고는 몇십 초 걸립니다)</p></form>"""
         return self._page("원고", body, session)
@@ -386,6 +388,7 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
             report = await run_in_threadpool(
                 import_manuscript, self.store, uid, path,
                 project_id=str(form.get("project_id") or "") or None, title=str(form.get("title") or "") or None,
+                subtitle=str(form.get("subtitle") or "") or None,
                 replace=form.get("replace") == "1",
             )
         except (ValueError, FileNotFoundError) as e:

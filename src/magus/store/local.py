@@ -29,6 +29,7 @@ from magus.store.fileio import write_text as _write_text
 from magus.store.shelf import ShelfMixin
 from magus.store.base import (
     ANCHOR_MAX,
+    BookTitles,
     CHAPTER_STATUSES,
     AuthorKind,
     Change,
@@ -94,7 +95,9 @@ class LocalStore(ShelfMixin):
     # ---- 프로젝트 --------------------------------------------------------------------
 
     @_locked
-    def create_project(self, user_id: str, title: str, project_id: str | None = None) -> Project:
+    def create_project(
+        self, user_id: str, title: str, project_id: str | None = None, *, titles: BookTitles | None = None
+    ) -> Project:
         project_id = safe_id(project_id or secrets.token_hex(4), "project_id")
         pdir = self._project_dir(user_id, project_id)
         if (pdir / "project.json").exists():
@@ -102,10 +105,30 @@ class LocalStore(ShelfMixin):
         now = utcnow()
         for sub in ("book", "versions", "original"):
             (pdir / sub).mkdir(parents=True, exist_ok=True)
-        _write_json(pdir / "project.json", {"title": title, "created_at": now, "parts": []})
+        extra = _title_fields(titles) if titles else {}
+        _write_json(pdir / "project.json", {"title": title, **extra, "created_at": now, "parts": []})
         with self._db:
-            self._index_project(user_id, project_id, title, now)
-        return Project(project_id, user_id, title, now, now)
+            self._index_project(user_id, project_id, title, now, extra)
+        return Project(project_id, user_id, title, now, now, **extra)
+
+    @_locked
+    def set_titles(self, user_id: str, project_id: str, titles: BookTitles) -> Project:
+        path = self._require_project(user_id, project_id) / "project.json"
+        data = _read_json(path)
+        if titles.title:
+            data["title"] = titles.title
+        for key in ("subtitle", "title_en", "subtitle_en"):
+            data.pop(key, None)
+        data.update(_title_fields(titles))
+        _write_json(path, data)
+        with self._db:
+            self._db.execute(
+                "UPDATE projects SET title = ?, subtitle = ?, title_en = ?, subtitle_en = ? WHERE user_id = ? AND id = ?",
+                (data["title"], data.get("subtitle"), data.get("title_en"), data.get("subtitle_en"), user_id, project_id),
+            )
+        project = self.get_project(user_id, project_id)
+        assert project is not None
+        return project
 
     @_locked
     def get_project(self, user_id: str, project_id: str | None = None) -> Project | None:
@@ -490,7 +513,7 @@ class LocalStore(ShelfMixin):
         project_id = pdir.name
         data = _read_json(pdir / "project.json")
         created = data.get("created_at") or utcnow()
-        self._index_project(user_id, project_id, data.get("title") or project_id, created)
+        self._index_project(user_id, project_id, data.get("title") or project_id, created, data)
         self._index_parts(user_id, project_id, [Part(int(p["number"]), p["title"]) for p in data.get("parts", [])])
         chapter_ids = {}
         for f in sorted((pdir / "book").glob("ch-*.md")):
@@ -521,11 +544,16 @@ class LocalStore(ShelfMixin):
             (at, user_id, project_id),
         )
 
-    def _index_project(self, user_id: str, project_id: str, title: str, created_at: str) -> None:
+    def _index_project(
+        self, user_id: str, project_id: str, title: str, created_at: str, extra: dict | None = None
+    ) -> None:
+        extra = extra or {}
         self._db.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (user_id,))
         self._db.execute(
-            "INSERT INTO projects (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (project_id, user_id, title, created_at, created_at),
+            "INSERT INTO projects (id, user_id, title, subtitle, title_en, subtitle_en, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (project_id, user_id, title, extra.get("subtitle"), extra.get("title_en"), extra.get("subtitle_en"),
+             created_at, created_at),
         )
 
     def _index_parts(self, user_id: str, project_id: str, parts: list[Part]) -> None:
@@ -602,7 +630,14 @@ def _inbox_entry(path: Path) -> InboxFile:
 
 
 def _project(r: sqlite3.Row) -> Project:
-    return Project(r["id"], r["user_id"], r["title"], r["created_at"], r["updated_at"])
+    return Project(
+        r["id"], r["user_id"], r["title"], r["created_at"], r["updated_at"], r["subtitle"], r["title_en"], r["subtitle_en"]
+    )
+
+
+def _title_fields(titles: BookTitles) -> dict[str, str]:
+    """project.json에 둘 부제·영문 제목·영문 부제(있는 것만)."""
+    return {k: v for k, v in (("subtitle", titles.subtitle), ("title_en", titles.title_en), ("subtitle_en", titles.subtitle_en)) if v}
 
 
 def _chapter_meta(r: sqlite3.Row) -> ChapterMeta:

@@ -40,7 +40,8 @@ def export_docx(store: Store, user_id: str, project: Project, filename: str | No
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "book.docx"
         pypandoc.convert_text(
-            markdown, "docx", format="markdown", outputfile=str(out), extra_args=["--metadata", f"title={project.title}"]
+            markdown, "docx", format="markdown", outputfile=str(out), extra_args=["--metadata", f"title={project.title}",
+                        *(["--metadata", f"subtitle={project.subtitle}"] if project.subtitle else [])]
         )
         data = out.read_bytes()
     name = Path(filename).name if filename else f"{project.id}-{re.sub(r'[^0-9]', '', utcnow())[:14]}.docx"

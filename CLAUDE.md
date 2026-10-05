@@ -118,7 +118,8 @@
 
 ## 데이터 모델 (모든 테이블에 user_id가 있다)
 
-- users(id), projects(id, user_id, title)
+- users(id), projects(id, user_id, title, subtitle?, title_en?, subtitle_en?)
+  - **제목과 부제를 따로 둔다(#77).** 원고에서 읽는다: docx 파일 속성 제목을 `—`·`:`에서 나눠 제목·부제로, 표지에서 그 제목(과 부제) 바로 뒤의 라틴 문자 문단 둘을 영문 제목·부제로. 속성이 없으면 표지의 Title·Subtitle 서식 문단. 사람이 준 title·subtitle이 먼저다. 한글 부제를 표지에서 추정하지는 않는다.
 - parts(user_id, project_id, number, title) — *추가(승인됨)*: 완료 기준의 "부 8개"를 위해 둔다. book_outline은 부 제목 아래에 장을 묶어 보여 준다.
 - chapters(id, user_id, project_id, number, label?, title, status, part_number, path, char_count, unverified_cite_count, version, last_note, updated_at)
   - **번호 없는 장**: 서장·프롤로그 = 0, 맺음·에필로그·나가며 = 90, 부록 N = 90+N. `label`(서장·맺음·부록 N)을 앞머리와 인덱스에 두고, outline·export·read에서 "제N장" 대신 보여 준다. 부에 속하지 않는다.
@@ -157,7 +158,7 @@
 data/users/<user_id>/shelf/casper/<id>.json                       # ideas
 data/users/<user_id>/shelf/melchior/<key>/{bib.json, passages.json, full.txt}
 data/users/<user_id>/shelf/balthasar/<id>.json                    # style
-data/users/<user_id>/projects/<project_id>/project.json           # title, created_at, parts, last_*_id
+data/users/<user_id>/projects/<project_id>/project.json           # title, subtitle?, title_en?, subtitle_en?, created_at, parts, last_*_id
 data/users/<user_id>/projects/<project_id>/book/ch-01.md … ch-35.md
 data/users/<user_id>/projects/<project_id>/{decisions.md, issues.md, versions/}
 data/users/<user_id>/projects/<project_id>/original/{원고 사본, unsplit.md, import-report.md}
@@ -210,7 +211,7 @@ data/index.sqlite
 
 ### 책 (`magus/book/`)
 - `book_outline(project_id?)` → **3,000 토큰 이하**. 모든 원고 작업은 이 도구로 시작한다.
-  - 첫 줄은 `프로젝트: 제목 (id)`다. 프로젝트가 2개 이상이면 안내 줄을 붙인다.
+  - 첫 줄은 `프로젝트: 제목 (id)`다. 부제·영문 제목이 있으면 둘째 줄에 `부제: … · 영문: … — …`을 싣는다(#77). 프로젝트가 2개 이상이면 안내 줄을 붙인다.
   - 집계 줄: `35장 + 서장·부 들어가며 2·맺음·부록 1~3 · 8부 · N자 · 미확인 문헌 N편 · 미연결 N · 열린 미해결 N`. 미확인 문헌은 **책 전체 고유 수**(여러 장에 나오는 문헌은 한 번)이고 저자 보고서 1절의 문헌 수와 같다. 장별 수는 각 장 줄에만 싣는다.
   - 미연결(uncertain: 한글 표기인데 refs와 못 이음)은 미확인 수에 넣지 않지만 숨기지 않는다. 머리줄에 따로 세고, ref_check에는 별도 목록(`uncertain`, `unique_uncertain`)으로 준다(사용자 결정 #29).
   - 장 목록은 부 제목 아래에 묶고, 각 줄에는 집계만 싣는다: `제N장 제목 · 상태 · N자 · 미해결 n · 미확인인용 n`. 장별 미해결 수에는 코멘트 유래까지 모두 센다.
@@ -224,7 +225,7 @@ data/index.sqlite
 - `book_decide(text, project_id?)` → D번호.
 - `book_issue_add(text, chapter_number?, origin=user|agent, project_id?)` → 없는 장 번호는 거부한다.
 - `book_issue_close(id="I3"|"3", note?, project_id?)`
-- `book_import(path, project_id?, title?, replace=false)` → 로컬 docx(없으면 pdf)를 새 프로젝트로 만든다(`magus/book/importer.py`).
+- `book_import(path, project_id?, title?, subtitle?, replace=false)` → 로컬 docx(없으면 pdf)를 새 프로젝트로 만든다(`magus/book/importer.py`).
   - 제목: "제N장"·"제N부"(공백·콜론·대시 변형 허용, 제목이 다음 줄에 와도 됨)와 번호 없는 장(서장·맺음·부록 N, 제목 서식이 있을 때만). "제N부 들어가며 …"는 부 제목이 아니라 그 부의 장(100+N)이다(#70).
   - 같은 장 번호가 여러 번 나오면(목차) 제목 서식이 있는 것, 그다음 본문이 가장 긴 것이 진짜다.
   - 첫 제목 앞의 글(표지·목차)과 부 서문은 `original/unsplit.md`에 둔다(목차 점선은 줄임). 장 안의 절·소절은 `##`·`###`이다.

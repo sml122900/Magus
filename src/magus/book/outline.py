@@ -77,6 +77,10 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
 
     # 첫 줄은 항상 어느 프로젝트인지 밝힌다. project_id를 생략하면 최근 프로젝트가 골라지기 때문이다.
     header_lines = [f"프로젝트: {project.title} ({project.id})"]
+    if project.subtitle or project.title_en:  # 제목과 부제를 따로 둔다(#77)
+        english = " — ".join(x for x in (project.title_en, project.subtitle_en) if x)
+        header_lines.append(" · ".join(x for x in (f"부제: {project.subtitle}" if project.subtitle else "",
+                                                   f"영문: {english}" if english else "") if x))
     others = [p for p in store.list_projects(user_id) if p.id != project.id]
     if others:
         listed = ", ".join(f"{_clip(p.title, 20)}({p.id})" for p in others[:_OTHER_PROJECTS_SHOWN])

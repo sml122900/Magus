@@ -20,7 +20,7 @@ from magus.book.docx_reader import Block, Manuscript, read_docx
 from magus.book.pdf_reader import read_pdf
 from magus.melchior.bibliography import BibReport, import_bibliography
 from magus.melchior.check import after_refs_changed
-from magus.store import Part, Store
+from magus.store import BookTitles, Part, Store
 from magus.store.base import PART_INTRO_BASE, reading_order
 from magus.store.formats import one_line
 
@@ -219,6 +219,7 @@ class ImportReport:
     notes: list[str]
     files: dict[str, str]
     comment_authors: Counter = field(default_factory=Counter)  # "Claude(AI)" → 건수(#71)
+    titles: BookTitles | None = None  # 제목·부제·영문(#77)
 
     def summary(self) -> str:
         kinds = Counter(row[2] for row in self.comment_rows)
@@ -226,6 +227,7 @@ class ImportReport:
         lines = [
             f"## 임포트 리포트 — {self.title} ({self.project_id})" + (" · 합성 fixture" if self.synthetic else ""),
             f"- 원본: {self.source}" + "".join(f" · {n}" for n in self.notes),
+            *([titles_line(self.titles)] if self.titles and titles_line(self.titles) else []),
             f"- 장 {len(self.chapters)}개(번호 장 {sum(1 for c in self.chapters if not c[1])}"
             f" + 서장·맺음·부록 {sum(1 for c in self.chapters if c[1])}) · 부 {len(self.parts)}개"
             f" · 그림 {self.figures} · 표 {self.tables} · 수식 {self.equations}",
@@ -264,6 +266,68 @@ class ImportReport:
         )
 
 
+def titles_line(t: BookTitles) -> str:
+    """'- 부제: … · 영문: … — …'. 부제도 영문도 없으면 빈 문자열."""
+    english = " — ".join(x for x in (t.title_en, t.subtitle_en) if x)
+    parts = [f"부제: {t.subtitle}" if t.subtitle else "", f"영문: {english}" if english else ""]
+    return "- " + " · ".join(x for x in parts if x) if any(parts) else ""
+
+
+_TITLE_SPLIT = re.compile(r"\s+[—–]\s+|\s*:\s+")  # 파일 속성 제목 "제목 — 부제", "제목: 부제"
+
+
+def _squash(text: str) -> str:
+    return re.sub(r"\s+", "", text)
+
+
+def _is_latin(text: str) -> bool:
+    letters = [ch for ch in text if ch.isalpha()]
+    return bool(letters) and sum(ch.isascii() for ch in letters) / len(letters) > 0.8
+
+
+def detect_titles(manuscript: Manuscript, cover: list[Block]) -> BookTitles:
+    """책 제목과 부제를 따로 읽는다(#77). cover는 첫 제목 앞의 블록(표지·목차).
+
+    - 제목·부제: docx 파일 속성 제목을 '—'·':'에서 나눈다. 속성이 없으면 표지의 Title·Subtitle 서식 문단.
+    - 영문 제목·부제: 표지에서 제목(과 부제) 바로 뒤에 오는 라틴 문자 문단 둘까지.
+    한글 부제를 표지에서 추정하지는 않는다(바로 뒤 줄이 저자·날짜일 수 있다)."""
+    title = subtitle = None
+    if manuscript.title:
+        head, *tail = _TITLE_SPLIT.split(manuscript.title.strip(), maxsplit=1)
+        title, subtitle = head.strip() or None, (tail[0].strip() or None) if tail else None
+    paras = [b for b in cover if b.kind == "para" and b.text.strip()]
+    styled = {b.style: " ".join(b.text.split()) for b in reversed(paras) if b.style in ("title", "subtitle")}
+    if not title and "title" in styled:
+        title, subtitle = styled["title"], subtitle or styled.get("subtitle")
+    latin: list[str] = []
+    if title:
+        at = next((n for n, b in enumerate(paras) if _squash(b.text) == _squash(title)), None)
+        if at is not None:
+            i = at + 1
+            if subtitle and i < len(paras) and _squash(paras[i].text) == _squash(subtitle):
+                i += 1
+            while i < len(paras) and len(latin) < 2 and _is_latin(paras[i].text):
+                latin.append(" ".join(paras[i].text.split()))
+                i += 1
+    return BookTitles(title, subtitle, *(latin + [None, None])[:2])
+
+
+def book_titles(manuscript: Manuscript, split: Split, title: str | None, subtitle: str | None, path: Path) -> BookTitles:
+    """사람이 준 제목·부제가 먼저, 없으면 원고에서 읽은 것, 그것도 없으면 파일 이름."""
+    cover = []
+    for b in manuscript.blocks:  # 첫 제목 앞(표지·목차)
+        if split.region_of_block.get(b.index) != "unsplit":
+            break
+        cover.append(b)
+    found = detect_titles(manuscript, cover)
+    return BookTitles(
+        (title or "").strip() or found.title or path.stem,
+        (subtitle or "").strip() or found.subtitle,
+        found.title_en,
+        found.subtitle_en,
+    )
+
+
 def read_manuscript(path: Path) -> Manuscript:
     suffix = path.suffix.lower()
     if suffix == ".docx":
@@ -280,6 +344,7 @@ def import_manuscript(
     *,
     project_id: str | None = None,
     title: str | None = None,
+    subtitle: str | None = None,
     replace: bool = False,
     synthetic: bool = False,
 ) -> ImportReport:
@@ -297,7 +362,8 @@ def import_manuscript(
         terms = store.get_non_citation_terms(user_id, project_id)  # 사람이 정한 비인용 용어는 다시 임포트해도 유지
         ai_names = store.get_ai_authors(user_id, project_id)  # AI 작성자 이름 목록도 같다
         store.archive_project(user_id, project_id)
-    project = store.create_project(user_id, title or manuscript.title or path.stem, project_id=project_id)
+    titles = book_titles(manuscript, split, title, subtitle, path)
+    project = store.create_project(user_id, titles.title or path.stem, project_id=project_id, titles=titles)
     files = {"original": store.save_original(user_id, project.id, path.name, path.read_bytes())}
     if terms:
         store.set_non_citation_terms(user_id, project.id, terms)
@@ -375,6 +441,7 @@ def import_manuscript(
         comments_linked=linked,
         comments_outside=outside,
         comment_authors=authors,
+        titles=titles,
         bib=bib_report,
         figures=manuscript.figures,
         tables=manuscript.tables,

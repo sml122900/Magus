@@ -31,6 +31,19 @@ class Project:
     title: str
     created_at: str
     updated_at: str
+    subtitle: str | None = None  # 책 제목과 부제를 따로 둔다(#77). 영문 제목·부제도 있으면 둔다
+    title_en: str | None = None
+    subtitle_en: str | None = None
+
+
+@dataclass(frozen=True)
+class BookTitles:
+    """원고에서 읽은 책 제목들(#77). 없으면 None."""
+
+    title: str | None = None
+    subtitle: str | None = None
+    title_en: str | None = None
+    subtitle_en: str | None = None
 
 
 @dataclass(frozen=True)
@@ -232,7 +245,14 @@ class Store(Protocol):
         ...
 
     # 프로젝트
-    def create_project(self, user_id: str, title: str, project_id: str | None = None) -> Project: ...
+    def create_project(
+        self, user_id: str, title: str, project_id: str | None = None, *, titles: BookTitles | None = None
+    ) -> Project:
+        """titles가 있으면 부제·영문 제목·영문 부제도 project.json에 둔다(title 인자가 제목이다)."""
+        ...
+    def set_titles(self, user_id: str, project_id: str, titles: BookTitles) -> Project:
+        """제목·부제·영문 제목·영문 부제를 바꾼다(다시 올리기). title이 None이면 제목은 그대로 둔다."""
+        ...
     def get_project(self, user_id: str, project_id: str | None = None) -> Project | None:
         """project_id가 None이면 그 사용자의 가장 최근에 갱신된 프로젝트를 돌려준다."""
         ...

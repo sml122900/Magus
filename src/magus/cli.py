@@ -26,6 +26,7 @@ def main(argv: list[str] | None = None) -> None:
     imp.add_argument("path", type=Path)
     imp.add_argument("--project-id")
     imp.add_argument("--title")
+    imp.add_argument("--subtitle", help="부제. 비우면 원고에서 읽는다")
     imp.add_argument("--replace", action="store_true", help="같은 project_id가 있으면 휴지통으로 옮기고 다시 만든다")
     imp.add_argument("--synthetic", action="store_true", help="리포트에 '합성 fixture'라고 표시")
     convo = sub.add_parser("conversation", help="대화 기록 md를 영감 책장(Casper)에 넣고 리포트를 출력")
@@ -128,6 +129,7 @@ def main(argv: list[str] | None = None) -> None:
             args.path,
             project_id=args.project_id,
             title=args.title,
+            subtitle=args.subtitle,
             replace=args.replace,
             synthetic=args.synthetic,
         )

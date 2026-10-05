@@ -1,4 +1,5 @@
 from magus.store.base import (
+    BookTitles,
     Change,
     Chapter,
     ChapterMeta,
@@ -16,6 +17,7 @@ from magus.store.base import (
 from magus.store.local import LocalStore
 
 __all__ = [
+    "BookTitles",
     "Change",
     "Chapter",
     "ChapterMeta",

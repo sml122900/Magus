@@ -210,12 +210,17 @@ def build_tools(
         return f"docx를 만들었다: {where}\n(코멘트·그림은 복원하지 않는다. 자리표시자 [그림 N]·[수식]이 그대로 남는다. 표는 Word 표로 나간다.)"
 
     def book_import(
-        path: str, project_id: str | None = None, title: str | None = None, replace: bool = False
+        path: str,
+        project_id: str | None = None,
+        title: str | None = None,
+        subtitle: str | None = None,
+        replace: bool = False,
     ) -> str:
         user = current_user()
         try:
             report = import_manuscript(
-                store, user, resolve_file(user, path)[0], project_id=project_id, title=title, replace=replace
+                store, user, resolve_file(user, path)[0], project_id=project_id, title=title, subtitle=subtitle,
+                replace=replace,
             )
         except (ValueError, FileNotFoundError) as e:
             raise ToolError(str(e)) from e
@@ -268,6 +273,7 @@ def build_tools(
                 "Word 코멘트는 미해결(import_comment, kind=citation|fact|general)로, 참고문헌은 refs(unverified)로 넣는다. "
                 "표는 칸의 글까지 markdown 표로 싣고, 그림·수식은 [그림 N]·[수식] 자리표시자로 남기며 원본은 original/에 복사한다. "
                 "같은 project_id가 이미 있으면 replace=true일 때만 기존 것을 휴지통으로 옮기고 다시 만든다. "
+                "title·subtitle을 비우면 원고(파일 속성 제목의 '제목 — 부제', 표지)에서 제목·부제·영문 제목을 따로 읽는다. "
                 "리포트(장·부 수, 분할 못 한 구간, 코멘트 분류, 참고문헌 파싱)와 장 매핑표를 돌려준다."
             ),
             structured_output=False,
