@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 
 from magus.melchior.citations import Citation, find_citations
-from magus.store.base import IssueKind
+from magus.store.base import AuthorKind, Issue, IssueKind
 
 CITATION_MARKERS = ("확인 필요", "인용 확인 필요", "서지", "원문 대조")
 _MARKER = re.compile(
@@ -26,6 +26,31 @@ _MARKER = re.compile(
 _SEOJI = re.compile(r"(?<![가-힣])서지(?:(?![가-힣])|(?=정보|사항|확인|누락|오류|표기|데이터|학))")
 COMMENT_ANCHOR_SPLIT = "\n— 원문: "
 NO_TERMS: frozenset[str] = frozenset()
+
+
+# 이 이름(또는 이 이름이 낱말로 든 이름)으로 단 코멘트는 AI의 확인 요청이다(#71). 프로젝트의 book/ai_authors.txt로 더한다.
+AI_AUTHOR_NAMES = (
+    "claude", "클로드", "anthropic", "chatgpt", "gpt", "openai", "챗지피티", "copilot", "코파일럿", "gemini", "제미나이",
+    "bard", "perplexity", "clova", "클로바", "wrtn", "뤼튼", "ai", "magus",
+)
+
+
+def author_kind(author: str | None, extra: list[str] | tuple[str, ...] = ()) -> AuthorKind | None:
+    """코멘트 작성자 → ai | person. 이름이 없으면(PDF 말풍선 등) None."""
+    name = (author or "").strip().lower()
+    if not name:
+        return None
+    names = {n.strip().lower() for n in (*AI_AUTHOR_NAMES, *extra) if n.strip()}
+    words = set(re.findall(r"[a-z0-9]+|[가-힣]+", name))
+    return "ai" if name in names or words & names else "person"
+
+
+def source_label(issue: Issue) -> str:
+    """미해결이 어디서 왔는지 사람이 읽는 말로. AI가 단 코멘트는 'AI 확인 요청'으로 드러낸다(#71)."""
+    if issue.origin != "import_comment":
+        return issue.origin
+    who = f"({issue.author})" if issue.author else ""
+    return f"AI 확인 요청{who}" if issue.by_ai else f"원고 코멘트{who}"
 
 
 def is_citation_comment(text: str) -> bool:

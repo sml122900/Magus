@@ -34,6 +34,7 @@ from starlette.responses import FileResponse, HTMLResponse, RedirectResponse, Re
 from magus.auth import JwtVerifier
 from magus.book.export import export_docx
 from magus.book.importer import import_manuscript
+from magus.book.outline import chapter_count
 from magus.config import Settings
 from magus.ids import local_time
 from magus.inbox import INBOX_TYPES, LimitError, mb, save_upload, size_text
@@ -47,6 +48,7 @@ SESSION_COOKIE, OAUTH_COOKIE = "magus_session", "magus_oauth"
 SESSION_TTL, OAUTH_TTL, DOWNLOAD_TTL = 12 * 3600, 600, 24 * 3600
 LIGHTS = {"verified": ("🟢", "확인"), "unverified": ("🟡", "미확인"), "unknown": ("🔴", "참고문헌에 없음"),
           "uncertain": ("⚪", "미연결")}
+ISSUE_KIND_NAMES = {"citation": "문헌 확인", "fact": "사실·수치 확인", "general": "기타"}
 
 
 class OAuthClient:
@@ -160,7 +162,7 @@ class Web:
             ("/logout", ["POST"], self.logout), ("/inbox", ["GET"], self.inbox), ("/inbox/upload", ["POST"], self.upload),
             ("/inbox/delete", ["POST"], self.delete), ("/book", ["GET"], self.book), ("/book/import", ["POST"], self.do_import),
             ("/book/export", ["POST"], self.do_export), ("/download/{token}", ["GET"], self.download),
-            ("/checklist", ["GET"], self.checklist),
+            ("/checklist", ["GET"], self.checklist), ("/issues", ["GET"], self.issues),
         ]
         for path, methods, handler in routes:
             server.custom_route(path, methods=methods, include_in_schema=False)(handler)
@@ -170,7 +172,7 @@ class Web:
         nav = ""
         if session:
             nav = (f'<nav><a href="/book">원고</a> · <a href="/inbox">받은함</a> · <a href="/checklist">인용 체크리스트</a>'
-                   f' · <span>{html.escape(session[0])}</span>'
+                   f' · <a href="/issues">미해결</a> · <span>{html.escape(session[0])}</span>'
                    f' <form method="post" action="/logout" class="inline">{self._csrf_input(session)}<button>로그아웃</button></form></nav>')
         return HTMLResponse(
             f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -336,21 +338,29 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
             return self._need_login(request)
         uid = session[0]
         projects = self.store.list_projects(uid)
+
+        def issue_counts(project_id: str) -> str:
+            issues = self.store.list_issues(uid, project_id, "open")
+            ai = sum(1 for i in issues if i.by_ai)
+            return f"{len(issues)}" + (f" (🤖 AI 확인 요청 {ai})" if ai else "")
+
         rows = "".join(
             f"<tr><td>{html.escape(p.title)}</td><td>{html.escape(p.id)}</td>"
-            f"<td>{len(self.store.list_chapters(uid, p.id))}</td><td>{local_time(p.updated_at)}</td>"
+            f"<td>{html.escape(chapter_count(self.store.list_chapters(uid, p.id)))}</td>"
+            f'<td><a href="/issues?project={urllib.parse.quote(p.id)}">{issue_counts(p.id)}</a></td>'
+            f"<td>{local_time(p.updated_at)}</td>"
             f'<td><form method="post" action="/book/export" class="inline">{self._csrf_input(session)}'
             f'<input type="hidden" name="project_id" value="{html.escape(p.id)}"><button>docx 내보내기</button></form> '
             f'<a href="/checklist?project={urllib.parse.quote(p.id)}">인용 체크리스트</a></td></tr>'
             for p in projects
-        ) or '<tr><td colspan="5">아직 원고가 없습니다. 받은함에 docx(또는 pdf)를 올리고 아래에서 임포트하세요.</td></tr>'
+        ) or '<tr><td colspan="6">아직 원고가 없습니다. 받은함에 docx(또는 pdf)를 올리고 아래에서 임포트하세요.</td></tr>'
         options = "".join(
             f'<option value="{html.escape(f.name)}">{html.escape(f.name)}</option>'
             for f in self.store.list_inbox(uid) if Path(f.name).suffix.lower() in (".docx", ".pdf")
         )
         message = f'<div class="msg{" err" if error else ""}">{html.escape(flash)}</div>' if flash else ""
         body = f"""{message}
-<table><tr><th>제목</th><th>id</th><th>장</th><th>갱신</th><th></th></tr>{rows}</table>
+<table><tr><th>제목</th><th>id</th><th>장</th><th>열린 미해결</th><th>갱신</th><th></th></tr>{rows}</table>
 <h2>임포트</h2>
 <form method="post" action="/book/import">{self._csrf_input(session)}
 <p><label>받은함 원고 <select name="name">{options or '<option value="">(받은함에 docx·pdf 없음)</option>'}</select></label></p>
@@ -410,6 +420,45 @@ table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;
             return self._page("내려받기", '<p class="msg err">파일이 없습니다. 다시 내보내세요.</p>', session, 404)
         return FileResponse(path, filename=path.name,
                             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+    # --- 미해결 ---
+    async def issues(self, request: Request) -> Response:
+        """열린 미해결 목록(조회 전용). AI가 원고에 단 코멘트에서 온 것은 'AI 확인 요청'으로 드러낸다(#71)."""
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        project = self.store.get_project(uid, request.query_params.get("project") or None)
+        if project is None:
+            return self._page("미해결", "<p>원고가 없습니다. <a href=\"/book\">원고</a>에서 임포트하세요.</p>", session)
+        status = request.query_params.get("status") if request.query_params.get("status") in ("open", "closed", "all") else "open"
+        kind = request.query_params.get("kind") if request.query_params.get("kind") in ISSUE_KIND_NAMES else None
+        issues = self.store.list_issues(uid, project.id, None if status == "all" else status, kind=kind)  # type: ignore[arg-type]
+        names = {c.number: c.display for c in self.store.list_chapters(uid, project.id)}
+        q = urllib.parse.quote(project.id)
+
+        def who(i) -> str:
+            if i.origin == "import_comment":
+                name = f"({html.escape(i.author)})" if i.author else ""
+                return f"🤖 AI 확인 요청{name}" if i.by_ai else f"원고 코멘트{name}"
+            return "직접 남김" if i.origin == "user" else "Claude가 남김"
+
+        rows = "".join(
+            f"<tr><td>I{i.id}{'' if i.status == 'open' else ' (닫힘)'}</td>"
+            f"<td>{html.escape(names.get(i.chapter_number, f'{i.chapter_number}장') if i.chapter_number is not None else '장 밖')}</td>"
+            f"<td>{who(i)}</td><td>{ISSUE_KIND_NAMES[i.kind]}</td>"
+            f"<td>{html.escape(i.text).replace(chr(10), '<br>')}</td></tr>"
+            for i in issues
+        )
+        ai = sum(1 for i in issues if i.by_ai)
+        filters = " · ".join(
+            f'<a href="?project={q}&status={status}&kind={k}">{name}</a>' for k, name in ISSUE_KIND_NAMES.items()
+        )
+        body = f"""<p>『{html.escape(project.title)}』 · 미해결 {len(issues)}건""" + (
+            f" · 그중 🤖 AI 확인 요청 {ai}건(AI가 원고에 단 코멘트입니다)" if ai else "") + f"""</p>
+<p><a href="?project={q}&status=open">열린 것</a> · <a href="?project={q}&status=closed">닫힌 것</a> · <a href="?project={q}&status=all">전체</a> | {filters}</p>
+<table><tr><th>번호</th><th>장</th><th>누가</th><th>종류</th><th>내용</th></tr>{rows or '<tr><td colspan="5">없음</td></tr>'}</table>"""
+        return self._page("미해결", body, session)
 
     # --- 인용 체크리스트 ---
     async def checklist(self, request: Request) -> Response:

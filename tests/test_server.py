@@ -127,7 +127,7 @@ async def test_book_issues_lists_and_filters(settings: Settings, store: LocalSto
     async with Client(build_server(settings, store)) as client:
         everything = _text(await client.call_tool("book_issues", {}))
         assert everything.splitlines()[0] == "미해결 4건 (status=open)"
-        assert "- I1 · open · 1장 · import_comment · citation→daeschler2006 ⇒ refs 없음 · Daeschler 2006 원문 확인 필요" in everything
+        assert "- I1 · open · 1장 · 원고 코멘트 · citation→daeschler2006 ⇒ refs 없음 · Daeschler 2006 원문 확인 필요" in everything
         comments = _text(await client.call_tool("book_issues", {"origin": "import_comment"}))
         assert comments.splitlines()[0] == "미해결 1건 (status=open, origin=import_comment)"
         ch3 = _text(await client.call_tool("book_issues", {"chapter_number": 3, "kind": "general"}))

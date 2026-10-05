@@ -78,6 +78,12 @@ def dump_issues(issues: list[Issue]) -> str:
             meta.append(f"- ref_key: {i.ref_key}")
         if i.ref_id:
             meta.append(f"- ref_id: {i.ref_id}")
+        if i.author:
+            meta.append(f"- author: {one_line(i.author)}")
+        if i.author_kind:
+            meta.append(f"- author_kind: {i.author_kind}")
+        if i.comment_date:
+            meta.append(f"- comment_date: {i.comment_date}")
         if i.closed_note:
             meta.append(f"- closed_note: {one_line(i.closed_note)}")
         out.append(f"## I{i.id} · {i.status}\n" + "\n".join(meta) + f"\n\n{i.text.strip()}\n")
@@ -106,6 +112,9 @@ def parse_issues(text: str) -> list[Issue]:
                 kind=meta.get("kind") if meta.get("kind") in ("citation", "fact") else "general",  # type: ignore[arg-type]
                 ref_key=meta.get("ref_key") or None,
                 ref_id=meta.get("ref_id") or None,
+                author=meta.get("author") or None,
+                author_kind=meta.get("author_kind") if meta.get("author_kind") in ("ai", "person") else None,  # type: ignore[arg-type]
+                comment_date=meta.get("comment_date") or None,
                 text="\n".join(lines).strip(),
             )
         )

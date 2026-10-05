@@ -217,12 +217,15 @@ def build_author_report(store: Store, user_id: str, project_id: str, date: str) 
         comment = issue.text.split("\n— 원문:")[0]
         head = one_line(MARKER_PREFIX.sub("", comment))
         head = head if len(head) <= 40 else head[:40] + "…"
-        facts[chapter_names.get(issue.chapter_number, "장 밖")].append(f"{head} (I{issue.id})")
+        facts[chapter_names.get(issue.chapter_number, "장 밖")].append(f"{head} (I{issue.id}{', AI' if issue.by_ai else ''})")
+    by_ai = [i for i in fact_issues if i.by_ai]
+    ai_names = "·".join(sorted({i.author for i in by_ai if i.author})) or "AI"
     lines += [
         "",
         f"## 5. 사실·수치 확인 요청 {len(fact_issues)}건",
         "특정 문헌이 아니라 사실이나 수치를 확인해 달라는 원고 메모입니다. 장별로 모아 앞 40자만 옮겼습니다. "
         "괄호 속 번호(I3 등)로 말씀하시면 해당 메모를 바로 찾습니다.",
+        *([f"이 중 {len(by_ai)}건은 {ai_names}(AI)가 원고에 단 확인 요청입니다(괄호 속 'AI')."] if by_ai else []),
         "",
     ]
     order = {m.display: n for n, m in enumerate(store.list_chapters(user_id, project_id))}  # 읽는 순서

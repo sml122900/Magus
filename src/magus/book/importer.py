@@ -15,7 +15,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from magus.book.comments import classify_comment
+from magus.book.comments import author_kind, classify_comment
 from magus.book.docx_reader import Block, Manuscript, read_docx
 from magus.book.pdf_reader import read_pdf
 from magus.melchior.bibliography import BibReport, import_bibliography
@@ -214,6 +214,7 @@ class ImportReport:
     equations: int
     notes: list[str]
     files: dict[str, str]
+    comment_authors: Counter = field(default_factory=Counter)  # "Claude(AI)" → 건수(#71)
 
     def summary(self) -> str:
         kinds = Counter(row[2] for row in self.comment_rows)
@@ -230,7 +231,8 @@ class ImportReport:
             f"- 빠진 장 번호: {', '.join(map(str, self.gaps)) or '없음'} · 본문 없는 장: {', '.join(map(str, self.empty_chapters)) or '없음'}",
             f"- 코멘트 → 이슈 {len(self.comment_rows)}건: citation {citation}(문헌 지목, refs 연결 {self.comments_linked})"
             f" · fact {kinds.get('fact', 0)}(사실·수치 확인) · general {kinds.get('general', 0)}"
-            + (f" · 장 밖 코멘트 {dict(self.comments_outside)}" if self.comments_outside else ""),
+            + (f" · 장 밖 코멘트 {dict(self.comments_outside)}" if self.comments_outside else "")
+            + (" · 작성자 " + ", ".join(f"{who} {n}" for who, n in self.comment_authors.most_common()) if self.comment_authors else ""),
             f"- {self.bib.render().splitlines()[0]}",
             *(f"  {line}" for line in self.bib.render().splitlines()[1:]),
         ]
@@ -284,15 +286,19 @@ def import_manuscript(
         raise ValueError("'제N장' 제목을 하나도 찾지 못했다. 원고의 장 제목 표기를 확인해 주세요.")
 
     terms: list[str] = []
+    ai_names: list[str] = []
     if project_id and store.get_project(user_id, project_id):
         if not replace:
             raise ValueError(f"프로젝트 {project_id!r}가 이미 있다. 새 project_id를 쓰거나 replace=True로 다시 임포트한다.")
         terms = store.get_non_citation_terms(user_id, project_id)  # 사람이 정한 비인용 용어는 다시 임포트해도 유지
+        ai_names = store.get_ai_authors(user_id, project_id)  # AI 작성자 이름 목록도 같다
         store.archive_project(user_id, project_id)
     project = store.create_project(user_id, title or manuscript.title or path.stem, project_id=project_id)
     files = {"original": store.save_original(user_id, project.id, path.name, path.read_bytes())}
     if terms:
         store.set_non_citation_terms(user_id, project.id, terms)
+    if ai_names:
+        store.set_ai_authors(user_id, project.id, ai_names)
     exclude = frozenset(terms)
 
     store.set_parts(user_id, project.id, split.parts)
@@ -318,6 +324,7 @@ def import_manuscript(
 
     comment_counts: Counter = Counter()
     outside: Counter = Counter()
+    authors: Counter = Counter()
     rows: list[tuple[int, int | None, str, str | None, str]] = []
     for c in sorted(manuscript.comments, key=lambda c: (c.block_index is None, c.block_index or 0, int(c.id) if c.id.isdigit() else 0)):
         region = split.region_of_block.get(c.block_index) if c.block_index is not None else None
@@ -330,9 +337,12 @@ def import_manuscript(
         anchor = one_line(c.anchor)[:120]
         text = (c.text or "(빈 코멘트)") + (f"\n— 원문: “{anchor}”" if anchor else "")
         issue = store.add_issue(
-            user_id, project.id, text, origin="import_comment", chapter_number=chapter, kind=kind, ref_key=ref_key
+            user_id, project.id, text, origin="import_comment", chapter_number=chapter, kind=kind, ref_key=ref_key,
+            author=c.author, author_kind=author_kind(c.author, ai_names), comment_date=c.date,
         )
         rows.append((issue.id, chapter, kind, ref_key, one_line(c.text)[:40]))
+        if c.author:
+            authors[c.author + ("(AI)" if issue.by_ai else "")] += 1
 
     bib_report = import_bibliography(store, user_id, "\n".join(b.text for b in split.bib_blocks if b.kind == "para"))
     after_refs_changed(store, user_id)  # 장별 미확인 인용 수, citation 이슈 → refs 연결(ref_id)
@@ -357,6 +367,7 @@ def import_manuscript(
         comment_rows=rows,
         comments_linked=linked,
         comments_outside=outside,
+        comment_authors=authors,
         bib=bib_report,
         figures=manuscript.figures,
         tables=manuscript.tables,

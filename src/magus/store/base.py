@@ -16,6 +16,7 @@ IssueOrigin = Literal["import_comment", "user", "agent"]
 # citation: 출처 확인 코멘트 + 문헌이 지목됨 / fact: 출처 확인 코멘트지만 문헌 없음(사실·수치 확인) / general: 그 외
 IssueKind = Literal["citation", "fact", "general"]
 ISSUE_KINDS: tuple[str, ...] = ("citation", "fact", "general")
+AuthorKind = Literal["ai", "person"]  # 원고 코멘트 작성자: AI인가 사람인가(#71)
 ChapterStatus = Literal["draft", "revising", "done"]
 CHAPTER_STATUSES: tuple[str, ...] = ("draft", "revising", "done")
 RefStatus = Literal["unverified", "verified"]
@@ -122,6 +123,14 @@ class Issue:
     kind: IssueKind = "general"
     ref_key: str | None = None  # kind=citation일 때 코멘트에서 뽑은 저자+연도 후보(조사 뗀 한글 key일 수도 있다)
     ref_id: str | None = None  # ref_key가 refs에서 해석된 정식 key. refs 행 id는 재생성되므로 key를 식별자로 쓴다.
+    # 원고 코멘트에서 온 미해결의 작성자(#71). 누가 말했는지 보존한다: AI가 단 코멘트는 저자에게도 "AI 확인 요청"으로 보인다.
+    author: str | None = None  # Word의 작성자 이름 그대로. PDF·직접 남긴 미해결은 None
+    author_kind: AuthorKind | None = None  # ai | person. 작성자 이름으로 판정해 파일에 적는다(사람이 고칠 수 있다)
+    comment_date: str | None = None  # Word 코멘트의 작성 시각(w:date)
+
+    @property
+    def by_ai(self) -> bool:
+        return self.author_kind == "ai"
 
 
 @dataclass(frozen=True)
@@ -235,6 +244,10 @@ class Store(Protocol):
         """인용 추출에서 뺄 낱말(지명·사건 등). 프로젝트의 book/non_citation_terms.txt, 한 줄에 하나."""
         ...
     def set_non_citation_terms(self, user_id: str, project_id: str, terms: list[str]) -> None: ...
+    def get_ai_authors(self, user_id: str, project_id: str) -> list[str]:
+        """이 프로젝트에서 AI로 볼 코멘트 작성자 이름(기본 목록에 더한다). book/ai_authors.txt, 한 줄에 하나."""
+        ...
+    def set_ai_authors(self, user_id: str, project_id: str, names: list[str]) -> None: ...
     def set_parts(self, user_id: str, project_id: str, parts: list[Part]) -> None: ...
     def list_parts(self, user_id: str, project_id: str) -> list[Part]: ...
 
@@ -279,6 +292,9 @@ class Store(Protocol):
         *,
         kind: IssueKind = "general",
         ref_key: str | None = None,
+        author: str | None = None,
+        author_kind: AuthorKind | None = None,
+        comment_date: str | None = None,
     ) -> Issue: ...
     def close_issue(self, user_id: str, project_id: str, issue_id: int, note: str | None = None) -> Issue | None:
         """없는 번호면 None. 이미 닫힌 이슈는 note만 갱신한다."""

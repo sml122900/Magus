@@ -1,7 +1,8 @@
-"""최신본 docx 시험 임포트(2026-10-06)에서 나온 보완: 표(#69), 제N부 들어가며(#70). 작은 합성 docx로 확인한다."""
+"""최신본 docx 시험 임포트(2026-10-06)에서 나온 보완: 표(#69), 제N부 들어가며(#70), 코멘트 작성자(#71). 작은 합성 docx로 확인한다."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from magus.book.importer import import_manuscript
 from magus.melchior.check import check_chapter
 from magus.server import build_server
 from magus.store import LocalStore
+from test_web import server_proc  # noqa: F401 - 픽스처(tests/는 패키지가 아니다)
 
 BIB = [
     "Clack, J. A. (2012). Gaining ground: The origin and evolution of tetrapods. Indiana University Press.",
@@ -139,6 +141,69 @@ async def test_issue_lines_name_part_intro(settings, store: LocalStore, tmp_path
         text = (await client.call_tool("book_issues", {"project_id": "b"})).content[0].text
         added = (await client.call_tool("book_issue_add", {"text": "도입 다듬기", "chapter_number": 102, "project_id": "b"})).content[0].text
         read = (await client.call_tool("book_read_chapter", {"number": 102, "project_id": "b"})).content[0].text
-    assert "- I1 · open · 제2부 들어가며 · import_comment" in text
+    assert "- I1 · open · 제2부 들어가며 · 원고 코멘트(편집자) · fact" in text
     assert added.startswith("I2 열림 (b · 제2부 들어가며 · user)")
     assert '"label": "제2부 들어가며"' in read
+
+
+# ---- #71 코멘트 작성자: 누가 말했는지 보존한다 -------------------------------------------------------
+
+
+def test_author_kind_by_name():
+    from magus.book.comments import author_kind
+
+    assert [author_kind(n) for n in ("Claude", "ChatGPT 4o", "Microsoft Copilot", "편집자", "Kai Kim", "", None)] == [
+        "ai", "ai", "ai", "person", "person", None, None,
+    ]
+    assert author_kind("우리 편집 도우미", ["편집 도우미"]) == "person"  # 이름 전체가 같아야 더한 목록이 맞는다
+    assert author_kind("편집 도우미", ["편집 도우미"]) == "ai"
+
+
+def _authored_manuscript(path: Path) -> Path:
+    m = Manuscript().heading("제1장 물가")
+    m.para(("데본기 물가(Daeschler, Shubin & Jenkins, 2006)", "인용 확인 필요", "Claude", "2026-10-02T01:02:03Z"), ".")
+    m.para(("이 문단은 길다", "문단 줄이기", "편집자"), ".")
+    return m.bibliography().save(path)
+
+
+def test_comment_author_is_kept_in_file_and_index(store: LocalStore, tmp_path: Path):
+    from magus.book.outline import build_outline
+
+    report = import_manuscript(store, "alice", _authored_manuscript(tmp_path / "a.docx"), project_id="b")
+    assert "작성자 Claude(AI) 1, 편집자 1" in report.summary()
+    ai, person = store.list_issues("alice", "b")
+    assert (ai.author, ai.author_kind, ai.comment_date, ai.by_ai) == ("Claude", "ai", "2026-10-02T01:02:03Z", True)
+    assert (person.author, person.author_kind, person.by_ai) == ("편집자", "person", False)
+    issues_md = (store.root / "users/alice/projects/b/issues.md").read_text(encoding="utf-8")
+    assert "- author: Claude\n- author_kind: ai\n- comment_date: 2026-10-02T01:02:03Z" in issues_md
+    store.reindex()
+    assert [i.author_kind for i in store.list_issues("alice", "b")] == ["ai", "person"]
+    assert "코멘트 유래 미해결 2건(citation 1 · general 1) · 그중 AI 확인 요청 1건(AI가 원고에 단 코멘트)" in build_outline(store, "alice", "b")
+
+
+@pytest.mark.anyio
+async def test_ai_comments_are_marked_in_tools(settings, store: LocalStore, tmp_path: Path):
+    import_manuscript(store, settings.user_id, _authored_manuscript(tmp_path / "a.docx"), project_id="b")
+    async with Client(build_server(settings, store)) as client:
+        lines = (await client.call_tool("book_issues", {"project_id": "b"})).content[0].text
+        read = (await client.call_tool("book_read_chapter", {"number": 1, "project_id": "b"})).content[0].text
+    assert "- I1 · open · 1장 · AI 확인 요청(Claude) · citation→daeschler2006" in lines
+    assert "- I2 · open · 1장 · 원고 코멘트(편집자) · general" in lines
+    assert '"I1 [AI 확인 요청] 인용 확인 필요' in read and '"I2 문단 줄이기' in read
+
+
+def test_web_marks_ai_comments(server_proc, tmp_path: Path):  # noqa: F811 - test_web의 픽스처
+    import httpx2
+
+    base, _, _ = server_proc({})
+    docx_bytes = _authored_manuscript(tmp_path / "a.docx").read_bytes()
+    with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
+        csrf = re.search(r'name="csrf" value="([0-9a-f]+)"', c.get("/login?next=/inbox").text).group(1)
+        c.post("/inbox/upload", data={"csrf": csrf}, files={"files": ("원고.docx", docx_bytes)})
+        page = c.post("/book/import", data={"csrf": csrf, "name": "원고.docx", "project_id": "b", "title": ""}).text
+        assert "1장 + " not in page and "<td>1장</td>" in page  # outline과 같은 장 수 표기
+        assert "2 (🤖 AI 확인 요청 1)" in page
+        issues = c.get("/issues?project=b").text
+    assert "그중 🤖 AI 확인 요청 1건(AI가 원고에 단 코멘트입니다)" in issues
+    assert "<td>🤖 AI 확인 요청(Claude)</td><td>문헌 확인</td>" in issues
+    assert "<td>원고 코멘트(편집자)</td><td>기타</td>" in issues

@@ -13,6 +13,7 @@ from typing import Any, Literal
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 
+from magus.book.comments import source_label
 from magus.book.export import export_docx
 from magus.book.importer import import_manuscript
 from magus.book.outline import build_outline
@@ -53,7 +54,7 @@ def _issue_line(i: Issue, labels: dict[int, str]) -> str:
     kind = i.kind + (f"→{i.ref_key}" if i.ref_key else "")
     if i.kind == "citation" and i.ref_key:
         kind += f" ⇒ {i.ref_id}" if i.ref_id and i.ref_id != i.ref_key else ("" if i.ref_id else " ⇒ refs 없음")
-    parts += [i.origin, kind]
+    parts += [source_label(i), kind]
     line = "- " + " · ".join(parts) + f" · {one_line(i.text)[:300]}"
     return line + (f" · 닫음: {one_line(i.closed_note)}" if i.closed_note else "")
 
@@ -95,7 +96,9 @@ def build_tools(
                 "updated_at": m.updated_at,
                 "char_count": m.char_count,
                 **_gate(check_text(store, user, chapter.content, exclude=terms_of(store, user, project.id))),
-                "open_issues": [f"I{i.id} {one_line(i.text)[:120]}" for i in open_issues],
+                "open_issues": [
+                    f"I{i.id}{' [AI 확인 요청]' if i.by_ai else ''} {one_line(i.text)[:120]}" for i in open_issues
+                ],
                 "content": chapter.content,
             }
         )
@@ -285,7 +288,8 @@ def build_tools(
                 "장 하나를 읽는다. number는 장 번호다: 제N장은 N, 서장 0, 맺음 90, 부록 N은 90+N, 제N부 들어가며는 100+N"
                 "(outline에서 번호 없는 장 옆 괄호의 숫자). "
                 "JSON: content(본문 markdown만), title, status, part_number, version, last_note, "
-                "unverified_cites, open_issues(이 장의 열린 미해결). 필요한 장만 읽는다. " + UNVERIFIED_CITES_MEANING
+                "unverified_cites, open_issues(이 장의 열린 미해결. [AI 확인 요청]은 AI가 원고에 단 코멘트라 저자에게도 그렇게 알린다). "
+                "필요한 장만 읽는다. " + UNVERIFIED_CITES_MEANING
             ),
             structured_output=False,
         ),
@@ -308,6 +312,8 @@ def build_tools(
             description=(
                 "미해결 목록(조회 전용). status=open|closed|all, chapter_number, origin=import_comment|user|agent, "
                 "kind=citation(문헌 지목)|fact(사실·수치 확인)|general로 거른다. 한 줄에 하나: 번호·상태·장·출처·종류(citation이면 →ref_key 후보)·내용. "
+                "출처는 user·agent·원고 코멘트(작성자)·AI 확인 요청(작성자)이다. AI 확인 요청은 AI가 원고에 단 코멘트라 "
+                "저자에게 전할 때도 AI의 확인 요청이라고 밝힌다. "
                 f"limit 기본 50, 최대 {ISSUE_LIST_MAX}."
             ),
             structured_output=False,

@@ -29,6 +29,7 @@ from magus.store.fileio import write_text as _write_text
 from magus.store.shelf import ShelfMixin
 from magus.store.base import (
     CHAPTER_STATUSES,
+    AuthorKind,
     Change,
     Chapter,
     ChapterMeta,
@@ -49,6 +50,7 @@ from magus.store.schema import SCHEMA, SCHEMA_VERSION, TABLES
 log = logging.getLogger("magus.store")
 
 NON_CITATION_TERMS = "non_citation_terms.txt"
+AI_AUTHORS = "ai_authors.txt"  # 이 프로젝트에서 AI로 볼 코멘트 작성자 이름(기본 목록에 더한다, #71)
 _CHAPTER_FILE = re.compile(r"ch-(\d+)\.md")
 _VERSION_FILE = re.compile(r"ch-(\d+)\.v(\d+)\.md")
 
@@ -151,6 +153,19 @@ class LocalStore(ShelfMixin):
         clean = list(dict.fromkeys(t.strip() for t in terms if t.strip()))
         header = "# 인용 추출에서 뺄 낱말(지명·사건·기관 등). 한 줄에 하나. 예: 마닐라(1571)의 '마닐라'\n"
         _write_text(path, header + "".join(f"{t}\n" for t in clean))
+
+    @_locked
+    def get_ai_authors(self, user_id: str, project_id: str) -> list[str]:
+        path = self._project_dir(user_id, project_id) / "book" / AI_AUTHORS
+        lines = (line.strip() for line in _read_text(path).splitlines())
+        return [line for line in lines if line and not line.startswith("#")]
+
+    @_locked
+    def set_ai_authors(self, user_id: str, project_id: str, names: list[str]) -> None:
+        path = self._require_project(user_id, project_id) / "book" / AI_AUTHORS
+        clean = list(dict.fromkeys(n.strip() for n in names if n.strip()))
+        header = "# AI로 볼 원고 코멘트 작성자 이름(기본 목록에 더한다). 한 줄에 하나. 예: 우리 편집 AI\n"
+        _write_text(path, header + "".join(f"{n}\n" for n in clean))
 
     @_locked
     def set_parts(self, user_id: str, project_id: str, parts: list[Part]) -> None:
@@ -295,6 +310,9 @@ class LocalStore(ShelfMixin):
         *,
         kind: IssueKind = "general",
         ref_key: str | None = None,
+        author: str | None = None,
+        author_kind: AuthorKind | None = None,
+        comment_date: str | None = None,
     ) -> Issue:
         if not text.strip():
             raise ValueError("미해결 내용이 비어 있다")
@@ -309,6 +327,9 @@ class LocalStore(ShelfMixin):
             created_at=utcnow(),
             kind=kind,
             ref_key=ref_key,
+            author=author or None,
+            author_kind=author_kind,
+            comment_date=comment_date or None,
         )
         _write_text(path, formats.dump_issues([*issues, issue]))
         with self._db:
@@ -425,7 +446,7 @@ class LocalStore(ShelfMixin):
         return [
             Issue(
                 r["id"], r["text"], r["status"], r["origin"], r["chapter_number"], r["created_at"], r["closed_note"],
-                r["kind"], r["ref_key"], r["ref_id"],
+                r["kind"], r["ref_key"], r["ref_id"], r["author"], r["author_kind"], r["comment_date"],
             )
             for r in rows
         ]
@@ -558,10 +579,10 @@ class LocalStore(ShelfMixin):
         self._db.executemany(
             "INSERT OR REPLACE INTO issues "
             "(user_id, project_id, id, text, status, origin, chapter_number, created_at, closed_note, kind, ref_key, "
-            "ref_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "ref_id, author, author_kind, comment_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (user_id, project_id, i.id, i.text, i.status, i.origin, i.chapter_number, i.created_at, i.closed_note,
-                 i.kind, i.ref_key, i.ref_id)
+                 i.kind, i.ref_key, i.ref_id, i.author, i.author_kind, i.comment_date)
                 for i in issues
             ],
         )

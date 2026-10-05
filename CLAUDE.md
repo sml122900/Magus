@@ -127,7 +127,9 @@
   - **status 값은 `draft` | `revising` | `done` 중 하나다.** 쓸 때 그 밖의 값이 오면 거부한다(Store는 ValueError, 도구는 스키마 enum으로 막는다).
 - chapter_versions(id, user_id, chapter_id, version, path, note, created_at) — 보관된 **이전** 본문들
 - decisions(user_id, project_id, id, text, created_at) — id는 프로젝트별 일련번호 `D{n}`
-- issues(user_id, project_id, id, text, status: open|closed, origin: import_comment|user|agent, chapter_number?, created_at, closed_note?, kind: citation|fact|general, ref_key?, ref_id?) — id는 프로젝트별 일련번호 `I{n}`
+- issues(user_id, project_id, id, text, status: open|closed, origin: import_comment|user|agent, chapter_number?, created_at, closed_note?, kind: citation|fact|general, ref_key?, ref_id?, author?, author_kind?: ai|person, comment_date?) — id는 프로젝트별 일련번호 `I{n}`
+  - **원고 코멘트의 작성자를 보존한다(#71).** `author`는 Word 이름 그대로, `author_kind`는 이름으로 판정한다(`book/comments.py: author_kind`, 기본 AI 이름 목록 + 프로젝트의 `book/ai_authors.txt`). 파일(issues.md)에 적으므로 사람이 고칠 수 있다.
+    - AI가 단 코멘트에서 온 미해결은 저자에게 보일 때도 **AI 확인 요청**으로 드러난다: book_issues 출처 `AI 확인 요청(Claude)`, book_read_chapter `[AI 확인 요청]`, outline `그중 AI 확인 요청 N건`, 웹 `/issues`·`/book`의 🤖, 저자 보고서 5절.
   - `kind`: 임포트할 때 코멘트로 정한다. 직접 남긴 이슈는 `general`이 기본값이다.
     - 출처 확인 코멘트: 본문에 "확인 필요", "인용 확인 필요", "원문 대조"가 들어 있거나(공백 차이와 실제 변형 허용), 독립된 낱말 "서지"가 있는 것("일어서지"는 아님).
     - `citation`: 출처 확인 코멘트이고 문헌이 지목된 것(코멘트 본문, 또는 서로 다른 인용이 하나뿐인 앵커에서 저자·연도를 찾음).
@@ -137,7 +139,7 @@
   - `ref_key`: citation 코멘트에서 뽑은 저자·연도 후보(`daeschler2006`, 한글이면 조사를 뗀 `갤러2022`). 코멘트 본문에 없으면 앵커 원문에서 찾고, 그래도 없으면 null이다. 추출기는 `magus/melchior/citations.py`이고, ref_check도 이것을 쓴다.
   - `ref_id`: ref_key를 refs(key 또는 aliases)에서 해석한 **정식 ref key**(예: `갤러2022` ⇒ `galor2022`). refs 행 id는 재생성되면 바뀌므로 key를 쓴다. 임포트, ref_add, ref_import_bibliography 뒤에 다시 계산한다.
 - chapters.unverified_cite_count: verified가 아닌 **고유 문헌 수**(unverified + unknown, uncertain 제외). 출현 횟수가 아니다(사용자 결정 #17 변경). 파생값이라 인덱스에만 두고, 서버 시작·`magus reindex`·refs 변경·장 쓰기 때 다시 계산한다.
-  - chapters.unverified_cite_keys / uncertain_cite_keys(JSON): 같은 때 함께 계산하는 그 장의 미확인 문헌 key와 미연결 한글 표기 key다. outline은 장 사이 합집합으로 책 전체 고유 수를 낸다(SCHEMA_VERSION 8).
+  - chapters.unverified_cite_keys / uncertain_cite_keys(JSON): 같은 때 함께 계산하는 그 장의 미확인 문헌 key와 미연결 한글 표기 key다. outline은 장 사이 합집합으로 책 전체 고유 수를 낸다(SCHEMA_VERSION 8에서 도입).
   - 이 캐시는 refs가 바뀌면(ref_add, ref_import_bibliography, `magus alias`, `magus terms`) 그 자리에서 사용자의 모든 장을 다시 계산한다(실원고 40장 0.3초). ref_add 직후 outline 수가 줄어드는지 테스트로 고정했다(사용자 결정 #43).
   - **한 번 준 번호는 절대 재사용하거나 다시 매기지 않는다.** 마지막 번호는 project.json의 `last_decision_id`/`last_issue_id`에 둔다.
 - refs(id, user_id, key, aliases json, bib json, status: unverified|verified, has_fulltext, file_path?, created_at)
@@ -322,7 +324,8 @@ data/index.sqlite
   - 경로 인자(book_import, ref_add, idea_add_conversation)는 받은함의 파일 이름을 받는다. 새 도구 `files_list()`로 받은함을 본다.
   - book_export는 exports/에 만들고, 로그인이 필요하고 만료가 있는 다운로드 URL을 돌려준다.
 - 웹(`magus/web.py`): 같은 프로세스의 Starlette 라우트로 서버에서 그린 최소 HTML이다(디자인은 P1 범위가 아니다).
-  - 페이지: `/login`, `/inbox`(업로드·목록·삭제), `/book`(임포트·docx 내보내기), `/checklist`(문헌 신호등 🟢확인 🟡미확인 🔴참고문헌에 없음 ⚪미연결 + 장별), `/download/{token}`.
+  - 페이지: `/login`, `/inbox`(업로드·목록·삭제), `/book`(임포트·docx 내보내기), `/checklist`(문헌 신호등 🟢확인 🟡미확인 🔴참고문헌에 없음 ⚪미연결 + 장별), `/issues`(미해결 목록, AI 확인 요청 🤖 표시, #71), `/download/{token}`.
+    - `/book`의 장 수는 outline과 같은 표기다(`35장 + 서장·…`).
   - 로그인
     - 원격: 인증 서버에 OAuth 인가 코드 + PKCE(S256) + `resource=PUBLIC_URL/mcp`로 로그인한다. 토큰은 MCP와 같은 JwtVerifier로 검증한다.
     - 실패 화면은 둘로 나뉜다. 토큰 무효는 401("로그인 토큰을 받아들이지 못했습니다", 원인은 서버 로그)이다. 허용 목록 밖은 403("허용 목록에 없습니다")이고, **본인의 사용자 id를 화면에 보여 준다**(운영자가 목록에 넣을 값).

@@ -21,7 +21,7 @@ def estimate_tokens(text: str) -> int:
     return non_ascii + math.ceil((len(text) - non_ascii) / 3)
 
 
-def _chapter_count(chapters: list[ChapterMeta]) -> str:
+def chapter_count(chapters: list[ChapterMeta]) -> str:
     """'35장 + 서장·부 들어가며 2·맺음·부록 1~3'. 번호 없는 장은 이름으로 적고, 부록은 이어지면 범위로 묶는다."""
     named = [c.label for c in chapters if c.label]
     appendix = sorted(int(m.group(1)) for label in named if (m := re.fullmatch(r"부록\s*(\d+)", label)))
@@ -89,7 +89,7 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
     unique_unverified = len({key for c in chapters for key in c.unverified_cite_keys})
     unlinked = len({key for c in chapters for key in c.uncertain_cite_keys})
     header_lines.append(
-        f"{_chapter_count(chapters)} · {len(parts)}부 · {sum(c.char_count for c in chapters):,}자 · "
+        f"{chapter_count(chapters)} · {len(parts)}부 · {sum(c.char_count for c in chapters):,}자 · "
         f"미확인 문헌 {unique_unverified}편 · 미연결 {unlinked} · 열린 미해결 {len(issues)}"
     )
     header = "\n".join(header_lines)
@@ -116,7 +116,9 @@ def build_outline(store: Store, user_id: str, project_id: str | None = None, bud
     if from_comments:
         kinds = Counter(i.kind for i in issues if i.origin == "import_comment")
         split = " · ".join(f"{k} {kinds[k]}" for k in ("citation", "fact", "general") if kinds[k])
-        issue_head += f"\n- 코멘트 유래 미해결 {from_comments}건({split}) — book_issues(kind)로 조회"
+        by_ai = sum(1 for i in issues if i.origin == "import_comment" and i.by_ai)  # 누가 말했는지 보존한다(#71)
+        ai = f" · 그중 AI 확인 요청 {by_ai}건(AI가 원고에 단 코멘트)" if by_ai else ""
+        issue_head += f"\n- 코멘트 유래 미해결 {from_comments}건({split}){ai} — book_issues(kind)로 조회"
     issue_items = [
         f"- I{i.id}"
         + (f" · {name(i.chapter_number)}" if i.chapter_number is not None else "")

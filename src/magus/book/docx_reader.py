@@ -47,6 +47,7 @@ class Comment:
     text: str
     block_index: int | None = None
     anchor: str = ""
+    date: str = ""  # Word의 w:date(작성 시각). PDF에는 없다
 
 
 @dataclass
@@ -185,12 +186,14 @@ def _style_names(xml: bytes) -> dict[str, str]:
     return names
 
 
-def _comments(xml: bytes) -> dict[str, tuple[str, str]]:
+def _comments(xml: bytes) -> dict[str, tuple[str, str, str]]:
+    """id → (작성자, 날짜, 본문)."""
     root = etree.fromstring(xml)
     out = {}
     for c in root.iter(_w("comment")):
         paras = ["".join(t.text or "" for t in p.iter(_w("t"))) for p in c.iter(_w("p"))]
-        out[c.get(_w("id"))] = (c.get(_w("author"), ""), "\n".join(x for x in paras if x.strip()).strip())
+        text = "\n".join(x for x in paras if x.strip()).strip()
+        out[c.get(_w("id"))] = (c.get(_w("author"), ""), c.get(_w("date"), ""), text)
     return out
 
 
@@ -216,7 +219,8 @@ def read_docx(path: Path) -> Manuscript:
             text=text,
             block_index=walker.comment_block.get(cid),
             anchor=walker.anchors.get(cid, "".join(walker.open.get(cid, [])).strip()),
+            date=date,
         )
-        for cid, (author, text) in raw_comments.items()
+        for cid, (author, date, text) in raw_comments.items()
     ]
     return Manuscript(walker.blocks, comments, title, walker.figures, walker.tables, walker.equations)
