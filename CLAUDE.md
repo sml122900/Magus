@@ -315,7 +315,7 @@ data/index.sqlite
   - 이미지: `Dockerfile`(python:3.12-slim, uv, 비root uid 10001, /data 볼륨, healthz 헬스체크). 구성: `deploy/compose.yaml`(magus·caddy·backup·restore).
 - 백업: 매일 04:00 restic → Cloudflare R2(`deploy/backup.sh`). `index.sqlite`는 빼고(재생성), `forget --keep-daily 30 --prune`, `check --read-data-subset=1/30`. R2 버킷에 수명 주기 규칙은 걸지 않는다.
   - 복구: `docs/deploy.md` 5절. 정기 시험은 `deploy/restore-test.sh <사용자…>`(복구본 reindex 뒤 outline 비교). 로컬 훈련 결과와 기록 표도 그 문서에 있다.
-- 알림: `magus/alerts.py`(텔레그램 `ALERT_TELEGRAM_*` 또는 웹훅 `ALERT_WEBHOOK_URL`). logsafe의 ERROR를 받아 백그라운드로 보낸다. 백업 누락은 healthchecks.io(`HEALTHCHECK_URL`)가 알린다. 시험은 `magus alert-test`.
+- 알림: `magus/alerts.py`(텔레그램 `ALERT_TELEGRAM_*` 또는 웹훅 `ALERT_WEBHOOK_URL`). logsafe의 ERROR를 받아 백그라운드로 보낸다. 백업 누락은 healthchecks.io(`HEALTHCHECK_URL`, magus-backup)가, 서버·HTTPS 정지는 `deploy/alive.sh`(호스트 cron 5분, `HEALTHCHECK_ALIVE_URL`, magus-alive)가 알린다. 시험은 `magus alert-test`.
 - **로그**: 도구 이름, user_id, 소요 시간, 결과만 남긴다(`magus/audit.py`). 본문·발췌·원고 내용은 절대 남기지 않는다.
   - SDK의 도구 실패 메시지와 예외 traceback은 `magus/logsafe.py`가 핸들러에서 거른다. 예외는 종류·위치만 남긴다.
   - ERROR는 알림 콜백으로 보낸다(10분에 한 번).

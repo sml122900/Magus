@@ -1,7 +1,7 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-05 KST — WorkOS 설정 지원: 로그인 401/403 구분, 실패 원인 로그, 빈 허용 목록 부트스트랩, 문서(Production·콜백·허용 목록 순서·아버지 온보딩). 태그 없음.
+> 마지막 갱신: 2026-10-05 KST — 계정 준비 끝(사용자). 배포용 `deploy/.env` 생성(비밀이 아닌 값·SESSION_SECRET 채움, 비밀 10개는 사용자 대기). 태그 없음.
 
 ## 0-1. 최근 보고 (2026-10-05, WorkOS 설정)
 
@@ -37,14 +37,23 @@
 
 ## 1. 지금 바로 할 일
 
-- **진행 중(사용자): WorkOS Production 설정**(docs/deploy.md 0절의 리디렉션 URI 3개·리소스, 로그인 Google·이메일 코드, 가입 끄기, CIMD·DCR). 그다음 배포하고 2-1절대로 본인 id를 `default`에 넣는다.
-- **대기(사용자): 나머지 계정.** 이것이 있어야 5단계를 끝내고 6·7단계로 간다. 목록은 `docs/deploy.md` 0절에 있다(도메인·서버 IP는 확정).
-  - Vultr 서울 서버
-  - 도메인 A 레코드(Cloudflare면 프록시 끔)
-  - WorkOS AuthKit: 초대 2명, 웹 클라이언트(리다이렉트 `/auth/callback`)
-  - Cloudflare R2 버킷과 토큰(수명 주기 규칙 없음)
-  - 텔레그램 봇과 chat id, healthchecks.io 체크
-- 계정이 생기면 내가 할 일(사용자가 서버 접속 정보를 주거나 직접 따라 한다)
+- **대기: `deploy/.env`의 비밀값 10개, 사용자.** 사용자가 메모장으로 직접 채운다. 비밀값은 채팅으로 묻지 않고, 파일 내용도 출력하지 않는다.
+  - 빈 키: WEB_CLIENT_SECRET, ALLOWED_USERS, ALERT_TELEGRAM_BOT_TOKEN, ALERT_TELEGRAM_CHAT_ID, HEALTHCHECK_ALIVE_URL, HEALTHCHECK_URL, R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, RESTIC_PASSWORD.
+  - 사용자가 "값 채웠어"라고 하면 다음 순서로 간다.
+    1. 키 이름만으로 빈 값을 점검한다(값은 출력하지 않는다). 형식도 확인하되 통과·실패만 말한다: BOM·CRLF, `$`, R2_ENDPOINT 끝 버킷, hc-ping URL.
+    2. 자가 점검을 한 뒤 배포한다(아래 "내가 할 일").
+- 계정 준비 완료(2026-10-05, 사용자)
+  - 서버 `158.247.225.48`: Vultr 서울, Ubuntu 24.04 LTS, root, SSH 키.
+  - 도메인 `magus.lifebookapplication.com`, R2 버킷 `magus-backup`, 텔레그램, healthchecks(magus-alive 5분/5분, magus-backup 1일/2시간).
+  - WorkOS는 **Staging 환경**(`https://dapper-palace-57-staging.authkit.app`)이다.
+    - 10-05 오전의 "Production" 결정을 사용자 지시로 바꿨다. issuer·클라이언트·사용자 id를 모두 Staging에서 가져와야 한다. issuer 끝의 `/`는 배포 때 .well-known과 실제 토큰의 iss로 맞춘다.
+    - 설정 상태: Magic Auth 켬, 비밀번호 끔, 가입 끔, DCR·CIMD 켬, 리소스 `/mcp`(Default), 웹 리디렉션 `/auth/callback`.
+    - 웹 클라이언트 `client_01M45PBRZEBZV6XEGJQSPWVH4P`는 기밀 클라이언트이고, PKCE 미사용으로 만들었다. 우리 코드는 PKCE(S256)와 client_secret을 함께 보낸다. 받아들여지는지는 첫 로그인에서 확인한다.
+- `deploy/.env`의 구조는 `.env.example`과 다르다. **배포 때 `.env.example`과 deploy.md 표를 맞춘다.**
+  - R2는 `R2_ENDPOINT`·`R2_ACCESS_KEY_ID`·`R2_SECRET_ACCESS_KEY`로 받는다. `RESTIC_REPOSITORY`·`AWS_*`는 compose가 `${…}`로 만든다(env_file 보간, 가짜 값으로 확인).
+  - `HEALTHCHECK_ALIVE_URL`(magus-alive)은 아직 읽는 코드가 없다. 배포 때 호스트 cron(`/healthz` 확인 뒤 핑)으로 연결한다.
+- 불명: "이전에 받은 P1 5~6단계 진행 지시"의 원문이 이 세션과 리포에 없다. 판단: 아래 "내가 할 일"과 docs/deploy.md 1~4절대로 진행한다.
+- 내가 할 일(배포)
   - `docs/deploy.md` 1~4절대로 배포한다.
   - `alert-test`로 알림을 받아 본다.
   - 첫 백업을 돌리고, `restore-test.sh default father`로 서버에서 복구 시험을 한다. 결과는 deploy.md 기록 표에 적는다.
@@ -207,6 +216,15 @@
   - `/fixtures/`(루트)와 `data/`는 gitignore. `tests/fixtures/`와 `docs/reports/`는 커밋한다.
 
 ## 6. 마지막 세션 요약
+
+**2026-10-05 (2)** — 배포용 env 파일
+- `deploy/.env`를 만들었다. 비밀이 아닌 값을 채우고, SESSION_SECRET(64자 hex)은 로컬에서 만들어 바로 썼다(출력하지 않음).
+- 비밀값 10개는 빈 값으로 두었다. 각 줄 위에 값의 출처를 주석으로 달았다.
+- 확인한 것
+  - git: `.gitignore:18`(`.env`)에 걸린다. 추적·이력 없음, `git add --dry-run`에도 잡히지 않는다.
+  - Docker: `.dockerignore`가 `deploy`·`.env`를 빼므로 이미지에 들어가지 않는다.
+- compose 보간을 가짜 값으로 시험했다. 같은 파일의 앞 키를 `${…}`로 참조할 수 있다. 따옴표 없는 `$`는 값이 잘리고(`a$b`→`a`), 작은따옴표로 감싸면 그대로 남는다. 파일 머리에 주의를 적었다.
+- 사용자 대기에서 멈춤.
 
 **2026-10-05** — WorkOS 대시보드 설정 지원
 - 대시보드에 넣을 값을 코드·docs 근거로 표로 정리했다. 근거가 없는 것은 "모름·추정"으로 표시했다.

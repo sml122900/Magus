@@ -7,7 +7,7 @@
 
 - [ ] Vultr 계정(결제 수단). 서버: 서울, `vc2-1c-1gb`, Ubuntu LTS. SSH 키로만 접속한다.
 - [ ] 도메인 `magus.lifebookapplication.com`. DNS A 레코드 → 서버 IP `158.247.225.48`. Cloudflare DNS라면 **프록시 끔(DNS 전용)**.
-- [ ] WorkOS 계정(AuthKit), **Production 환경**에서 설정한다. issuer·클라이언트 ID·사용자 id를 모두 같은 환경에서 가져온다(섞이면 iss 불일치로 401). 절차는 auth-provider.md "연결 절차"에 있다.
+- [ ] WorkOS 계정(AuthKit). 지금은 **Staging 환경**(`dapper-palace-57-staging.authkit.app`)을 쓴다. 10-05 오전에 Production으로 정했다가, 같은 날 사용자 지시로 바꿨다. issuer·클라이언트 ID·사용자 id를 모두 같은 환경에서 가져온다(섞이면 iss 불일치로 401). 절차는 auth-provider.md "연결 절차"에 있다.
   - 리디렉션 URI 세 개(글자 그대로):
     - `https://magus.lifebookapplication.com/auth/callback` — 웹 로그인(코드: `PUBLIC_URL/auth/callback`)
     - `https://claude.ai/api/mcp/auth_callback` — Claude 커넥터(Claude CIMD 메타데이터의 콜백, 2026-10-03 조사)
@@ -15,7 +15,9 @@
   - 리소스(audience): `https://magus.lifebookapplication.com/mcp`
 - [ ] Cloudflare R2 버킷 `magus-backup`(위치 힌트 APAC)과 그 버킷 전용 API 토큰(읽기·쓰기). **수명 주기 규칙은 걸지 않는다.**
 - [ ] 텔레그램 봇(BotFather)과 운영자 chat id.
-- [ ] healthchecks.io 체크 하나: 주기 1일, 유예 2시간, 알림은 텔레그램.
+- [ ] healthchecks.io 체크 둘, 알림은 텔레그램.
+  - `magus-alive`: 주기 5분, 유예 5분. `deploy/alive.sh`(호스트 cron)가 바깥 주소의 `/healthz`를 본 뒤 핑한다.
+  - `magus-backup`: 주기 1일, 유예 2시간. `deploy/backup.sh`가 핑한다.
 
 ## 1. 서버 준비(한 번)
 
@@ -32,9 +34,16 @@ SSH는 비밀번호 로그인을 끄고(`PasswordAuthentication no`) 키로만 �
 
 ## 2. 배포
 
+원격 저장소가 없으므로 코드는 git bundle로 옮긴다(로컬 PC에서, 커밋한 것만 들어간다).
+
 ```sh
-sudo git clone <저장소> /opt/magus && cd /opt/magus/deploy
-cp .env.example .env && chmod 600 .env     # 값을 채운다(아래 표)
+git bundle create magus.bundle master --tags
+scp magus.bundle root@<서버>:/root/ && scp deploy/.env root@<서버>:/root/magus.env   # .env는 로컬에서 채운 것
+```
+
+```sh
+sudo git clone -b master /root/magus.bundle /opt/magus && cd /opt/magus/deploy
+sudo install -m 600 /root/magus.env .env && sudo rm /root/magus.env   # 또는 cp .env.example .env로 만들어 채운다(아래 표)
 mkdir -p data && sudo chown 10001 data      # 컨테이너 사용자(uid 10001)가 쓴다
 sudo docker compose up -d --build
 sudo docker compose ps                      # magus: healthy, caddy: running
@@ -51,10 +60,11 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 | `SESSION_SECRET` | `python -c "import secrets;print(secrets.token_hex(32))"` |
 | `WEB_CLIENT_ID`(·`WEB_CLIENT_SECRET`) | WorkOS 웹 클라이언트(리다이렉트 `https://<도메인>/auth/callback`) |
 | `ALERT_TELEGRAM_BOT_TOKEN`·`ALERT_TELEGRAM_CHAT_ID` | 텔레그램 |
-| `RESTIC_REPOSITORY` | `s3:https://<계정id>.r2.cloudflarestorage.com/magus-backup` |
-| `RESTIC_PASSWORD` | 무작위. **비밀번호 관리자에 따로 보관한다**(잃으면 백업을 못 읽는다) |
-| `AWS_ACCESS_KEY_ID`·`AWS_SECRET_ACCESS_KEY` | R2 API 토큰 |
-| `HEALTHCHECK_URL` | `https://hc-ping.com/<uuid>` |
+| `R2_ENDPOINT` | `https://<계정id>.r2.cloudflarestorage.com`(버킷 이름 없이). `R2_BUCKET=magus-backup` |
+| `R2_ACCESS_KEY_ID`·`R2_SECRET_ACCESS_KEY` | R2 API 토큰. `RESTIC_REPOSITORY`·`AWS_*`는 이 값들로 compose가 만든다(고치지 않는다) |
+| `RESTIC_PASSWORD` | 무작위. **비밀번호 관리자에 따로 보관한다**(잃으면 백업을 못 읽는다). `$`가 있으면 작은따옴표로 감싼다 |
+| `HEALTHCHECK_ALIVE_URL` | magus-alive 체크의 `https://hc-ping.com/<uuid>` |
+| `HEALTHCHECK_URL` | magus-backup 체크의 `https://hc-ping.com/<uuid>` |
 
 ### 2-1. 첫 로그인과 허용 목록(user id 얻기)
 
@@ -79,7 +89,7 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
   - 아버지 원고는 docx 원본을 아버지 받은함에 새로 올려 임포트한다(PDF 임포트본을 옮기지 않는다).
   - 절차는 [onboarding-father.md](onboarding-father.md)에 있다.
 
-업데이트: `cd /opt/magus && sudo git pull && cd deploy && sudo docker compose up -d --build`.
+업데이트: 로컬에서 새 번들을 만들어 `/root/magus.bundle`에 올린 뒤 `cd /opt/magus && sudo git pull /root/magus.bundle master && cd deploy && sudo docker compose up -d --build`.
 
 ## 3. 알림 확인
 
@@ -88,7 +98,15 @@ sudo docker compose exec magus /app/.venv/bin/magus alert-test   # 텔레그램�
 ```
 
 - 서버 오류(ERROR 로그)는 같은 내용으로는 10분에 한 번만 온다. 원고 내용은 들어 있지 않다(종류·위치만).
-- 백업이 실패하거나 하루 동안 돌지 않으면 healthchecks.io가 알린다.
+- 백업이 실패하거나 하루 동안 돌지 않으면 healthchecks.io(magus-backup)가 알린다.
+- 서버나 HTTPS가 멈추면 healthchecks.io(magus-alive)가 알린다. 호스트 cron에 생존 확인을 건다.
+
+```sh
+sudo crontab -e
+*/5 * * * * /opt/magus/deploy/alive.sh >/dev/null 2>&1
+```
+
+손으로 한 번 돌려 healthchecks.io의 magus-alive가 초록이 되는지 본다: `sudo /opt/magus/deploy/alive.sh`.
 
 ## 4. 백업(매일 04:00)
 
