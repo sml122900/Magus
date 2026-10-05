@@ -103,15 +103,17 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 
 업데이트: 로컬에서 새 번들을 만들어 `/root/magus.bundle`에 올린 뒤 아래를 실행한다.
 
-- 지금(2026-10-06부터) 서버는 브랜치 `fix/auth-audience`(태그 `p1-auth-audience`)에 있다. 옛 이력은 지웠다.
-- 다음에 master를 배포할 때는 pull 대신 `cd /opt/magus && sudo git fetch /root/magus.bundle master && sudo git checkout -B master FETCH_HEAD && cd deploy && sudo docker compose up -d --build`.
-  - 그 master에 `p1-auth-audience`가 병합돼 있어야 한다(`git merge-base --is-ancestor p1-auth-audience FETCH_HEAD`). 아니면 aud 검사가 옛 판으로 되돌아간다.
+- 지금(2026-10-06 01:40부터) 서버는 master(태그 `p1-reupload`)에 있다. 옛 이력은 지웠다.
+- 배포는 pull 대신 `cd /opt/magus && sudo git fetch /root/magus.bundle master && sudo git checkout -B master FETCH_HEAD && cd deploy && sudo docker compose up -d --build`. 태그도 가져오려면 `git fetch /root/magus.bundle "refs/heads/master:refs/remotes/bundle/master" "refs/tags/*:refs/tags/*"` 뒤 `git checkout -B master <태그>`.
+  - 그 master에 `p1-auth-audience`가 들어 있어야 한다(`git merge-base --is-ancestor p1-auth-audience FETCH_HEAD`). 아니면 aud 검사가 옛 판으로 되돌아간다.
+- 반영 전에: 백업을 손으로 한 번 돌려 스냅샷을 확인하고(`docker compose --profile backup run --rm backup </dev/null`), 실행 중 이미지를 `magus:rollback-<커밋>`으로 태그해 둔다.
 - 반영 전에 되돌릴 커밋(`git rev-parse HEAD`)과 data 해시 목록을 적어 둔다. 되돌릴 때는 그 커밋으로 `reset --hard` 후 다시 빌드한다(`HEAD~1`을 쓰지 않는다).
 
 반영 기록
 
 | 날짜(KST) | 반영 | 반영 전 → 후 | 확인 |
 |---|---|---|---|
+| 2026-10-06 01:38 | `p1-reupload`(#69~#77 임포트 보완, #76 다시 올리기, #79 포함) | `896633c`(`p1-auth-audience`) → `4df2720` | 반영 전 백업 스냅샷 `a3322693`(798개, 오류 없음). 인덱스 v12 자동 재생성(01:39:52), healthy, `/healthz` ok, `/mcp` 401 + resource_metadata, data 798개 해시 같음(index 제외), `.env` 해시 같음, default outline 수치 같음. 메모리 magus 123MiB, 호스트 available 440MB. 되돌리기 이미지 `magus:rollback-896633c`, 옛 `rollback-21b4e2a` 삭제. 서버 기록 `/root/deploy-20261006-reupload/`(ROLLBACK.txt) |
 | 2026-10-06 00:53 | `p1-auth-audience`(토큰 aud 검사, 결정 #79) + 이력 교체 | `21b4e2a`(옛 이력) → `896633c`. 같은 상태의 새 이력 커밋은 `78c9668` | `/healthz` ok, `/mcp` 401 + resource_metadata, 컨테이너 안에서 trip_ai·섞인 aud 거부, 다른 `AUTH_AUDIENCE`로 시작 실패(종료 2), data 798개 해시 같음, `docs/reports` 객체 없음. 서버 기록은 `/root/deploy-20261006-auth-audience/`(ROLLBACK.txt) |
 
 ## 3. 알림 확인

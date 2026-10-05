@@ -1,8 +1,28 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-06 03시 KST — #69~#77과 다시 올리기 기본(#76)을 구현했다(로컬, 서버 변경 없음). `father-trial`을 최신본으로 다시 임포트했고, 4판 → 최신본 다시 올리기 시험을 통과했다. 대기: 서버 배포 승인, `docs/worktree-rule` 병합 확인(사용자).
+> 마지막 갱신: 2026-10-06 01:45 KST(서버 시각) — 결정 #80~#83, `docs/worktree-rule` 병합(`e396d3f`), 태그 `p1-reupload`(`4df2720`) push, **서버 배포 완료**(0-5절), 아버지 자료용 데이터(`private/reports/2026-10-06-father-materials-data.md`). 대기: claude.ai 새 대화에서 book_outline 확인(사용자).
 > 2026-10-06 01시 KST — 토큰 aud 검사 강화(결정 #79)를 `p1-auth-audience`로 서버에 반영하고, 서버의 옛 git 이력을 새 이력으로 바꿨다(0-3절).
+
+## 0-5. 최근 보고 (2026-10-06, 서버 배포 `p1-reupload` + 아버지 자료용 데이터, 세션 magus-25)
+
+- 결정 #80~#83 반영(`4df2720`). `docs/worktree-rule`(끝 `195af55`)은 앞 요청에서 병합해 push했다(`e396d3f`).
+- 태그 `p1-reupload` = `4df2720`(annotated). master·태그를 push했다(`e396d3f..4df2720`, 금지 경로 0건).
+- **서버 배포(2026-10-06 01:38~01:40, 서버 시각 KST)** — 기록 `/root/deploy-20261006-reupload/`(ROLLBACK.txt, data-before/after.sha, backup-before.log, up.log)
+  - 반영 전 실행 커밋: `896633c`(`p1-auth-audience`, 브랜치 `fix/auth-audience`, 작업 트리 깨끗). **이것이 이번 되돌리기 기준이다.**
+  - 반영 전 백업을 손으로 실행: 성공, 스냅샷 `a3322693`, 파일 798개 7.7MiB, 보관 정책 일별 30 + 월별 12, 검사 오류 없음.
+  - 반영 전 이미지를 `magus:rollback-896633c`로 남겼다. 옛 `magus:rollback-21b4e2a`는 지웠다.
+  - 절차: 새 bundle(로컬과 sha256 같음) → `git fetch` master·태그 → `p1-auth-audience` 포함 확인 → `git checkout -B master p1-reupload` → `docker compose up -d --build`. `deploy/.env`(해시 그대로)와 `data/`는 건드리지 않았다. 배포 스크립트·Dockerfile은 두 커밋 사이에 바뀐 것이 없다.
+  - 확인
+    - 컨테이너 healthy, 로그 `인덱스 스키마 v12 생성 → 파일에서 재생성`(01:39:52), 시작 완료 01:39:55, `허용 1명`
+    - 바깥 `/healthz` `{"status":"ok"}`, `/mcp` 401 + `resource_metadata`
+    - data 원본 798개(index.sqlite 제외) 해시가 반영 전과 같다. index.sqlite만 새로 만들어졌다.
+    - 서버 default outline이 반영 전 수치와 같다: 249,065자, 미확인 문헌 297, 미해결 86. 판 줄 "판 기록 없음(다시 올리기 기능 전 임포트) · 임포트 10-03 15:40"이 새로 보인다.
+    - 메모리(1GB 서버): magus 컨테이너 123MiB, caddy 30MiB, 호스트 used 515MB·available 440MB, 스왑 61MB. 디스크 `/` 9.7G/23G(45%).
+- 아버지 자료용 데이터: `private/reports/2026-10-06-father-materials-data.md`(396줄, 리포 밖). father-trial(최신본, 비인용 용어 6개) 기준이다.
+  - 이전 판 질문 8건은 모두 최신본에서도 유효하다(음역 추정 7건은 제35장 본문이 아니라 표 안에 있다).
+  - 저자 보고서 생성기의 작은 오탐 두 개는 자료에서 바로잡았다: 같은 장 번호가 두 번 찍힘("제35·35장"), Lee(1969) 이름 대조에 '이상호'가 섞임(7절).
+- 대기: claude.ai 새 대화에서 Magus의 book_outline을 한 번 불러 확인(사용자).
 
 ## 0-4. 최근 보고 (2026-10-06, #69~#77 구현 + 다시 올리기 기본 + 최신본 재임포트, 세션 magus-25)
 
@@ -43,7 +63,7 @@
     - `docker compose run -e AUTH_AUDIENCE=<trip_ai>`: 종료 2, 한국어 이유 출력.
   - 옛 이력 정리: `21b4e2a`, 보고서 객체 2개 없음, 객체 1,867 → 668. `/root/magus.bundle`도 새 bundle로 바꿨다.
   - 되돌리기: `21b4e2a`는 gc로 지웠다. 같은 상태의 새 이력 커밋은 `78c9668`이다. 이미지 `magus:rollback-21b4e2a`(반영 전 이미지)를 남겼다. 절차는 서버 `/root/deploy-20261006-auth-audience/ROLLBACK.txt`.
-    - **이미지 `magus:rollback-21b4e2a` 보관 중, 다음 배포 때 삭제**(2026-10-06 사용자 지시). 삭제: `docker image rm magus:rollback-21b4e2a`.
+    - 이미지 `magus:rollback-21b4e2a`는 다음 배포(2026-10-06 `p1-reupload`) 때 지웠다.
     - 서버 디스크(2026-10-06): `/` 23G 중 8.2G 사용(38%). docker 이미지 5개 2.05GB(그중 magus 둘이 각 1.15GB), 빌드 캐시 1.15GB.
 - 대기: claude.ai 새 대화에서 Magus 도구 한 번 불러 확인(사용자). 되돌리기 이미지는 확인과 관계없이 다음 배포 때 지운다.
 
@@ -103,10 +123,8 @@
 
 ## 1. 지금 바로 할 일
 
-- **대기(사용자, 2026-10-06)**
-  - **서버에 master 배포 승인**: 7단계 전에 필요하다. 아버지 원고는 서버에서 임포트하므로 새 파서(#69~#77)와 다시 올리기(#76)가 서버에 있어야 한다. 이번 세션은 로컬 전용이라 배포하지 않았다.
-    - 절차: docs/deploy.md "업데이트"(fetch + `checkout -B master`). SCHEMA_VERSION 12라 첫 시작 때 인덱스를 자동으로 다시 만든다. 서버 default(10/02 PDF 판)는 판 기록 전 프로젝트로 그대로 쓰인다.
-  - **`docs/worktree-rule` 병합 확인**: 다른 세션(magus-a1)이 CLAUDE.md에 운영 규칙(동시 세션은 각자 worktree, 메인 트리에서 switch·checkout·reset 금지, 되돌리기 기준 커밋)을 넣은 브랜치다(끝 `195af55`, origin에 있음, master와 충돌 없음). 다른 세션 요청만으로는 CLAUDE.md를 바꾸지 않아서 병합하지 않았다. 사용자가 지시하면 병합한다.
+- **대기(사용자)**: claude.ai 새 대화에서 Magus의 book_outline을 한 번 불러 확인한다(서버 배포 `p1-reupload` 뒤).
+- (처리함 2026-10-06) 서버 배포 `p1-reupload`(0-5절), `docs/worktree-rule` 병합(`e396d3f`, 사용자 지시).
 - **운영 규칙(#78)**: 같은 책을 다시 올릴 때는 새 판으로 한다(`book_import new_edition=true`, 웹 "이 책의 새 판으로 올리기", CLI `--new-edition`). `replace`는 결정·직접 남긴 미해결·닫은 미해결까지 휴지통으로 보내니 쓰지 않는다.
 - 로컬 시험 공간: **아버지 온보딩이 끝날 때까지 지우지 않는다(#83).** 그 뒤 지울 때는 폴더를 지우고 `magus reindex`
   - `data/users/father-trial/`(4.4MB): 최신본 새 임포트(2026-10-06 두 번째, 새 파서)
@@ -130,14 +148,15 @@
     - `p1-step1` 19d6a02 → 73733b6, `p1-step2` 7273e47 → 80fd87b, `p1-step3` c4af070 → bb3a279, `p1-step4` ca6a5cf → 20572fa
     - `p1-step5` 9b420a3 → eff78d5, `p1-step6` 2164715 → 49daa60
     - 태그 종류(annotated/lightweight)는 정리 전과 같다.
-  - **서버 이력 교체 완료(2026-10-06)**: 서버는 새 이력의 `p1-auth-audience`(`896633c`, 브랜치 `fix/auth-audience`)다. 옛 객체·보고서 객체는 gc로 지웠다(0-3절).
-    - **서버 되돌리기 기준 커밋: `78c9668`**(2026-10-06 반영 직전 상태와 트리가 같다. 반영 전 이미지 `magus:rollback-21b4e2a` 보관 중, 다음 배포 때 삭제). `HEAD~1`을 쓰지 않는다(CLAUDE.md 호스팅).
-    - 다음에 master를 배포할 때는 `git fetch /root/magus.bundle master && git checkout -B master FETCH_HEAD`로 한다(docs/deploy.md "업데이트"). 그 master에 `p1-auth-audience`가 들어 있어야 한다.
+  - **서버(2026-10-06 01:40부터)**: master `4df2720`(태그 `p1-reupload`). 옛 이력은 지난 배포 때 gc로 지웠다(0-3절).
+    - **서버 되돌리기 기준 커밋: `896633c`**(`p1-auth-audience`, 이번 배포 직전 실행본). 반영 전 이미지 `magus:rollback-896633c` 보관 중. 절차는 서버 `/root/deploy-20261006-reupload/ROLLBACK.txt`. `HEAD~1`을 쓰지 않는다(CLAUDE.md 호스팅).
+    - 그 전 기준 `78c9668`과 이미지 `magus:rollback-21b4e2a`는 이번 배포로 대체했다(이미지 삭제).
+    - 다음 배포도 같은 절차다: 새 bundle → `git fetch /root/magus.bundle master` → `git checkout -B master FETCH_HEAD` → `docker compose up -d --build`(docs/deploy.md "업데이트").
 - **다음: 7단계 아버지 온보딩**(`docs/onboarding-father.md` 초안). 아래 "7단계 전 확인"을 먼저 끝낸다.
 - **7단계 전 확인**
   - [x] #69~#74, #77, #76 기본 부분 구현(2026-10-06, 로컬). 최신본 재임포트·다시 올리기 시험 통과.
   - [x] `docs/onboarding-father.md`를 최신 수치와 새 흐름(Word가 원본, 새 판으로 다시 올리기)으로 고쳤다(2026-10-06). 아버지께 드릴 자료는 채팅 Claude가 다시 만든다.
-  - [ ] **서버에 master 배포**(사용자 승인 대기). 배포 뒤 서버에서 `/book`·`/issues` 화면과 outline 판 줄을 한 번 본다.
+  - [x] **서버에 master 배포**(2026-10-06 `p1-reupload`, 0-5절). 남은 것: claude.ai에서 book_outline 확인, 아버지 임포트 뒤 `/book`·`/issues` 화면 보기.
   - [x] 아버지 docx 크기: 최신본 1.4MB(한도 50MB 안).
   - [ ] 아버지 docx를 받으면 업로드 전에 크기를 확인한다(한도 `MAX_UPLOAD_MB` 50MB, #54). 넘으면 서버 `.env`에서 한도를 올리고 `up -d`.
   - [ ] 사용자가 받은함 업로드 화면(`/inbox`)을 캡처해 채팅 Claude와 검토한다(#56). 아버지가 혼자 쓸 수 있는지 본다.
@@ -492,6 +511,12 @@
 
 ## 6. 마지막 세션 요약
 
+**2026-10-06 (4)** — 결정 #80~#83, 병합, 태그 `p1-reupload`·push, 서버 배포, 아버지 자료용 데이터(세션 magus-25)
+- `docs/worktree-rule`을 병합하고(`e396d3f`) push했다. 그 뒤로 동시 세션 규칙(각자 worktree, 메인 트리에서 switch·checkout·reset 금지)을 따른다.
+- 서버를 `896633c` → `4df2720`으로 옮겼다. 백업·data 해시·되돌리기 이미지를 갖추고 했고, data 원본 해시는 같다(0-5절).
+- 아버지 자료용 데이터를 `private/reports/`에 만들었다(리포 밖).
+- 남긴 것: claude.ai 확인(사용자). 7단계 완료 때 `p1-step7` 태그.
+
 **2026-10-06 (3)** — #69~#77 구현, 다시 올리기 기본(#76), 최신본 재임포트·다시 올리기 시험(세션 magus-25, 로컬 전용)
 - 단계마다 테스트를 넣고 커밋했다(0-4절 해시). 테스트 223개 통과, ruff(F·B) 통과. 간헐 실패 `test_request_size_limit`도 이번에는 5번 모두 통과했다.
 - 다른 세션(magus-a1)이 잠깐 메인 트리 HEAD를 옮겼다가 되돌렸다. 그 뒤 그쪽은 별도 worktree만 썼다. 그 세션의 병합 브랜치는 master에 합쳤고(`9162a8b`), CLAUDE.md 운영 규칙 브랜치는 사용자 확인 대기로 남겼다.
@@ -569,4 +594,5 @@
 - **보고서 쪽수**: Word·LibreOffice가 없어 글자폭으로 추정했다(약 2.3쪽). Word에서 열어 확인이 필요하다.
 - **원격 미검증(계정 대기)**: 실제 WorkOS 로그인(웹·Claude 커넥터·토큰 갱신), Caddy 인증서 발급, R2 백업, 서버 위 복구 시험, 텔레그램 수신.
 - **웹 업로드 크기**: Starlette는 multipart 파일을 디스크로 받으므로, 큰 요청은 `Content-Length`로만 미리 거른다(파일 한도 × 20 + 1MB). 청크 전송(길이 없음)은 다 받은 뒤 파일별 한도로 거른다.
+- **저자 보고서 생성기(`author_report.py`)의 작은 오탐**(2026-10-06 발견, 고치지 않음): 같은 표기가 한 장에 두 번 있으면 장 번호가 두 번 찍힌다("제35·35장 하야시(2016)"). 이름 대조가 Lee(1969)에 '이상호'(다른 사람, 제32장)를 섞는다. 다음 저자 보고서 전에 고친다.
 - 이전부터 있던 것: 번호 충돌 가능성(멀티 프로세스), 직접 수정 뒤 reindex 필요, 토큰 추정 휴리스틱, 임베딩 API 실제 호출 미검증.
