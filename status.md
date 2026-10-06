@@ -1,12 +1,28 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-06 18:16 KST — 서버 배포 `p1-shelf-tweak`(e08bb79, 0-12절). 되돌리기 기준 `ebb98fc`.
+> 마지막 갱신: 2026-10-06 18:30 KST — 서버 배포 `p1-profile-email`(ec6c40b, 0-13절). 되돌리기 기준 `e08bb79`.
+> 그 전: 2026-10-06 18:16 KST — 서버 배포 `p1-shelf-tweak`(e08bb79, 0-12절).
 > 그 전: 2026-10-06 17:10 KST — 서버 배포 `p1-shelf-fix`(ebb98fc, 0-11절).
 > 그 전: 2026-10-06 14:5x KST — 서버 배포 `p1-shelf`(05a2659, 0-10절).
 > 그 전: 2026-10-06 아침 KST — 야간 자율 작업(책장·카테고리·제목·책 색 #92, 저자 확인 질문지 #84) 끝, 서버 배포 없음(0-9절, 보고 docs/daily/2026-10-06.md).
 > 그 전: 2026-10-06 KST — 비밀 대화 시험 결과 기록(되묻기 성공, 선택지에 원고가 섞임 → #90 수정, 커밋만), 사용자 서랍 설계안 #91(검토 대기, `docs/decisions/user-drawers.md`).
 > 2026-10-06 01시 KST — 토큰 aud 검사 강화(결정 #79)를 `p1-auth-audience`로 서버에 반영하고, 서버의 옛 git 이력을 새 이력으로 바꿨다(0-3절).
+
+## 0-13. 서버 배포 `p1-profile-email`(2026-10-06 18:28 서버 시각 KST, 세션 magus-25, 사용자 승인)
+
+- 증상(사용자): 다시 로그인해도 상단 바가 메일이 아니라 default. 표시 이름 저장은 되고, 비우면 default로 돌아감.
+- **원인(근거)**: 웹 로그인 코드는 issuer 메타데이터를 `/.well-known/oauth-authorization-server`에서 먼저 읽는다. WorkOS의 이 문서에는 `userinfo_endpoint`가 없고 `/.well-known/openid-configuration`에만 있다(두 문서의 키 목록을 직접 대조). 그래서 userinfo를 한 번도 부르지 않고 바로 '없음'을 돌려줬다.
+  - 서버 로그: 18:20:30·18:20:40·18:21:15 세 번 모두 `web login profile: email=no`. default `profile.json`의 키는 `name_at`·`schema_version`뿐(email 없음, 값은 보지 않음).
+  - 배포돼 있던 코드로 컨테이너 안에서 확인: metadata에 userinfo_endpoint 없음, `userinfo()`가 요청 없이 None.
+  - 시험이 이걸 못 잡은 이유: 가짜 인증 서버가 userinfo_endpoint를 잘못된 문서(oauth-authorization-server)에 넣고 있었다.
+- **고친 것**: ① userinfo 주소를 OAuth 메타데이터, 없으면 OIDC 디스커버리에서 찾는다(issuer와 같은 곳만). ② 그래도 못 받으면 로그인 응답의 `id_token`을 서명·iss·aud(웹 클라이언트 id)·exp 검증 뒤 메일로 쓴다(WorkOS 문서 Connect token: 응답에 id_token, claim에 email, aud = client id). 어느 쪽이든 sub가 검증한 액세스 토큰의 sub와 같을 때만 저장, 실패해도 로그인은 그대로. 로그는 `email=yes via=userinfo|id_token` 또는 `email=no via=- (이유 코드)`만(메일 값 없음, #52). WorkOS User Management API(새 API 키 필요)는 쓰지 않았다.
+- 진단용 임시 로그는 넣지 않았다(컨테이너 안에서 스크립트로 확인). 가짜 인증 서버를 WorkOS와 같은 배치로 바꾸고 id_token 대체·aud 틀림·sub 불일치·로그 시험을 더했다. 테스트 266개 통과.
+- 태그 `p1-profile-email` = `ec6c40b`(push함). 서버 기록 `/root/deploy-20261006-profile-email/`. 반영 전 `e08bb79`(**되돌리기 기준**), 반영 전 백업 `f02024b5`(1,200개, 오류 없음).
+- 되돌리기 이미지: `magus:rollback-e08bb79` 더함, 가장 오래된 `magus:rollback-05a2659` 지움(`rollback-ebb98fc` 남김).
+- 확인: healthy·재시작 0, `허용 2명`, `/healthz` ok, `/mcp` 401, data 1,200개 해시 같음, `.env` 같음, 인덱스 v16, 메모리 magus 81MiB·available 456MB, 디스크 54%. 컨테이너 안: `userinfo_endpoint` = `…/oauth2/userinfo`, 가짜 토큰으로 부르면 `http 401`(이제 실제로 부른다).
+- MCP 도구·instructions는 바뀌지 않았다(커넥터 재연결 불필요).
+- **사용자 할 일**: 로그아웃 → 다시 로그인 → 상단 바 확인. 서버 로그 `web login profile: email=yes via=…`로도 확인한다.
 
 ## 0-12. 서버 배포 `p1-shelf-tweak`(2026-10-06 18:15 서버 시각 KST, 세션 magus-25, 사용자 승인)
 
@@ -246,8 +262,8 @@ print('정리한 생각 파일', n)"
 
 - **대기(사용자)**: `C:\c` 폴더가 원래 있던 것인지 확인(사실은 6절 2026-10-06 (15)). 배포 여부.
 - (처리함) 야간 작업 아침 보고 확인(`docs/daily/2026-10-06.md`). 로컬 `USER_ID=demo-shelf DATA_DIR=./data .venv/Scripts/python -m magus serve --transport http --port 8765` → http://127.0.0.1:8765/shelf. 결정 #92(a~k)와 #84 구현 방식 확인 → 배포 여부 결정. 배포하면 커넥터 재연결 필요, 되돌리기 기준 `74bbbf4`.
-- **서버(2026-10-06 18:15부터): `p1-shelf-tweak`(e08bb79).** 되돌리기 기준 `ebb98fc`(이미지 `magus:rollback-ebb98fc`), 그 앞 `05a2659`(이미지 남김). `74bbbf4`는 이미지를 지웠다(코드로 빌드, 0-10절 제목 키 정리 먼저).
-- **대기(사용자)**: 웹으로 다시 로그인해 상단 바에 가입 메일이 보이는지 확인(메일을 받는 경로를 처음 실제로 확인하는 단계).
+- **서버(2026-10-06 18:28부터): `p1-profile-email`(ec6c40b).** 되돌리기 기준 `e08bb79`(이미지 `magus:rollback-e08bb79`), 그 앞 `ebb98fc`(이미지 남김). `05a2659`·`74bbbf4`는 이미지를 지웠다(코드로 빌드. 74bbbf4는 0-10절 제목 키 정리 먼저).
+- **대기(사용자)**: 로그아웃 → 다시 로그인 → 상단 바에 가입 메일이 보이는지 확인(서버 로그 `email=yes via=…`).
 - **대기(사용자)**: 커넥터 연결 해제 → 다시 연결 → 비밀 대화에서 '생각에 기록해 줘: 시험2'가 한 번에 되는지 확인.
 - **다음: 아버지 첫 로그인**(2026-10-06 02:17 허용 목록에 추가함). `/book`이 비어 있어야 한다. 그다음 온보딩 B절.
 - (처리함 2026-10-06, `p1-ui-terms`) `ALLOWED_USERS`에 같은 이름이 두 번이거나 같은 sub가 두 번이면 서버가 시작하지 않는다(`auth.parse_allowed`, 오류에는 항목 순서만). 배포 전 서버 값(2명)으로 로컬에서 미리 통과를 확인했다.

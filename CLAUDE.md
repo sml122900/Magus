@@ -18,7 +18,7 @@
   - 사용자 격리: 아버지 계정 추가 전에 점검했다(status.md 0-6절, `tests/test_isolation.py`).
 - 다음 배포에 함께(커밋만): #90 되묻기 선택지에서 원고 빼기.
 - **야간 자율 작업(2026-10-06 밤, #92, 서버 배포 없음)**: 책장 화면(`/shelf`, 양장본 책장 + 게시판형 목록 + 검색, 태그 `shelf-web`), 저자의 카테고리·책 색·항목 제목(도구 21 → 28, 인덱스 v15, 태그 `shelf-categories`). #92는 사용자 확인(e만 바꿈). 아침 보완과 함께 2026-10-06 14:51 `p1-shelf`로 서버에 배포했다(status.md 0-10절).
-- 서버(2026-10-06 18:15부터): master `p1-shelf-tweak`(`e08bb79`: 책장·카테고리 #92·질문지 #84·시험 수정 + 문헌 책등 확인/전체·상단 바 이름). 되돌리기 기준은 `ebb98fc`(이미지 `magus:rollback-ebb98fc`, 그 앞 `magus:rollback-05a2659`). `74bbbf4`까지 갈 때는 이미지가 없어 코드로 빌드하고 **생각 파일의 제목 키를 먼저 정리한다**(status.md 0-10절, 서버 ROLLBACK.txt).
+- 서버(2026-10-06 18:28부터): master `p1-profile-email`(`ec6c40b`: 책장·카테고리 #92·질문지 #84·시험 수정·문헌 책등·상단 바 이름 + 메일 받기 수정). 되돌리기 기준은 `e08bb79`(이미지 `magus:rollback-e08bb79`, 그 앞 `magus:rollback-ebb98fc`). `74bbbf4`까지 갈 때는 이미지가 없어 코드로 빌드하고 **생각 파일의 제목 키를 먼저 정리한다**(status.md 0-10절, 서버 ROLLBACK.txt).
   - 다음 배포도 docs/deploy.md "업데이트" 절차(`git fetch … master && git checkout -B master FETCH_HEAD`)로 한다.
 - (고침 2026-10-06 밤) `tests/test_http.py::test_request_size_limit`의 Windows 간헐 실패: 머리만 보내고 응답을 먼저 읽게 고쳤다(status.md 7절).
 - 대기 사항: 계정·키·결정·아버지 docx처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), 저자 보고서 답변. 상세는 status.md에만 적는다.

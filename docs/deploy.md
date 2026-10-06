@@ -103,7 +103,7 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 
 업데이트: 로컬에서 새 번들을 만들어 `/root/magus.bundle`에 올린 뒤 아래를 실행한다.
 
-- 지금(2026-10-06 18:15부터) 서버는 master(태그 `p1-shelf-tweak`)에 있다. 옛 이력은 지웠다.
+- 지금(2026-10-06 18:28부터) 서버는 master(태그 `p1-profile-email`)에 있다. 옛 이력은 지웠다.
 - `p1-shelf`부터 되돌릴 때는 먼저 생각 파일의 제목 키를 정리한다(서버 `/root/deploy-20261006-shelf/ROLLBACK.txt`, status.md 0-10절).
 - 로컬이 Windows면 서버 접속은 Windows OpenSSH(`C:\Windows\System32\OpenSSH\ssh.exe`)로 한다. Git Bash의 ssh는 다른 known_hosts를 읽어 "Host key verification failed"가 난다(호스트 키를 새로 받아들이지 않는다).
 - `ssh … 'bash -s' <<EOF` 안에서 `docker compose exec -T`를 부를 때는 `</dev/null`을 붙인다. 안 붙이면 exec가 스크립트의 남은 줄을 stdin으로 먹는다.
@@ -116,6 +116,7 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 
 | 날짜(KST) | 반영 | 반영 전 → 후 | 확인 |
 |---|---|---|---|
+| 2026-10-06 18:28 | `p1-profile-email`(표시 이름 메일: userinfo 주소를 OIDC 디스커버리에서, 못 받으면 검증한 id_token) | `e08bb79`(`p1-shelf-tweak`) → `ec6c40b` | 원인: WorkOS의 oauth-authorization-server 메타데이터에 userinfo_endpoint가 없어 userinfo를 부르지 않음(로그 email=no 3회, profile.json에 email 없음). 반영 전 백업 `f02024b5`(1,200개, 오류 없음). healthy·재시작 0, 허용 2명, `/healthz` ok, `/mcp` 401, data 1,200개·`.env` 해시 같음, 인덱스 v16. 컨테이너 안에서 userinfo 주소 찾음·가짜 토큰 401 확인. 되돌리기 이미지 `rollback-e08bb79` 더함, `rollback-05a2659` 삭제, `rollback-ebb98fc` 유지. 서버 기록 `/root/deploy-20261006-profile-email/` |
 | 2026-10-06 18:15 | `p1-shelf-tweak`(문헌 책등 확인/전체, 상단 바 이름 = 표시 이름·가입 메일, `/me`) | `ebb98fc`(`p1-shelf-fix`) → `e08bb79` | 반영 전 백업 스냅샷 `4593624d`(1,199개, 오류 없음). 인덱스 v16 그대로, healthy·재시작 0, 허용 2명, `/healthz` ok, `/mcp` 401, data 1,199개 해시 같음(index 제외), `.env` 해시 같음. MCP 도구·instructions가 ebb98fc와 같은 해시라 커넥터 재연결 불필요. 컨테이너 안 임시 서버로 책등·`/me` 확인. 메모리 magus 83.5MiB, 디스크 54%. 되돌리기 이미지 `rollback-ebb98fc` 더함, `rollback-74bbbf4` 삭제, `rollback-05a2659` 유지. 서버 기록 `/root/deploy-20261006-shelf-tweak/` |
 | 2026-10-06 17:09 | `p1-shelf-fix`(category_put 생각 경로·문체·문헌 안내, 템플릿 항목 내용 완화, instructions 규칙 11, CLI trash put category) | `05a2659`(`p1-shelf`) → `ebb98fc` | 반영 전 백업 스냅샷 `5f39c102`(1,198개, 오류 없음). 인덱스 v16 그대로, healthy·재시작 0, 허용 2명, `/healthz` ok, `/mcp` 401, data 1,198개 해시 같음(index 제외), `.env` 해시 같음. 메모리 magus 83.8MiB, 호스트 available 451MB, 디스크 58%(9.4G 남음). 되돌리기 이미지 `magus:rollback-05a2659` 더함, `rollback-74bbbf4` 유지. 배포 뒤 default 시험 기록(카테고리 「사례」·생각 「시험 메모」) 휴지통. 서버 기록 `/root/deploy-20261006-shelf-fix/` |
 | 2026-10-06 14:51 | `p1-shelf`(책장·카테고리·책 색·제목 #92, 웹 항목 고치기·휴지통, 저자 확인 질문지 #84, 인덱스 v16, 도구 30) | `74bbbf4`(`p1-trash`) → `05a2659` | 반영 전 백업 스냅샷 `596da508`(1,194개, 오류 없음). 인덱스 v16 자동 재생성(14:51:41), healthy·재시작 0, 허용 2명, `/healthz` ok, `/mcp` 401, data 1,194개 해시 같음(index 제외), `.env` 해시 같음. 컨테이너 안 임시 서버(/tmp, 인증 끔)로 /shelf·카테고리 목록·/shelf/new·/questions 200. 메모리 magus 131.8MiB, 호스트 available 465MB. 되돌리기 이미지 `magus:rollback-74bbbf4`, 옛 `rollback-2d9777f` 삭제. 되돌리기 전 제목 키 정리(ROLLBACK.txt). 서버 기록 `/root/deploy-20261006-shelf/` |
