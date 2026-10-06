@@ -155,6 +155,15 @@ class JwtVerifier:
             self._cache.popitem(last=False)
         return claims, reason
 
+    def id_token_claims(self, token: str, client_id: str) -> dict[str, Any] | None:
+        """웹 로그인 응답의 OIDC id_token: 서명(같은 JWKS)·iss·aud(웹 클라이언트 id)·exp를 검증한 claim. 아니면 None.
+        액세스 토큰이 아니므로 사용자 확인에는 쓰지 않고, 메일을 읽는 데만 쓴다(WorkOS 문서: id_token에 email, aud = client id)."""
+        try:
+            return jwt.decode(token, self._key(token), algorithms=ALGORITHMS, audience=client_id, issuer=self.config.issuer,
+                              options={"require": ["exp", "iss", "aud", "sub"]})
+        except (jwt.PyJWTError, ValueError):
+            return None
+
     def user_of(self, claims: Mapping[str, Any]) -> str | None:
         return self.config.allowed.get(str(claims.get("sub", "")))
 

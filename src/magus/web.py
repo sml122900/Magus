@@ -18,6 +18,7 @@ import html
 import json
 import logging
 import secrets
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Awaitable, Callable
@@ -145,6 +146,7 @@ class OAuthClient:
         self.issuer, self.client_id, self.client_secret = issuer.rstrip("/"), client_id, client_secret
         self.redirect_uri, self.resource = redirect_uri, resource
         self._meta: dict[str, Any] | None = None
+        self._oidc: dict[str, Any] | None = None
 
     def metadata(self) -> dict[str, Any]:
         if self._meta is None:
@@ -169,7 +171,24 @@ class OAuthClient:
         })
         return f"{self.metadata()['authorization_endpoint']}?{query}"
 
-    def exchange(self, code: str, verifier: str) -> str:
+    def oidc_metadata(self) -> dict[str, Any]:
+        """OIDC 디스커버리(/.well-known/openid-configuration). userinfo_endpoint는 여기에만 있다
+        (WorkOS의 oauth-authorization-server 메타데이터에는 없다 — 2026-10-06 메일을 못 받던 원인). 못 읽으면 빈 dict."""
+        if self._oidc is None:
+            try:
+                with urllib.request.urlopen(self.issuer + "/.well-known/openid-configuration", timeout=10) as r:  # noqa: S310
+                    data = json.load(r)
+                self._oidc = data if isinstance(data, dict) else {}
+            except (OSError, ValueError):
+                return {}
+        return self._oidc
+
+    def userinfo_endpoint(self) -> str | None:
+        """userinfo 주소: OAuth 메타데이터, 없으면 OIDC 디스커버리. issuer와 같은 곳의 주소만 쓴다."""
+        endpoint = str(self.metadata().get("userinfo_endpoint") or self.oidc_metadata().get("userinfo_endpoint") or "")
+        return endpoint if endpoint.startswith(self.issuer + "/") else None
+
+    def exchange(self, code: str, verifier: str) -> dict[str, Any]:
         form = {"grant_type": "authorization_code", "code": code, "redirect_uri": self.redirect_uri,
                 "client_id": self.client_id, "code_verifier": verifier, "resource": self.resource}
         if self.client_secret:
@@ -179,25 +198,28 @@ class OAuthClient:
             {"content-type": "application/x-www-form-urlencoded", "accept": "application/json"},
         )
         with urllib.request.urlopen(request, timeout=15) as r:  # noqa: S310
-            token = json.load(r).get("access_token")
-        if not token:
+            tokens = json.load(r)
+        if not isinstance(tokens, dict) or not tokens.get("access_token"):
             raise RuntimeError("토큰 응답에 access_token이 없다")
-        return str(token)
+        return tokens  # access_token, (scope에 openid가 있으면) id_token 등
 
-    def userinfo(self, access_token: str) -> dict[str, Any] | None:
+    def userinfo(self, access_token: str) -> tuple[str, dict[str, Any] | None]:
         """OIDC userinfo(WorkOS: POST /oauth2/userinfo, Bearer 액세스 토큰 → sub·email·email_verified).
-        scope에 email이 있어야 메일이 온다(웹 로그인은 openid profile email을 청한다). 실패하면 None(로그인은 막지 않는다)."""
-        endpoint = self.metadata().get("userinfo_endpoint")
+        scope에 email이 있어야 메일이 온다(웹 로그인은 openid profile email을 청한다).
+        (결과 이유, 응답). 이유는 로그용이고 값을 담지 않는다: ok | no-endpoint | http <상태> | error. 실패해도 로그인은 막지 않는다."""
+        endpoint = self.userinfo_endpoint()
         if not endpoint:
-            return None
-        request = urllib.request.Request(str(endpoint), b"", {"authorization": f"Bearer {access_token}", "accept": "application/json"},
+            return "no-endpoint", None
+        request = urllib.request.Request(endpoint, b"", {"authorization": f"Bearer {access_token}", "accept": "application/json"},
                                          method="POST")
         try:
-            with urllib.request.urlopen(request, timeout=10) as r:  # noqa: S310 - 설정한 issuer의 메타데이터에 있는 주소만
+            with urllib.request.urlopen(request, timeout=10) as r:  # noqa: S310 - issuer와 같은 곳의 주소만(userinfo_endpoint)
                 data = json.load(r)
+        except urllib.error.HTTPError as e:
+            return f"http {e.code}", None
         except (OSError, ValueError):
-            return None
-        return data if isinstance(data, dict) else None
+            return "error", None
+        return ("ok", data) if isinstance(data, dict) else ("error", None)
 
 
 def _pkce() -> tuple[str, str]:
@@ -337,7 +359,8 @@ class Web(ShelfPages):
                               status=400)
         assert self.oauth is not None and self.verifier is not None
         try:
-            token = await run_in_threadpool(self.oauth.exchange, code, str(pending["v"]))
+            tokens = await run_in_threadpool(self.oauth.exchange, code, str(pending["v"]))
+            token = str(tokens["access_token"])
         except (OSError, ValueError, RuntimeError) as e:
             log.warning("web login: token exchange failed (%s)", type(e).__name__)
             return self._page("로그인", '<p class="msg err">로그인에 실패했습니다. <a href="/login">다시 로그인</a></p>', status=502)
@@ -361,7 +384,7 @@ class Web(ShelfPages):
                 f"<p>운영자에게 아래 사용자 id를 알려 주세요.</p><p><code>{html.escape(sub)}</code></p>",
                 status=403,
             )
-        await run_in_threadpool(self._remember_email, uid, str(claims.get("sub", "")), token)
+        await run_in_threadpool(self._remember_email, uid, str(claims.get("sub", "")), tokens)
         response = RedirectResponse(str(pending.get("n") or "/book"), status_code=303)
         self._cookie(response, SESSION_COOKIE, sign({"uid": uid, "sid": secrets.token_hex(8)}, self.secret, "session",
                                                     SESSION_TTL), SESSION_TTL)
@@ -369,15 +392,33 @@ class Web(ShelfPages):
         log.info("web login user=%s", uid)
         return response
 
-    def _remember_email(self, uid: str, sub: str, token: str) -> None:
-        """웹 로그인 때 userinfo의 메일을 프로필에 적는다. userinfo의 sub가 검증한 토큰의 sub와 같을 때만.
-        로그에는 메일을 남기지 않는다(받았는지 여부만, #52)."""
-        if self.oauth is None:
+    def _remember_email(self, uid: str, sub: str, tokens: dict[str, Any]) -> None:
+        """웹 로그인 때 메일을 프로필에 적는다. ① userinfo(OIDC 디스커버리의 주소) ② 없으면 로그인 응답의 id_token
+        (서명·iss·aud=웹 클라이언트 id·exp 검증). 어느 쪽이든 sub가 검증한 액세스 토큰의 sub와 같을 때만 쓴다.
+        로그에는 메일을 남기지 않는다(어느 길로 받았는지·못 받은 이유만, #52). 실패해도 로그인은 그대로다."""
+        if self.oauth is None or self.verifier is None:
             return
-        info = self.oauth.userinfo(token)
-        email = str((info or {}).get("email") or "").strip()
-        ok = bool(info) and str(info.get("sub", "")) == sub and "@" in email and len(email) <= 254
-        log.info("web login profile: email=%s", "yes" if ok else "no")
+
+        def usable(claims: dict[str, Any] | None) -> str:
+            if not claims:
+                return ""
+            email = str(claims.get("email") or "").strip()
+            if str(claims.get("sub", "")) != sub:
+                return "sub-mismatch"
+            return email if "@" in email and len(email) <= 254 else "no-email"
+
+        reason, info = self.oauth.userinfo(str(tokens["access_token"]))
+        email = usable(info)
+        via, why = "userinfo", (reason if reason != "ok" else (email if email in ("sub-mismatch", "no-email") else ""))
+        if "@" not in email:
+            raw = str(tokens.get("id_token") or "")
+            claims = self.verifier.id_token_claims(raw, self.oauth.client_id) if raw else None
+            email = usable(claims)
+            via = "id_token"
+            state = "none" if not raw else "invalid" if claims is None else "ok" if "@" in email else email or "no-email"
+            why += f"; id_token={state}"  # 이유 코드만(메일 값은 넣지 않는다)
+        ok = "@" in email
+        log.info("web login profile: email=%s via=%s%s", "yes" if ok else "no", via if ok else "-", "" if ok else f" ({why})")
         if not ok:
             return
         profile = self.store.get_profile(uid)

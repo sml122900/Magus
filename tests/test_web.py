@@ -120,7 +120,10 @@ def fake_issuer():
             path = urllib.parse.urlparse(self.path).path
             if path == "/.well-known/oauth-authorization-server":
                 self._json({"issuer": issuer, "authorization_endpoint": f"{issuer}/authorize",
-                            "token_endpoint": f"{issuer}/token", "jwks_uri": f"{issuer}/jwks", "userinfo_endpoint": f"{issuer}/userinfo"})
+                            "token_endpoint": f"{issuer}/token", "jwks_uri": f"{issuer}/jwks"})
+            elif path == "/.well-known/openid-configuration":
+                self._json({"issuer": issuer, "authorization_endpoint": f"{issuer}/authorize", "token_endpoint": f"{issuer}/token",
+                            "jwks_uri": f"{issuer}/jwks", "userinfo_endpoint": f"{issuer}/userinfo"})
             elif path == "/jwks":
                 self._json({"keys": [{**jwk, "kid": "k1", "alg": "RS256", "use": "sig"}]})
             else:
@@ -132,6 +135,8 @@ def fake_issuer():
                 sub = jwt.decode(token, options={"verify_signature": False})["sub"]
                 if sub == "sub-liar":  # 토큰과 다른 sub를 돌려주는 경우: 메일을 받아 적지 않아야 한다
                     return self._json({"sub": "sub-someone", "email": "liar@example.com"})
+                if sub == "sub-noinfo":  # userinfo가 실패하면 id_token으로
+                    return self._json({"error": "server_error"}, 500)
                 return self._json({"sub": sub, "email": f"{sub}@example.com", "email_verified": True})
             form = dict(urllib.parse.parse_qsl(self.rfile.read(int(self.headers["content-length"])).decode()))
             pending = state.pop(form.get("code", ""), None)
@@ -145,7 +150,10 @@ def fake_issuer():
                       "iat": now, "exp": now + bad.get("exp_in", 600)}
             token = jwt.encode(claims, bad.get("key", ISSUER_KEY), algorithm="RS256", headers={"kid": "k1"})
             issued.append(token)
-            self._json({"access_token": token, "token_type": "Bearer"})
+            id_claims = {"sub": pending["sub"], "iss": issuer, "aud": bad.get("id_aud", form.get("client_id")), "iat": now,
+                         "exp": now + 600, "email": f"{pending['sub']}@id.example.com", "email_verified": True}
+            id_token = jwt.encode(id_claims, ISSUER_KEY, algorithm="RS256", headers={"kid": "k1"})
+            self._json({"access_token": token, "token_type": "Bearer", "id_token": id_token})
 
         def log_message(self, *args):
             pass
@@ -403,7 +411,8 @@ def test_display_name_from_email_and_editable(server_proc, fake_issuer):
     메일·표시 이름은 로그에 남지 않고, 사용자마다 따로다."""
     issuer, issuer_state, _ = fake_issuer
     base, data_dir, log_path = server_proc({
-        "PUBLIC_URL": "http://127.0.0.1:{port}", "AUTH_ISSUER": issuer, "ALLOWED_USERS": "sub-alice=alice,sub-bob=bob,sub-liar=liar",
+        "PUBLIC_URL": "http://127.0.0.1:{port}", "AUTH_ISSUER": issuer,
+        "ALLOWED_USERS": "sub-alice=alice,sub-bob=bob,sub-liar=liar,sub-noinfo=noinfo",
         "SESSION_SECRET": "x" * 40, "WEB_CLIENT_ID": "web-client",
     })
     with httpx2.Client(base_url=base, timeout=120) as alice, httpx2.Client(base_url=base, timeout=120) as bob:
@@ -424,16 +433,20 @@ def test_display_name_from_email_and_editable(server_proc, fake_issuer):
         cleared = alice.post("/me", data={"csrf": csrf, "display_name": "   "}, follow_redirects=True).text
         assert ">sub-alice@example.com</a>" in cleared  # 비우면 다시 메일
     with httpx2.Client(base_url=base, timeout=120) as liar:
-        _login(liar, issuer_state, "sub-liar")
-        assert ">liar</a>" in liar.get("/inbox").text  # userinfo의 sub가 다르면 메일을 적지 않는다(내부 이름)
+        _login(liar, issuer_state, "sub-liar", {"id_aud": "다른-클라이언트"})
+        assert ">liar</a>" in liar.get("/inbox").text  # userinfo의 sub가 다르고 id_token의 aud도 틀리면 메일을 적지 않는다
+    with httpx2.Client(base_url=base, timeout=120) as noinfo:
+        _login(noinfo, issuer_state, "sub-noinfo")
+        assert ">sub-noinfo@id.example.com</a>" in noinfo.get("/inbox").text  # userinfo가 실패하면 검증한 id_token의 메일
     profile = json.loads((data_dir / "users" / "alice" / "profile.json").read_text(encoding="utf-8"))
     assert profile["email"] == "sub-alice@example.com" and "display_name" not in profile and profile["schema_version"] == 1
     assert json.loads((data_dir / "users" / "bob" / "profile.json").read_text(encoding="utf-8"))["display_name"] == "밥"
     assert not (data_dir / "users" / "liar" / "profile.json").exists()
     time.sleep(0.3)
     log = log_path.read_text(encoding="utf-8")
-    assert "web login profile: email=yes" in log and "web login profile: email=no" in log
-    for secret in ("sub-alice@example.com", "liar@example.com", "표시명시험", "교수"):
+    assert "web login profile: email=yes via=userinfo" in log and "web login profile: email=yes via=id_token" in log
+    assert "web login profile: email=no via=- (sub-mismatch; id_token=invalid)" in log  # 이유 코드만
+    for secret in ("sub-alice@example.com", "liar@example.com", "sub-noinfo@id.example.com", "sub-liar@id.example.com", "표시명시험", "교수"):
         assert secret not in log  # 메일과 표시 이름은 로그에 없다(#52)
 
 

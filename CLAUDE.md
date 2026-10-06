@@ -420,7 +420,7 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
     - 원격: 인증 서버에 OAuth 인가 코드 + PKCE(S256) + `resource=PUBLIC_URL/mcp`로 로그인한다. 토큰은 MCP와 같은 JwtVerifier로 검증한다.
     - 실패 화면은 둘로 나뉜다. 토큰 무효는 401("로그인 토큰을 받아들이지 못했습니다", 원인은 서버 로그)이다. 허용 목록 밖은 403("허용 목록에 없습니다")이고, **본인의 사용자 id를 화면에 보여 준다**(운영자가 목록에 넣을 값).
     - 로컬(인증 없는 HTTP, 루프백 전용): `USER_ID`로 바로 로그인한다.
-  - **상단 바 이름**: 표시 이름, 없으면 가입 메일, 없으면 내부 이름(user id). 메일은 웹 로그인 콜백에서 인증 서버 userinfo(WorkOS `POST /oauth2/userinfo`, Bearer 액세스 토큰, scope `openid profile email`)로 받아, userinfo의 sub가 검증한 토큰의 sub와 같을 때만 `profile.json`에 적는다. 이름을 누르면 `/me`(내 정보: 표시 이름 바꾸기, 40자, CSRF, 비우면 메일로. 메일은 보이기만). 메일·표시 이름은 로그에 남기지 않는다(받았는지 yes/no만, #52).
+  - **상단 바 이름**: 표시 이름, 없으면 가입 메일, 없으면 내부 이름(user id). 메일은 웹 로그인 콜백에서 ① 인증 서버 userinfo(WorkOS `POST /oauth2/userinfo`, Bearer 액세스 토큰, scope `openid profile email`. **주소는 OIDC 디스커버리 `/.well-known/openid-configuration`에서 찾는다** — WorkOS의 `oauth-authorization-server` 메타데이터에는 userinfo_endpoint가 없어 처음 배포에서 메일을 못 받았다) ② 실패하면 로그인 응답의 `id_token`(서명·iss·aud=웹 클라이언트 id·exp 검증, WorkOS 문서: email claim)으로 받는다. 어느 쪽이든 sub가 검증한 액세스 토큰의 sub와 같을 때만 `profile.json`에 적는다. 로그는 `email=yes via=userinfo|id_token` 또는 `email=no (이유 코드)`만. 이름을 누르면 `/me`(내 정보: 표시 이름 바꾸기, 40자, CSRF, 비우면 메일로. 메일은 보이기만). 메일·표시 이름은 로그에 남기지 않는다(받았는지 yes/no만, #52).
   - 세션은 HMAC 서명 쿠키(HttpOnly, SameSite=Lax, https면 Secure, 12시간)다. 모든 POST는 CSRF 토큰을 확인한다(`magus/signing.py`).
   - 내려받기: book_export(원격·HTTP)는 서명·만료(24시간) 링크를 돌려준다. 링크만으로는 받을 수 없고, 같은 사용자로 로그인해 있어야 한다.
 - 저장: 파일 + SQLite를 유지한다(Store 인터페이스 뒤. Postgres는 P2).
