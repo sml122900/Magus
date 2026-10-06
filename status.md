@@ -1,9 +1,32 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-06 아침 KST — 야간 자율 작업(책장·카테고리·제목·책 색 #92, 저자 확인 질문지 #84) 끝, 서버 배포 없음(0-9절, 보고 docs/daily/2026-10-06.md).
+> 마지막 갱신: 2026-10-06 14:5x KST — 서버 배포 `p1-shelf`(05a2659, 0-10절). 되돌리기 기준 `74bbbf4`.
+> 그 전: 2026-10-06 아침 KST — 야간 자율 작업(책장·카테고리·제목·책 색 #92, 저자 확인 질문지 #84) 끝, 서버 배포 없음(0-9절, 보고 docs/daily/2026-10-06.md).
 > 그 전: 2026-10-06 KST — 비밀 대화 시험 결과 기록(되묻기 성공, 선택지에 원고가 섞임 → #90 수정, 커밋만), 사용자 서랍 설계안 #91(검토 대기, `docs/decisions/user-drawers.md`).
 > 2026-10-06 01시 KST — 토큰 aud 검사 강화(결정 #79)를 `p1-auth-audience`로 서버에 반영하고, 서버의 옛 git 이력을 새 이력으로 바꿨다(0-3절).
+
+## 0-10. 서버 배포 `p1-shelf`(2026-10-06 14:51 서버 시각 KST, 세션 magus-25, 사용자 승인)
+
+- 태그 `p1-shelf` = `pre-deploy-review` = `05a2659`(annotated, push함). 번들 sha256 852c02cd…(로컬·서버 같음). 서버 기록 `/root/deploy-20261006-shelf/`(ROLLBACK.txt, head-before/after.txt, data-before/after.sha, env-before.sha, backup-before.log, up.log).
+- 반영 전 실행 커밋: `74bbbf4`(`p1-trash`, 작업 트리 깨끗). **이것이 이번 되돌리기 기준이다.** 반영 후 `05a2659`. `p1-auth-audience`·`74bbbf4` 포함 확인, Dockerfile·deploy/ 변경 0.
+- 반영 전 백업: 성공, 스냅샷 `596da508`, 1,194개 11.457MiB, 오류 없음(아버지 쓰기로 802 → 1,194).
+- 되돌리기 이미지: `magus:rollback-74bbbf4`(a1ab0262b9d9)를 남기고 옛 `magus:rollback-2d9777f`는 지웠다.
+- 확인: 로그 `인덱스 스키마 v16 생성 → 파일에서 재생성`(14:51:41), `허용 2명`, healthy·재시작 0, 바깥 `/healthz` ok, `/mcp` 401 + resource_metadata, 인덱스 user_version 16, data 원본 1,194개 해시 같음(index 제외, 서버 시험 뒤에도 같음), `.env` 해시 같음, 메모리 magus 131.8MiB·caddy 28.9MiB·호스트 available 465MB, 디스크 58%.
+- 서버 시험(실데이터 안 씀): 컨테이너 안 `/tmp/shelftest`에 시험 공간을 만들어 루프백 8799 임시 서버(인증·알림 끔)로 `/shelf`(책장 메뉴·카테고리 책·카테고리 추가), 카테고리 목록(항목·고치기 링크), `/shelf/new`(색 격자 18), `/questions`(연도 불일치) 모두 200. 임시 서버 종료, 시험 폴더 지움.
+- **되돌릴 때 주의**: 제목을 붙이거나 웹에서 고친 생각이 생긴 뒤 되돌리면 옛 코드(74bbbf4)의 reindex가 생각 파일의 `title`·`title_by`·`edited_at`·`edited_by` 키에서 멈춘다. 되돌리기 **전에**(새 코드가 도는 동안) ① 백업 `cd /opt/magus/deploy && docker compose --profile backup run --rm backup </dev/null`(제목은 스냅샷에 남는다) ② 아래 정리 명령(생각 파일에서 네 키를 뺀다. 제목·고친 기록은 잃는다) ③ 이미지 되돌리기 `docker tag magus:rollback-74bbbf4 magus:latest && docker compose up -d --no-build magus`(코드까지면 `cd /opt/magus && git reset --hard 74bbbf4 && cd deploy && docker compose up -d --build`). 카테고리·책장 설정·answers.md는 옛 코드가 읽지 않아 그대로 둬도 된다. 같은 내용이 서버 ROLLBACK.txt에 있다.
+  ```
+docker exec magus-magus-1 /app/.venv/bin/python -c "import json,pathlib
+n=0
+for p in [*pathlib.Path('/data/users').glob('*/shelf/casper/*.json'), *pathlib.Path('/data/users').glob('*/trash/shelf/casper/*.json')]:
+    d=json.loads(p.read_text(encoding='utf-8')); k=[x for x in ('title','title_by','edited_at','edited_by') if x in d]
+    if k:
+        for x in k: d.pop(x)
+        p.write_text(json.dumps(d,ensure_ascii=False,indent=2)+chr(10),encoding='utf-8'); n+=1
+print('정리한 생각 파일', n)"
+  ```
+  (로컬에서 시험 사본으로 돌려 봤다: 네 키만 빠지고 옛 Idea 필드만 남는다.)
+- **사용자 할 일**: claude.ai에서 Magus 커넥터 연결 해제 → 다시 연결 → 비밀 대화에서 시험(도구 9개가 늘고 instructions·도구 설명이 바뀌었다).
 
 ## 0-9. 야간 자율 작업(2026-10-06 밤, 세션 magus-25) — 끝(서버 배포 없음)
 
@@ -197,7 +220,8 @@
 
 - **대기(사용자)**: `C:\c` 폴더가 원래 있던 것인지 확인(사실은 6절 2026-10-06 (15)). 배포 여부.
 - (처리함) 야간 작업 아침 보고 확인(`docs/daily/2026-10-06.md`). 로컬 `USER_ID=demo-shelf DATA_DIR=./data .venv/Scripts/python -m magus serve --transport http --port 8765` → http://127.0.0.1:8765/shelf. 결정 #92(a~k)와 #84 구현 방식 확인 → 배포 여부 결정. 배포하면 커넥터 재연결 필요, 되돌리기 기준 `74bbbf4`.
-- **서버는 여전히 `p1-trash`(74bbbf4)다.** 밤의 태그 `shelf-web`·`shelf-categories`·`questions`는 GitHub 백업용이다.
+- **서버(2026-10-06 14:51부터): `p1-shelf`(05a2659).** 되돌리기 기준 `74bbbf4`(이미지 `magus:rollback-74bbbf4`), 되돌리기 전 정리 명령은 0-10절.
+- **대기(사용자)**: claude.ai에서 Magus 커넥터 연결 해제 → 다시 연결 → 비밀 대화에서 시험.
 - **다음: 아버지 첫 로그인**(2026-10-06 02:17 허용 목록에 추가함). `/book`이 비어 있어야 한다. 그다음 온보딩 B절.
 - (처리함 2026-10-06, `p1-ui-terms`) `ALLOWED_USERS`에 같은 이름이 두 번이거나 같은 sub가 두 번이면 서버가 시작하지 않는다(`auth.parse_allowed`, 오류에는 항목 순서만). 배포 전 서버 값(2명)으로 로컬에서 미리 통과를 확인했다.
 - (처리함 2026-10-06) 재연결 + 비밀 대화 시험: 되묻기 성공, 내부 이름 없음(0-8절). 선택지에 원고가 섞인 것은 #90으로 고쳤다.
