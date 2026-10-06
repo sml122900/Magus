@@ -34,9 +34,11 @@ from magus.book.importer import (
 from magus.ids import utcnow
 from magus.melchior.bibliography import BibReport, import_bibliography
 from magus.melchior.check import after_refs_changed
+from magus.melchior.questions import TYPES, build_questions
 from magus.store import BookTitles, Edition, Issue, Store
 from magus.store.base import STALE_REASONS, ChapterMeta
 
+QUESTION_LINES = 5  # 리포트에 질문을 종류마다 몇 줄까지 옮기나
 SAME_BOOK_MIN = 0.3  # 장 제목 겹침이 이보다 적으면 다른 책으로 보고 멈춘다
 UPLOAD_NOTE = "수정본 E{n} 업로드: {name}"
 _QUOTES = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'", "「": '"', "」": '"'})
@@ -111,6 +113,10 @@ class ReuploadReport:
     decisions: int = 0
     bib: BibReport = field(default_factory=BibReport)
     files: dict[str, str] = field(default_factory=dict)
+    # 답해 주실 질문(#84): 올리기 전후를 비교한다. (종류, 질문 문장)
+    questions_new: list[tuple[str, str]] = field(default_factory=list)
+    questions_closed: list[tuple[str, str]] = field(default_factory=list)
+    questions_waiting: list[tuple[str, str]] = field(default_factory=list)  # 'Word에서' 답했는데 이번 원고에도 그대로
 
     def summary(self) -> str:
         names = lambda rows: ", ".join(r.display for r in rows)  # noqa: E731
@@ -135,6 +141,11 @@ class ReuploadReport:
             f"- 그대로 둔 것: 결정 {self.decisions}건, 직접 남긴 확인 요청 {self.direct_issues}건, 생각·문헌·문체",
             f"- {self.bib.render().splitlines()[0]}",
             *(f"  {line}" for line in self.bib.render().splitlines()[1:]),
+            f"- 답해 주실 질문: 새로 생김 {len(self.questions_new)} · 저절로 닫힘 {len(self.questions_closed)} · "
+            f"답했지만 원고에 아직 그대로 {len(self.questions_waiting)}",
+            *(f"  - {label}: {kind} — {text[:100]}" for label, rows in (
+                ("새로 생김", self.questions_new), ("저절로 닫힘", self.questions_closed),
+                ("아직 그대로", self.questions_waiting)) for kind, text in rows[:QUESTION_LINES]),
         ]
         return "\n".join(lines)
 
@@ -184,6 +195,7 @@ def reupload_manuscript(
     if not split.chapters:
         raise ValueError("'제N장' 제목을 하나도 찾지 못했다. 원고의 장 제목 표기를 확인해 주세요.")
     old_list = store.list_chapters(user_id, project.id)
+    questions_before = {q.id: q for q in build_questions(store, user_id, project.id)}  # 올리기 전 질문(비교용)
     overlap = title_overlap([c.title for c in old_list], [c.title for c in split.chapters])
     if overlap < SAME_BOOK_MIN and not force:
         raise ValueError(
@@ -240,6 +252,11 @@ def reupload_manuscript(
 
     report.bib = import_bibliography(store, user_id, "\n".join(b.text for b in split.bib_blocks if b.kind == "para"))
     after_refs_changed(store, user_id)
+    questions_after = {q.id: q for q in build_questions(store, user_id, project.id)}
+    report.questions_new = [(TYPES[q.type], q.text) for k, q in questions_after.items() if k not in questions_before]
+    report.questions_closed = [(TYPES[q.type], q.text) for k, q in questions_before.items() if k not in questions_after]
+    report.questions_waiting = [(TYPES[q.type], q.text) for k, q in questions_after.items()
+                                if q.state == "waiting" and k in questions_before]
     report.decisions = len(store.list_decisions(user_id, project.id))
     report.direct_issues = sum(1 for i in store.list_issues(user_id, project.id, None) if i.origin != "import_comment")
     store.add_edition(

@@ -40,6 +40,8 @@ from magus.config import Settings
 from magus.ids import local_time
 from magus.inbox import INBOX_TYPES, LimitError, mb, save_upload, size_text
 from magus.melchior.author_report import cite_label
+from magus.melchior.questions import TYPES as QUESTION_TYPES
+from magus.melchior.questions import build_questions
 from magus.melchior.report import build_cite_report
 from magus.signing import sign, unsign
 from magus.store import Store
@@ -51,6 +53,7 @@ SESSION_COOKIE, OAUTH_COOKIE = "magus_session", "magus_oauth"
 SESSION_TTL, OAUTH_TTL, DOWNLOAD_TTL = 12 * 3600, 600, 24 * 3600
 LIGHTS = {"verified": ("🟢", "확인"), "unverified": ("🟡", "미확인"), "unknown": ("🔴", "참고문헌에 없음"),
           "uncertain": ("⚪", "미연결")}
+QUESTION_STATES = {"open": "열림", "waiting": "답함·원고 반영 대기", "answered": "답함"}
 ISSUE_KIND_NAMES = {"citation": "문헌 확인", "fact": "사실·수치 확인", "general": "기타"}
 # 생각·문헌·문체는 '책장' 하나로 모았다(2026-10-06). 책장 화면은 magus.webshelf.
 NAV = (("/book", "원고"), ("/inbox", "받은함"), ("/checklist", "인용 체크리스트"), ("/issues", "확인 요청"), ("/shelf", "책장"))
@@ -107,6 +110,7 @@ input:focus,select:focus{border-color:var(--primary)}
 input[type=file]:focus-visible::file-selector-button{outline:3px solid var(--primary);outline-offset:2px}
 label{display:inline-block;margin:4px 16px 4px 0;max-width:100%}select{width:auto}
 label.off{color:var(--mute)}
+.qlist{list-style:none;padding:0;margin:12px 0}.qlist .card{margin:12px 0}.qlist .muted{color:var(--ink2)}
 details{margin:12px 0}summary{cursor:pointer;color:var(--ink2);padding:4px 0}
 form.inline{display:inline}
 form.busy{pointer-events:none}
@@ -242,7 +246,7 @@ class Web(ShelfPages):
             ("/logout", ["POST"], self.logout), ("/inbox", ["GET"], self.inbox), ("/inbox/upload", ["POST"], self.upload),
             ("/inbox/delete", ["POST"], self.delete), ("/book", ["GET"], self.book), ("/book/import", ["POST"], self.do_import),
             ("/book/export", ["POST"], self.do_export), ("/download/{token}", ["GET"], self.download),
-            ("/checklist", ["GET"], self.checklist), ("/issues", ["GET"], self.issues),
+            ("/checklist", ["GET"], self.checklist), ("/issues", ["GET"], self.issues), ("/questions", ["GET"], self.questions),
             *self.shelf_routes(),
         ]
         for path, methods, handler in routes:
@@ -441,7 +445,8 @@ class Web(ShelfPages):
             f'<td class="num">{edition_of(p.id)}</td><td class="num">{local_time(p.updated_at)}</td>'
             f'<td><form method="post" action="/book/export" class="inline">{self._csrf_input(session)}'
             f'<input type="hidden" name="project_id" value="{html.escape(p.id)}"><button>docx 내보내기</button></form> '
-            f'<a href="/checklist?project={urllib.parse.quote(p.id)}">인용 체크리스트</a></td></tr>'
+            f'<a href="/checklist?project={urllib.parse.quote(p.id)}">인용 체크리스트</a> · '
+            f'<a href="/questions?project={urllib.parse.quote(p.id)}">답해 주실 질문</a></td></tr>'
             for p in projects
         ) or '<tr><td colspan="7">아직 원고가 없습니다. 받은함에 docx(또는 pdf)를 올리고 아래에서 임포트하세요.</td></tr>'
         options = "".join(
@@ -565,6 +570,53 @@ class Web(ShelfPages):
 <p><a href="?project={q}&status=open">열린 것</a> · <a href="?project={q}&status=closed">닫힌 것</a> · <a href="?project={q}&status=all">전체</a> | {filters}</p>
 <table><tr><th>번호</th><th>장</th><th>누가</th><th>종류</th><th>내용</th></tr>{rows or '<tr><td colspan="5">없음</td></tr>'}</table>"""
         return self._page("확인 요청", body, session)
+
+    # --- 답해 주실 질문(#84, 조회 전용): 답은 Claude 대화로(book_answer) ---
+    async def questions(self, request: Request) -> Response:
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        project = self.store.get_project(uid, request.query_params.get("project") or None)
+        if project is None:
+            return self._page("답해 주실 질문", "<p>원고가 없습니다. <a href=\"/book\">원고</a>에서 임포트하세요.</p>", session)
+        status = request.query_params.get("status") if request.query_params.get("status") in ("open", "waiting", "all") else "open"
+        kind = request.query_params.get("type") if request.query_params.get("type") in QUESTION_TYPES else None
+        everything = await run_in_threadpool(build_questions, self.store, uid, project.id)
+        chosen = [q for q in everything if (status == "all" or q.state == status) and (kind is None or q.type == kind)]
+        counts = {s: sum(1 for q in everything if q.state == s) for s in QUESTION_STATES}
+        q = urllib.parse.quote(project.id)
+
+        def options(question) -> str:  # 저자에게는 코드 대신 설명만(다른 문헌 고르기는 대화로)
+            return " / ".join(html.escape(label.replace("(그 key)", "")) for _, label in question.options)
+
+        def answered(question) -> str:
+            if not question.answer:
+                return ""
+            label = dict(question.options).get(question.answer.get("choice", ""), question.answer.get("choice", ""))
+            return (f'<p class="muted">답: {html.escape(label.replace("(그 key)", ""))}'
+                    + (f" · 결정 {html.escape(question.answer['decision'])}" if question.answer.get("decision") else "")
+                    + f" · {QUESTION_STATES[question.state]}</p>")
+
+        cards = "".join(
+            f'<li class="card"><p><b>{QUESTION_TYPES[x.type]}</b> · {QUESTION_STATES[x.state]}</p>'
+            f"<p>{html.escape(x.text)}</p><p class=\"muted\">고를 수 있는 답: {options(x)}</p>{answered(x)}</li>"
+            for x in chosen
+        )
+        types = " · ".join(
+            f'<a href="?project={q}&status={status}&type={t}">{name} {sum(1 for x in everything if x.type == t)}</a>'
+            for t, name in QUESTION_TYPES.items() if any(x.type == t for x in everything)
+        )
+        body = (
+            f"<p>『{html.escape(project.title)}』 · 질문 {len(everything)}건(열림 {counts['open']} · 원고 반영 대기 {counts['waiting']} · "
+            f"답함 {counts['answered']})</p>"
+            "<p>Magus가 원고와 참고문헌을 맞춰 보다가 저자만 답할 수 있는 것을 모았습니다. "
+            "답은 Claude에게 말씀해 주세요. 예: \"답해 주실 질문 보여 줘\", \"그 연도는 본문을 고칠게\"</p>"
+            f'<p><a href="?project={q}&status=open">열린 것</a> · <a href="?project={q}&status=waiting">원고 반영 대기</a> · '
+            f'<a href="?project={q}&status=all">전체</a>' + (f" | {types}" if types else "") + "</p>"
+            + (f'<ol class="qlist">{cards}</ol>' if cards else '<p class="msg">없음</p>')
+        )
+        return self._page("답해 주실 질문", body, session)
 
     # --- 인용 체크리스트 ---
     async def checklist(self, request: Request) -> Response:

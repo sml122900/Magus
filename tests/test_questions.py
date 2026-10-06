@@ -103,3 +103,68 @@ async def test_questions_are_per_user(settings: Settings, store: LocalStore):
         assert "저자에게 물을 것 0건" in _text(await c.call_tool("book_questions", {}))
         assert (await c.call_tool("book_answer", {"question_id": "year:brook2008", "choice": "fix_text"})).is_error
     assert store.get_answers("alice", "book") == "" and store.list_decisions("alice", "book") == []
+
+
+def test_reupload_report_compares_questions(store: LocalStore, tmp_path):
+    """수정본 리포트의 '답해 주실 질문' 줄: 새로 생김 · 저절로 닫힘 · 답했지만 원고에 아직 그대로."""
+    from test_docx_features import Manuscript
+
+    from magus.book.importer import import_manuscript
+    from magus.book.reupload import reupload_manuscript
+    from magus.melchior.questions import answer_question
+
+    brook = "Brook, T. (2010). The Troubled Empire: China in the Yuan and Ming Dynasties. Belknap."
+
+    def edition(n: int, text: str):
+        m = Manuscript()
+        m.heading("제1장 물가").para(text)
+        return m.bibliography([brook]).save(tmp_path / f"e{n}.docx")
+
+    import_manuscript(store, "alice", edition(1, "Brook(2008)도 있다."), project_id="b")
+    [year] = [q for q in build_questions(store, "alice", "b") if q.id == "year:brook2008"]
+    answer_question(store, "alice", "b", year, "fix_text", "2010이 맞다")
+    same = reupload_manuscript(store, "alice", edition(2, "Brook(2008)도 있다. 가나다(2019)의 말."), "b").summary()
+    assert "- 답해 주실 질문: 새로 생김 1 · 저절로 닫힘 0 · 답했지만 원고에 아직 그대로 1" in same
+    assert "  - 새로 생김: 미연결 표기 — 제1장 가나다(2019): 참고문헌의 어느 문헌인가요?" in same
+    assert "  - 아직 그대로: 연도 불일치 — 제1장 본문 Brook(2008) ↔ 참고문헌 Brook(2010)" in same
+    fixed = reupload_manuscript(store, "alice", edition(3, "Brook(2010)도 있다. 가나다(2019)의 말."), "b")
+    assert "- 답해 주실 질문: 새로 생김 0 · 저절로 닫힘 1 · 답했지만 원고에 아직 그대로 0" in fixed.summary()
+    assert "답해 주실 질문" in (store.root / fixed.files["report"]).read_text(encoding="utf-8")
+
+
+def test_questions_web_page(tmp_path):
+    """웹 /questions(조회 전용): 코드 대신 설명, 상태 거르기, 이스케이프, 사용자별."""
+    import os
+    import subprocess
+    import sys
+
+    import httpx2
+    from test_http import _free_port, _wait_healthy
+
+    data_dir = tmp_path / "data"
+    store = LocalStore(data_dir)
+    _book(store)
+    import_bibliography(store, "alice", "Zed, Z. (1999). Evil <script>alert(1)</script> title. Press.\n")
+    store.close()
+    port = _free_port()
+    env = {**os.environ, "USER_ID": "alice", "DATA_DIR": str(data_dir), "EMBEDDINGS": "none", "PYTHONIOENCODING": "utf-8"}
+    with (tmp_path / "server.log").open("w", encoding="utf-8") as log:
+        proc = subprocess.Popen([sys.executable, "-m", "magus", "serve", "--transport", "http", "--port", str(port)],
+                                env=env, stdout=log, stderr=subprocess.STDOUT)
+        try:
+            base = f"http://127.0.0.1:{port}"
+            _wait_healthy(f"{base}/healthz", proc)
+            with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
+                book = c.get("/login?next=/book").text
+                assert '<a href="/questions?project=book">답해 주실 질문</a>' in book
+                page = c.get("/questions?project=book").text
+                assert "<h1>답해 주실 질문</h1>" in page and "질문 9건(열림 9 · 원고 반영 대기 0 · 답함 0)" in page
+                assert "<b>연도 불일치</b> · 열림" in page and "고를 수 있는 답: 맞다 / 다른 문헌 / 참고문헌에 없음" in page
+                assert "ref:" not in page and "fix_text" not in page  # 저자에게는 코드가 보이지 않는다
+                assert "<script>alert" not in page and "Evil &lt;script&gt;alert(1)&lt;/script&gt; title" in page
+                only = c.get("/questions?project=book&type=ab").text
+                assert "연도 a/b 모호" in only and "연도 불일치</b>" not in only
+                assert c.get("/questions?project=book&status=waiting").text.count('<li class="card">') == 0
+        finally:
+            proc.terminate()
+            proc.wait(timeout=10)

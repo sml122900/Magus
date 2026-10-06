@@ -12,7 +12,8 @@
 - A 완료: `/shelf`(책 세 권) + 게시판형 목록·고유 주소·검색(웹 전용 레인 style_passage·ref_bib, 인덱스 v14), 용어집 책장·카테고리(#92). 태그 `shelf-web`(0dac85e).
 - B 완료: 저자의 카테고리(저장·도구 7개·웹 만들기·이름·색·휴지통·바로 적기), 책 색(격자 18·내 색 12·직접 고르기), 항목 제목(생각·카테고리, 기본값 서버 저장), instructions 머리말·규칙 7·9·10. 인덱스 v15, 도구 21 → 28. 태그 `shelf-categories`.
 - C 완료: 캡처 `private/screens/2026-10-06-shelf/`(24장), 스스로 점검 3회(9a375f8), 되돌리기 안전(제목 없는 생각 파일에 title 키 안 씀, b8ed3c2). 예시 공간 다시 만들기·캡처 스크립트는 `private/demo/`.
-- D 완료(일부): #84 `book_questions`·`book_answer` + `book/answers.md`, 저자 보고서 오탐 두 개 수정. 도구 28 → 30. father-trial 질문 19건(자료의 18곳 + IEA 중복분), 2,102토큰. 웹 `/questions`·수정본 리포트 절은 남음. 태그 `questions`.
+- D 완료(일부): #84 `book_questions`·`book_answer` + `book/answers.md`, 저자 보고서 오탐 두 개 수정. 도구 28 → 30. father-trial 질문 19건(자료의 18곳 + IEA 중복분), 2,102토큰. 태그 `questions`.
+- **아침 답(2026-10-06 낮) 반영**: #92 a·b·c·d·f·g·h·i·j·k 승인, e 바꿈(제목엔 title_by 필수), D 방식 승인. 더한 것: 웹에서 생각·카테고리 항목 고치기·휴지통(edited_by·edited_at, 인덱스 v16), 웹 `/questions`, 수정본 리포트 질문 줄. CLAUDE.md에 '프로젝트 밖 파일·폴더는 만들지도 지우지도 않는다' 규칙. 도구 목록 크기: 30개 설명+스키마+이름 약 9,566토큰(21개 때 6,245), instructions 1,303(21개 때 990), 보수적 추정.
 - E: 아침 보고 `docs/daily/2026-10-06.md`.
 - 예시 공간 `demo-shelf`(합성 데이터, data/users/demo-shelf). 실행: `USER_ID=demo-shelf DATA_DIR=./data .venv/Scripts/python -m magus serve --transport http --port 8765` → http://127.0.0.1:8765/shelf
 
@@ -194,7 +195,8 @@
 
 ## 1. 지금 바로 할 일
 
-- **대기(사용자): 야간 작업 아침 보고 확인**(`docs/daily/2026-10-06.md`). 로컬 `USER_ID=demo-shelf DATA_DIR=./data .venv/Scripts/python -m magus serve --transport http --port 8765` → http://127.0.0.1:8765/shelf. 결정 #92(a~k)와 #84 구현 방식 확인 → 배포 여부 결정. 배포하면 커넥터 재연결 필요, 되돌리기 기준 `74bbbf4`.
+- **대기(사용자)**: `C:\c` 폴더가 원래 있던 것인지 확인(사실은 6절 2026-10-06 (15)). 배포 여부.
+- (처리함) 야간 작업 아침 보고 확인(`docs/daily/2026-10-06.md`). 로컬 `USER_ID=demo-shelf DATA_DIR=./data .venv/Scripts/python -m magus serve --transport http --port 8765` → http://127.0.0.1:8765/shelf. 결정 #92(a~k)와 #84 구현 방식 확인 → 배포 여부 결정. 배포하면 커넥터 재연결 필요, 되돌리기 기준 `74bbbf4`.
 - **서버는 여전히 `p1-trash`(74bbbf4)다.** 밤의 태그 `shelf-web`·`shelf-categories`·`questions`는 GitHub 백업용이다.
 - **다음: 아버지 첫 로그인**(2026-10-06 02:17 허용 목록에 추가함). `/book`이 비어 있어야 한다. 그다음 온보딩 B절.
 - (처리함 2026-10-06, `p1-ui-terms`) `ALLOWED_USERS`에 같은 이름이 두 번이거나 같은 sub가 두 번이면 서버가 시작하지 않는다(`auth.parse_allowed`, 오류에는 항목 순서만). 배포 전 서버 값(2명)으로 로컬에서 미리 통과를 확인했다.
@@ -666,6 +668,10 @@
   - `/fixtures/`(루트), `data/`, `/private/`(저자용 보고서 등 실원고 파생 자료)는 gitignore. `tests/fixtures/`(합성)는 커밋한다.
 
 ## 6. 마지막 세션 요약
+
+**2026-10-06 (15, 낮)** — 아침 답 반영(세션 magus-25, 서버 배포 없음)
+- `C:\c` 사실: 캡처 스크립트(node)가 출력 경로 `/c/Users/이성민/AppData/Local/Temp/claude/C--project-2026-Magus/92a7a382-…/scratchpad/shots/a-*.png`를 `C:\c\Users\…\shots\`로 풀어 PNG 9개(a-shelf-desktop·a-shelf-hover·a-shelf-mobile·a-ideas-desktop·a-ideas-open·a-ideas-mobile·a-search·a-refs·a-styles)를 만들었다. 지우기 전에 본 목록은 그 shots 폴더의 9개뿐이고 `C:\c` 자체나 다른 하위 폴더는 보지 않았다. 지운 명령은 Git Bash `rm -rf /c/c`(휴지통을 거치지 않음), 그 뒤 `ls /c/c` → 없음. 그 전에 `C:\c`가 있었는지는 모른다.
+- #92-e 바꿈(제목엔 title_by 필수), 웹 항목 고치기·휴지통, 웹 `/questions`, 수정본 리포트 질문 줄, 도구 목록 크기 측정. 테스트 261개 통과.
 
 **2026-10-06 (14, 밤)** — 야간 자율 작업: 책장 화면·카테고리·책 색·항목 제목(#92) + 저자 확인 질문지(#84), 서버 배포 없음(세션 magus-25)
 - A `shelf-web`(0dac85e) → B `shelf-categories`(7fdc555) → C 점검 3회(9a375f8)·되돌리기 안전(b8ed3c2) → D `questions`(254e25a) → E 보고(5ec8db0). 테스트 241 → 257개 통과, ruff 통과.

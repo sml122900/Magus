@@ -216,7 +216,7 @@ def test_web_pages_are_per_user_even_with_same_project_id(server_proc, fake_issu
         # 밥도 같은 id(synth)로 자기 원고를 올린다
         bob.post("/inbox/upload", data={"csrf": b_csrf}, files={"files": ("밥.docx", _mini_docx(tmp_path / "b.docx", "밥의 코멘트").read_bytes())})
         assert not re.search("class=\"msg err\"", bob.post("/book/import", data={"csrf": b_csrf, "name": "밥.docx", "project_id": "synth", "mode": "new"}).text)
-        pages = {who: {path: c.get(f"{path}?project=synth").text for path in ("/book", "/issues", "/checklist", "/inbox")}
+        pages = {who: {path: c.get(f"{path}?project=synth").text for path in ("/book", "/issues", "/checklist", "/inbox", "/questions")}
                  for who, c in (("alice", alice), ("bob", bob))}
     assert "닿으려는 종" in pages["alice"]["/book"] and "닿으려는 종" not in pages["bob"]["/book"]
     assert "인용 확인필요 — 쪽수 표기" in pages["alice"]["/issues"] and "밥의 코멘트" not in pages["alice"]["/issues"]
@@ -224,6 +224,8 @@ def test_web_pages_are_per_user_even_with_same_project_id(server_proc, fake_issu
     assert "Daeschler" in pages["alice"]["/checklist"] and "Daeschler" not in pages["bob"]["/checklist"]
     assert "원고.docx" in pages["alice"]["/inbox"] and "원고.docx" not in pages["bob"]["/inbox"] and "밥.docx" in pages["bob"]["/inbox"]
     assert "밥.docx" not in pages["alice"]["/inbox"]
+    assert "Bob(2020)" in pages["bob"]["/questions"] and "Bob(2020)" not in pages["alice"]["/questions"]  # 답해 주실 질문도 사용자별
+    assert "닿으려는 종" in pages["alice"]["/questions"] and "닿으려는 종" not in pages["bob"]["/questions"]
 
 
 def test_web_session_ends_when_user_is_removed(server_proc, fake_issuer):  # noqa: F811

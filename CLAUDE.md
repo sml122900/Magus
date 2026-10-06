@@ -14,7 +14,7 @@
   - 최신본을 `father-trial`에 새로 임포트해 수치를 쟀고, `reupload-trial`에서 4판 → 최신본 다시 올리기를 시험했다(기존 미해결 86 유지 + 새 43, 바뀐 장 6만 교체).
 - **운영 규칙(#78)**: 같은 책을 다시 올릴 때는 수정본(`new_edition`)으로 한다. 아버지 원고를 `replace`로 다시 임포트하지 않는다. replace는 결정·직접 남긴 미해결·닫은 미해결까지 휴지통으로 보낸다.
 - 다음 할 일: **7단계 아버지 온보딩**(`docs/onboarding-father.md`). 시작 전 확인은 status.md "7단계 전 확인"을 따른다. 그 전에 사용자가 claude.ai에서 book_outline을 한 번 확인한다.
-  - 저자 확인 질문지 `book_questions`·`book_answer`(#84)는 2026-10-06 밤에 앞당겨 구현했다(태그 `questions`, 서버 배포 전). 웹 `/questions`·수정본 리포트 절은 남았다.
+  - 저자 확인 질문지(#84)는 2026-10-06에 앞당겨 끝냈다: 도구 `book_questions`·`book_answer`, 웹 `/questions`, 수정본 리포트 절(서버 배포 전).
   - 사용자 격리: 아버지 계정 추가 전에 점검했다(status.md 0-6절, `tests/test_isolation.py`).
 - 다음 배포에 함께(커밋만): #90 되묻기 선택지에서 원고 빼기.
 - **야간 자율 작업(2026-10-06 밤, #92, 서버 배포 없음)**: 책장 화면(`/shelf`, 양장본 책장 + 게시판형 목록 + 검색, 태그 `shelf-web`), 저자의 카테고리·책 색·항목 제목(도구 21 → 28, 인덱스 v15, 태그 `shelf-categories`). 검토 대기 결정은 status.md 4절 #92. 서버는 여전히 `p1-trash`다.
@@ -308,7 +308,7 @@ data/index.sqlite
     - 발음 부호·소문자 접두어·여러 단어 저자(Prüfer, de Vries, Ibn Khaldun), 한자 저자(田代和生)
     - 한글 공저자 `넌·첸(2011)`, 한 글자 성 `셰 등(2019)`, 띄어 쓴 일본 이름 `다시로 가즈이(1981)`
   - 해석: key → aliases → 공저자로 동명 판별 → 연도 a/b → (한글만) 같은 연도 안 음역 추정(`magus/melchior/translit.py`). 지명·사건 접미사와 일반명사는 저자로 보지 않는다.
-- **저자 확인 질문지(#84)**: `book_questions(status=open|waiting|all, type?, project_id?)` → 저자만 답할 수 있는 인용 질문(연도 불일치 year·참고문헌에만 bibonly·한글 표기 추정 translit·연도 a/b ab·같은 저자·연도 두 편 pair·미연결 unlinked·중복 서지 dup). 질문은 매번 지금 원고·문헌에서 계산하고(저장하지 않음), 3,000토큰 예산. `book_answer(question_id, choice, note?, project_id?)` → 표기를 잇는 답은 alias, "사람 이름이 아님"은 비인용 용어로 바로 반영하고 수를 다시 계산한다. "Word에서" 답은 결정(D번호)으로 남겨 "원고 반영 대기"가 된다. 답은 프로젝트의 `book/answers.md`(사람이 읽는 파일)에 쌓인다(`magus/melchior/questions.py`, `question_tools.py`). 웹 `/questions`와 수정본 리포트의 "새로 생긴 질문" 절은 아직 없다.
+- **저자 확인 질문지(#84)**: `book_questions(status=open|waiting|all, type?, project_id?)` → 저자만 답할 수 있는 인용 질문(연도 불일치 year·참고문헌에만 bibonly·한글 표기 추정 translit·연도 a/b ab·같은 저자·연도 두 편 pair·미연결 unlinked·중복 서지 dup). 질문은 매번 지금 원고·문헌에서 계산하고(저장하지 않음), 3,000토큰 예산. `book_answer(question_id, choice, note?, project_id?)` → 표기를 잇는 답은 alias, "사람 이름이 아님"은 비인용 용어로 바로 반영하고 수를 다시 계산한다. "Word에서" 답은 결정(D번호)으로 남겨 "원고 반영 대기"가 된다. 답은 프로젝트의 `book/answers.md`(사람이 읽는 파일)에 쌓인다(`magus/melchior/questions.py`, `question_tools.py`). 웹 `/questions`("답해 주실 질문", 조회 전용, 코드 대신 설명, `/book`에서 링크)와 수정본 리포트의 "답해 주실 질문: 새로 생김 · 저절로 닫힘 · 답했지만 원고에 아직 그대로" 줄이 있다.
 - 책 전체 집계는 CLI `magus cite-report --project-id <id>`로 낸다(`magus/melchior/report.py`).
   - 내용: 고유 미확인 수, 많이 인용된 순위, 참고문헌에 없는 인용(+같은 저자 다른 연도 힌트), uncertain, 추정 연결, 미인용 항목.
 - 저자용 보고서는 CLI `magus author-report --project-id <id> --out private/reports/<날짜>-인용-점검.md`로 만든다(`magus/melchior/author_report.py`, 같은 이름의 docx도 만든다).
