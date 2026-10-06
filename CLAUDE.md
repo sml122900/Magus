@@ -330,6 +330,8 @@ data/index.sqlite
 - `category_create(name, template=빈 카테고리|인물|사례|수치|용어, color?)` → 이름 규칙(12자, 예약어·중복 금지, 30개까지), 색은 기본 색 이름(18개) 또는 #RRGGBB.
 - `category_edit(category, new_name?, color?)` → 기본 셋은 색만.
 - `category_put(category, author: me|ai, content?, title?, title_by?, untitled?, fields?, tags?, chapters?, item_id?, project_id?)` → 넣기(item_id면 준 것만 고치기). 칸은 그 카테고리의 칸 이름만, 장은 지금 책에 있는 번호만. 제목 규칙은 idea_add와 같다.
+  - **내용·제목·칸 중 하나만 있어도 저장한다**(모두 비었을 때만 거부, 빈 카테고리는 제목이나 내용). 목록에서 제목·내용이 없으면 채워진 칸(예: 장소: 엘알토)이 앞부분으로 보인다(2026-10-06 비밀 대화 시험).
+  - **category=생각이면 거부하지 않고 생각에 저장한다**(idea_add와 같은 제목 기본값·title_by 규칙, 누가는 author를 따른다, 장·태그는 넣지 않음). 문체·문헌이면 저장하지 않고 "문체는 이 도구로 넣지 않는다. style_add 도구를 찾아 쓴다(…)"처럼 도구 이름을 담은 오류를 돌려준다. 도구를 그때그때 찾아 불러오는 클라이언트에서 Claude가 idea_add 대신 category_put을 부르고 "생각 도구가 연결돼 있지 않다"고 답한 일 때문이다. category_list 응답과 category_put 설명 앞부분에도 같은 한 줄이 있다.
 - `category_search(query, category?, k=8)`, `category_trash(category, note, item_id?)`(항목 또는 통째, 기본 셋은 못 옮김), `category_title_default(mode: ask|ai|none)`.
 - 쓰기 도구 설명 첫 문장은 "저자가 …라고 분명히 말했을 때만 부른다"다. 되묻는 선택지는 생각·문체·문헌과 저자의 카테고리(원고 없음).
 
@@ -356,6 +358,7 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
 - 예외: **규칙 4는 사용자 결정 #74(2026-10-06)로 바꿨다.** "장 수정안은 대화에서 제안하고, 저자가 Word 원고에 반영한다. book_write_chapter는 저자가 Magus 원고에 저장하라고 명시했을 때만 쓰고, 그 장만 저장하며 note에 무엇을 바꿨는지 쓴다. 결정은 book_decide에, 열린 문제는 book_issue_add에 남긴다."
 - 예외: **사용자 결정 #87(2026-10-06)로 머리말에서 '책장'을 빼고("이 서버는 사용자의 생각·문헌·문체와 원고를 관리한다."), 규칙 7 끝을 "…'책 지도'·'미해결'·'이슈'·'새 판'·'영감'·'책장'·'refs' 같은 말은 쓰지 않는다. 코어 이름(Casper·Melchior·Balthasar)이나 도구 이름을 저자에게 말하지 않는다."로 바꿨다.**
 - 예외: **사용자 결정 #85(2026-10-06, 용어 통일)로 머리말의 '영감'을 '생각'으로 바꾸고 규칙 7~9를 더했다.** 7 저자에게 보이는 이름(용어집), 8 저자의 말 해석("전체 보여 줘" → book_outline, "전체 읽어 줘" → 한 장씩 안내, "수정본 올렸어" → files_list의 최신 원고를 new_edition으로), 9 넣을 곳을 말하지 않은 "저장해 줘"·"기록해 줘"·"등록해 줘"·"넣어 줘"에는 쓰기 도구를 바로 부르지 않고 생각·문체·문헌 중 어디인지 먼저 묻기. 원문은 `tests/test_instructions.py`의 SPEC.
+- 예외: **2026-10-06 비밀 대화 시험(사용자 요청)으로 규칙 11을 더했다**: "어떤 도구가 이 대화에 없어 보이면 '연결돼 있지 않다'고 답하기 전에 도구 이름으로 찾아본다." 도구를 부르지 않는 규칙이라 규칙 7처럼 언제나 실린다.
 - 예외: **사용자 결정 #92(2026-10-06 밤, 책장·카테고리)로 머리말에 '카테고리'를 넣고("이 서버는 사용자의 생각·문헌·문체·카테고리와 원고를 관리한다."), 규칙 7에 책장·카테고리를 더하고 쓰지 않는 이름에서 '책장'을 빼고, 규칙 9의 선택지에 저자의 카테고리를 더하고(category_list, 많으면 목록), 규칙 10(제목: 직접·지어 드림·비워 둠 중에서 묻고 '앞으로는'이면 category_title_default)을 더했다.**
 - **instructions는 등록된 도구만 언급한다.** `build_instructions(등록된 도구 이름)`은 규칙 문장에 나오는 도구(`book_|ref_|idea_|style_|files_|category_` 이름)가 모두 등록된 규칙만 넣고, 번호는 다시 매긴다. 도구를 부르지 않는 규칙 7은 언제나 실린다. 도구가 모두 등록되면 SPEC과 똑같아진다(`tests/test_instructions.py`).
 - 새 도구를 추가하면 그 도구가 필요한 규칙이 자동으로 instructions에 들어간다. 따로 손댈 것은 없다.
@@ -466,7 +469,7 @@ magus reindex                             # 파일 → index.sqlite 재생성 + 
 magus cite-report --project-id book       # 책 전체 인용 집계(확인 순서)
 magus author-report --project-id book --out private/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + docx)
 magus terms --project-id book [--add …] [--remove …]                         # 비인용 용어 보기·고치기
-magus trash list | put idea|style <id> --note … | restore idea|style|category|category-item <id> [--name …]   # 책장 휴지통(운영자, USER_ID 사용자, #88·#92)
+magus trash list | put idea|style|category <id> --note … | restore idea|style|category|category-item <id> [--name …]   # 책장 휴지통(운영자, USER_ID 사용자, #88·#92)
 magus alias <key> <표기>                                                      # 저자가 확정한 표기를 aliases에(예: keynes1930b "케인스(1930)")
 magus inbox [--add 파일…] [--remove 이름…]                                    # 받은함(로컬 개발용, 원격은 웹 업로드)
 magus outline [--project-id …]                                               # book_outline과 같은 출력(USER_ID). 복구 확인용

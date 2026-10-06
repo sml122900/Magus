@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> None:
     terms.add_argument("--project-id", required=True)
     terms.add_argument("--add", nargs="*", default=[])
     terms.add_argument("--remove", nargs="*", default=[])
-    trash = sub.add_parser("trash", help="책장 휴지통(운영자용, USER_ID 사용자): list | put idea|style <id> --note … | "
+    trash = sub.add_parser("trash", help="책장 휴지통(운영자용, USER_ID 사용자): list | put idea|style|category <id> --note … | "
                                          "restore idea|style|category|category-item <id> [--name 새 이름]")
     trash.add_argument("action", choices=["list", "put", "restore"])
     trash.add_argument("kind", nargs="?", choices=["idea", "style", "category", "category-item"])
@@ -206,10 +206,13 @@ def main(argv: list[str] | None = None) -> None:
             parser.exit(2, "put·restore에는 idea|style과 id가 필요합니다\n")
         try:
             if args.action == "put":
-                if args.kind not in ("idea", "style"):  # 카테고리는 웹 책장이나 대화(category_trash)로 옮긴다
-                    parser.exit(2, "put은 idea|style만 받습니다\n")
-                moved = ([i.id for i in store.trash_idea(user, args.id, args.note)] if args.kind == "idea"
-                         else [e.id for e in [store.trash_style(user, args.id, args.note)] if e])
+                if args.kind == "category-item":  # 항목 하나는 웹 책장이나 대화(category_trash)로 옮긴다
+                    parser.exit(2, "put은 idea|style|category만 받습니다\n")
+                if args.kind == "category":  # 카테고리 통째(항목 포함)
+                    moved = [c.id for c in [store.trash_category(user, args.id, args.note)] if c]
+                else:
+                    moved = ([i.id for i in store.trash_idea(user, args.id, args.note)] if args.kind == "idea"
+                             else [e.id for e in [store.trash_style(user, args.id, args.note)] if e])
                 if not moved:
                     parser.exit(2, f"없음: {args.kind} {args.id}\n")
                 print(f"휴지통으로 옮김({user}): {args.kind} {', '.join(moved)}")

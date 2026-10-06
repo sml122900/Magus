@@ -20,13 +20,21 @@ from magus.category.rules import (
 from magus.category.titles import TITLE_RULE, decide_title
 from magus.ids import local_time, new_id
 from magus.search import Embedder, hybrid_search
-from magus.store import Category, CategoryItem, ShelfSettings, Store
+from magus.store import Category, CategoryItem, Idea, ShelfSettings, Store
 from magus.store.formats import one_line
 
 WHERE = ("'저장해 줘'처럼 넣을 곳이 정해지지 않았으면 부르지 말고 생각·문체·문헌과 저자의 카테고리(category_list) 중 어디인지 먼저 묻는다"
          "(원고는 선택지에 넣지 않는다). ")
 WHO = {"me": "저자의 말", "ai": "Claude가 쓴 글"}
 BUILTIN_BY_KEY = {name_key(name): key for key, name in BUILTINS.items()}
+# 생각·문체·문헌은 기본 카테고리다. 도구를 그때그때 찾아 불러오는 클라이언트에서는 Claude가 idea_add 대신 category_put을 부르기도 한다
+# (2026-10-06 비밀 대화 시험). 생각은 여기서도 idea_add와 같은 규칙으로 받고, 문체·문헌은 맞는 도구 이름을 알려 준다.
+BUILTIN_LINE = "생각·문체·문헌은 기본 카테고리다. 생각은 이 도구로도 들어가지만, 문체는 style_add, 문헌은 ref_add로 넣는다. "
+BUILTIN_PUT = {
+    "styles": "문체는 이 도구로 넣지 않는다. style_add 도구를 찾아 쓴다(구절과 저자가 말한 이유가 필요하다).",
+    "refs": "문헌은 이 도구로 넣지 않는다. ref_add 도구를 찾아 쓴다(서지와, 원문에서 고른 발췌와 그 이유가 필요하다).",
+}
+BUILTIN_SEARCH = {"ideas": "idea_search", "styles": "style_search", "refs": "ref_search"}
 
 
 def _template_line(c: Category) -> str:
@@ -46,11 +54,15 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
                 return c
         raise ToolError(f"'{category}' 카테고리가 없다. category_list로 이름을 확인한다.")
 
-    def own(category: str, action: str) -> Category:
+    def own(category: str, action: str, tools: dict[str, str] = BUILTIN_TOOLS) -> Category:
         found = resolve(category)
         if isinstance(found, str):
-            raise ToolError(f"'{BUILTINS[found]}'은 기본 카테고리라 {action} 수 없다. {BUILTINS[found]}에 넣는 것은 {BUILTIN_TOOLS[found]}로 한다.")
+            raise ToolError(f"'{BUILTINS[found]}'은 기본 카테고리라 {action} 수 없다. {tools[found]} 도구를 찾아 쓴다.")
         return found
+
+    def summary(item: CategoryItem) -> str:
+        """항목을 한 줄로: 내용, 없으면 채워진 칸(예: 장소: 엘알토)."""
+        return one_line(item.content) or " · ".join(f"{k}: {v}" for k, v in item.fields.items() if v)
 
     def chapter_refs(chapters: list[int] | None, project_id: str | None) -> tuple[tuple[str, int], ...]:
         if not chapters:
@@ -70,6 +82,7 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
         counts = {"ideas": len(store.list_ideas(user)), "styles": len(store.list_styles(user)), "refs": len(store.list_refs(user))}
         mine = store.list_categories(user)
         lines = [f"책장의 카테고리 {3 + len(mine)}개(기본 3 + 저자가 만든 {len(mine)}) · 제목 기본값: {TITLE_MODES[settings.title_default]}"]
+        lines.append(BUILTIN_LINE.strip())
         lines.append("기본 카테고리(넣을 때는 각자의 도구): " + " · ".join(
             f"{BUILTINS[k]} {counts[k]}개({BUILTIN_TOOLS[k]}, 색 {color_label(settings.colors.get(k, DEFAULT_COLORS[k]))})"
             for k in BUILTINS))
@@ -138,13 +151,16 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
         project_id: str | None = None,
     ) -> str:
         user = current_user()
-        target = own(category, "category_put으로 넣을")
+        found = resolve(category)
+        if found == "ideas":
+            return put_idea(user, author, content, title, title_by, untitled, fields, tags, chapters, item_id)
+        if isinstance(found, str):
+            raise ToolError(BUILTIN_PUT[found])
+        target = found
         old = store.get_category_item(user, target.id, item_id.strip()) if item_id else None
         if item_id and old is None:
             raise ToolError(f"「{target.name}」에 항목 {item_id}가 없다. category_search 결과의 id를 준다.")
         text = (content or "").strip()
-        if not text and old is None:
-            raise ToolError("content(내용)가 비어 있다.")
         if len(text) > CONTENT_MAX:
             raise ToolError(f"내용은 {CONTENT_MAX}자까지다.")
         values = dict(old.fields) if old else {}
@@ -160,6 +176,9 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
             clean_tag_list = clean_tags(tags) if tags is not None else list(old.tags if old else ())
         except ValueError as e:
             raise ToolError(str(e)) from e
+        if old is None and not text and not (title or "").strip() and not values:  # 내용·제목·칸이 모두 비었을 때만 거부
+            raise ToolError("제목이나 내용 중 하나는 있어야 한다." if not target.fields else
+                            f"내용·제목·칸({', '.join(target.fields)}) 중 하나는 있어야 한다.")
         links = chapter_refs(chapters, project_id) if chapters is not None else (old.chapters if old else ())
         if old is not None and not title and not untitled:  # 고칠 때 제목을 주지 않으면 그대로
             name, by, said = old.title, old.title_by, "제목 그대로"
@@ -175,10 +194,26 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
         parts += [f"연결된 장 {', '.join(str(n) for _, n in links)}"] if links else []
         return f"{'고침' if old else '넣음'}: 카테고리 「{target.name}」 {item.id} · " + " · ".join(parts)
 
+    def put_idea(user: str, author: Literal["me", "ai"], content: str | None, title: str | None,
+                 title_by: Literal["ai", "author"] | None, untitled: bool, fields: dict[str, str] | None,
+                 tags: list[str] | None, chapters: list[int] | None, item_id: str | None) -> str:
+        """category_put(category=생각): idea_add와 같은 규칙(제목 기본값·title_by)으로 생각에 넣는다. 누가는 author를 따른다."""
+        if item_id:
+            raise ToolError("생각은 이 도구로 고치지 않는다. 저자가 웹 책장에서 고치거나, 새로 넣는다.")
+        extra = [f"{k}: {one_line(str(v))}" for k, v in (fields or {}).items() if str(v).strip()]
+        text = "\n".join([*([content.strip()] if content and content.strip() else []), *extra]) or (title or "").strip()
+        if not text:
+            raise ToolError("생각에 넣을 내용(content)이 비어 있다.")
+        name, by, said = decide_title(store, user, title, title_by, untitled)
+        [idea] = store.add_ideas(user, [Idea(new_id(), text[:CONTENT_MAX], "thought" if author == "me" else "ai", author,
+                                             title=name, title_by=by)])
+        skipped = " · 생각에는 장 연결·태그가 없어 넣지 않았다" if chapters or tags else ""
+        return f"생각에 저장함 [{author}] {idea.id} · {said}{skipped}"
+
     def category_search(query: str, category: str | None = None, k: int = 8) -> str:
         user = current_user()
         k = max(1, min(k, 30))
-        only = own(category, "category_search로 찾을") if category else None
+        only = own(category, "category_search로 찾을", BUILTIN_SEARCH) if category else None
         cats = {c.id: c for c in store.list_categories(user)}
         found: list[CategoryItem] = []
         for chunk in hybrid_search(store, user, query, ["category"], k * 4, embedder):
@@ -200,7 +235,7 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
                 names[item.chapters[0][0]] = {c.number: c.display for c in store.list_chapters(user, item.chapters[0][0])}
             head = f"{n}. 「{cat.name if cat else '?'}」 {item.id} · [{item.author}] {local_time(item.created_at, '%Y-%m-%d')}"
             head += f" · 제목 「{item.title}」" + (" (AI가 지은 제목)" if item.title_by == "ai" else "") if item.title else ""
-            lines += [head, f"   “{one_line(item.content)[:200]}”"]
+            lines += [head, f"   “{summary(item)[:200]}”"]
             if item.fields:
                 lines.append("   " + " · ".join(f"{k}: {v[:60]}" for k, v in item.fields.items()))
             if item.chapters:
@@ -215,7 +250,7 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
                 moved = store.trash_category_item(user, target.id, item_id.strip(), note.strip())
                 if moved is None:
                     raise ToolError(f"「{target.name}」에 항목 {item_id}가 없다. category_search 결과의 id를 준다.")
-                return (f"휴지통으로 옮김: 「{target.name}」의 항목 {moved.id} “{one_line(moved.title or moved.content)[:60]}”. "
+                return (f"휴지통으로 옮김: 「{target.name}」의 항목 {moved.id} “{(moved.title or summary(moved))[:60]}”. "
                         "지운 것이 아니라 옮긴 것이라 운영자가 되살릴 수 있다.")
             gone = store.trash_category(user, target.id, note.strip())
         except ValueError as e:
@@ -265,8 +300,9 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
         Tool.from_function(
             category_put, name="category_put",
             description=(
-                "저자가 그 카테고리에 넣으라고 분명히 말했을 때만 부른다. " + WHERE
-                + "저자가 만든 카테고리에 항목을 넣거나(item_id를 주면) 고친다. 생각·문체·문헌은 각자의 도구(idea_add·style_add·ref_add)로 넣는다. "
+                "저자가 그 카테고리에 넣으라고 분명히 말했을 때만 부른다. " + BUILTIN_LINE + WHERE
+                + "저자가 만든 카테고리에 항목을 넣거나(item_id를 주면) 고친다. "
+                "내용·제목·칸 중 하나만 있어도 된다(빈 카테고리는 제목이나 내용). "
                 "category는 category_list의 이름 그대로. author: 저자의 말을 옮긴 것이면 me, Claude가 쓴 글(요약·설명)이면 ai. "
                 "fields는 그 카테고리의 칸 이름: 값이다. 저자가 말하지 않은 칸은 지어내지 말고 비워 둔다. "
                 "수치·출처는 저자가 말했거나 확인한 것만 넣고, Claude의 기억으로 채우지 않는다. "

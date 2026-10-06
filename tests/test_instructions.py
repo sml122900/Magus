@@ -17,13 +17,15 @@ SPEC = """\
 7. 저자에게 보이는 이름은 이것으로 한다: 전체(책 전체 현황. 구성·상태이고 원고 전문이 아니다) · 확인 요청(출처·사실을 확인해야 하는 곳. 도구의 issue이고, AI가 단 것은 'AI 확인 요청') · 생각(떠오른 아이디어 메모. 도구의 idea) · 문체(좋아서 모은 구절. 도구의 style) · 문헌(원문을 읽고 등록한 책·논문. 도구의 ref) · 결정(정해 둔 방침) · 수정본(Word에서 고친 원고를 다시 올린 것. 도구의 new_edition이고, E2·E3… 번호는 '수정본 번호') · 책장(생각·문체·문헌과 카테고리를 모아 보는 화면) · 카테고리(책장에 꽂힌 묶음 하나. 생각·문체·문헌은 기본 카테고리이고 그 옆에 저자가 만든 카테고리가 꽂힌다. 도구의 category. 원고를 가리키는 '책'과 섞이지 않게 카테고리를 '책'이라고 부르지 않는다). 저자에게 답할 때는 이 이름을 쓰고, '책 지도'·'미해결'·'이슈'·'새 판'·'영감'·'refs' 같은 말은 쓰지 않는다. 코어 이름(Casper·Melchior·Balthasar)이나 도구 이름을 저자에게 말하지 않는다.
 8. 저자의 말은 이렇게 받는다. '전체 보여 줘'는 book_outline이다. '전체 읽어 줘'처럼 원고 전문을 원하면 한 번에 한 장씩 볼 수 있다고 알리고 어느 장부터 볼지 묻는다. '수정본 올렸어'·'수정본 올려 줘'는 files_list에서 가장 최근에 올린 원고 파일(.docx·.pdf)을 이 책(book_outline 첫 줄의 id)의 수정본으로 올린다(book_import, new_edition=true). 마지막 업로드 뒤에 올린 원고 파일이 여럿이거나 어느 것인지 분명하지 않으면 파일 이름을 보여 주고 묻는다.
 9. '저장해 줘'·'기록해 줘'·'등록해 줘'·'넣어 줘'처럼 어디에 넣을지 말하지 않은 요청에는 쓰기 도구를 바로 부르지 않는다. 생각·문체·문헌과 저자의 카테고리(category_list로 확인한다) 중 어디에 넣을지 먼저 묻고, 답을 들은 뒤 진행한다. 저자의 카테고리가 많으면 목록을 보여 준다. 원고는 이 선택지에 넣지 않는다: book_write_chapter는 저자가 'Magus 원고에 저장'을 분명히 말했을 때만 쓴다.
-10. 생각이나 저자의 카테고리에 넣을 때 저자가 제목을 말하지 않았으면, 저장하기 전에 제목을 직접 지을지·지어 드릴지·비워 둘지 묻는다. 저자가 '앞으로는 …'이라고 정하면 category_title_default로 저장하고, 그 뒤로는 묻지 않고 그 기본값(category_list에 보인다)을 따른다. Claude가 지은 제목은 title_by=ai로 남긴다."""
+10. 생각이나 저자의 카테고리에 넣을 때 저자가 제목을 말하지 않았으면, 저장하기 전에 제목을 직접 지을지·지어 드릴지·비워 둘지 묻는다. 저자가 '앞으로는 …'이라고 정하면 category_title_default로 저장하고, 그 뒤로는 묻지 않고 그 기본값(category_list에 보인다)을 따른다. Claude가 지은 제목은 title_by=ai로 남긴다.
+11. 어떤 도구가 이 대화에 없어 보이면 '연결돼 있지 않다'고 답하기 전에 도구 이름으로 찾아본다."""
 
 ALL_TOOLS = {
     "book_outline", "book_read_chapter", "book_write_chapter", "book_decide", "book_issue_add", "book_import",
     "ref_search", "idea_search", "style_search", "style_add", "files_list", "category_list", "category_title_default",
 }
 GLOSSARY = RULES[6]  # 도구를 부르지 않는 규칙이라 언제나 실린다
+LOOK_UP = RULES[10]  # 도구 이름으로 찾아보기(2026-10-06 비밀 대화 시험). 도구를 부르지 않아 언제나 실린다
 
 
 def test_all_tools_reproduce_spec_verbatim():
@@ -34,7 +36,7 @@ def test_stage1_mentions_no_unregistered_tools():
     text = build_instructions({"book_outline"})
     for name in ("ref_search", "idea_search", "style_search", "style_add", "book_read_chapter", "files_list", "book_import"):
         assert name not in text
-    assert text == f"{HEADER}\n1. {GLOSSARY}"
+    assert text == f"{HEADER}\n1. {GLOSSARY}\n2. {LOOK_UP}"
 
 
 def test_rules_are_renumbered():

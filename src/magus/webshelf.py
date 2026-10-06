@@ -49,6 +49,8 @@ TAGS_BY = {"ai": "AI가 뽑은 태그", "author": "저자가 정한 태그"}
 SAY = "Claude에게 이렇게 말하면 쌓입니다. 예: "
 LIGHT_TEXT, DARK_TEXT = "#ffffff", "#1a1a1a"
 AI_TITLE = '<span class="tag">AI가 지은 제목</span>'
+EMPTY_IDEA = "내용을 적어 주세요."
+EMPTY_ITEM = "제목·내용·칸 중 하나는 적어 주세요."
 
 
 def luminance(color: str) -> float:
@@ -778,7 +780,8 @@ class ShelfPages:
                     + f'<p class="muted">누가: {"저자의 말" if i.author == "me" else "Claude가 쓴 글"}'
                     + (" · 제목은 AI가 지었습니다." if i.title and i.title_by == "ai" else "") + "</p>" + edited_note(i))
             text = "\n".join([i.content, *(f"{k} {v}" for k, v in i.fields.items()), " ".join(i.tags)])
-            rows.append((i.id, Row(i.id, f"/shelf/{category.id}/{i.id}", i.created_at, i.title, i.content, aux, body, text,
+            preview = i.content or " · ".join(f"{k}: {v}" for k, v in i.fields.items() if v)  # 내용이 없으면 채워진 칸
+            rows.append((i.id, Row(i.id, f"/shelf/{category.id}/{i.id}", i.created_at, i.title, preview, aux, body, text,
                                    AI_TITLE if i.title and i.title_by == "ai" else "", True)))
         return rows
 
@@ -789,10 +792,11 @@ class ShelfPages:
                         for f in fields)
         return (
             f'<details class="card write"{" open" if error or opened else ""}><summary>새로 적기</summary>'
-            + ('<p class="msg err">내용을 적어 주세요.</p>' if error else "")
+            + (f'<p class="msg err">{EMPTY_IDEA if kind.category is None else EMPTY_ITEM}</p>' if error else "")
             + f'<form method="post" action="/shelf/write/{kind.key}">{self._csrf_input(session)}'
             f'<label class="block">제목(비워 둬도 됩니다) <input name="title" maxlength="{TITLE_MAX}"></label>'
-            f'<label class="block">내용 <textarea name="content" rows="6" maxlength="{CONTENT_MAX}" required></textarea></label>'
+            f'<label class="block">내용 <textarea name="content" rows="6" maxlength="{CONTENT_MAX}"'
+            f'{" required" if kind.category is None else ""}></textarea></label>'
             + (f"<details><summary>칸 더 적기(선택)</summary>{extra}</details>" if extra else "")
             + '<p><button class="primary">적어 두기</button> 적은 사람은 저자(나)로 남습니다.</p></form></details>'
         )
@@ -811,13 +815,13 @@ class ShelfPages:
             return self._shelf_page("책장", '<p class="msg err">여기에는 바로 적을 수 없습니다.</p>', session, 404)
         content = str(form.get("content") or "").strip()[:CONTENT_MAX]
         title = one_line(str(form.get("title") or ""))[:TITLE_MAX] or None
-        if not content:
+        values = {f: one_line(str(form.get(f"f:{f}") or ""))[:FIELD_MAX] for f in (kind.category.fields if kind.category else ())}
+        if not content and (kind.category is None or not (title or any(values.values()))):
             return RedirectResponse(f"/shelf/{kind.key}?error=empty", status_code=303)
         if kind.category is None:  # 생각(저자가 직접 적음)
             [idea] = await run_in_threadpool(self.store.add_ideas, uid, [
                 Idea(new_id(), content, "thought", "me", title=title, title_by="author" if title else None)])
             return RedirectResponse(f"/shelf/ideas/{idea.id}", status_code=303)
-        values = {f: one_line(str(form.get(f"f:{f}") or ""))[:FIELD_MAX] for f in kind.category.fields}
         item = await run_in_threadpool(self.store.put_category_item, uid, CategoryItem(
             new_id(), kind.category.id, content, "me", title, "author" if title else None, {k: v for k, v in values.items() if v}))
         return RedirectResponse(f"/shelf/{kind.category.id}/{item.id}", status_code=303)
@@ -1029,7 +1033,8 @@ class ShelfPages:
                 return self._shelf_page("항목 고치기", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
             content = str(form.get("content") or "").strip()[:CONTENT_MAX]
             title = one_line(str(form.get("title") or ""))[:TITLE_MAX] or None
-            if content:
+            values = {f: one_line(str(form.get(f"f:{f}") or ""))[:FIELD_MAX] for f in (() if is_idea else kind.category.fields)}
+            if content or (not is_idea and (title or any(values.values()))):
                 # 제목을 그대로 두면 누가 지었는지도 그대로, 저자가 새로 적으면 저자가 지은 제목, 지우면 없음
                 title_by = item.title_by if title == item.title else ("author" if title else None)
                 now = utcnow()
@@ -1037,12 +1042,11 @@ class ShelfPages:
                     await run_in_threadpool(self.store.add_ideas, uid, [replace(
                         item, text=content, title=title, title_by=title_by, edited_at=now, edited_by="author")])
                 else:
-                    values = {f: one_line(str(form.get(f"f:{f}") or ""))[:FIELD_MAX] for f in kind.category.fields}
                     await run_in_threadpool(self.store.put_category_item, uid, replace(
                         item, content=content, title=title, title_by=title_by, fields={k: v for k, v in values.items() if v},
                         edited_at=now, edited_by="author"))
                 return RedirectResponse(f"{link}?done=edited", status_code=303)
-            error = '<p class="msg err">내용을 적어 주세요.</p>'
+            error = f'<p class="msg err">{EMPTY_IDEA if is_idea else EMPTY_ITEM}</p>'
             old_text = content
         fields = "" if is_idea else "".join(
             f'<label class="block">{html.escape(f)} <input name="f:{html.escape(f)}" value="{html.escape(item.fields.get(f, ""))}" '
@@ -1053,7 +1057,8 @@ class ShelfPages:
             f'<p class="crumb"><a href="{link}">← {html.escape(kind.name)}</a></p>{error}{who}'
             f'<form method="post" action="{link}/edit" class="card">{self._csrf_input(session)}'
             f'<label class="block">제목(비워 둬도 됩니다) <input name="title" value="{html.escape(item.title or "")}" maxlength="{TITLE_MAX}"></label>'
-            f'<label class="block">내용 <textarea name="content" rows="8" maxlength="{CONTENT_MAX}" required>{html.escape(old_text)}</textarea></label>'
+            f'<label class="block">내용 <textarea name="content" rows="8" maxlength="{CONTENT_MAX}"{" required" if is_idea else ""}>'
+            f'{html.escape(old_text)}</textarea></label>'
             f'{fields}<p><button class="primary">저장</button> <a href="{link}">그만두기</a></p></form>'
         )
         return self._shelf_page("항목 고치기", body, session, 400 if error else 200)

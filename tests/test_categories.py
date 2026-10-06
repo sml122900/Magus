@@ -112,10 +112,13 @@ def test_trash_and_restore_with_cli(store: LocalStore, data_dir: Path, monkeypat
     assert store.trash_category("default", c.id, "통째").items == 1
     assert store.list_categories("default") == [] and not store.search_substring("default", ["category"], "하나", 5)
     store.create_category("default", "사례", "blank", "#000000", ())  # 같은 이름을 새로 만들 수 있다
+    other = store.create_category("default", "치울 것", "blank", "#000000", ())
     store.close()
     monkeypatch.setenv("DATA_DIR", str(data_dir))
     monkeypatch.setenv("USER_ID", "default")
     monkeypatch.setenv("EMBEDDINGS", "none")
+    cli.main(["trash", "put", "category", other.id, "--note", "시험 기록 정리"])  # 운영자 CLI로 카테고리 통째
+    assert f"휴지통으로 옮김(default): category {other.id}" in capsys.readouterr().out
     cli.main(["trash", "list"])
     out = capsys.readouterr().out
     assert f"- category {c.id}" in out and "카테고리 「사례」" in out and f"- category_item {c.id}/20261006000000001-aaaaab" in out
@@ -156,7 +159,8 @@ async def test_category_tools_round_trip(settings: Settings, store: LocalStore):
         assert put.startswith("넣음: 카테고리 「사례」 ") and "제목 「항구 장날」" in put and "누가: 저자의 말(me)" in put
         item_id = re.search(r"\d{17}-[0-9a-f]{6}", put).group()
         for args, why in (({"fields": {"값": "3"}}, "'값' 칸이 없다"), ({"chapters": [9]}, "없는 장 번호"),
-                          ({"category": "생각"}, "idea_add"), ({"category": "없는것"}, "카테고리가 없다")):
+                          ({"category": "문체"}, "style_add 도구를 찾아 쓴다"), ({"category": "문헌"}, "ref_add 도구를 찾아 쓴다"),
+                          ({"category": "없는것"}, "카테고리가 없다")):
             result = await c.call_tool("category_put", {"category": "사례", "author": "me", "content": "x", "untitled": True, **args})
             assert result.is_error and why in _text(result), args
         edited = _text(await c.call_tool("category_put", {"category": "사례", "author": "me", "item_id": item_id, "fields": {"장소": "예시 강가"}}))
@@ -341,3 +345,69 @@ def test_web_categories_are_per_user(server_proc, fake_issuer):  # noqa: F811
     assert bob.name == "사례" and bob.items == 1 and bob.color == "#b3261e"
     assert store.get_shelf_settings("bob") == ShelfSettings({"ideas": "#654321"}, ("#000001",), "ai")
     store.close()
+
+
+async def test_put_into_builtin_categories(settings: Settings, store: LocalStore):
+    """도구를 그때그때 찾아 불러오는 클라이언트에서 Claude가 idea_add 대신 category_put(category=생각)을 부르기도 한다.
+    생각은 idea_add와 같은 규칙(제목 기본값·title_by)으로 저장하고, 문체·문헌은 맞는 도구 이름을 담은 오류를 돌려준다."""
+    async with Client(build_server(settings, store)) as c:
+        listed = _text(await c.call_tool("category_list", {}))
+        assert "생각·문체·문헌은 기본 카테고리다. 생각은 이 도구로도 들어가지만, 문체는 style_add, 문헌은 ref_add로 넣는다." in listed
+        desc = {t.name: t.description for t in (await c.list_tools()).tools}["category_put"]
+        assert desc.startswith("저자가 그 카테고리에 넣으라고 분명히 말했을 때만 부른다. 생각·문체·문헌은 기본 카테고리다.")
+        asked = await c.call_tool("category_put", {"category": "생각", "author": "me", "content": "시험2"})
+        assert asked.is_error and "매번 묻기" in _text(asked) and store.list_ideas("alice") == []  # 제목 기본값도 같다
+        await c.call_tool("category_title_default", {"mode": "none"})
+        saved = _text(await c.call_tool("category_put", {"category": "생각 카테고리", "author": "me", "content": "시험2", "chapters": [3]}))
+        assert saved.startswith("생각에 저장함 [me] ") and "제목 없음" in saved and "장 연결·태그가 없어 넣지 않았다" in saved
+        titled = await c.call_tool("category_put", {"category": "생각", "author": "me", "content": "시험3", "title": "셋"})
+        assert titled.is_error and "title_by를 함께 준다" in _text(titled)
+        for name, said in (("문체", "문체는 이 도구로 넣지 않는다. style_add 도구를 찾아 쓴다(구절과 저자가 말한 이유가 필요하다)."),
+                           ("문헌", "문헌은 이 도구로 넣지 않는다. ref_add 도구를 찾아 쓴다(서지와, 원문에서 고른 발췌와 그 이유가 필요하다).")):
+            result = await c.call_tool("category_put", {"category": name, "author": "me", "content": "x", "untitled": True})
+            assert result.is_error and said in _text(result)
+        found = await c.call_tool("category_search", {"query": "x", "category": "문헌"})
+        assert found.is_error and "ref_search 도구를 찾아 쓴다" in _text(found)
+    [idea] = store.list_ideas("alice")
+    assert (idea.text, idea.author, idea.kind, idea.title) == ("시험2", "me", "thought", None)
+    assert store.list_styles("alice") == [] and store.list_refs("alice") == []
+
+
+async def test_template_item_needs_only_one_of_content_title_fields(settings: Settings, store: LocalStore):
+    """사례 카테고리에 '엘알토, 볼리비아, 제16장'처럼 칸만 채운 항목도 넣는다. 모두 비었을 때만 거부(빈 카테고리는 제목이나 내용)."""
+    store.create_project("alice", "책", project_id="book")
+    store.write_chapter("alice", "book", 16, "고원 도시.", "x", title="고원")
+    async with Client(build_server(settings, store)) as c:
+        await c.call_tool("category_title_default", {"mode": "none"})
+        await c.call_tool("category_create", {"name": "사례", "template": "사례"})
+        await c.call_tool("category_create", {"name": "메모", "template": "빈 카테고리"})
+        put = _text(await c.call_tool("category_put", {"category": "사례", "author": "me", "fields": {"장소": "엘알토, 볼리비아"},
+                                                       "chapters": [16]}))
+        assert put.startswith("넣음: 카테고리 「사례」") and "칸 1" in put
+        assert "“장소: 엘알토, 볼리비아”" in _text(await c.call_tool("category_search", {"query": "엘알토"}))
+        empty = await c.call_tool("category_put", {"category": "사례", "author": "me"})
+        assert empty.is_error and "내용·제목·칸(시기, 장소, 출처) 중 하나는 있어야 한다." in _text(empty)
+        blank = await c.call_tool("category_put", {"category": "메모", "author": "me"})
+        assert blank.is_error and "제목이나 내용 중 하나는 있어야 한다." in _text(blank)
+        only_title = _text(await c.call_tool("category_put", {"category": "메모", "author": "me", "title": "제목만", "title_by": "author"}))
+        assert only_title.startswith("넣음: 카테고리 「메모」")
+    [item] = [i for i in store.list_category_items("alice") if i.fields]
+    assert (item.content, item.title, item.fields, item.chapters) == ("", None, {"장소": "엘알토, 볼리비아"}, (("book", 16),))
+
+
+def test_web_list_shows_fields_when_no_title_or_content(server_proc):  # noqa: F811
+    base, data_dir, _ = server_proc({})
+    store = LocalStore(data_dir)
+    c = store.create_category("alice", "사례", "case", "#b3261e", ("시기", "장소", "출처"))
+    store.put_category_item("alice", CategoryItem("20261006000000000-aaaaaa", c.id, "", "me", fields={"장소": "엘알토, 볼리비아"}))
+    store.close()
+    with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as w:
+        page = w.get(f"/login?next=/shelf/{c.id}").text
+        assert '<span class="t none">장소: 엘알토, 볼리비아</span>' in page
+        csrf = _csrf(page)
+        assert 'name="content" rows="6" maxlength="20000"></textarea>' in page  # 카테고리 적기 폼은 내용이 꼭 필요하지 않다
+        only_field = w.post(f"/shelf/write/{c.id}", data={"csrf": csrf, "title": "", "content": "", "f:시기": "1950년대"})
+        assert "<dt>시기</dt><dd>1950년대</dd>" in only_field.text
+        nothing = w.post(f"/shelf/write/{c.id}", data={"csrf": csrf, "title": "", "content": ""})
+        assert "error=empty" in str(nothing.url) and "제목·내용·칸 중 하나는 적어 주세요." in nothing.text
+        assert "error=empty" in str(w.post("/shelf/write/ideas", data={"csrf": csrf, "title": "제목만", "content": ""}).url)
