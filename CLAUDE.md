@@ -17,7 +17,7 @@
   - 저자 확인 질문지(#84)는 2026-10-06에 앞당겨 끝냈다: 도구 `book_questions`·`book_answer`, 웹 `/questions`, 수정본 리포트 절(서버 배포 전).
   - 사용자 격리: 아버지 계정 추가 전에 점검했다(status.md 0-6절, `tests/test_isolation.py`).
 - 다음 배포에 함께(커밋만): #90 되묻기 선택지에서 원고 빼기.
-- **야간 자율 작업(2026-10-06 밤, #92, 서버 배포 없음)**: 책장 화면(`/shelf`, 양장본 책장 + 게시판형 목록 + 검색, 태그 `shelf-web`), 저자의 카테고리·책 색·항목 제목(도구 21 → 28, 인덱스 v15, 태그 `shelf-categories`). 검토 대기 결정은 status.md 4절 #92. 서버는 여전히 `p1-trash`다.
+- **야간 자율 작업(2026-10-06 밤, #92, 서버 배포 없음)**: 책장 화면(`/shelf`, 양장본 책장 + 게시판형 목록 + 검색, 태그 `shelf-web`), 저자의 카테고리·책 색·항목 제목(도구 21 → 28, 인덱스 v15, 태그 `shelf-categories`). #92는 사용자 확인(e만 바꿈). 아침 보완과 함께 2026-10-06 14:51 `p1-shelf`로 서버에 배포했다(status.md 0-10절).
 - 서버(2026-10-06 14:51부터): master `p1-shelf`(`05a2659`: 책장·카테고리 #92, 저자 확인 질문지 #84, 인덱스 v16, 도구 30). 되돌리기 기준은 `74bbbf4`(이미지 `magus:rollback-74bbbf4`). **되돌리기 전에 생각 파일의 제목 키를 정리한다**(status.md 0-10절, 서버 ROLLBACK.txt).
   - 다음 배포도 docs/deploy.md "업데이트" 절차(`git fetch … master && git checkout -B master FETCH_HEAD`)로 한다.
 - (고침 2026-10-06 밤) `tests/test_http.py::test_request_size_limit`의 Windows 간헐 실패: 머리만 보내고 응답을 먼저 읽게 고쳤다(status.md 7절).
