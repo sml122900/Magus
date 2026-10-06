@@ -103,7 +103,7 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 
 업데이트: 로컬에서 새 번들을 만들어 `/root/magus.bundle`에 올린 뒤 아래를 실행한다.
 
-- 지금(2026-10-06 14:51부터) 서버는 master(태그 `p1-shelf`)에 있다. 옛 이력은 지웠다.
+- 지금(2026-10-06 17:09부터) 서버는 master(태그 `p1-shelf-fix`)에 있다. 옛 이력은 지웠다.
 - `p1-shelf`부터 되돌릴 때는 먼저 생각 파일의 제목 키를 정리한다(서버 `/root/deploy-20261006-shelf/ROLLBACK.txt`, status.md 0-10절).
 - 로컬이 Windows면 서버 접속은 Windows OpenSSH(`C:\Windows\System32\OpenSSH\ssh.exe`)로 한다. Git Bash의 ssh는 다른 known_hosts를 읽어 "Host key verification failed"가 난다(호스트 키를 새로 받아들이지 않는다).
 - `ssh … 'bash -s' <<EOF` 안에서 `docker compose exec -T`를 부를 때는 `</dev/null`을 붙인다. 안 붙이면 exec가 스크립트의 남은 줄을 stdin으로 먹는다.
@@ -116,6 +116,7 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 
 | 날짜(KST) | 반영 | 반영 전 → 후 | 확인 |
 |---|---|---|---|
+| 2026-10-06 17:09 | `p1-shelf-fix`(category_put 생각 경로·문체·문헌 안내, 템플릿 항목 내용 완화, instructions 규칙 11, CLI trash put category) | `05a2659`(`p1-shelf`) → `ebb98fc` | 반영 전 백업 스냅샷 `5f39c102`(1,198개, 오류 없음). 인덱스 v16 그대로, healthy·재시작 0, 허용 2명, `/healthz` ok, `/mcp` 401, data 1,198개 해시 같음(index 제외), `.env` 해시 같음. 메모리 magus 83.8MiB, 호스트 available 451MB, 디스크 58%(9.4G 남음). 되돌리기 이미지 `magus:rollback-05a2659` 더함, `rollback-74bbbf4` 유지. 배포 뒤 default 시험 기록(카테고리 「사례」·생각 「시험 메모」) 휴지통. 서버 기록 `/root/deploy-20261006-shelf-fix/` |
 | 2026-10-06 14:51 | `p1-shelf`(책장·카테고리·책 색·제목 #92, 웹 항목 고치기·휴지통, 저자 확인 질문지 #84, 인덱스 v16, 도구 30) | `74bbbf4`(`p1-trash`) → `05a2659` | 반영 전 백업 스냅샷 `596da508`(1,194개, 오류 없음). 인덱스 v16 자동 재생성(14:51:41), healthy·재시작 0, 허용 2명, `/healthz` ok, `/mcp` 401, data 1,194개 해시 같음(index 제외), `.env` 해시 같음. 컨테이너 안 임시 서버(/tmp, 인증 끔)로 /shelf·카테고리 목록·/shelf/new·/questions 200. 메모리 magus 131.8MiB, 호스트 available 465MB. 되돌리기 이미지 `magus:rollback-74bbbf4`, 옛 `rollback-2d9777f` 삭제. 되돌리기 전 제목 키 정리(ROLLBACK.txt). 서버 기록 `/root/deploy-20261006-shelf/` |
 | 2026-10-06 03:24 | `p1-trash`(휴지통 #88, 도구 설명 가드·내부 이름 빼기 #87, 문체 tags_by #89, 인덱스 스키마 v13) | `2d9777f`(`p1-ui-terms`) → `74bbbf4` | 반영 전 백업 스냅샷 `ec0c2c20`(802개, 오류 없음). 인덱스 v13 자동 재생성(03:25:23), healthy·재시작 0, 허용 2명, `/healthz` ok, `/mcp` 401, data 802개 해시 같음(index 제외), `.env` 해시 같음. 메모리 magus 130MiB, 호스트 available 460MB. 되돌리기 이미지 `magus:rollback-2d9777f`, 옛 `rollback-4df2720` 삭제. 배포 뒤 default 생각 3건을 `magus trash put`으로 휴지통(status.md 0-8절). 서버 기록 `/root/deploy-20261006-trash/` |
 | 2026-10-06 03:01 | `p1-ui-terms`(웹 스타일, 세 책장 화면, 용어 통일 #85, 입력칸 #86, 허용 목록 중복 거부) | `4df2720`(`p1-reupload`) → `2d9777f` | 배포 전 서버 `ALLOWED_USERS`로 새 검사 통과(2명). 반영 전 백업 스냅샷 `8ea57cec`(798개, 오류 없음). healthy·재시작 0, 로그 허용 2명, `/healthz` ok, `/mcp` 401 + resource_metadata, data 798개 해시 같음(index 제외), `.env` 해시 같음. 새 문구: 바깥 오류 페이지의 상단 바·입력칸 CSS, 컨테이너 안 임시 로컬 서버로 메뉴 확인 요청·생각. 메모리 magus 123MiB, 호스트 available 469MB. 되돌리기 이미지 `magus:rollback-4df2720`, 옛 `rollback-896633c` 삭제. 서버 기록 `/root/deploy-20261006-ui-terms/`(ROLLBACK.txt) |
