@@ -37,19 +37,20 @@ from magus.book.importer import import_manuscript
 from magus.book.outline import chapter_count
 from magus.book.reupload import reupload_manuscript
 from magus.config import Settings
-from magus.ids import local_time
+from magus.ids import local_time, utcnow
 from magus.inbox import INBOX_TYPES, LimitError, mb, save_upload, size_text
 from magus.melchior.author_report import cite_label
 from magus.melchior.questions import TYPES as QUESTION_TYPES
 from magus.melchior.questions import build_questions
 from magus.melchior.report import build_cite_report
 from magus.signing import sign, unsign
-from magus.store import Store
+from magus.store import Profile, Store
 from magus.store.base import STALE_REASONS
 from magus.webshelf import ShelfPages
 
 log = logging.getLogger("magus.web")
 SESSION_COOKIE, OAUTH_COOKIE = "magus_session", "magus_oauth"
+DISPLAY_NAME_MAX = 40  # 상단 바 표시 이름 길이 한도
 SESSION_TTL, OAUTH_TTL, DOWNLOAD_TTL = 12 * 3600, 600, 24 * 3600
 LIGHTS = {"verified": ("🟢", "확인"), "unverified": ("🟡", "미확인"), "unknown": ("🔴", "참고문헌에 없음"),
           "uncertain": ("⚪", "미연결")}
@@ -81,6 +82,8 @@ p{margin:12px 0}a{color:var(--primary)}a:hover{color:var(--press)}small{color:va
 .site nav a:hover{color:var(--primary)}
 .site nav a[aria-current=page]{color:var(--primary);border-bottom-color:var(--primary)}
 .site nav span{color:var(--mute)}
+.site nav a.me{color:var(--ink2);border-bottom-color:transparent;max-width:16em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.muted{color:var(--ink2)}
 .table-wrap,.card,.msg{background:var(--canvas);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
 .table-wrap{overflow-x:auto;margin:16px 0}
 .card{padding:16px 24px;margin:16px 0}
@@ -181,6 +184,21 @@ class OAuthClient:
             raise RuntimeError("토큰 응답에 access_token이 없다")
         return str(token)
 
+    def userinfo(self, access_token: str) -> dict[str, Any] | None:
+        """OIDC userinfo(WorkOS: POST /oauth2/userinfo, Bearer 액세스 토큰 → sub·email·email_verified).
+        scope에 email이 있어야 메일이 온다(웹 로그인은 openid profile email을 청한다). 실패하면 None(로그인은 막지 않는다)."""
+        endpoint = self.metadata().get("userinfo_endpoint")
+        if not endpoint:
+            return None
+        request = urllib.request.Request(str(endpoint), b"", {"authorization": f"Bearer {access_token}", "accept": "application/json"},
+                                         method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=10) as r:  # noqa: S310 - 설정한 issuer의 메타데이터에 있는 주소만
+                data = json.load(r)
+        except (OSError, ValueError):
+            return None
+        return data if isinstance(data, dict) else None
+
 
 def _pkce() -> tuple[str, str]:
     verifier = secrets.token_urlsafe(48)
@@ -243,7 +261,7 @@ class Web(ShelfPages):
     def register(self, server: MCPServer) -> None:
         routes: list[tuple[str, list[str], Callable[[Request], Awaitable[Response]]]] = [
             ("/", ["GET"], self.home), ("/login", ["GET"], self.login), ("/auth/callback", ["GET"], self.callback),
-            ("/logout", ["POST"], self.logout), ("/inbox", ["GET"], self.inbox), ("/inbox/upload", ["POST"], self.upload),
+            ("/logout", ["POST"], self.logout), ("/me", ["GET", "POST"], self.me), ("/inbox", ["GET"], self.inbox), ("/inbox/upload", ["POST"], self.upload),
             ("/inbox/delete", ["POST"], self.delete), ("/book", ["GET"], self.book), ("/book/import", ["POST"], self.do_import),
             ("/book/export", ["POST"], self.do_export), ("/download/{token}", ["GET"], self.download),
             ("/checklist", ["GET"], self.checklist), ("/issues", ["GET"], self.issues), ("/questions", ["GET"], self.questions),
@@ -261,7 +279,8 @@ class Web(ShelfPages):
             links = "".join(
                 f'<a href="{href}"{" aria-current=page" if label == (current or title) else ""}>{label}</a>' for href, label in NAV
             )
-            nav = (f'<nav>{links}<span>{html.escape(session[0])}</span>'
+            shown = html.escape(self.shown_name(session[0]))
+            nav = (f'<nav>{links}<a href="/me" class="me" aria-label="내 정보, {shown}">{shown}</a>'
                    f'<form method="post" action="/logout" class="inline">{self._csrf_input(session)}<button>로그아웃</button></form></nav>')
         body = body.replace("<table>", '<div class="table-wrap"><table>').replace("</table>", "</table></div>")
         return HTMLResponse(
@@ -342,12 +361,67 @@ class Web(ShelfPages):
                 f"<p>운영자에게 아래 사용자 id를 알려 주세요.</p><p><code>{html.escape(sub)}</code></p>",
                 status=403,
             )
+        await run_in_threadpool(self._remember_email, uid, str(claims.get("sub", "")), token)
         response = RedirectResponse(str(pending.get("n") or "/book"), status_code=303)
         self._cookie(response, SESSION_COOKIE, sign({"uid": uid, "sid": secrets.token_hex(8)}, self.secret, "session",
                                                     SESSION_TTL), SESSION_TTL)
         response.delete_cookie(OAUTH_COOKIE, path="/")
         log.info("web login user=%s", uid)
         return response
+
+    def _remember_email(self, uid: str, sub: str, token: str) -> None:
+        """웹 로그인 때 userinfo의 메일을 프로필에 적는다. userinfo의 sub가 검증한 토큰의 sub와 같을 때만.
+        로그에는 메일을 남기지 않는다(받았는지 여부만, #52)."""
+        if self.oauth is None:
+            return
+        info = self.oauth.userinfo(token)
+        email = str((info or {}).get("email") or "").strip()
+        ok = bool(info) and str(info.get("sub", "")) == sub and "@" in email and len(email) <= 254
+        log.info("web login profile: email=%s", "yes" if ok else "no")
+        if not ok:
+            return
+        profile = self.store.get_profile(uid)
+        if profile.email != email:
+            self.store.save_profile(uid, Profile(email, profile.display_name, utcnow(), profile.name_at))
+
+    def shown_name(self, uid: str) -> str:
+        """상단 바 이름: 표시 이름, 없으면 메일, 없으면 내부 이름."""
+        profile = self.store.get_profile(uid)
+        return profile.display_name or profile.email or uid
+
+    async def me(self, request: Request) -> Response:
+        """내 정보: 표시 이름 바꾸기(본인 것만, CSRF). 메일은 보이기만 한다. 비우면 다시 메일로 보인다."""
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        profile = await run_in_threadpool(self.store.get_profile, uid)
+        message = ""
+        if request.method == "POST":
+            try:
+                form = await self._form(request, session)
+            except PermissionError:
+                return self._page("내 정보", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            name = " ".join("".join(ch for ch in str(form.get("display_name") or "") if ch.isprintable()).split())
+            if len(name) > DISPLAY_NAME_MAX:
+                message = f'<p class="msg err">표시 이름은 {DISPLAY_NAME_MAX}자까지입니다. 지금 {len(name)}자</p>'
+            else:
+                profile = Profile(profile.email, name or None, profile.email_at, utcnow())
+                await run_in_threadpool(self.store.save_profile, uid, profile)
+                return RedirectResponse("/me?done=1", status_code=303)
+        elif request.query_params.get("done") == "1":
+            message = '<p class="msg">저장했습니다.</p>'
+        email = (f"<p>메일: {html.escape(profile.email)}</p>" if profile.email
+                 else "<p>메일: 아직 모릅니다(웹에서 로그인하면 채워집니다).</p>")
+        body = (
+            f'{message}<form method="post" action="/me" class="card">{self._csrf_input(session)}'
+            f'<p><label>표시 이름 <input name="display_name" value="{html.escape(profile.display_name or "")}" '
+            f'maxlength="{DISPLAY_NAME_MAX}"></label></p>'
+            "<p>위쪽 막대에 보이는 이름입니다. 비우고 저장하면 메일이 보입니다.</p>"
+            f'{email}<p class="muted">메일은 로그인한 계정의 것이라 여기서 바꾸지 않습니다.</p>'
+            '<p><button class="primary">저장</button></p></form>'
+        )
+        return self._page("내 정보", body, session, 400 if message.startswith('<p class="msg err">') else 200)
 
     async def logout(self, request: Request) -> Response:
         session = self.user_of(request)

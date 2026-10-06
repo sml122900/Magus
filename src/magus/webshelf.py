@@ -90,6 +90,9 @@ class Book:
     count: int
     color: str
     href: str | None  # None이면 누를 수 없는 미리보기
+    # 문헌만: 원문을 확인한 편수. 책등 아래를 "확인 n · 전체 m" 두 줄로 보인다(두께는 전체 수 기준 그대로).
+    # 문헌 수에는 원고 참고문헌에서 들여온 미확인 항목도 들어 있어, 전체만 보이면 '원문을 읽고 등록한 책'으로 오해한다.
+    verified: int | None = None
 
 
 def book_style(book: Book) -> str:
@@ -108,10 +111,13 @@ def book_style(book: Book) -> str:
 
 def book_html(book: Book) -> str:
     count = f"{book.count}개" if book.count < 10000 else f"{book.count / 10000:.1f}만개"
+    label = html.escape(f"{book.name}, 항목 {book.count}개")
+    if book.verified is not None:
+        count = f'<span class="line">확인 {book.verified}</span><span class="line">전체 {book.count}</span>'
+        label = html.escape(f"{book.name}, 확인 {book.verified}편, 전체 {book.count}편")
     inner = (f'<span class="band top" aria-hidden="true">{html.escape(book.band)}</span>'
              f'<span class="spine-title" aria-hidden="true">{html.escape(book.name)}</span>'
              f'<span class="band bottom" aria-hidden="true">{count}</span>')
-    label = html.escape(f"{book.name}, 항목 {book.count}개")
     if book.href is None:
         return f'<li><span class="book" style="{book_style(book)}" role="img" aria-label="{label}">{inner}</span></li>'
     return f'<li><a class="book" href="{html.escape(book.href)}" style="{book_style(book)}" aria-label="{label}">{inner}</a></li>'
@@ -158,7 +164,7 @@ a.book:hover,a.book:focus-visible{color:var(--fg);transform:translateY(-14px);bo
 .band{display:block;width:100%;text-align:center;font-size:14px;font-weight:600;line-height:1.2;
 padding:6px 2px;background:rgb(var(--away)/.22);border-top:2px solid rgb(var(--fgrgb)/.45);
 border-bottom:2px solid rgb(var(--fgrgb)/.45);font-variant-numeric:tabular-nums;white-space:nowrap}
-.band.top{margin-top:14px}.band.bottom{margin-bottom:12px}
+.band.top{margin-top:14px}.band.bottom{margin-bottom:12px}.band .line{display:block;font-size:13px;line-height:1.35}
 .spine-title{writing-mode:vertical-rl;text-orientation:mixed;font-size:var(--fs);font-weight:600;line-height:1.1;
 letter-spacing:.06em;margin:auto 0;padding:10px 0;white-space:nowrap}
 .book.add{--fs:18px;background:transparent;color:var(--ink2);border:2px dashed var(--ink2);box-shadow:none;justify-content:center;
@@ -493,9 +499,11 @@ class ShelfPages:
     # --- 책장 ---
     def books(self, uid: str) -> list[Book]:
         settings = self.store.get_shelf_settings(uid)
-        counts = {"ideas": len(self.store.list_ideas(uid)), "styles": len(self.store.list_styles(uid)),
-                  "refs": len(self.store.list_refs(uid))}
-        builtins = [Book(k, KINDS[k].name, "기본", counts[k], settings.colors.get(k, DEFAULT_COLORS[k]), f"/shelf/{k}") for k in KINDS]
+        refs = self.store.list_refs(uid)
+        counts = {"ideas": len(self.store.list_ideas(uid)), "styles": len(self.store.list_styles(uid)), "refs": len(refs)}
+        verified = sum(1 for r in refs if r.status == "verified")
+        builtins = [Book(k, KINDS[k].name, "기본", counts[k], settings.colors.get(k, DEFAULT_COLORS[k]), f"/shelf/{k}",
+                         verified if k == "refs" else None) for k in KINDS]
         mine = [Book(c.id, c.name, TEMPLATE_BY_KEY[c.template].band if c.template in TEMPLATE_BY_KEY else "일반", c.items, c.color,
                      f"/shelf/{c.id}") for c in self.store.list_categories(uid)]
         return builtins + mine
@@ -662,7 +670,7 @@ class ShelfPages:
         project = self.store.get_project(uid, filters.get("project") or None)
         q = f"project={urllib.parse.quote(project.id)}&" if project else ""
         checklist = f' · 인용 현황은 <a href="/checklist?{q}">인용 체크리스트</a>' if project else ""
-        return (f"<p>문헌 {len(refs)}편(확인 {verified} · 미확인 {len(refs) - verified}){checklist}{edit}</p>"
+        return (f"<p>문헌 확인 {verified}편 · 전체 {len(refs)}편(미확인 {len(refs) - verified}편){checklist}{edit}</p>"
                 f'<p><a href="/shelf/refs?{q}">전체</a> · <a href="/shelf/refs?{q}status=verified">{LIGHTS["verified"][0]} '
                 f'{LIGHTS["verified"][1]}</a> · <a href="/shelf/refs?{q}status=unverified">{LIGHTS["unverified"][0]} '
                 f'{LIGHTS["unverified"][1]}</a></p>')

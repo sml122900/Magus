@@ -46,6 +46,7 @@ from magus.store.base import (
     IssueOrigin,
     IssueStatus,
     Part,
+    Profile,
     Project,
     reading_order,
 )
@@ -515,6 +516,18 @@ class LocalStore(ShelfMixin, CategoryMixin):
     def inbox_path(self, user_id: str, name: str) -> Path | None:
         path = self._inbox_file(user_id, name)
         return path if path.is_file() else None
+
+    @_locked
+    def get_profile(self, user_id: str) -> Profile:
+        path = self._user_dir(user_id) / "profile.json"
+        data = _read_json(path) if path.exists() else {}
+        return Profile(**{k: (str(data[k]) if data.get(k) else None) for k in ("email", "display_name", "email_at", "name_at")})
+
+    @_locked
+    def save_profile(self, user_id: str, profile: Profile) -> Profile:
+        record = {"schema_version": 1, **{k: v for k, v in asdict(profile).items() if v}}
+        _write_json(self._user_dir(user_id) / "profile.json", record)
+        return profile
 
     def usage_bytes(self, user_id: str) -> int:
         folder = self._user_dir(user_id)

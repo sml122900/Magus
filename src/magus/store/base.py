@@ -287,6 +287,17 @@ class ShelfSettings:
 
 
 @dataclass(frozen=True)
+class Profile:
+    """사용자 프로필(users/<id>/profile.json). 상단 바 이름 = 표시 이름, 없으면 메일, 없으면 내부 이름(user id).
+    메일은 웹 로그인 때 인증 서버의 userinfo에서 받는다(저자가 바꾸지 않는다). 로그에는 남기지 않는다(#52)."""
+
+    email: str | None = None
+    display_name: str | None = None
+    email_at: str | None = None  # 메일을 받아 적은 시각
+    name_at: str | None = None  # 표시 이름을 바꾼 시각
+
+
+@dataclass(frozen=True)
 class TrashItem:
     """휴지통의 생각·문체 하나(trash/shelf/<casper|balthasar>/<id>.json). 지우지 않고 옮겨 둔 것이라 되살릴 수 있다(#88)."""
 
@@ -339,6 +350,10 @@ class Store(Protocol):
     def usage_bytes(self, user_id: str) -> int:
         """사용자 폴더 전체(원고·책장·받은함·휴지통) 크기. 저장 용량 한도에 쓴다."""
         ...
+    def get_profile(self, user_id: str) -> Profile:
+        """없으면 빈 프로필. 읽기만 하면 사용자 폴더를 만들지 않는다."""
+        ...
+    def save_profile(self, user_id: str, profile: Profile) -> Profile: ...
 
     # 프로젝트
     def create_project(

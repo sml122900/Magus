@@ -120,13 +120,19 @@ def fake_issuer():
             path = urllib.parse.urlparse(self.path).path
             if path == "/.well-known/oauth-authorization-server":
                 self._json({"issuer": issuer, "authorization_endpoint": f"{issuer}/authorize",
-                            "token_endpoint": f"{issuer}/token", "jwks_uri": f"{issuer}/jwks"})
+                            "token_endpoint": f"{issuer}/token", "jwks_uri": f"{issuer}/jwks", "userinfo_endpoint": f"{issuer}/userinfo"})
             elif path == "/jwks":
                 self._json({"keys": [{**jwk, "kid": "k1", "alg": "RS256", "use": "sig"}]})
             else:
                 self._json({}, 404)
 
         def do_POST(self):
+            if urllib.parse.urlparse(self.path).path == "/userinfo":  # WorkOS처럼 POST + Bearer 액세스 토큰
+                token = (self.headers.get("authorization") or "").removeprefix("Bearer ")
+                sub = jwt.decode(token, options={"verify_signature": False})["sub"]
+                if sub == "sub-liar":  # 토큰과 다른 sub를 돌려주는 경우: 메일을 받아 적지 않아야 한다
+                    return self._json({"sub": "sub-someone", "email": "liar@example.com"})
+                return self._json({"sub": sub, "email": f"{sub}@example.com", "email_verified": True})
             form = dict(urllib.parse.parse_qsl(self.rfile.read(int(self.headers["content-length"])).decode()))
             pending = state.pop(form.get("code", ""), None)
             challenge = base64.urlsafe_b64encode(hashlib.sha256(form.get("code_verifier", "").encode()).digest()).rstrip(b"=").decode()
@@ -173,7 +179,7 @@ def test_remote_web_login_with_oauth(server_proc, fake_issuer):
         done = _login(alice, issuer_state, "sub-alice")
         assert done.status_code == 303 and done.headers["location"] == "/inbox"
         page = alice.get("/inbox").text
-        assert "<span>alice</span>" in page
+        assert '<a href="/me" class="me" aria-label="내 정보, sub-alice@example.com">sub-alice@example.com</a>' in page
         csrf = _csrf(page)
         alice.post("/inbox/upload", data={"csrf": csrf}, files={"files": ("원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes())})
         alice.post("/book/import", data={"csrf": csrf, "name": "원고.docx", "project_id": "synth"})
@@ -307,7 +313,7 @@ def test_shelf_books_and_board_lists(server_proc):
         _seed_shelf(data_dir)
 
         shelf = c.get("/shelf").text
-        for label in ("생각, 항목 123개", "문체, 항목 2개", "문헌, 항목 2개"):
+        for label in ("생각, 항목 123개", "문체, 항목 2개", "문헌, 확인 1편, 전체 2편"):
             assert f'aria-label="{label}"' in shelf
         assert 'aria-current=page>책장</a>' in shelf and '<span class="spine-title" aria-hidden="true">생각</span>' in shelf
         assert re.search(r'class="book" href="/shelf/ideas" style="--c:#[0-9a-f]{6};--fg:#[0-9a-f]{6};', shelf)
@@ -390,3 +396,49 @@ def test_shelf_search_marks_hits(server_proc):
     store = LocalStore(data_dir)
     assert not hybrid_search(store, "alice", "물결", ["style"], 5)  # 문체 자문(style_search)은 여전히 구절을 보지 않는다
     store.close()
+
+
+def test_display_name_from_email_and_editable(server_proc, fake_issuer):
+    """상단 바 이름: 처음에는 가입 메일(웹 로그인 때 userinfo), 내 정보에서 표시 이름으로 바꾸고, 비우면 다시 메일.
+    메일·표시 이름은 로그에 남지 않고, 사용자마다 따로다."""
+    issuer, issuer_state, _ = fake_issuer
+    base, data_dir, log_path = server_proc({
+        "PUBLIC_URL": "http://127.0.0.1:{port}", "AUTH_ISSUER": issuer, "ALLOWED_USERS": "sub-alice=alice,sub-bob=bob,sub-liar=liar",
+        "SESSION_SECRET": "x" * 40, "WEB_CLIENT_ID": "web-client",
+    })
+    with httpx2.Client(base_url=base, timeout=120) as alice, httpx2.Client(base_url=base, timeout=120) as bob:
+        _login(alice, issuer_state, "sub-alice")
+        _login(bob, issuer_state, "sub-bob")
+        me = alice.get("/me").text
+        assert "<h1>내 정보</h1>" in me and "<p>메일: sub-alice@example.com</p>" in me and 'name="display_name" value=""' in me
+        csrf = _csrf(me)
+        assert alice.post("/me", data={"csrf": "틀림", "display_name": "x"}).status_code == 403
+        too_long = alice.post("/me", data={"csrf": csrf, "display_name": "가" * 41})
+        assert too_long.status_code == 400 and "표시 이름은 40자까지입니다. 지금 41자" in too_long.text
+        saved = alice.post("/me", data={"csrf": csrf, "display_name": "  <b>표시명시험</b>  교수 "}, follow_redirects=True).text
+        assert "저장했습니다." in saved and ">&lt;b&gt;표시명시험&lt;/b&gt; 교수</a>" in saved and "<b>표시명시험" not in saved
+        assert ">sub-bob@example.com</a>" in bob.get("/inbox").text  # 밥의 상단 바는 밥의 것
+        bob_csrf = _csrf(bob.get("/me").text)
+        bob.post("/me", data={"csrf": bob_csrf, "display_name": "밥"})
+        assert ">&lt;b&gt;표시명시험&lt;/b&gt; 교수</a>" in alice.get("/inbox").text  # 밥이 바꿔도 앨리스 것은 그대로
+        cleared = alice.post("/me", data={"csrf": csrf, "display_name": "   "}, follow_redirects=True).text
+        assert ">sub-alice@example.com</a>" in cleared  # 비우면 다시 메일
+    with httpx2.Client(base_url=base, timeout=120) as liar:
+        _login(liar, issuer_state, "sub-liar")
+        assert ">liar</a>" in liar.get("/inbox").text  # userinfo의 sub가 다르면 메일을 적지 않는다(내부 이름)
+    profile = json.loads((data_dir / "users" / "alice" / "profile.json").read_text(encoding="utf-8"))
+    assert profile["email"] == "sub-alice@example.com" and "display_name" not in profile and profile["schema_version"] == 1
+    assert json.loads((data_dir / "users" / "bob" / "profile.json").read_text(encoding="utf-8"))["display_name"] == "밥"
+    assert not (data_dir / "users" / "liar" / "profile.json").exists()
+    time.sleep(0.3)
+    log = log_path.read_text(encoding="utf-8")
+    assert "web login profile: email=yes" in log and "web login profile: email=no" in log
+    for secret in ("sub-alice@example.com", "liar@example.com", "표시명시험", "교수"):
+        assert secret not in log  # 메일과 표시 이름은 로그에 없다(#52)
+
+
+def test_local_mode_shows_internal_name_and_me_page(server_proc):
+    base, _, _ = server_proc({})
+    with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
+        page = c.get("/login?next=/me").text
+        assert ">alice</a>" in page and "메일: 아직 모릅니다(웹에서 로그인하면 채워집니다)." in page

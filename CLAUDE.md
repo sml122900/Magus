@@ -200,6 +200,7 @@ data/users/<user_id>/trash/<project_id>-<시각>/                   # book_impor
 data/users/<user_id>/trash/shelf/{casper,balthasar}/<id>.json    # 휴지통의 생각·문체(#88). 원래 파일 + "_trash": {at, note, with?}
 data/users/<user_id>/shelf/categories/<id>/{category.json, items/<항목 id>.json}   # 저자의 카테고리(#92, schema_version 1)
 data/users/<user_id>/shelf/settings.json                          # 책 색·내 색·제목 기본값(#92)
+data/users/<user_id>/profile.json                                # 메일(웹 로그인 때 userinfo)·표시 이름(내 정보에서). 로그에 남기지 않는다
 data/users/<user_id>/trash/shelf/categories/<id>/                 # 휴지통의 카테고리 통째. 항목 하나는 trash/shelf/category-items/<카테고리 id>/
 data/users/<user_id>/inbox/                                       # 받은함(업로드한 원고·논문·대화 기록). 도구는 파일 이름으로 가리킨다
 data/index.sqlite
@@ -407,6 +408,7 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
 - 웹(`magus/web.py`): 같은 프로세스의 Starlette 라우트로 서버에서 그린 최소 HTML이다(디자인은 P1 범위가 아니다).
   - 페이지: `/login`, `/inbox`(업로드·목록·삭제), `/book`(임포트·docx 내보내기), `/checklist`(문헌 신호등 🟢확인 🟡미확인 🔴참고문헌에 없음 ⚪미연결 + 장별), `/issues`(메뉴 "확인 요청": 목록, AI 확인 요청 🤖 표시, #71), `/download/{token}`.
   - **책장**(메뉴 "책장", `magus/webshelf.py`, #92): `/shelf`는 양장본 책장(기본 셋 + 저자의 카테고리 + 점선 "카테고리 추가", 책등 세로쓰기·위 띠·아래 항목 수·두께는 항목 수 단계). 책을 누르면 게시판형 목록 `/shelf/{ideas|styles|refs|카테고리 id}`(한 줄 = 제목·작성 시각·보조 정보, 누르면 펼침, 100개씩, 기존 거르기 유지), 항목 고유 주소 `/shelf/<…>/<항목 id>`(펼친 채 열림). 검색 `?q=`(두 글자 이상 FTS, 한 글자는 그대로 포함, `<mark>`), `/shelf?q=`는 카테고리별로 묶는다. 예전 `/ideas`·`/refs`·`/styles`는 넘긴다.
+    - 문헌 책등 아래는 "확인 n · 전체 m" 두 줄(낭독기 "문헌, 확인 n편, 전체 m편"), 두께는 전체 수 기준. 문헌 목록 머리줄도 "문헌 확인 n편 · 전체 m편(미확인 k편)". 원고 참고문헌에서 들여온 미확인 항목까지 세어 '원문을 읽고 등록한 책'으로 오해하지 않게.
     - 생각과 저자의 카테고리 항목은 펼친 곳의 "고치기 · 휴지통으로"로 웹에서 고치고 옮긴다(`/shelf/<…>/<항목 id>/edit`·`/trash`, 자기 책장만, CSRF, 휴지통은 확인 화면 한 번). AI가 쓴 항목을 고치면 "저자가 고침(시각)"이 남는다.
     - 만들기 `/shelf/new`, 이름·색 `/shelf/edit/<…>`(기본 셋은 색만, 색 격자 18 + 내 색 12 + 색 선택기·#RRGGBB·R·G·B), 휴지통 `/shelf/trash/<id>`(확인 화면), 바로 적기 `POST /shelf/write/<ideas|카테고리 id>`(누가 = 저자). 문체·문헌은 대화로 넣는다. 책장 전용 색은 web-style.md "책장 전용".
   - **화면 스타일**(2026-10-06): `web.py`의 `STYLE` 상수 한 곳. 토큰과 참고 문서에서 바꾼 점은 `docs/decisions/web-style.md`(참고 문서는 외부 디자인 분석 문서, `private/design/`, 리포 밖). 시스템 한글 글꼴, 본문 16px·줄간격 1.6, 굵기 400/600, 그라데이션 없음, 흰 상단 바. 화면 문구는 사용자 결정으로만 바꾼다(#85 용어집).
@@ -418,6 +420,7 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
     - 원격: 인증 서버에 OAuth 인가 코드 + PKCE(S256) + `resource=PUBLIC_URL/mcp`로 로그인한다. 토큰은 MCP와 같은 JwtVerifier로 검증한다.
     - 실패 화면은 둘로 나뉜다. 토큰 무효는 401("로그인 토큰을 받아들이지 못했습니다", 원인은 서버 로그)이다. 허용 목록 밖은 403("허용 목록에 없습니다")이고, **본인의 사용자 id를 화면에 보여 준다**(운영자가 목록에 넣을 값).
     - 로컬(인증 없는 HTTP, 루프백 전용): `USER_ID`로 바로 로그인한다.
+  - **상단 바 이름**: 표시 이름, 없으면 가입 메일, 없으면 내부 이름(user id). 메일은 웹 로그인 콜백에서 인증 서버 userinfo(WorkOS `POST /oauth2/userinfo`, Bearer 액세스 토큰, scope `openid profile email`)로 받아, userinfo의 sub가 검증한 토큰의 sub와 같을 때만 `profile.json`에 적는다. 이름을 누르면 `/me`(내 정보: 표시 이름 바꾸기, 40자, CSRF, 비우면 메일로. 메일은 보이기만). 메일·표시 이름은 로그에 남기지 않는다(받았는지 yes/no만, #52).
   - 세션은 HMAC 서명 쿠키(HttpOnly, SameSite=Lax, https면 Secure, 12시간)다. 모든 POST는 CSRF 토큰을 확인한다(`magus/signing.py`).
   - 내려받기: book_export(원격·HTTP)는 서명·만료(24시간) 링크를 돌려준다. 링크만으로는 받을 수 없고, 같은 사용자로 로그인해 있어야 한다.
 - 저장: 파일 + SQLite를 유지한다(Store 인터페이스 뒤. Postgres는 P2).
