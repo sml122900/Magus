@@ -59,7 +59,7 @@ def build_tools(
         kind: Literal["thought", "ai", "article", "conversation", "tv", "other"],
         origin: str | None = None,
         title: str | None = None,
-        title_by: Literal["ai", "author"] = "ai",
+        title_by: Literal["ai", "author"] | None = None,
         untitled: bool = False,
     ) -> str:
         if not text.strip():

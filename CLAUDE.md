@@ -83,6 +83,7 @@
 - **인용 게이트**: refs에 `status=verified`로 있는 출처만 인용할 수 있다. 없는 출처는 본문에 `[출처 필요: 주장 요약]`으로 남긴다. 쓰기를 막지는 않는다. 표시하고 집계만 하며, 판단은 사용자가 한다.
 - **누가 말했는지 보존한다.** Casper는 사용자 발화(`author=me`)와 AI 발화(`author=ai`)를 구분해 저장하고, 검색에서는 me를 먼저 보여 준다.
 - **Magus 안의 원본은 사람이 읽을 수 있는 파일(markdown/json)이다. SQLite는 인덱스일 뿐이다.** (원고 본문의 ch-NN.md는 그 자체가 저자 파일의 사본이다.) 인덱스는 언제든 파일에서 다시 만들 수 있어야 한다(`magus reindex`). 파일에 없는 정보를 SQLite에만 두지 않는다. 예외는 계산으로 얻는 값(char_count, unverified_cite_count, chunks)이다.
+- **프로젝트 폴더 밖의 파일·폴더는 만들지도 지우지도 않는다. 경로가 프로젝트 밖으로 풀리면 그 자리에서 멈추고 보고한다. 프로젝트 안이라도 내가 이 세션에서 만들지 않은 폴더를 통째로 지우지 않는다.**(2026-10-06 사용자 지시. 그 전날 밤 캡처 스크립트가 경로를 `C:\c\…`로 잘못 풀어 파일을 만들었고, 정리하며 `C:\c`를 통째로 지웠다.) 임시 파일은 프로젝트 안 `private/tmp/`(gitignore)에 둔다.
 - **프로젝트 폴더 밖의 파일은 사용자가 경로를 명시해 지시했을 때만 읽는다.** 필요한 파일이 없으면 status.md에 "대기: 무엇을, 누가"로 기록하고 멈춘다. 다른 폴더를 뒤져 찾아오지 않는다.
   - "프로젝트 폴더 밖"에는 환경이 알려 준 경로(대화 기록 파일, 홈 폴더, Downloads)도 포함된다. 사용자가 이 세션에서 경로를 직접 적었을 때만 읽는다.
 - **지시문의 참조를 찾지 못하면 밖에서 찾거나 추측하지 않는다.** status.md에 "불명: …"으로 적고, 내 판단으로 진행한 뒤 보고한다(예: "위 세 가지 테스트 프롬프트"가 메시지에 없을 때).
@@ -174,10 +175,10 @@
 - refs(id, user_id, key, aliases json, bib json, status: unverified|verified, has_fulltext, file_path?, created_at)
   - key는 첫 저자 성(소문자 영문) + 연도다. 예: `daeschler2006`, `galor2022`. 한글 표기(갤러, 다이아몬드 등)는 aliases에 넣는다.
 - ref_passages(id, user_id, ref_id, text, reason, locator?)
-- ideas(id, user_id, text, kind: thought|ai|article|conversation|tv|other, origin?, author: me|ai, parent_id?, created_at, title?, title_by?: ai|author) — 제목은 선택(#92). 제목도 검색한다
+- ideas(id, user_id, text, kind: thought|ai|article|conversation|tv|other, origin?, author: me|ai, parent_id?, created_at, title?, title_by?: ai|author, edited_at?, edited_by?: author|ai) — 제목은 선택(#92). 제목도 검색한다. edited_*는 처음 쓴 뒤 고친 사람·시각(웹에서 저자가 고치면 author. 처음 쓴 사람 author는 그대로). 값이 없으면 파일에 키를 쓰지 않는다(옛 코드로 되돌려도 읽힘). SCHEMA_VERSION 16
 - style_entries(id, user_id, passage, reason, work?, tags json, created_at, tags_by?: ai|author) — tags_by는 태그를 누가 정했나(#89. Claude가 뽑음 ai / 저자가 말함 author, 기록 전 항목은 비어 있음). SCHEMA_VERSION 13
 - categories(id, user_id, name, name_key, template, color, fields json, schema_version, created_at, updated_at) — 저자의 카테고리(#92). (user_id, name_key) 유일
-- category_items(id, user_id, category_id, title?, title_by?, content, fields json, author: me|ai, tags json, chapters json, schema_version, created_at, updated_at)
+- category_items(id, user_id, category_id, title?, title_by?, content, fields json, author: me|ai, tags json, chapters json, schema_version, created_at, updated_at, edited_at?, edited_by?)
 - 책장 설정(shelf/settings.json, 인덱스 없음): 기본 카테고리 책 색, 내 색(12개까지), 제목 기본값 ask|ai|none
 - chunks(id, user_id, owner_type, owner_id, lane: ref_picked|ref_full|idea_me|idea_ai|style|style_passage|ref_bib|category, text, embedding blob?) + chunks_fts
   - style_passage(문체 구절·출전)·ref_bib(문헌 서지)는 **웹 책장 검색 전용**이다. 도구 검색(style_search·ref_search)은 보지 않고 임베딩도 하지 않는다(#92). category는 owner_id `<카테고리 id>/<항목 id>`. SCHEMA_VERSION 15
@@ -315,7 +316,7 @@ data/index.sqlite
   - 7개 절: 한 줄 요약 / 바로 확인할 것(연도 불일치, 참고문헌에만 있는 것) / 답해 주실 질문(음역 추정, 동명 판별) / 확인 순서 상위 20 / 사실·수치 요청(fact) / 장별 미확인 수 / 앞으로의 방식.
 
 ### 영감 — Casper (`magus/casper/`)
-- `idea_add(text, kind, origin?, title?, title_by=ai|author, untitled?)` → author=me로 저장한다. 제목을 주지 않고 untitled도 아니면 저자의 제목 기본값을 따른다(#92: 매번 묻기면 저장하지 않고 먼저 묻게 하는 오류, AI가 짓기면 지어서 다시 부르게 하는 오류, 비워 두기면 제목 없이 저장).
+- `idea_add(text, kind, origin?, title?, title_by?: author|ai, untitled?)` → author=me로 저장한다. **제목을 주면 title_by가 반드시 있어야 한다**(기본값 없음, #92-e: 저자가 지은 제목이 AI 것으로 기록되지 않게). 제목을 주지 않고 untitled도 아니면 저자의 제목 기본값을 따른다(#92: 매번 묻기면 저장하지 않고 먼저 묻게 하는 오류, AI가 짓기면 지어서 다시 부르게 하는 오류, 비워 두기면 제목 없이 저장).
 - `idea_add_conversation(markdown? | path?, origin?)` → 화자 마커로 발화를 나눈다(`magus/casper/conversation.py`). 로컬 .md path도 받는다(긴 기록용).
   - 지원 마커(한 파일 안 혼용 가능): `**사용자:**`/`**Claude:**`(변형: `**사용자**:`, 나/User, ChatGPT/AI), `질문:`/`답변:`(괄호 설명 허용: `**답변(수정된 평가):**`), 제목형 `## 질문 N` / `### 답변`, `> 인용 블록` 뒤의 `**Claude 요지**`. 사용자 발화 전체가 인용 블록이면 `>`를 뗀다.
   - 사용자 발화 하나는 ideas(author=me, kind=conversation)가 되고, 바로 뒤의 AI 발화는 ideas(author=ai, parent_id=그 사용자 발화)가 된다. 대화 사이 구분 제목(`## 대화 N`, `---`)은 발화에서 떼어 낸다.
@@ -403,6 +404,7 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
 - 웹(`magus/web.py`): 같은 프로세스의 Starlette 라우트로 서버에서 그린 최소 HTML이다(디자인은 P1 범위가 아니다).
   - 페이지: `/login`, `/inbox`(업로드·목록·삭제), `/book`(임포트·docx 내보내기), `/checklist`(문헌 신호등 🟢확인 🟡미확인 🔴참고문헌에 없음 ⚪미연결 + 장별), `/issues`(메뉴 "확인 요청": 목록, AI 확인 요청 🤖 표시, #71), `/download/{token}`.
   - **책장**(메뉴 "책장", `magus/webshelf.py`, #92): `/shelf`는 양장본 책장(기본 셋 + 저자의 카테고리 + 점선 "카테고리 추가", 책등 세로쓰기·위 띠·아래 항목 수·두께는 항목 수 단계). 책을 누르면 게시판형 목록 `/shelf/{ideas|styles|refs|카테고리 id}`(한 줄 = 제목·작성 시각·보조 정보, 누르면 펼침, 100개씩, 기존 거르기 유지), 항목 고유 주소 `/shelf/<…>/<항목 id>`(펼친 채 열림). 검색 `?q=`(두 글자 이상 FTS, 한 글자는 그대로 포함, `<mark>`), `/shelf?q=`는 카테고리별로 묶는다. 예전 `/ideas`·`/refs`·`/styles`는 넘긴다.
+    - 생각과 저자의 카테고리 항목은 펼친 곳의 "고치기 · 휴지통으로"로 웹에서 고치고 옮긴다(`/shelf/<…>/<항목 id>/edit`·`/trash`, 자기 책장만, CSRF, 휴지통은 확인 화면 한 번). AI가 쓴 항목을 고치면 "저자가 고침(시각)"이 남는다.
     - 만들기 `/shelf/new`, 이름·색 `/shelf/edit/<…>`(기본 셋은 색만, 색 격자 18 + 내 색 12 + 색 선택기·#RRGGBB·R·G·B), 휴지통 `/shelf/trash/<id>`(확인 화면), 바로 적기 `POST /shelf/write/<ideas|카테고리 id>`(누가 = 저자). 문체·문헌은 대화로 넣는다. 책장 전용 색은 web-style.md "책장 전용".
   - **화면 스타일**(2026-10-06): `web.py`의 `STYLE` 상수 한 곳. 토큰과 참고 문서에서 바꾼 점은 `docs/decisions/web-style.md`(참고 문서는 외부 디자인 분석 문서, `private/design/`, 리포 밖). 시스템 한글 글꼴, 본문 16px·줄간격 1.6, 굵기 400/600, 그라데이션 없음, 흰 상단 바. 화면 문구는 사용자 결정으로만 바꾼다(#85 용어집).
     - 대비 AA: ink-mute는 흰 바탕에서만, 태그 바탕은 #b9b9f9 40%, ruby는 오류 왼쪽 테두리에만(글자로는 4.29:1). 입력칸 테두리는 ink-mute(4.75:1, 사용자 결정 #86).

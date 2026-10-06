@@ -20,7 +20,7 @@ import html
 import re
 import urllib.parse
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from starlette.concurrency import run_in_threadpool
@@ -31,7 +31,7 @@ from magus.category.rules import (
     BUILTINS, COLOR_NAMES, CONTENT_MAX, DEFAULT_COLORS, FIELD_MAX, HEX, MAX_CATEGORIES, MAX_MY_COLORS, NEW_COLOR_ORDER,
     PALETTE, PALETTE_BY_NAME, TEMPLATE_BY_KEY, TEMPLATES, TITLE_MAX, check_name, name_key,
 )
-from magus.ids import local_time, new_id
+from magus.ids import local_time, new_id, utcnow
 from magus.melchior.author_report import chapters_text, cite_label
 from magus.melchior.report import build_cite_report
 from magus.store import Category, CategoryItem, Idea, ShelfSettings, Store
@@ -327,6 +327,7 @@ class Row:
     body: str
     text: str  # 맞은 부분 찾기용 평문(제목 밖에서 맞았을 때 한 줄 보이기)
     badge: str = ""  # 제목 뒤 표시(AI가 지은 제목)
+    actions: bool = False  # 고치기·휴지통으로(생각과 저자의 카테고리 항목만)
 
 
 def row_html(row: Row, q: str = "", open_: bool = False) -> str:
@@ -343,7 +344,10 @@ def row_html(row: Row, q: str = "", open_: bool = False) -> str:
             f'<time class="when" datetime="{html.escape(row.at)}">{when}</time><span class="aux">{row.aux}</span>'
             + (f'<small class="hit">{hit}</small>' if hit else "")
             + f'</summary><div class="body">{row.body}'
-            f'<p class="muted"><a href="{html.escape(row.link)}">이 항목의 주소</a></p></div></details></li>')
+            f'<p class="muted"><a href="{html.escape(row.link)}">이 항목의 주소</a>'
+            + (f' · <a href="{html.escape(row.link)}/edit">고치기</a> · <a href="{html.escape(row.link)}/trash">휴지통으로</a>'
+               if row.actions else "")
+            + "</p></div></details></li>")
 
 
 def paragraphs(text: str, q: str = "") -> str:
@@ -429,6 +433,14 @@ def chosen_color(form: Any) -> str:
     raise ValueError("책 색을 골라 주세요.")
 
 
+def edited_note(item: Any) -> str:
+    """고친 적이 있으면 누가 언제 고쳤는지. 처음 쓴 사람(나·AI)은 그대로 두고 따로 보인다."""
+    if not item.edited_by:
+        return ""
+    who = "저자가" if item.edited_by == "author" else "AI가"
+    return f'<p class="muted">{who} 고침({local_time(item.edited_at or "", WHEN)})</p>'
+
+
 class ShelfPages:
     """Web에 섞어 쓰는 책장 화면들. Web의 _page·user_of·_need_login·_form·_csrf_input·store를 쓴다."""
 
@@ -450,6 +462,8 @@ class ShelfPages:
             ("/shelf/colors", ["POST"], self.shelf_colors),
             ("/shelf/{kind}", ["GET"], self.shelf_list),
             ("/shelf/{kind}/{item}", ["GET"], self.shelf_item),
+            ("/shelf/{kind}/{item}/edit", ["GET", "POST"], self.shelf_item_edit),
+            ("/shelf/{kind}/{item}/trash", ["GET", "POST"], self.shelf_item_trash),
             # 예전 주소(생각·문헌·문체 메뉴)는 책장의 같은 목록으로 넘긴다. 거르기 조건은 그대로 이어 간다.
             ("/ideas", ["GET"], self._moved("ideas")), ("/refs", ["GET"], self._moved("refs")),
             ("/styles", ["GET"], self._moved("styles")),
@@ -551,12 +565,19 @@ class ShelfPages:
             return self._shelf_page("책장", '<p class="msg err">없는 카테고리입니다. <a href="/shelf">책장</a>으로 돌아가세요.</p>',
                                     session, 404)
         crumb = '<p class="crumb"><a href="/shelf">← 책장</a></p>'
+        done = {"edited": "고쳤습니다.", "trashed": "항목을 휴지통으로 옮겼습니다. 지운 것이 아니라 운영자가 되살릴 수 있습니다."}.get(
+            request.query_params.get("done") or "")  # 고치기·휴지통 뒤 한 줄(정해진 문장만)
+        done = f'<p class="msg">{done}</p>' if done else ""
         writable = kind.key == "ideas" or kind.category is not None
         error = request.query_params.get("error") == "empty"
+        missing = (f'{crumb}<p class="msg err">없는 항목입니다(휴지통으로 옮겨졌을 수 있습니다). '
+                   f'<a href="/shelf/{kind.key}">{html.escape(kind.name)} 목록</a></p>')
         if not await run_in_threadpool(self._has_any, uid, kind):  # 비어 있으면 바로 적기 폼을 펼쳐 둔다
+            if item:
+                return self._shelf_page(kind.name, missing, session, 404)
             summary = await run_in_threadpool(self._summary, uid, kind, {})
             write = self._write_form(session, kind, error, opened=True) if writable else ""
-            return self._shelf_page(kind.name, f'{crumb}{summary}{write}<p class="msg">{kind.empty}</p>', session)
+            return self._shelf_page(kind.name, f'{crumb}{done}{summary}{write}<p class="msg">{kind.empty}</p>', session)
         write = self._write_form(session, kind, error) if writable else ""
         params = request.query_params
         q = "" if item else clean_query(params.get("q"))
@@ -566,8 +587,7 @@ class ShelfPages:
         if item:
             index = next((n for n, r in enumerate(rows) if r.id == item), None)
             if index is None:
-                return self._shelf_page(kind.name, f'{crumb}<p class="msg err">없는 항목입니다(휴지통으로 옮겨졌을 수 있습니다). '
-                                                   f'<a href="/shelf/{kind.key}">{html.escape(kind.name)} 목록</a></p>', session, 404)
+                return self._shelf_page(kind.name, missing, session, 404)
             page = index // PAGE_SIZE + 1
         else:
             try:
@@ -601,7 +621,7 @@ class ShelfPages:
                      + f' · <a href="/shelf/{kind.key}">검색 지우기</a></p>')
         board = (f'<ol class="board">{"".join(row_html(r, q, r.id == item) for r in shown)}</ol>'
                  if shown else '<p class="msg">찾는 말이 들어간 항목이 없습니다.</p>' if q else '<p class="msg">없음</p>')
-        body = f"{crumb}{summary}{search}{write}{found}{pager}{board}{pager}" + (SCROLL_SCRIPT if item else "")
+        body = f"{crumb}{done}{summary}{search}{write}{found}{pager}{board}{pager}" + (SCROLL_SCRIPT if item else "")
         return self._shelf_page(kind.name, body, session)
 
     def _has_any(self, uid: str, kind: Kind) -> bool:
@@ -674,8 +694,8 @@ class ShelfPages:
             origin = f'<p class="muted">출처: {html.escape(i.origin)}</p>' if i.origin else ""
             by = '<p class="muted">제목은 AI가 지었습니다.</p>' if i.title and i.title_by == "ai" else ""
             rows.append((i.id, Row(i.id, f"/shelf/ideas/{i.id}", i.created_at, i.title, i.text, who,
-                                   paragraphs(i.text, q) + origin + back + by, i.text,
-                                   AI_TITLE if i.title and i.title_by == "ai" else "")))
+                                   paragraphs(i.text, q) + origin + back + by + edited_note(i), i.text,
+                                   AI_TITLE if i.title and i.title_by == "ai" else "", True)))
         return rows
 
     def _style_rows(self, uid: str, filters: dict[str, str], q: str) -> list[tuple[str, Row]]:
@@ -756,10 +776,10 @@ class ShelfPages:
                     + (f"<p>{pills}</p>" if pills else "")
                     + (f"<p>연결된 장: {html.escape(', '.join(chapters))}</p>" if chapters else "")
                     + f'<p class="muted">누가: {"저자의 말" if i.author == "me" else "Claude가 쓴 글"}'
-                    + (" · 제목은 AI가 지었습니다." if i.title and i.title_by == "ai" else "") + "</p>")
+                    + (" · 제목은 AI가 지었습니다." if i.title and i.title_by == "ai" else "") + "</p>" + edited_note(i))
             text = "\n".join([i.content, *(f"{k} {v}" for k, v in i.fields.items()), " ".join(i.tags)])
             rows.append((i.id, Row(i.id, f"/shelf/{category.id}/{i.id}", i.created_at, i.title, i.content, aux, body, text,
-                                   AI_TITLE if i.title and i.title_by == "ai" else "")))
+                                   AI_TITLE if i.title and i.title_by == "ai" else "", True)))
         return rows
 
     # --- 바로 적기(생각·저자의 카테고리) ---
@@ -971,5 +991,103 @@ class ShelfPages:
             f"<p>항목 {category.items}개가 함께 옮겨집니다. 지우는 것이 아니라 옮기는 것이라 운영자가 되살릴 수 있습니다.</p>"
             f'<form method="post" action="/shelf/trash/{category.id}">{self._csrf_input(session)}'
             f'<p><button>휴지통으로 옮기기</button> <a href="/shelf/{category.id}">그만두기</a></p></form></div>'
+        )
+        return self._shelf_page("휴지통으로", body, session)
+
+    # --- 항목 고치기·휴지통(생각과 저자의 카테고리 항목. 자기 책장 안에서만, CSRF, 휴지통은 확인 한 번) ---
+    def _editable(self, uid: str, kind_key: str, item_id: str) -> tuple[Kind, Any] | None:
+        kind = self._kind(uid, kind_key)
+        if kind is None or not (kind.key == "ideas" or kind.category is not None):
+            return None
+        try:
+            if kind.category is not None:
+                item = self.store.get_category_item(uid, kind.category.id, item_id)
+            else:
+                item = self.store.get_ideas(uid, [item_id]).get(item_id)
+        except ValueError:
+            return None
+        return (kind, item) if item is not None else None
+
+    async def shelf_item_edit(self, request: Request) -> Response:
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        found = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
+        if found is None:
+            return self._shelf_page("책장", '<p class="msg err">고칠 수 있는 항목이 아닙니다. <a href="/shelf">책장</a>으로 돌아가세요.</p>',
+                                    session, 404)
+        kind, item = found
+        link = f"/shelf/{kind.key}/{item.id}"
+        is_idea = kind.category is None
+        old_text = item.text if is_idea else item.content
+        error = ""
+        if request.method == "POST":
+            try:
+                form = await self._form(request, session)
+            except PermissionError:
+                return self._shelf_page("항목 고치기", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            content = str(form.get("content") or "").strip()[:CONTENT_MAX]
+            title = one_line(str(form.get("title") or ""))[:TITLE_MAX] or None
+            if content:
+                # 제목을 그대로 두면 누가 지었는지도 그대로, 저자가 새로 적으면 저자가 지은 제목, 지우면 없음
+                title_by = item.title_by if title == item.title else ("author" if title else None)
+                now = utcnow()
+                if is_idea:
+                    await run_in_threadpool(self.store.add_ideas, uid, [replace(
+                        item, text=content, title=title, title_by=title_by, edited_at=now, edited_by="author")])
+                else:
+                    values = {f: one_line(str(form.get(f"f:{f}") or ""))[:FIELD_MAX] for f in kind.category.fields}
+                    await run_in_threadpool(self.store.put_category_item, uid, replace(
+                        item, content=content, title=title, title_by=title_by, fields={k: v for k, v in values.items() if v},
+                        edited_at=now, edited_by="author"))
+                return RedirectResponse(f"{link}?done=edited", status_code=303)
+            error = '<p class="msg err">내용을 적어 주세요.</p>'
+            old_text = content
+        fields = "" if is_idea else "".join(
+            f'<label class="block">{html.escape(f)} <input name="f:{html.escape(f)}" value="{html.escape(item.fields.get(f, ""))}" '
+            f'maxlength="{FIELD_MAX}"></label>' for f in kind.category.fields)
+        who = ('<p class="muted">처음 쓴 사람: Claude(AI). 고치면 "저자가 고침"으로 함께 남습니다.</p>' if item.author == "ai"
+               else "")
+        body = (
+            f'<p class="crumb"><a href="{link}">← {html.escape(kind.name)}</a></p>{error}{who}'
+            f'<form method="post" action="{link}/edit" class="card">{self._csrf_input(session)}'
+            f'<label class="block">제목(비워 둬도 됩니다) <input name="title" value="{html.escape(item.title or "")}" maxlength="{TITLE_MAX}"></label>'
+            f'<label class="block">내용 <textarea name="content" rows="8" maxlength="{CONTENT_MAX}" required>{html.escape(old_text)}</textarea></label>'
+            f'{fields}<p><button class="primary">저장</button> <a href="{link}">그만두기</a></p></form>'
+        )
+        return self._shelf_page("항목 고치기", body, session, 400 if error else 200)
+
+    async def shelf_item_trash(self, request: Request) -> Response:
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        found = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
+        if found is None:
+            return self._shelf_page("책장", '<p class="msg err">옮길 수 있는 항목이 아닙니다. <a href="/shelf">책장</a>으로 돌아가세요.</p>',
+                                    session, 404)
+        kind, item = found
+        link = f"/shelf/{kind.key}/{item.id}"
+        is_idea = kind.category is None
+        if request.method == "POST":
+            try:
+                await self._form(request, session)
+            except PermissionError:
+                return self._shelf_page("휴지통으로", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            if is_idea:
+                await run_in_threadpool(self.store.trash_idea, uid, item.id, "웹 책장에서 옮김")
+            else:
+                await run_in_threadpool(self.store.trash_category_item, uid, kind.category.id, item.id, "웹 책장에서 옮김")
+            return RedirectResponse(f"/shelf/{kind.key}?done=trashed", status_code=303)
+        replies = (sum(1 for i in await run_in_threadpool(self.store.list_ideas, uid) if i.parent_id == item.id) if is_idea else 0)
+        preview = one_line(item.title or (item.text if is_idea else item.content))
+        body = (
+            f'<p class="crumb"><a href="{link}">← {html.escape(kind.name)}</a></p>'
+            f'<div class="card"><p>이 항목을 휴지통으로 옮길까요?</p><p><b>{html.escape(preview[:80])}{"…" if len(preview) > 80 else ""}</b></p>'
+            + (f"<p>이 생각에 응답한 AI 발화 {replies}건도 함께 옮겨집니다.</p>" if replies else "")
+            + "<p>지우는 것이 아니라 옮기는 것이라 운영자가 되살릴 수 있습니다.</p>"
+            f'<form method="post" action="{link}/trash">{self._csrf_input(session)}'
+            f'<p><button>휴지통으로 옮기기</button> <a href="{link}">그만두기</a></p></form></div>'
         )
         return self._shelf_page("휴지통으로", body, session)

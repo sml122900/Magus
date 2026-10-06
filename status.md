@@ -445,6 +445,7 @@
 **2026-10-06 밤 검토 대기(#92, 야간 자율 작업 — 질문 없이 권장안으로 진행. 비용이 높은 것부터)**
 
 92. **책장·카테고리 커스터마이징**(`docs/decisions/user-drawers.md`, `docs/decisions/web-style.md` "책장 전용"). 사용자가 확정한 것: 용어 책장·카테고리, 기본 카테고리 셋 고정, 템플릿 첫 버전(빈·인물·사례·수치·용어), 제목 선택·기본값, 책 색. 아래는 내가 고른 것이다.
+    - **2026-10-06 사용자 확인: a·b·c·d·f·g·h·i·j·k 승인. e는 바꿈 — 제목이 있으면 title_by(author|ai)를 반드시 받는다(기본값으로 AI를 넣지 않는다: 저자가 지은 제목이 AI 것으로 기록되는 것을 막으려고). D의 '판별 로직을 옮기지 않고 기존 함수를 불러 씀'도 승인.**
     - a. 카테고리 저장: **사람 소유**, `shelf/categories/<id>/{category.json, items/*.json}`, 파일·인덱스 모두 `schema_version 1`. 대안: 책(프로젝트) 소유, SQLite만. 바꾸는 비용: 높음(쌓인 뒤면 파일 옮기기 스크립트 + reindex, 장 연결 해석도 바뀜).
     - b. 도구 7개(`category_list·create·edit·put·search·trash·title_default`, 21 → 28). 통째 휴지통도 도구로 했다(요청 "휴지통은 화면과 대화 양쪽"). 대안: 설계안 #91의 5개(통째는 CLI만), 제목 기본값을 category_list 안에. 바꾸는 비용: 중간(도구를 빼거나 이름을 바꾸면 claude.ai 커넥터 재연결, instructions·시험 수정).
     - c. instructions 문장(원문 그대로 규칙이라 승인 필요): 머리말 "…생각·문헌·문체·카테고리와 원고를…", 규칙 7에 책장·카테고리 정의, 규칙 9 "생각·문체·문헌과 저자의 카테고리(category_list로 확인한다) 중 … 저자의 카테고리가 많으면 목록을 보여 준다", 규칙 10(제목). 전문은 docs/daily/2026-10-06.md. 대안: 도구 설명에만 적기. 비용: 낮음(문장·SPEC 시험).
@@ -629,7 +630,7 @@
 - **Python** 3.12(.venv). **MCP SDK** mcp 2.2.0.
 - **의존성**: python-docx 1.2.0, pymupdf 1.28.2, pypandoc-binary 1.17(pandoc 3.9), numpy 2.5.3, lxml. ruff 0.16(개발용, `--select F,B`로 점검).
 - **Node** v22.23.2(fnm). MCP Inspector는 `npx -y @modelcontextprotocol/inspector --cli …`로 쓴다.
-- **SQLite** 3.49.1. 인덱스 `SCHEMA_VERSION=15`(2026-10-06: 9 작성자, 10 앵커, 11 부제, 12 판·지문·stale, 13 tags_by, 14 웹 전용 레인, 15 카테고리·생각 제목). 버전이 바뀌면 처음 열 때 자동으로 다시 만들고, 서버가 시작할 때 파생값을 다시 계산한다.
+- **SQLite** 3.49.1. 인덱스 `SCHEMA_VERSION=16`(2026-10-06: 9 작성자, 10 앵커, 11 부제, 12 판·지문·stale, 13 tags_by, 14 웹 전용 레인, 15 카테고리·생각 제목, 16 고친 사람·시각). 버전이 바뀌면 처음 열 때 자동으로 다시 만들고, 서버가 시작할 때 파생값을 다시 계산한다.
 - **Claude Desktop**
   - 설정: `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json`(USER_ID=default, DATA_DIR=C:\project_2026\Magus\data → FILES_DIR 기본 C:\project_2026\Magus)
   - 로그: `%LOCALAPPDATA%\Claude\Logs\mcp-server-magus.log`. 시작 줄에 files_root가 찍힌다.

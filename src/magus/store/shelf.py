@@ -27,6 +27,8 @@ from magus.store.base import (
 from magus.store.fileio import locked, read_json, read_text, write_json, write_text
 from magus.textindex import chunk_text, index_text
 
+# 생각 파일에서 값이 없으면 쓰지 않는 키(#92 전 코드로 되돌려도 그 파일을 그대로 읽도록)
+OPTIONAL_IDEA_KEYS = ("title", "title_by", "edited_at", "edited_by")
 _REF_KEY = re.compile(r"[a-z0-9가-힣一-鿿㐀-䶿][a-z0-9가-힣一-鿿㐀-䶿_-]{0,79}")
 
 
@@ -155,7 +157,7 @@ class ShelfMixin:
             safe_id(idea.id, "idea id")
             idea = replace(idea, created_at=idea.created_at or utcnow())
             # 제목이 없으면 title·title_by 키를 쓰지 않는다: 제목 전(#92 전) 코드로 되돌려도 파일을 그대로 읽는다
-            record = {k: v for k, v in asdict(idea).items() if not (k in ("title", "title_by") and v is None)}
+            record = {k: v for k, v in asdict(idea).items() if not (k in OPTIONAL_IDEA_KEYS and v is None)}
             write_json(self._casper_dir(user_id) / f"{idea.id}.json", record)
             stored.append(idea)
         with self._db:
@@ -165,10 +167,10 @@ class ShelfMixin:
 
     def _index_idea(self, user_id: str, idea: Idea) -> None:
         self._db.execute(
-            "INSERT OR REPLACE INTO ideas (id, user_id, text, kind, origin, author, parent_id, created_at, title, title_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO ideas (id, user_id, text, kind, origin, author, parent_id, created_at, title, title_by, "
+            "edited_at, edited_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (idea.id, user_id, idea.text, idea.kind, idea.origin, idea.author, idea.parent_id, idea.created_at, idea.title,
-             idea.title_by),
+             idea.title_by, idea.edited_at, idea.edited_by),
         )
         lane: Lane = "idea_me" if idea.author == "me" else "idea_ai"
         text = f"{idea.title}\n{idea.text}" if idea.title else idea.text  # 제목(#92)도 찾는다
@@ -434,7 +436,7 @@ def _style(r: sqlite3.Row) -> StyleEntry:
 def _idea(r: sqlite3.Row) -> Idea:
     return Idea(
         id=r["id"], text=r["text"], kind=r["kind"], author=r["author"], origin=r["origin"], parent_id=r["parent_id"],
-        created_at=r["created_at"], title=r["title"], title_by=r["title_by"],
+        created_at=r["created_at"], title=r["title"], title_by=r["title_by"], edited_at=r["edited_at"], edited_by=r["edited_by"],
     )
 
 

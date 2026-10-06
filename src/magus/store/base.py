@@ -30,7 +30,8 @@ TagsBy = Literal["ai", "author"]  # 문체 태그를 누가 정했나: Claude가
 # 휴지통에 옮길 수 있는 책장 항목(#88). 카테고리는 통째(category, id = 카테고리 id)와 항목(category_item, id = "<카테고리 id>/<항목 id>")
 TrashKind = Literal["idea", "style", "category", "category_item"]
 TitleBy = Literal["ai", "author"]  # 항목 제목을 누가 지었나(#92). 태그의 tags_by와 같은 방식
-TitleMode = Literal["ask", "ai", "none"]  # 저자가 제목을 말하지 않았을 때: 매번 묻기 / AI가 짓기 / 비워 두기
+TitleMode = Literal["ask", "ai", "none"]
+EditedBy = Literal["author", "ai"]  # 항목을 나중에 고친 사람(웹에서 저자가 고치면 author). 처음 쓴 사람(author 필드)은 그대로 둔다  # 저자가 제목을 말하지 않았을 때: 매번 묻기 / AI가 짓기 / 비워 두기
 
 
 @dataclass(frozen=True)
@@ -226,6 +227,8 @@ class Idea:
     created_at: str = ""
     title: str | None = None  # 선택 제목(#92). 없으면 목록에 내용 앞부분이 흐리게 보인다
     title_by: TitleBy | None = None
+    edited_at: str | None = None  # 처음 쓴 뒤 고친 시각과 고친 사람(웹에서 저자가 고침). 고친 적이 없으면 None
+    edited_by: EditedBy | None = None
 
 
 @dataclass(frozen=True)
@@ -270,6 +273,8 @@ class CategoryItem:
     chapters: tuple[tuple[str, int], ...] = ()
     created_at: str = ""
     updated_at: str = ""
+    edited_at: str | None = None  # 고친 시각과 고친 사람. AI가 쓴 항목을 저자가 고치면 author는 ai 그대로, edited_by는 author
+    edited_by: EditedBy | None = None
 
 
 @dataclass(frozen=True)

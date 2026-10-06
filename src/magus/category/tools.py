@@ -129,7 +129,7 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
         author: Literal["me", "ai"],
         content: str | None = None,
         title: str | None = None,
-        title_by: Literal["ai", "author"] = "ai",
+        title_by: Literal["ai", "author"] | None = None,
         untitled: bool = False,
         fields: dict[str, str] | None = None,
         tags: list[str] | None = None,

@@ -250,10 +250,11 @@ class CategoryMixin:
     def _index_item(self, user_id: str, item: CategoryItem) -> None:
         self._db.execute(
             "INSERT OR REPLACE INTO category_items (id, user_id, category_id, title, title_by, content, fields, author, tags, chapters,"
-            " schema_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " schema_version, created_at, updated_at, edited_at, edited_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (item.id, user_id, item.category_id, item.title, item.title_by, item.content,
              json.dumps(item.fields, ensure_ascii=False), item.author, json.dumps(list(item.tags), ensure_ascii=False),
-             json.dumps([list(c) for c in item.chapters]), SCHEMA_VERSION, item.created_at, item.updated_at),
+             json.dumps([list(c) for c in item.chapters]), SCHEMA_VERSION, item.created_at, item.updated_at, item.edited_at,
+             item.edited_by),
         )
         text = "\n".join([item.title or "", item.content, *(f"{k}: {v}" for k, v in item.fields.items() if v), " ".join(item.tags)])
         self._replace_chunks(user_id, "category", f"{item.category_id}/{item.id}", "category", chunk_text(text.strip()))
@@ -288,7 +289,8 @@ def _item_record(item: CategoryItem) -> dict[str, Any]:
     return {"schema_version": SCHEMA_VERSION, "id": item.id, "title": item.title, "title_by": item.title_by,
             "content": item.content, "fields": item.fields, "author": item.author, "tags": list(item.tags),
             "chapters": [{"project": p, "number": n} for p, n in item.chapters],
-            "created_at": item.created_at, "updated_at": item.updated_at}
+            "created_at": item.created_at, "updated_at": item.updated_at,
+            **({"edited_at": item.edited_at, "edited_by": item.edited_by} if item.edited_by else {})}
 
 
 def _item_from_record(category_id: str, r: dict[str, Any]) -> CategoryItem:
@@ -299,6 +301,7 @@ def _item_from_record(category_id: str, r: dict[str, Any]) -> CategoryItem:
         fields={str(k): str(v) for k, v in (r.get("fields") or {}).items()}, tags=tuple(str(t) for t in r.get("tags") or ()),
         chapters=tuple((str(c["project"]), int(c["number"])) for c in r.get("chapters") or ()),
         created_at=str(r.get("created_at") or ""), updated_at=str(r.get("updated_at") or r.get("created_at") or ""),
+        edited_at=r.get("edited_at") or None, edited_by=r.get("edited_by") if r.get("edited_by") in ("author", "ai") else None,
     )
 
 
@@ -312,7 +315,7 @@ def _item(r: sqlite3.Row) -> CategoryItem:
         id=r["id"], category_id=r["category_id"], content=r["content"], author=r["author"], title=r["title"],
         title_by=r["title_by"], fields=json.loads(r["fields"]), tags=tuple(json.loads(r["tags"])),
         chapters=tuple((str(p), int(n)) for p, n in json.loads(r["chapters"])), created_at=r["created_at"],
-        updated_at=r["updated_at"],
+        updated_at=r["updated_at"], edited_at=r["edited_at"], edited_by=r["edited_by"],
     )
 
 

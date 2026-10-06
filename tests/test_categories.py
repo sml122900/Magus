@@ -187,8 +187,10 @@ async def test_title_default_is_kept_on_server(settings: Settings, store: LocalS
         assert ask.is_error and "매번 묻기" in _text(ask) and store.list_ideas("alice") == []
         mine = _text(await c.call_tool("idea_add", {"text": "바다는 돌아가는 곳", "kind": "thought", "title": "바다", "title_by": "author"}))
         assert mine.endswith("· 제목 「바다」")
-        ai = _text(await c.call_tool("idea_add", {"text": "숲은 기다리는 곳", "kind": "thought", "title": "숲의 기다림"}))
-        assert ai.endswith("제목 「숲의 기다림」 (AI가 지은 제목)")  # title_by를 빼면 AI가 지은 것으로 남긴다(tags_by와 같다)
+        unsure = await c.call_tool("idea_add", {"text": "숲은 기다리는 곳", "kind": "thought", "title": "숲의 기다림"})
+        assert unsure.is_error and "title_by를 함께 준다" in _text(unsure)  # 기본값이 없다(#92-e): 누가 지었는지 꼭 받는다
+        ai = _text(await c.call_tool("idea_add", {"text": "숲은 기다리는 곳", "kind": "thought", "title": "숲의 기다림", "title_by": "ai"}))
+        assert ai.endswith("제목 「숲의 기다림」 (AI가 지은 제목)")
         empty = _text(await c.call_tool("idea_add", {"text": "제목 없는 생각", "kind": "thought", "untitled": True}))
         assert empty.endswith("· 제목 없음")
         assert "(AI가 지은 제목)" in _text(await c.call_tool("idea_search", {"query": "숲은 기다리는"}))
