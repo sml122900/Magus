@@ -112,6 +112,38 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 - 반영 전에: 백업을 손으로 한 번 돌려 스냅샷을 확인하고(`docker compose --profile backup run --rm backup </dev/null`), 실행 중 이미지를 `magus:rollback-<커밋>`으로 태그해 둔다.
 - 반영 전에 되돌릴 커밋(`git rev-parse HEAD`)과 data 해시 목록을 적어 둔다. 되돌릴 때는 그 커밋으로 `reset --hard` 후 다시 빌드한다(`HEAD~1`을 쓰지 않는다).
 
+### 2-2. 층(#93) + 모든 동작을 책장에서(#94) 묶음 배포 — 사용자 승인 뒤 한 번에
+
+두 작업을 한 번에 낸다: **데이터 이전 한 번, 커넥터 재연결 한 번.** 반영 전 서버는 `p1-profile-email`(`ec6c40b`), 반영할 것은 master 끝(태그 `shelf-books-local` 이후).
+바뀌는 것: 인덱스 v16 → v19(시작할 때 자동 재생성), 항목 파일에 `"floor"`·`shelf/floors.json`(이전 스크립트가 쓴다), 도구 30 → 29(idea_delete·style_delete를 category_trash에 합침, book_document 더함), instructions 규칙 7·8 바뀜·12·13 더함, 웹 메뉴는 책장 하나(옛 주소 `/book`·`/issues`·`/checklist`·`/questions`·`/inbox`는 새 화면으로 넘긴다).
+
+1. **기록·백업**(서버, 위 "반영 전에" 그대로): `git rev-parse HEAD`(= `ec6c40b`) 기록, data 해시 목록, 손 백업 스냅샷(`docker compose --profile backup run --rm backup </dev/null`), 실행 중 이미지를 `magus:rollback-ec6c40b`로 태그.
+2. **코드 반영·빌드만**(아직 올리지 않음): `cd /opt/magus && sudo git fetch /root/magus.bundle master && sudo git checkout -B master FETCH_HEAD`
+   (`git merge-base --is-ancestor p1-auth-audience FETCH_HEAD` 확인) → `cd deploy && sudo docker compose build magus`.
+3. **서버를 멈추고 이전**(멈춘 사이에 쓰기가 끼지 않게. 몇 초~몇십 초):
+   ```sh
+   sudo docker compose stop magus
+   sudo docker compose run --rm --no-deps magus /app/.venv/bin/magus floors plan --all-users                     # 미리보기: 사용자마다 1층 「원고 제목」·공용에 무엇이 가나
+   sudo docker compose run --rm --no-deps magus /app/.venv/bin/magus floors apply --all-users --backup /data/floors-backup
+   ```
+   - apply 출력 끝이 사용자마다 **"전후 비교: 같음"**이어야 한다(항목 수·장별 인용 점검·전체 현황 수). "다름"이면 올리지 않고 아래 "되돌리기"로 간다.
+   - 로컬 시험(사본)에서의 기대값: father-trial 사본은 1층에 생각·문헌, 공용에 문체, 문헌 337·확인 0·전체 현황 미확인 문헌 335편 그대로(`data/realdata/2026-10-07-floors-trial.md`).
+4. **올리기**: `sudo docker compose up -d` → `docker compose ps`(healthy) → 로그에 허용 2명(인덱스 v19는 3단계에서 이미 다시 만들었다) → `/healthz` ok, `/mcp` 401 + resource_metadata.
+5. **확인**(운영자 계정, 웹): `/shelf`에 공용 + 1층, 1층에 원고 책(갈색, 위 띠 '원고')·생각·문헌, 공용에 문체. 원고 책을 눌러 탭 넷(장 목록·확인 요청·인용 상태·수정본 이력). `/book` → 원고 책으로 넘어감. `/inbox` → '올린 파일'(설정).
+   data 해시: 바뀐 파일은 항목 파일(`"floor"`)과 새 `shelf/floors.json`, 백업 폴더뿐이어야 한다(원고·issues.md·decisions.md·project.json은 같음).
+6. **커넥터 재연결 한 번**(claude.ai 설정 → 커넥터 → Magus 연결 해제 → 다시 연결). 도구 29개인지, 비밀 대화에서 "전체 보여 줘"가 book_outline으로 가고 첫 줄 아래에 층 줄이 보이는지.
+7. **사용자 할 일(배포 뒤)**: 휴대폰에서 책 끌어 옮기기(길게 눌러 들어 올리기) 한 번. 헤드리스로는 마우스 끌기만 확인했다.
+
+**되돌리기**(이 순서를 지킨다. 옛 코드는 `"floor"`가 든 생각·문체 파일을 읽지 못한다):
+```sh
+sudo docker compose stop magus
+sudo docker compose run --rm --no-deps magus /app/.venv/bin/magus floors revert --all-users   # 새 코드로: "floor"를 떼고 floors.json을 옆으로 비켜 둔다(지우지 않음)
+sudo docker tag magus:rollback-ec6c40b magus:latest && sudo docker compose up -d --no-build      # 옛 이미지. 또는 ec6c40b로 reset --hard 뒤 build
+```
+- 옛 코드는 인덱스 버전이 다르면(v19 ≠ v16) 파일에서 다시 만든다. 새 파일 중 옛 코드가 모르는 것은 그대로 남고 무시된다: 문서 책(`shelf/documents/`), 원고 책 색(project.json `color`), 문헌의 공용으로 옮긴 기록(bib.json `moved`).
+- 배포 뒤에 웹에서 휴지통으로 보낸 원고 책은 `trash/`에 있고, 그 층은 같은 id의 빈 작업물로 남는다(옛 코드에서는 장 없는 책).
+- 그래도 이상하면 3단계의 `/data/floors-backup/<사용자>-shelf-<시각>/`을 사용자 `shelf/`에 되돌려 놓는다(또는 1단계 스냅샷에서 복구, 5절).
+
 반영 기록
 
 | 날짜(KST) | 반영 | 반영 전 → 후 | 확인 |
