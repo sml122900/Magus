@@ -103,13 +103,13 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
         # 6. 수정본 올리기 → 문서 책은 옛 판 기준
         edition = c.post(f"/shelf/book/{floor_id}/edition", data={"csrf": csrf},
                          files={"file": (manuscript.name, manuscript.read_bytes(), DOCX)})
-        assert str(edition.url).endswith("tab=editions&done=edition") and "수정본 E2을 올렸습니다." in edition.text
+        assert str(edition.url).endswith("tab=editions&done=edition") and "수정본 E2 올리기를 마쳤습니다." in edition.text
         assert "리포트 — 수정본 E2" in edition.text
         floor = c.get(f"/shelf/floor/{floor_id}").text
         assert '<span class="band bottom stale" aria-hidden="true"><span class="line">옛 판</span><span class="line">기준</span>' in floor
         assert f"문서 책 닿으려는 종 출처 확인 문서, {STALE}" in floor
         doc = c.get(f"/shelf/doc/{doc_id}").text
-        assert f"{STALE}: 기준 원고에 새 수정본(E2)이 왔습니다. 이 문서는 E1 기준입니다." in doc and "다시 만들기</button>" in doc
+        assert f"{STALE}: 기준 원고에 새 수정본(E2)이 올라왔습니다. 이 문서는 E1 기준입니다." in doc and "다시 만들기</button>" in doc
         redo = c.post(f"/shelf/doc/{doc_id}/redo", data={"csrf": csrf})
         assert "다시 만들었습니다." in redo.text and f"{STALE}: 기준 원고에 새 수정본" not in redo.text and "만든 이력 2" in redo.text
         assert "이 문서의 이전 판(v1, E1 기준" in redo.text  # 이전 것과 견준 수치
@@ -120,7 +120,7 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
         blocked = c.post("/shelf/move", data={"csrf": csrf, "book": f"doc.{doc_id}", "to": "common", "next": f"/shelf/floor/{floor_id}"})
         assert "공용 층에는 모음 책만 둘 수 있습니다." in blocked.text
         renamed = c.post(f"/shelf/edit/doc.{doc_id}", data={"csrf": csrf, "name": "출처 확인", "color": "#2f6db5"})
-        assert "「출처 확인」 책을(를) 고쳤습니다." in renamed.text and "--c:#2f6db5;" in renamed.text
+        assert "「출처 확인」 책을 고쳤습니다." in renamed.text and "--c:#2f6db5;" in renamed.text
         assert "원고 책은 그 층 자체라 다른 층으로 옮기지 않습니다." in c.get(f"/shelf/edit/ms.{floor_id}").text
         # 8. 원고 책 휴지통: 층은 빈 층으로 남고 문서 책은 그대로
         confirm = c.get(f"/shelf/trash/ms.{floor_id}").text

@@ -6,7 +6,7 @@
   움직임 줄이기(prefers-reduced-motion)면 바로 넘어간다. 주소가 바뀌므로 뒤로 가기로 돌아온다.
 - 한 층 화면(/shelf/floor/<층 id>): 지금의 책장(책등이 큰 화면)에 위쪽 층 이름 띠(공용·1층·2층…)와 '전체 책장' 버튼.
 - 옮기기: 책을 다른 층으로 끌어 놓는다(전체 보기: 층 위에, 한 층 화면: 위쪽 층 이름 띠 위에). 마우스는 6px 움직이면,
-  손가락은 길게 눌러(0.35초) 들어 올린다. 키보드 사용자는 카테고리 설정의 '위치'로 옮긴다. 놓으면 POST /shelf/move(CSRF).
+  손가락은 길게 눌러(0.35초) 들어 올린다. 키보드 사용자는 책 설정의 '위치'로 옮긴다. 놓으면 POST /shelf/move(CSRF).
   옮긴 뒤 "○○를 공용으로 옮겼습니다. [되돌리기]"(마지막 옮기기만, POST /shelf/undo).
 - 검색: 층 이름(작업물 제목)·카테고리 이름·항목 내용을 한 번에, 층 → 카테고리 순으로 묶고 최근 수정을 붙인다.
   결과를 누르면 책장 전체에서 그 층으로 다가간 뒤 그 자리로 간다(/shelf?zoom=<층>&next=<주소>, 뒤로 가기에 남지 않게 replace).
@@ -363,8 +363,8 @@ class FloorPages:
             if room else f'<p class="muted">층은 공용 빼고 {MAX_FLOORS}개까지 만들 수 있습니다.</p>'
         )
         body = (f"{notices}{form}{case}"
-                "<p>층을 누르면 그 층이 크게 열립니다. 책을 다른 층으로 끌어 놓으면 그 층으로 옮겨집니다"
-                "(카테고리 설정의 '위치'로도 옮길 수 있습니다).</p>"
+                "<p>층을 누르면 그 층이 크게 열립니다. 모음 책과 문서 책은 다른 층으로 끌어 놓으면 그 층으로 옮겨집니다"
+                "(책 설정의 '위치'로도 옮길 수 있습니다). 원고 책은 그 층 자체라 옮기지 않습니다.</p>"
                 f"{new_floor}{self._move_form(session, '/shelf')}{FLOOR_SCRIPT}")
         return self._shelf_floor_page("책장", body, session)
 
@@ -451,8 +451,8 @@ class FloorPages:
             f'<nav class="fband" aria-label="층">{band}</nav></div>'
             f'<p class="floor-meta">{meta}</p>{notices}'
             + shelf_html([book_html(b, floor.id) for b in books], add_book(floor.id))
-            + "<p>책을 누르면 그 카테고리의 목록이 열립니다. 책을 위의 층 이름으로 끌어 놓으면 그 층으로 옮겨집니다"
-            "(카테고리 설정의 '위치'로도 옮길 수 있습니다).</p>"
+            + "<p>책을 누르면 그 책이 열립니다. 모음 책과 문서 책은 위의 층 이름으로 끌어 놓으면 그 층으로 옮겨집니다"
+            "(책 설정의 '위치'로도 옮길 수 있습니다).</p>"
             + self._move_form(session, here) + FLOOR_SCRIPT
         )
         return self._shelf_floor_page(floor_name(floor), body, session)

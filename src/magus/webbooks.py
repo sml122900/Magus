@@ -66,6 +66,7 @@ text-decoration:none;font-weight:600}a.button:hover{background:var(--press);colo
 .progress .bar i{display:block;height:100%;width:0;background:var(--primary);transition:width .2s}
 .progress .say{margin:8px 0 0;font-weight:600}
 .doc{background:var(--canvas);border:1px solid var(--line);border-radius:12px;padding:4px 28px 24px;box-shadow:var(--shadow);max-width:880px}
+.doc-history{max-width:880px;box-sizing:border-box}
 .doc h2{font-size:24px}.doc h3{font-size:19px;margin-top:28px}.doc li{margin:6px 0}.doc blockquote{margin:8px 0;color:var(--ink2)}
 .doc-actions{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:12px 0}
 .msg.stale{border-left:4px solid #b8923a}
@@ -289,7 +290,7 @@ class BookPages:
                     f"확인 요청 {len(issues)}건(원고 코멘트에서) · 문헌 {len(refs)}편(참고문헌에서). "
                     "가져온 내용은 '수정본 이력'의 리포트에서 볼 수 있습니다.</p>")
         if done == "edition":
-            return f'<p class="msg">수정본 E{latest_edition(self.store, uid, project.id)}을 올렸습니다. 아래 리포트에서 바뀐 것을 보세요.</p>'
+            return f'<p class="msg">수정본 E{latest_edition(self.store, uid, project.id)} 올리기를 마쳤습니다. 아래 리포트에서 바뀐 것을 보세요.</p>'
         return ""
 
     async def manuscript_page(self, request: Request) -> Response:
@@ -440,10 +441,15 @@ class BookPages:
     def _editions_html(self, uid: str, session: tuple[str, str], project: Any, params: Any) -> str:
         editions = self.store.list_editions(uid, project.id)
         base = f"/shelf/book/{urllib.parse.quote(project.id)}?tab=editions"
+        def counts(e: Any) -> str:  # changed에는 새 장이 들어 있다. 처음 올린 원고는 견줄 것이 없다
+            if e.number == 1:
+                return f'<td class="num">—</td><td class="num">{e.added or "—"}</td><td class="num">—</td><td class="num">—</td>'
+            return (f'<td class="num">{e.changed - e.added}</td><td class="num">{e.added}</td>'
+                    f'<td class="num">{e.removed}</td><td class="num">{e.unchanged}</td>')
+
         rows = "".join(
             f"<tr><td>{'처음 올린 원고 E1' if e.number == 1 else f'수정본 E{e.number}'}</td><td>{html.escape(e.file)}</td>"
-            f'<td class="num">{local_time(e.uploaded_at, WHEN)}</td>'
-            f'<td class="num">{e.changed}</td><td class="num">{e.added}</td><td class="num">{e.removed}</td><td class="num">{e.unchanged}</td>'
+            f'<td class="num">{local_time(e.uploaded_at, WHEN)}</td>{counts(e)}'
             f'<td><a href="{base}&report={e.number}">리포트</a></td></tr>'
             for e in reversed(editions)
         )
@@ -522,7 +528,7 @@ class BookPages:
                         f'<a href="/shelf/doc/{html.escape(doc.id)}">지금 것 보기</a></p>')
         elif is_stale(self.store, uid, doc):
             now = latest_edition(self.store, uid, doc.project_id)
-            notices += (f'<div class="msg stale">{STALE_WORDS}: 기준 원고에 새 수정본(E{now})이 왔습니다. 이 문서는 '
+            notices += (f'<div class="msg stale">{STALE_WORDS}: 기준 원고에 새 수정본(E{now})이 올라왔습니다. 이 문서는 '
                         + (f"E{current.edition}" if current.edition else "수정본 기록 전") + " 기준입니다. "
                         f'<form method="post" action="/shelf/doc/{html.escape(doc.id)}/redo" class="inline">{self._csrf_input(session)}'
                         "<button>다시 만들기</button></form></div>")
@@ -538,7 +544,7 @@ class BookPages:
         )
         return (f'{self._floor_crumb(uid, doc.floor)}<p class="floor-meta">{meta}</p>{notices}{actions}'
                 f'<article class="doc">{to_html(content)}</article>'
-                f'<details class="card no-print"><summary>만든 이력 {len(doc.versions)}</summary><ol>{history}</ol>'
+                f'<details class="card no-print doc-history"><summary>만든 이력 {len(doc.versions)}</summary><ol>{history}</ol>'
                 "<p class=\"muted\">다시 만들면 서버가 지금의 원고·문헌으로 질문·수치를 새로 만듭니다(머리말은 넣지 않습니다. "
                 "머리말이 필요하면 Claude에게 부탁하세요). 답하고 닫는 일은 원고 책의 확인 요청에서 합니다.</p></details>")
 

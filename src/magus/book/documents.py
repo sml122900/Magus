@@ -62,7 +62,9 @@ def build_source_check(store: Store, user_id: str, project_id: str, title: str, 
     lines += [
         "", "## 한눈에",
         f"- {summary_line(p)}",
-        f"- 열린 확인 요청 **{len(open_issues)}건**, 답해 주실 질문 **{len(questions)}건**, 사실·수치 확인 요청 **{fact_count}건**",
+        f"- 열린 확인 요청 **{len(open_issues)}건**, 답해 주실 질문 **{len(questions)}건**"
+        + (f"(1절 {len(asked)}건 · 2절 원고 불일치 {len(questions) - len(asked)}건)" if len(questions) > len(asked) else "")
+        + f", 사실·수치 확인 요청 **{fact_count}건**",
         "", f"## 1. 답해 주실 질문 {len(asked)}건",
         "답은 원고 책의 확인 요청이나 Claude와의 대화에서 해 주세요. 이 문서는 읽기용입니다. "
         "연도가 맞지 않는 것과 참고문헌에만 있는 것은 2절에 있습니다.",

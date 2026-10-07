@@ -601,7 +601,7 @@ class ShelfPages:
             shown = book.title if book else ""
         name = f"「{html.escape(shown)}」 " if shown else ""
         what = "책" if cid.startswith(("ms.", "doc.")) else "카테고리"
-        text = {"made": f"{name}카테고리를 꽂았습니다.", "edit": f"{name}{what}을(를) 고쳤습니다." if what == "책" else f"{name}카테고리를 고쳤습니다.",
+        text = {"made": f"{name}카테고리를 꽂았습니다.", "edit": f"{name}{what}을 고쳤습니다." if what == "책" else f"{name}카테고리를 고쳤습니다.",
                 "trash": "책을 휴지통으로 옮겼습니다. 지운 것이 아니라 운영자가 되살릴 수 있습니다."}.get(done or "")
         if text and request.query_params.get("full") == "1":
             text += f" 내 색은 {MAX_MY_COLORS}개까지라 이번 색은 내 색에 넣지 못했습니다. 하나를 뺀 뒤 다시 저장하세요."
