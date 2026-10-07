@@ -167,7 +167,7 @@ def gather(store: Store, user_id: str, project_id: str) -> ReportParts:
         raise ValueError(f"프로젝트 {project_id!r}가 없다")
     report = build_cite_report(store, user_id, project_id)
     resolver, terms = Resolver(store, user_id, project_id), terms_of(store, user_id, project_id)
-    refs = {r.key: r for r in store.list_refs(user_id, floors=resolver.floors)}  # 그 작업물 층 + 공용(#93)
+    refs = {r.key: r for r in store.list_refs(user_id, floors=resolver.floors)}  # 그 프로젝트 + 연결 노드가 가리키는 문헌(#95)
 
     # 추정 연결과 동명 판별을 장 단위로 다시 모은다(어느 장의 어떤 표기인지 보여 주려고)
     inferred: dict[tuple[str, str], list[str]] = defaultdict(list)  # (표기, ref key) → 장

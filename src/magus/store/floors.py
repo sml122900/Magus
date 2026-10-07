@@ -246,7 +246,7 @@ class FloorMixin:
             """,
             (user_id, floor),
         ).fetchone()
-        return max(str(row[0] or ""), layout.changed_at.get(floor, ""))
+        return max(str(row[0] or ""), layout.changed_at.get(floor, ""), self.map_updated(user_id, floor))  # type: ignore[attr-defined]
 
     @locked
     def list_floors(self, user_id: str) -> list[Floor]:
@@ -289,20 +289,48 @@ class FloorMixin:
     # ---- 새 항목이 들어갈 층 ---------------------------------------------------------------------
 
     @locked
+    def book_targets(self, user_id: str, kind: str, floor: str) -> list[str]:
+        """그 프로젝트에서 기본 책(kind)에 넣으면 들어갈 프로젝트 후보(#95): 자기 책이 있으면 그것 하나,
+        없으면 지도의 연결 노드가 가리키는 노드에 꽂힌 그 책들(여럿일 수 있다). 둘 다 없으면 빈 목록."""
+        layout = self._layout(user_id)
+        if kind in layout.builtins.get(floor, []):
+            return [floor]
+        found = self.get_map(user_id, floor)  # type: ignore[attr-defined]
+        out: list[str] = []
+        for node in found.nodes if found else ():
+            if node.link and not node.missing and f"{kind}.{node.link[0]}" in node.books and node.link[0] not in out:
+                out.append(node.link[0])
+        return out
+
+    @locked
     def place(self, user_id: str, kind: str, floor: str | None) -> str:
+        """새 항목이 들어갈 프로젝트. 그 프로젝트의 책 → 연결 노드로 이어진 책(하나일 때) → 없으면 그 프로젝트에 새로 꽂는다
+        (지도에는 이름이 같은 노드로 보인다). 묻는 것은 도구 쪽에서 먼저 한다(project_args.resolve_put)."""
         layout = self._layout(user_id)
         if floor is None:
             return layout.fallback(kind)
         floor = self._check_floor(user_id, layout, floor)
-        if kind in layout.builtins.get(floor, []):
-            return floor
-        if kind in layout.builtins.get(COMMON, []):
-            return COMMON
-        layout = self.ensure_layout(user_id)  # 그 층에 기본 카테고리를 다시 꽂는다
+        targets = self.book_targets(user_id, kind, floor)
+        if len(targets) == 1:
+            return targets[0]
+        layout = self.ensure_layout(user_id)  # 그 프로젝트에 기본 책을 다시 꽂는다
         layout.builtins.setdefault(floor, []).append(kind)
         layout.changed_at[floor] = utcnow()
         self._write_layout(user_id, layout)
         return floor
+
+    @locked
+    def add_builtin(self, user_id: str, kind: str, floor: str, node: str | None = None) -> bool:
+        """그 프로젝트에 기본 책(kind)을 다시 꽂는다(#95, 저자가 이 프로젝트에 새로 두자고 할 때). 이미 있으면 False.
+        node: 꽂을 노드(없으면 이름이 같은 노드, 그것도 없으면 새 노드)."""
+        layout = self.ensure_layout(user_id)
+        floor = self._check_floor(user_id, layout, floor)
+        if kind in layout.builtins.get(floor, []):
+            return False
+        self.ensure_maps(user_id)  # type: ignore[attr-defined]
+        self._ensure_builtin(user_id, kind, floor)
+        self._persist_map(user_id, floor, {f"{kind}.{floor}": node} if node else None)  # type: ignore[attr-defined]
+        return True
 
     def _ensure_builtin(self, user_id: str, kind: str, floor: str) -> None:
         layout = self.ensure_layout(user_id)
@@ -333,8 +361,9 @@ class FloorMixin:
         return row[0] if row else None
 
     @locked
-    def move_category(self, user_id: str, category_id: str, to_floor: str) -> FloorMove:
+    def move_category(self, user_id: str, category_id: str, to_floor: str, to_node: str | None = None) -> FloorMove:
         layout = self.ensure_layout(user_id)
+        self.ensure_maps(user_id)  # type: ignore[attr-defined]
         to_floor = self._check_floor(user_id, layout, to_floor)
         row = self._db.execute("SELECT name, floor FROM categories WHERE user_id = ? AND id = ?", (user_id, category_id)).fetchone()
         if row is None:
@@ -351,7 +380,13 @@ class FloorMixin:
         layout.last_move = asdict(move)
         layout.changed_at.update({from_floor: at, to_floor: at})
         self._write_layout(user_id, layout)
+        self._moved_maps(user_id, from_floor, to_floor, {category_id: to_node} if to_node else None)
         return move
+
+    def _moved_maps(self, user_id: str, from_floor: str, to_floor: str, hint: dict[str, str] | None) -> None:
+        """책이 다른 프로젝트로 간 뒤 두 지도를 맞춰 적는다(받는 쪽은 hint의 노드에)."""
+        self._persist_map(user_id, from_floor)  # type: ignore[attr-defined]
+        self._persist_map(user_id, to_floor, hint)  # type: ignore[attr-defined]
 
     def _builtin_items(self, user_id: str, kind: str, floor: str) -> list[str]:
         if kind == "refs":
@@ -374,10 +409,11 @@ class FloorMixin:
                                  [(floor, user_id, i) for i in ids])
 
     @locked
-    def move_builtin(self, user_id: str, kind: str, from_floor: str, to_floor: str) -> FloorMove:
+    def move_builtin(self, user_id: str, kind: str, from_floor: str, to_floor: str, to_node: str | None = None) -> FloorMove:
         if kind not in KINDS:
             raise MoveError("no_builtin", f"기본 카테고리 종류가 아니다: {kind!r}")
         layout = self.ensure_layout(user_id)
+        self.ensure_maps(user_id)  # type: ignore[attr-defined]
         from_floor = self._check_floor(user_id, layout, from_floor)
         to_floor = self._check_floor(user_id, layout, to_floor)
         name = {"ideas": "생각", "styles": "문체", "refs": "문헌"}[kind]
@@ -396,18 +432,21 @@ class FloorMixin:
         layout.last_move = asdict(move)
         layout.changed_at.update({from_floor: at, to_floor: at})
         self._write_layout(user_id, layout)
+        self._moved_maps(user_id, from_floor, to_floor, {f"{kind}.{to_floor}": to_node} if to_node and not merged else None)
         return move
 
     @locked
-    def move_document(self, user_id: str, doc_id: str, to_floor: str) -> FloorMove:
-        """문서 책을 다른 작업물 층으로(#94). 공용 층에는 모음 책만 둘 수 있다."""
+    def move_document(self, user_id: str, doc_id: str, to_floor: str, to_node: str | None = None) -> FloorMove:
+        """문서 책을 원고가 있는 다른 프로젝트로(#94·#95)."""
         layout = self.ensure_layout(user_id)
+        self.ensure_maps(user_id)  # type: ignore[attr-defined]
         to_floor = self._check_floor(user_id, layout, to_floor)
         row = self._db.execute("SELECT title, floor FROM documents WHERE user_id = ? AND id = ?", (user_id, doc_id)).fetchone()
         if row is None:
             raise MoveError("unknown_category", f"문서 {doc_id}가 없다")
-        if to_floor == COMMON:
-            raise MoveError("common_only", "공용 층에는 모음 책만 둘 수 있다", name=row["title"])
+        has_ms = self._db.execute("SELECT 1 FROM chapters WHERE user_id = ? AND project_id = ? LIMIT 1", (user_id, to_floor)).fetchone()
+        if to_floor == COMMON or not has_ms:
+            raise MoveError("common_only", "문서 책은 원고가 있는 프로젝트에만 둔다", name=row["title"])
         if row["floor"] == to_floor:
             raise MoveError("same", "이미 그 층에 있다", name=row["title"])
         at = utcnow()
@@ -416,6 +455,7 @@ class FloorMixin:
         layout.last_move = asdict(move)
         layout.changed_at.update({row["floor"]: at, to_floor: at})
         self._write_layout(user_id, layout)
+        self._moved_maps(user_id, row["floor"], to_floor, {f"doc.{doc_id}": to_node} if to_node else None)
         return move
 
     @locked
@@ -434,7 +474,15 @@ class FloorMixin:
         if move.from_floor not in self._known(user_id, layout):
             raise MoveError("unknown_floor", f"층 {move.from_floor!r}가 없다", floor=move.from_floor)
         at = utcnow()
-        if move.book.startswith("doc."):  # 문서 책(#94)
+        self.ensure_maps(user_id)  # type: ignore[attr-defined]
+        key = f"{move.book}.{move.from_floor}" if move.book in KINDS else move.book
+        if move.from_floor == move.to_floor:  # 같은 프로젝트 안에서 노드만 옮긴 것(#95)
+            if move.from_node:
+                try:
+                    self.place_book(user_id, move.from_floor, key, move.from_node)  # type: ignore[attr-defined]
+                except ValueError:
+                    pass  # 그 노드가 사라졌거나 가득 찼으면 지금 자리에
+        elif move.book.startswith("doc."):  # 문서 책(#94)
             doc_id = move.book[4:]
             if self._db.execute("SELECT 1 FROM documents WHERE user_id = ? AND id = ?", (user_id, doc_id)).fetchone() is None:
                 raise MoveError("unknown_category", f"문서 {doc_id}가 없다")
@@ -459,6 +507,19 @@ class FloorMixin:
         layout.last_move = None
         layout.last_undone = asdict(move)
         layout.changed_at.update({move.from_floor: at, move.to_floor: at})
+        self._write_layout(user_id, layout)
+        if move.from_floor != move.to_floor:
+            self._moved_maps(user_id, move.to_floor, move.from_floor, {key: move.from_node} if move.from_node else None)
+            if move.made_node and move.to_node:
+                self._drop_empty_node(user_id, move.to_floor, move.to_node)  # type: ignore[attr-defined]
+        return move
+
+    @locked
+    def record_move(self, user_id: str, move: FloorMove) -> FloorMove:
+        """마지막 옮기기로 적는다(노드를 옮긴 것까지 담아 한 번 되돌릴 수 있게, #95)."""
+        layout = self.ensure_layout(user_id)
+        layout.last_move = asdict(move)
+        layout.changed_at.update({move.from_floor: move.at, move.to_floor: move.at})
         self._write_layout(user_id, layout)
         return move
 

@@ -11,7 +11,7 @@ from mcp.server.mcpserver.tools import Tool
 from pydantic import BaseModel, Field
 
 from magus.ids import utcnow
-from magus.floor_args import FLOOR_FIND, FLOOR_PUT, floor_name, labels_for, resolve_floor, search_floors
+from magus.project_args import PROJECT_FIND, PROJECT_PUT, floor_name, labels_for, resolve_project, resolve_put, search_projects
 from magus.melchior.bibliography import import_bibliography
 from magus.melchior.check import after_refs_changed, chapters_citing, check_chapter
 from magus.melchior.refs import add_ref
@@ -34,9 +34,9 @@ def build_tools(
 ) -> list[Tool]:
     resolve_file = files or FileResolver(store)
 
-    def ref_import_bibliography(text: str, floor: str | None = None) -> str:
+    def ref_import_bibliography(text: str, project: str | None = None) -> str:
         user = current_user()
-        report = import_bibliography(store, user, text, resolve_floor(store, user, floor))
+        report = import_bibliography(store, user, text, resolve_project(store, user, project))
         linked = after_refs_changed(store, user)
         return (
             report.render()
@@ -49,12 +49,12 @@ def build_tools(
         file_path: str | None = None,
         full_text: str | None = None,
         aliases: list[str] | None = None,
-        floor: str | None = None,
+        project: str | None = None,
     ) -> str:
         user = current_user()
         started = utcnow()
         try:
-            given = resolve_floor(store, user, floor) if floor else None
+            given = resolve_project(store, user, project) if project else None
             path, label = resolve_file(user, file_path) if file_path else (None, None)
             ref, before, added = add_ref(
                 store,
@@ -66,7 +66,7 @@ def build_tools(
                 full_text=full_text,
                 aliases=aliases,
                 floor=given,
-                default_floor=lambda: resolve_floor(store, user, None),  # 새 문헌만: 작업물이 여럿이면 묻게 한다
+                default_floor=lambda: resolve_put(store, user, "refs", None),  # 새 문헌만: 프로젝트가 여럿이면 묻게 한다
             )
         except (ValueError, FileNotFoundError) as e:
             raise ToolError(str(e)) from e
@@ -83,10 +83,10 @@ def build_tools(
             f"문헌 확인 요청과의 연결 변경 {linked}건 · 이 문헌을 인용하는 장: {where or '없음'}"
         )
 
-    def ref_search(query: str, scope: Literal["picked", "full", "both"] = "both", k: int = 8, floor: str | None = None) -> str:
+    def ref_search(query: str, scope: Literal["picked", "full", "both"] = "both", k: int = 8, project: str | None = None) -> str:
         user = current_user()
         k = max(1, min(k, 30))
-        only = search_floors(store, user, floor)
+        only = search_projects(store, user, project, "refs")
         lanes: list[Lane] = {"picked": ["ref_picked"], "full": ["ref_full"], "both": ["ref_picked", "ref_full"]}[scope]  # type: ignore[assignment]
         hits = hybrid_search(store, user, query, lanes, k * (6 if only else 2), embedder)
         if only is not None:
@@ -136,8 +136,8 @@ def build_tools(
             description=(
                 "참고문헌 목록 텍스트(한 줄에 한 문헌)를 refs에 status=unverified로 넣는다. "
                 "key는 첫 저자 성(소문자 영문)+연도(예: daeschler2006)이고, '[국역: …]'이 있으면 한글 성+연도를 aliases에 넣는다. "
-                "이미 있는 key는 건드리지 않는다(다른 작업물 층에 있던 문헌이면 두 작업물이 함께 쓰도록 공용으로 옮긴다). "
-                "파싱 실패 줄은 raw로 보관하고 리포트한다. " + FLOOR_PUT
+                "이미 있는 key는 건드리지 않는다(다른 프로젝트에만 있던 문헌이면 「내 서재」로 옮기고 두 지도에 연결 노드를 붙인다). "
+                "파싱 실패 줄은 raw로 보관하고 리포트한다. " + PROJECT_PUT
             ),
             structured_output=False,
         ),
@@ -151,7 +151,7 @@ def build_tools(
                 "passages: [{text, reason, locator?}] 하나 이상 필수(직접 고른 발췌와 고른 이유). "
                 "file_path(올린 파일 이름, txt/md/pdf/docx. files_list로 확인. 예: kremer1993.pdf) "
                 "또는 full_text로 전문을 함께 넣을 수 있다. "
-                "같은 key나 alias가 unverified로 있으면 verified로 올린다. aliases로 한글 표기(예: 갤러2022)를 더한다. " + FLOOR_PUT
+                "같은 key나 alias가 unverified로 있으면 verified로 올린다. aliases로 한글 표기(예: 갤러2022)를 더한다. " + PROJECT_PUT
                 + "이미 있는 문헌은 제자리에 둔다."
             ),
             structured_output=False,
@@ -162,7 +162,7 @@ def build_tools(
             description=(
                 "verified 문헌에서 찾는다. scope=picked(발췌)|full(전문)|both, k=8. 발췌 결과를 먼저 보여 주고, "
                 "전문 결과에는 '발췌되지 않은 부분'이라고 표시한다(인용하려면 ref_add로 발췌 추가). 인용은 여기서 나온 것만 쓴다. "
-                + FLOOR_FIND
+                + PROJECT_FIND
             ),
             structured_output=False,
         ),
@@ -171,7 +171,7 @@ def build_tools(
             name="ref_check",
             description=(
                 "장 본문의 인용을 refs와 대조한다. JSON: verified / unverified(refs에 있으나 미확인) / "
-                "unknown(refs에 없음) 세 목록과 needs_source([출처 필요: …] 표시 수). 그 작업물 층과 공용의 문헌만 본다. "
+                "unknown(refs에 없음) 세 목록과 needs_source([출처 필요: …] 표시 수). 그 프로젝트와 연결 노드의 문헌만 본다. "
                 "인용 표기: (Daeschler, Shubin & Jenkins, 2006), Clack(2012), Hu et al.(2023), 갤러(2022), (헨릭, 2016)."
             ),
             structured_output=False,

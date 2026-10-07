@@ -15,8 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from magus.floor_args import shared_reason
-from magus.floors import COMMON
+from magus.project_args import needs_share, share_ref
 from magus.melchior.bibliography import first_author
 from magus.melchior.citations import make_ref_key
 from magus.store import Passage, Ref, Store
@@ -104,8 +103,8 @@ def add_ref(
     default_floor: Callable[[], str] | None = None,
 ) -> tuple[Ref, str | None, int]:
     """(저장된 ref, 이전 상태 또는 None, 새로 추가된 발췌 수).
-    층(#93): 새 문헌은 floor(없으면 default_floor())의 문헌에 꽂는다. 이미 있는 문헌은 제자리에 두되,
-    floor를 줬고 그 문헌이 다른 작업물 층에 있으면 두 작업물이 함께 쓰도록 공용으로 옮긴다."""
+    프로젝트(#95): 새 문헌은 floor(없으면 default_floor())의 문헌에 꽂는다. 이미 있는 문헌은 제자리에 두되,
+    floor를 줬고 그 프로젝트 원고의 인용 점검이 보지 못하는 곳에 있으면 「내 서재」로 옮기고 두 지도에 연결 노드를 붙인다."""
     passages = [p for p in passages if p.text.strip()]
     if not passages:
         raise ValueError("passages가 비어 있다. 직접 읽고 고른 발췌(text, reason)가 있어야 verified가 된다.")
@@ -135,8 +134,8 @@ def add_ref(
             created_at=existing.created_at,
         )
         stored = store.put_ref(user_id, ref, passages=[*old, *new], full_text=full_text)
-        if floor and stored.floor not in (floor, COMMON):  # 두 작업물이 함께 쓰게 됐다: 공용으로, 이유를 남긴다(#93-a 더함)
-            stored = store.set_ref_floor(user_id, stored.key, COMMON, shared_reason(store, user_id, stored.floor, floor))
+        if floor and needs_share(store, user_id, stored.floor, floor):  # 두 프로젝트가 함께 쓰게 됐다: 「내 서재」로, 이유를 남긴다
+            stored = share_ref(store, user_id, stored.key, stored.floor, floor)
         return stored, existing.status, len(new)
     target = floor or (default_floor() if default_floor else None)
     home = store.place(user_id, "refs", target) if target else None

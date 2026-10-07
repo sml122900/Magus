@@ -31,6 +31,7 @@ from magus.category.rules import HEX
 from magus.store.categories import CategoryMixin
 from magus.store.documents import DocumentMixin
 from magus.store.floors import FloorMixin
+from magus.store.maps import MapMixin
 from magus.store.shelf import ShelfMixin
 from magus.store.base import (
     ANCHOR_MAX,
@@ -66,7 +67,7 @@ ANSWERS_HEADER = ("# 저자 답\n\n질문은 매번 원고와 문헌에서 계�
 _CHAPTER_FILE = re.compile(r"ch-(\d+)\.md")
 _VERSION_FILE = re.compile(r"ch-(\d+)\.v(\d+)\.md")
 
-class LocalStore(ShelfMixin, CategoryMixin, FloorMixin, DocumentMixin):
+class LocalStore(ShelfMixin, CategoryMixin, FloorMixin, MapMixin, DocumentMixin):
     def __init__(self, data_dir: Path):
         self.root = Path(data_dir)
         self.root.mkdir(parents=True, exist_ok=True)
@@ -110,13 +111,13 @@ class LocalStore(ShelfMixin, CategoryMixin, FloorMixin, DocumentMixin):
     ) -> Project:
         project_id = safe_id(project_id or secrets.token_hex(4), "project_id")
         if project_id == COMMON:
-            raise ValueError(f"{COMMON!r}은 공용 층의 이름이라 작업물 id로 쓸 수 없다")
+            raise ValueError(f"{COMMON!r}은 「내 서재」의 id라 작업물 id로 쓸 수 없다")
         pdir = self._project_dir(user_id, project_id)
         if (pdir / "project.json").exists():
             raise ValueError(f"프로젝트 {project_id!r}가 이미 있다")
         layout = self.ensure_layout(user_id)  # 층 배치를 먼저 파일로 적는다(이전 전 사용자, #93)
         if project_id not in layout.order and len(self._existing(user_id, layout)) >= MAX_FLOORS:
-            raise ValueError(f"작업물 층은 {MAX_FLOORS}개까지다(공용 빼고)")
+            raise ValueError(f"프로젝트는 {MAX_FLOORS}개까지다(「내 서재」 빼고)")
         now = utcnow()
         for sub in ("book", "versions", "original"):
             (pdir / sub).mkdir(parents=True, exist_ok=True)
@@ -124,7 +125,8 @@ class LocalStore(ShelfMixin, CategoryMixin, FloorMixin, DocumentMixin):
         _write_json(pdir / "project.json", {"title": title, **extra, "created_at": now, "parts": []})
         with self._db:
             self._index_project(user_id, project_id, title, now, extra)
-        self._register_floor(user_id, project_id, layout)  # 새 층에는 생각·문헌(#93)
+        self._register_floor(user_id, project_id, layout)  # 새 프로젝트에는 생각·문헌(#93)
+        self.ensure_maps(user_id)  # 새 프로젝트의 지도: 가운데·생각·문헌 + 「내 서재」 문체·문헌 연결(#95)
         return Project(project_id, user_id, title, now, now, **extra)
 
     @_locked
@@ -212,6 +214,24 @@ class LocalStore(ShelfMixin, CategoryMixin, FloorMixin, DocumentMixin):
         folder = self._project_dir(user_id, project_id) / "original"
         path = folder / Path(filename).name
         return path.read_text(encoding="utf-8") if path.suffix == ".md" and path.is_file() else None
+
+    @_locked
+    def original_bytes(self, user_id: str, project_id: str, filename: str | None = None) -> tuple[str, bytes] | None:
+        """original/의 원고 파일(내려받기용, #95). filename이 없으면 마지막 수정본의 원고(docx·pdf). 없으면 None."""
+        folder = self._project_dir(user_id, project_id) / "original"
+        names = [filename] if filename else []
+        if not names:
+            editions = self.list_editions(user_id, project_id)
+            if editions:
+                last = editions[-1]
+                names = [f"E{last.number}-{last.file}", last.file]
+            names += sorted((p.name for p in folder.glob("*") if p.suffix.lower() in (".docx", ".pdf")),
+                            key=lambda n: (folder / n).stat().st_mtime, reverse=True) if folder.exists() else []
+        for name in names:
+            path = folder / Path(name).name
+            if path.is_file():
+                return path.name, path.read_bytes()
+        return None
 
     @_locked
     def get_non_citation_terms(self, user_id: str, project_id: str) -> list[str]:

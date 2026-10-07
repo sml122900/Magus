@@ -40,7 +40,7 @@ from magus.inbox import INBOX_TYPES, LimitError, mb, save_upload, size_text
 from magus.signing import sign, unsign
 from magus.store import Profile, Store
 from magus.webbooks import BookPages
-from magus.webfloors import FloorPages
+from magus.webmap import MapPages
 from magus.webshelf import EMBED, ShelfPages, is_panel_request, safe_at, state_url
 
 log = logging.getLogger("magus.web")
@@ -48,7 +48,7 @@ SESSION_COOKIE, OAUTH_COOKIE = "magus_session", "magus_oauth"
 DISPLAY_NAME_MAX = 40  # 상단 바 표시 이름 길이 한도
 SESSION_TTL, OAUTH_TTL, DOWNLOAD_TTL = 12 * 3600, 600, 24 * 3600
 # 생각·문헌·문체는 '책장' 하나로 모았다(2026-10-06). 책장 화면은 magus.webshelf.
-NAV = (("/shelf", "책장"),)  # #94: 저자 화면은 책장 하나. 원고·확인 요청·인용 상태는 원고 책 안에, 올린 파일은 내 정보 아래
+NAV = (("/shelf", "프로젝트"),)  # #94·#95: 저자 화면은 프로젝트(지도) 하나. 원고·확인 요청·인용 상태는 원고 책 안에, 올린 파일은 내 정보 아래
 
 # 화면 스타일은 여기 한 곳(결정 #56: 템플릿 엔진·외부 글꼴·CDN 없음). 토큰과 참고 문서에서 바꾼 점은 docs/decisions/web-style.md.
 # 입력칸 테두리는 --mute(흰 바탕 4.75:1)다. 참고 문서의 입력칸 색(1.82:1)은 칸이 보이지 않아 쓰지 않는다(사용자 결정 #86).
@@ -114,7 +114,7 @@ border:2px solid currentColor;border-right-color:transparent;border-radius:50%;a
 @media (max-width:767px){main{padding:16px 12px 24px}h1{font-size:22px}table{min-width:640px}
 button,input[type=file]::file-selector-button,input:not([type=radio]):not([type=checkbox]):not([type=hidden]),select{min-height:44px}}
 """
-# 책장 패널(iframe) 안의 화면: 흰 바탕, 좁은 여백. 제목(h1)은 패널 머리가 보이므로 숨기고, 책장으로 돌아가는 길('← 책장 · N층')도 뺀다.
+# 패널의 게시판 자리(iframe) 안의 화면: 흰 바탕, 좁은 여백. 제목(h1)은 패널 머리가 보이므로 숨기고, 돌아가는 길('← 프로젝트 · 「제목」')도 뺀다.
 EMBED_STYLE = """
 body.embed{background:var(--canvas)}
 body.embed main{max-width:none;padding:12px 16px 24px}
@@ -226,7 +226,7 @@ def _pkce() -> tuple[str, str]:
 
 
 @dataclass
-class Web(ShelfPages, FloorPages, BookPages):
+class Web(ShelfPages, MapPages, BookPages):
     store: Store
     settings: Settings
     base_url: str  # 바깥에서 보이는 주소(원격: PUBLIC_URL, 로컬: http://127.0.0.1:포트)
@@ -294,8 +294,8 @@ class Web(ShelfPages, FloorPages, BookPages):
             server.custom_route(path, methods=methods, include_in_schema=False)(self._wrap(handler))
 
     def _wrap(self, handler: Callable[[Request], Awaitable[Response]]) -> Callable[[Request], Awaitable[Response]]:
-        """한 화면 책장(2026-10-07 밤): 책 화면 주소를 브라우저 주소창으로 바로 열면 책장의 그 층·그 책 패널로 넘긴다.
-        책장 패널(iframe) 안의 요청이면 머리(메뉴) 없는 패널 모양으로 그린다(EMBED)."""
+        """지도 화면(#95): 책 화면 주소를 브라우저 주소창으로 바로 열면 그 프로젝트 지도의 그 노드·그 책 패널로 넘긴다.
+        패널의 게시판 자리(iframe) 안의 요청이면 머리(메뉴) 없는 모양으로 그린다(EMBED)."""
 
         async def run(request: Request) -> Response:
             path = request.url.path
@@ -351,7 +351,7 @@ class Web(ShelfPages, FloorPages, BookPages):
         return form
 
     def _need_login(self, request: Request) -> Response:
-        here = request.url.path + (f"?{request.url.query}" if request.url.query else "")  # 책장의 층·책 상태도 이어서
+        here = request.url.path + (f"?{request.url.query}" if request.url.query else "")  # 프로젝트 지도의 노드·책 상태도 이어서
         return RedirectResponse(f"/login?next={urllib.parse.quote(here)}", status_code=303)
 
     # --- 로그인 ---
@@ -608,7 +608,7 @@ class Web(ShelfPages, FloorPages, BookPages):
         except PermissionError:
             return self._page("원고 책", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         project = self.store.get_project(session[0], str(form.get("project_id", "")))
-        if project is None or not self.store.list_chapters(session[0], project.id):  # 빈 층에는 원고 책이 없다
+        if project is None or not self.store.list_chapters(session[0], project.id):  # 원고 없는 프로젝트에는 원고 책이 없다
             return self._page("원고 책", '<p class="msg err">없는 원고 책입니다. <a href="/shelf">책장</a>으로 돌아가세요.</p>', session, 404)
         location = await run_in_threadpool(export_docx, self.store, session[0], project)
         return RedirectResponse(self.export_link(session[0], location).removeprefix(self.base_url), status_code=303)

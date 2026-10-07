@@ -10,8 +10,8 @@ from mcp.server.mcpserver.tools import Tool
 
 from magus.book.documents import DOC_TYPE_BY_NAME, DOC_TYPES, DOCUMENT_COLOR, build_source_check, default_title
 from magus.category.titles import decide_title
-from magus.floor_args import floor_name, floors_text, match_floor
-from magus.floors import COMMON
+from magus.maps import CENTER
+from magus.project_args import floor_name
 from magus.store import Document, Store
 
 PREFACE_MAX = 2000
@@ -21,7 +21,7 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
     def book_document(
         kind: Literal["출처 확인 문서"] = "출처 확인 문서",
         project_id: str | None = None,
-        floor: str | None = None,
+        node: str | None = None,
         title: str | None = None,
         title_by: Literal["ai", "author"] | None = None,
         untitled: bool = False,
@@ -43,22 +43,26 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
         if project is None:
             raise ToolError(f"원고 책 {project_id!r}가 없다." if project_id else "원고 책이 없다. 먼저 원고를 올린다.")
         if not store.list_chapters(user, project.id):
-            raise ToolError(f"『{project.title}』에는 아직 원고가 없다(빈 층). 저자가 책장에서 원고를 올린 뒤 만든다.")
-        where = project.id
-        if floor and floor.strip():
-            found = match_floor(store.list_floors(user), floor)
-            if found is None:
-                raise ToolError(f"'{floor}' 층을 찾지 못했다. 층: {floors_text(store.list_floors(user))}")
-            if found.id == COMMON:
-                raise ToolError("공용 층에는 모음 책만 둘 수 있다. 문서 책은 작업물 층에 넣는다.")
-            where = found.id
+            raise ToolError(f"『{project.title}』에는 아직 원고가 없다. 저자가 책장에서 원고를 올린 뒤 만든다.")
+        where, target = project.id, CENTER
+        if node and node.strip():  # 그 원고 프로젝트 지도의 노드(이름). 연결 노드·다른 프로젝트에는 두지 않는다
+            found = store.get_map(user, where)
+            hit = next((n for n in found.nodes if not n.link and (n.id == node.strip() or (" ".join(n.name.split()) == " ".join(node.split()))
+                                                                  or (n.center and node.strip() in ("가운데", "가운데 노드")))), None) if found else None
+            if hit is None:
+                raise ToolError(f"『{project.title}』 지도에 '{node}' 노드가 없다. 문서 책은 그 원고의 프로젝트 지도에 둔다.")
+            target = hit.id
         name, by, _ = decide_title(store, user, title, title_by, untitled)  # 제목 규칙(규칙 10)
         doc_type = DOC_TYPE_BY_NAME[kind]
         name = name or default_title(store, user, project.id, doc_type)  # 비워 두기면 '원고 제목 + 문서 종류'
         content, version = build_source_check(store, user, project.id, name, preface=preface, preface_by="ai")
         doc = store.create_document(user, Document("", name, by, doc_type, where, project.id, DOCUMENT_COLOR, versions=(version,)),
-                                    content)
-        return _said(doc, "만듦", floor_name(store, user, where))
+                                    content, None if target == CENTER else target)
+        placed = store.node_of_book(user, f"doc.{doc.id}")
+        target = placed[1] if placed else CENTER
+        shown = store.get_map(user, where)
+        node_name = next((n.name for n in shown.nodes if n.id == target and not n.center), "") if shown else ""
+        return _said(doc, "만듦", floor_name(store, user, where) + (f" · 노드 「{node_name}」" if node_name else " · 가운데 노드"))
 
     def _said(doc: Document, verb: str, where: str) -> str:
         v = doc.versions[-1]
@@ -77,7 +81,7 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
                 "저자가 원고에서 문서를 만들어 책장에 넣으라고 분명히 말했을 때만 부른다. "
                 "kind=출처 확인 문서: 질문·원고 불일치·사실 확인 요청·우선 확인 문헌·장별 미확인 수·바뀐 점을 서버가 데이터로 만든다"
                 "(Claude는 그 수치·목록을 쓰거나 preface에 옮기지 않는다). preface: 저자가 원하면 짧은 머리말(AI가 쓴 것으로 표시). "
-                "project_id: 기준 원고(없으면 최근). floor: 없으면 그 원고의 층(공용 불가). 제목은 생각과 같은 규칙. "
+                "project_id: 기준 원고(없으면 최근). node: 그 원고 프로젝트 지도의 노드(없으면 가운데). 제목은 생각과 같은 규칙. "
                 "document_id를 주면 그 문서를 지금 원고로 다시 만든다(이전 것은 이력으로 남는다)."
             ),
             structured_output=False,

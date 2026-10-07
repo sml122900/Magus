@@ -226,20 +226,18 @@ def build_tools(
         force: bool = False,
     ) -> str:
         user = current_user()
-        if not path or not path.strip():  # 원고 없이 제목만 있는 빈 층(#93). 원고는 나중에 같은 project_id로 가져온다
+        if not path or not path.strip():  # 원고 없이 제목만 있는 프로젝트(#93·#95). 원고는 나중에 같은 project_id로 가져온다
             if new_edition or replace:
                 raise ToolError("수정본·바꾸기에는 원고 파일(path)이 필요하다.")
             if not title or not title.strip():
-                raise ToolError("원고 없이 빈 층을 만들려면 작업물 제목(title)을 준다. 원고를 가져오려면 path에 올린 파일 이름을 준다.")
+                raise ToolError("원고 없이 프로젝트를 만들려면 제목(title)을 준다. 원고를 가져오려면 path에 올린 파일 이름을 준다.")
             try:
                 made = store.create_project(user, " ".join(title.split())[:120], project_id=project_id or None,
                                             titles=BookTitles(subtitle=subtitle) if subtitle else None)
             except ValueError as e:
                 raise ToolError(str(e)) from e
-            floor = store.get_floor(user, made.id)
-            label = floor.label if floor else "?"
-            return (f"빈 층을 만듦: {label} 「{made.title}」({made.id}). 생각·문헌이 꽂혀 있다. "
-                    f"원고는 저자가 그 층의 '책 추가 → 원고'로 올리거나, book_import(path=올린 파일 이름, project_id={made.id})로 가져온다.")
+            return (f"원고 없는 프로젝트를 만듦: 「{made.title}」({made.id}). 지도에 가운데 노드와 생각·문헌 노드가 있다. "
+                    f"원고는 저자가 가운데 노드의 '+ 책 → 원고'로 올리거나, book_import(path=올린 파일 이름, project_id={made.id})로 가져온다.")
         if new_edition:
             if not project_id:
                 raise ToolError("수정본으로 올릴 책의 project_id를 주세요(book_outline 첫 줄의 괄호 안).")
@@ -303,9 +301,9 @@ def build_tools(
             book_import,
             name="book_import",
             description=(
-                "올린 원고 파일(docx, 없으면 pdf)로 원고 책을 만든다(새 작업물 층, 또는 project_id가 빈 층이면 그 층). "
+                "올린 원고 파일(docx, 없으면 pdf)로 원고 책을 만든다(새 프로젝트, 또는 project_id가 원고 없는 프로젝트면 그 가운데 노드). "
                 "path에는 올린 파일 이름을 준다(files_list로 확인). "
-                "저자가 원고 없이 새 작업물 층을 만들자고 하면 path 없이 title만 준다(빈 층. 원고는 나중에 같은 project_id로 가져온다). "
+                "저자가 원고 없이 새 프로젝트를 만들자고 하면 path 없이 title만 준다(원고는 나중에 같은 project_id로 가져온다). "
                 "'제N부'·'제N장' 제목으로 장을 나누고, "
                 "Word 코멘트는 확인 요청(import_comment, kind=citation|fact|general)으로, 참고문헌은 문헌(unverified)으로 넣는다. "
                 "표는 칸의 글까지 markdown 표로 싣고, 그림·수식은 [그림 N]·[수식] 자리표시자로 남기며 원본은 original/에 복사한다. "
@@ -314,7 +312,7 @@ def build_tools(
                 "'해결됐을 수 있음'으로 표시만 한다. 결정·직접 남긴 확인 요청·생각·문체·문헌은 그대로다. 장 제목이 30% 미만으로 겹치면 "
                 "다른 책으로 보고 멈춘다(맞으면 force=true). "
                 "replace=true는 기존 프로젝트(결정·확인 요청 포함)를 휴지통으로 옮기고 새로 만드니 수정본에 쓰지 않는다. "
-                "title·subtitle을 비우면 원고(파일 속성 제목의 '제목 — 부제', 표지)에서 제목·부제·영문 제목을 따로 읽는다. "
+                "title·subtitle을 비우면 원고(파일 속성·표지)에서 제목·부제·영문 제목을 읽는다. "
                 "리포트(장·부 수, 분할 못 한 구간, 코멘트 분류, 참고문헌 파싱)와 장 매핑표를 돌려준다."
             ),
             structured_output=False,

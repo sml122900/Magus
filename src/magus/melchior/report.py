@@ -110,7 +110,7 @@ def build_cite_report(store: Store, user_id: str, project_id: str) -> CiteReport
             doc.cited_as.update(c for _, c in g.occurrences)
             if g.matched_by not in ("", "alias"):
                 doc.inferred.update(f"{c} [{g.matched_by}]" for _, c in g.occurrences)
-    refs = store.list_refs(user_id, floors=resolver.floors)  # 그 작업물 층 + 공용(#93)
+    refs = store.list_refs(user_id, floors=resolver.floors)  # 그 프로젝트 + 연결 노드가 가리키는 문헌(#95)
     for doc in docs.values():
         if doc.status == "unknown" and (name := re.sub(r"\d{4}[a-z]?(-\d+)?$", "", doc.key)):
             similar = [r.key for r in refs if re.sub(r"\d{4}[a-z]?(-\d+)?$", "", r.key) == name]

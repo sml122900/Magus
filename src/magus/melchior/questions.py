@@ -56,7 +56,7 @@ def build_questions(store: Store, user_id: str, project_id: str) -> list[Questio
     """지금 원고·문헌에서 질문을 계산하고, answers.md의 답으로 상태를 붙인다."""
     report = build_cite_report(store, user_id, project_id)
     resolver, terms = Resolver(store, user_id, project_id), terms_of(store, user_id, project_id)
-    refs = {r.key: r for r in store.list_refs(user_id, floors=resolver.floors)}  # 그 작업물 층 + 공용(#93)
+    refs = {r.key: r for r in store.list_refs(user_id, floors=resolver.floors)}  # 그 프로젝트 + 연결 노드가 가리키는 문헌(#95)
     inferred: dict[tuple[str, str], list[str]] = defaultdict(list)  # (표기, key) → 장
     ambiguous: dict[str, tuple[list[str], list[str], set[str]]] = {}  # 모호 key → (후보, 장, 표기)
     linked: dict[str, list[str]] = defaultdict(list)  # 형제가 있는 key → 장
@@ -196,7 +196,7 @@ def answer_question(store: Store, user_id: str, project_id: str, question: Quest
     applied, decision = "", ""
     if question.type in ("translit", "ab", "unlinked") and kind in ("yes", "ref"):
         key = choice[4:] if kind == "ref" else question.id.split(">")[1]
-        if store.get_ref(user_id, key, floors=cite_floors(project_id)) is None:
+        if store.get_ref(user_id, key, floors=cite_floors(store, user_id, project_id)) is None:
             raise ValueError(f"문헌 {key}가 없다")
         ref, alias = add_alias(store, user_id, key, question.surface)
         after_refs_changed(store, user_id)

@@ -365,7 +365,7 @@ def import_manuscript(
     terms: list[str] = []
     ai_names: list[str] = []
     existing = store.get_project(user_id, project_id) if project_id else None
-    # 원고 없이 제목만 만든 빈 층(#93)이면 그 층에 원고를 채운다(층의 카테고리·자리는 그대로, 제목은 저자가 지은 것)
+    # 원고 없이 제목만 만든 프로젝트(#93·#95)면 그 프로젝트에 원고를 채운다(지도·책은 그대로, 제목은 저자가 지은 것)
     empty = (existing is not None and not replace and not store.list_chapters(user_id, existing.id)
              and not store.list_editions(user_id, existing.id))
     if existing is not None and not empty:

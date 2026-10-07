@@ -142,11 +142,12 @@ async def test_category_tools_round_trip(settings: Settings, store: LocalStore):
     store.write_chapter("alice", "book", 3, "항구 이야기.", "x", title="항구")
     async with Client(build_server(settings, store)) as c:
         listed = _text(await c.call_tool("category_list", {}))
-        assert "## 1층 「책」(book) · 원고 있음\n- 생각 0개 · 기본(idea_add)" in listed and "제목 기본값: 매번 묻기" in listed
-        assert "## 공용\n- 문체 0개 · 기본(style_add)" in listed  # 층(#93): 문체는 공용, 생각·문헌은 작업물 층
+        assert "## 「책」(book) · 원고 있음 · 노드 4 · 선 3\n- 가운데 원고 책 1장\n- 「생각」 생각 0" in listed
+        assert "제목 기본값: 매번 묻기" in listed
+        assert "## 내 서재 · 노드 2 · 선 1\n- 가운데 책 없음\n- 「문체」 문체 0" in listed  # 문체는 「내 서재」, 생각·문헌은 프로젝트
         made = _text(await c.call_tool("category_create", {"name": "사례 카테고리", "template": "사례", "color": "빨간색"}))
         assert made.startswith("카테고리를 만듦: 「사례」 · 사례 템플릿(칸: 시기, 장소, 출처) · 색 빨강(#b3261e)")
-        for args, why in (({"name": "사례"}, "이미 있습니다"), ({"name": "문헌"}, "정해진 이름"),
+        for args, why in (({"name": "사례"}, "이미 있습니다"), ({"name": "문헌"}, "이미 문헌이 있다(기본 카테고리)"), ({"name": "원고"}, "정해진 이름"),
                           ({"name": "새것", "color": "#fff;}"}, "기본 색 이름")):
             result = await c.call_tool("category_create", args)
             assert result.is_error and why in _text(result), args
@@ -231,8 +232,9 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         shelf = c.get("/login?next=/shelf").text
         csrf = _csrf(shelf)
-        # 카테고리 추가 자리는 한 층 화면에 있다(#93). 작업물이 없으면 공용 층 하나
-        assert '<a class="madd" href="/shelf/add?floor=common" aria-label="책 추가">' in c.get("/shelf/floor/common").text
+        # 책 추가 자리는 노드의 책장에 있다(#95). 프로젝트가 없으면 「내 서재」 하나
+        assert '<a class="book add" href="/shelf/add?project=common&amp;node=center" aria-label="책 추가">' in c.get(
+            "/shelf/p/common?node=center").text
         form = c.get("/shelf/new").text
         assert 'name="template" value="case"' in form and form.count('name="color" value="#') == 18 and 'value="custom"' in form
         assert c.post("/shelf/new", data={"csrf": "틀림", "name": "사례", "template": "case", "color": "#b3261e"}).status_code == 403
@@ -244,8 +246,8 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         made = c.post("/shelf/new", data={"csrf": csrf, "name": "사례", "template": "case", "color": "custom", "hex": "",
                                           "r": "74", "g": "103", "b": "65", "keep": "1"})
         assert "「사례」 카테고리를 꽂았습니다." in made.text
-        assert 'aria-label="사례, 항목 0개"' in made.text and "--c:#4a6741;" in made.text
-        cid = re.search(r'data-open="/shelf/(\d{17}-[0-9a-f]{6})"', made.text).group(1)
+        assert 'aria-label="사례, 항목 0개"' in made.text and "--c:#4a6741;" in made.text  # 만든 책이 꽂힌 노드의 책장이 열린다
+        cid = re.search(r'data-key="(\d{17}-[0-9a-f]{6})"', made.text).group(1)
         store = LocalStore(data_dir)
         assert store.get_shelf_settings("alice").my_colors == ("#4a6741",)  # 내 색에 저장
         store.close()
@@ -260,7 +262,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         assert "&lt;script&gt;alert(1)&lt;/script&gt; 강가 장날" in written.text and "<script>alert" not in written.text
         assert "<dt>시기</dt><dd>1850년대</dd>" in written.text and "누가: 저자의 말" in written.text
         idea = c.post("/shelf/write/ideas", data={"csrf": csrf, "title": "물가의 제목", "content": "물가는 궁지다"})
-        assert '<span class="t">물가의 제목</span>' in idea.text and "/shelf/ideas.common/" in str(idea.url)  # 예전 주소로 적어도 그 층에
+        assert '<span class="t">물가의 제목</span>' in idea.text and "/shelf/ideas.common/" in str(idea.url)  # 예전 주소로 적어도 그 프로젝트에
         assert c.post("/shelf/write/styles", data={"csrf": csrf, "content": "x"}).status_code == 404  # 문체·문헌은 대화로
         # 고치기: 이름과 색(기본 색 이름은 화면에서 격자로 고른다). 기본 카테고리는 색만
         edit = c.get(f"/shelf/edit/{cid}").text
@@ -273,8 +275,8 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         builtin = c.get("/shelf/edit/ideas").text
         assert 'name="name"' not in builtin and "기본 카테고리라 이름은 바꿀 수 없습니다." in builtin
         c.post("/shelf/edit/ideas", data={"csrf": csrf, "name": "엉뚱한 이름", "color": "#8db8de"})
-        shelf = c.get("/shelf/floor/common").text
-        assert re.search(r'data-open="/shelf/ideas.common"[^>]*style="--c:#8db8de;--fg:#1a1a1a;', shelf) and "엉뚱한 이름" not in shelf
+        shelf = c.get("/shelf/p/common", params={"node": "b-ideas"}).text
+        assert re.search(r'href="/shelf/ideas.common" style="--c:#8db8de;--fg:#1a1a1a;', shelf) and "엉뚱한 이름" not in shelf
         # 내 색 빼기
         c.post("/shelf/colors", data={"csrf": csrf, "remove": "#4a6741", "next": "https://evil.example/"})
         store = LocalStore(data_dir)
@@ -308,7 +310,8 @@ def test_web_category_list_search_and_titles(server_proc):  # noqa: F811
         found = c.get(f"/shelf/{c1.id}", params={"q": "장날"}).text
         assert "찾은 항목 1개" in found and "<mark>장날</mark>" in found
         everywhere = c.get("/shelf", params={"q": "물결"}).text
-        assert f'<h3><a href="/shelf/{c1.id}">사례</a> <small>1개 · 최근 수정 ' in everywhere and "<mark>물결</mark>" in everywhere
+        assert re.search(rf'<a href="/shelf/p/common\?node=[^"]+&amp;book={c1.id}">사례</a> <small>모음 책 · 1개</small>', everywhere)
+        assert "<mark>물결</mark>" in everywhere
         assert '<details id="i-20261006000000001-aaaaab" open data-here>' in c.get(f"/shelf/{c1.id}/20261006000000001-aaaaab").text
 
 
@@ -332,7 +335,7 @@ def test_web_categories_are_per_user(server_proc, fake_issuer):  # noqa: F811
         csrf = _csrf(alice.get("/shelf").text)
         mine = alice.get(f"/shelf/{ids['alice']}").text
         assert "앨리스의 바다" in mine and "밥의" not in mine
-        shelf = alice.get("/shelf").text
+        shelf = alice.get("/shelf/p/common", params={"node": "b-ideas"}).text
         assert "--c:#123456;" in shelf and "#654321" not in shelf
         assert "밥의" not in alice.get("/shelf", params={"q": "바다"}).text
         edit = alice.get(f"/shelf/edit/{ids['alice']}").text

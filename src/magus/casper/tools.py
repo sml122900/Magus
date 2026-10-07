@@ -12,7 +12,7 @@ from typing import Literal
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 
-from magus.floor_args import FLOOR_FIND, FLOOR_PUT, floor_name, labels_for, resolve_floor, search_floors
+from magus.project_args import PROJECT_FIND, PROJECT_PUT, floor_name, labels_for, resolve_put, search_projects
 from magus.casper.conversation import split_conversation
 from magus.category.titles import TITLE_RULE, decide_title
 from magus.ids import local_time, new_id
@@ -28,7 +28,7 @@ ASK = ("'저장해 줘'처럼 넣을 곳이 정해지지 않았으면 부르지 
 
 def add_conversation(store: Store, user_id: str, markdown: str, origin: str | None,
                      floor: str | None = None) -> tuple[str, list[Idea]]:
-    """floor: 넣을 층(#93, place로 정한 층). None이면 위에서부터 생각이 꽂힌 첫 층."""
+    """floor: 넣을 프로젝트(#95, resolve_put으로 정한 것). None이면 「내 서재」부터 생각이 있는 첫 프로젝트."""
     split = split_conversation(markdown)
     ideas: list[Idea] = []
     for u in split.utterances:
@@ -64,23 +64,23 @@ def build_tools(
         title: str | None = None,
         title_by: Literal["ai", "author"] | None = None,
         untitled: bool = False,
-        floor: str | None = None,
+        project: str | None = None,
     ) -> str:
         if not text.strip():
             raise ToolError("text가 비어 있다")
         kind_: IdeaKind = kind
         user = current_user()
-        where = store.place(user, "ideas", resolve_floor(store, user, floor))  # 층(#93): 그 층에 생각이 없으면 공용의 생각
+        where = resolve_put(store, user, "ideas", project)  # 그 프로젝트의 생각, 없으면 연결 노드가 가리키는 생각(#95)
         name, by, said = decide_title(store, user, title, title_by, untitled)  # 제목(#92): 기본값이 '매번 묻기'면 먼저 묻게 한다
         [idea] = store.add_ideas(user, [Idea(new_id(), text.strip(), kind_, "me", origin, title=name, title_by=by, floor=where)])
         return (f"기록함 [me] {idea.id} · {kind}" + (f" · {origin}" if origin else "")
                 + f" · {floor_name(store, user, where)}의 생각 · {said}")
 
     def idea_add_conversation(markdown: str | None = None, path: str | None = None, origin: str | None = None,
-                              floor: str | None = None) -> str:
+                              project: str | None = None) -> str:
         if bool(markdown) == bool(path):
             raise ToolError("markdown(대화 기록 본문)과 path(로컬 .md 파일) 중 하나만 준다")
-        where = store.place(current_user(), "ideas", resolve_floor(store, current_user(), floor))
+        where = resolve_put(store, current_user(), "ideas", project)
         if path:
             try:
                 file = resolve_file(current_user(), path)[0]
@@ -93,13 +93,13 @@ def build_tools(
         return (report + f"\n저장: me·ai 발화 {len(ideas)}건 (origin={origin or '-'}, {floor_name(store, current_user(), where)}의 생각). "
                 "ai 발화에는 응답한 사용자 발화의 id(parent_id)가 붙어 있다.")
 
-    def idea_search(query: str, author: Literal["me", "ai", "all"] = "me", k: int = 10, floor: str | None = None) -> str:
+    def idea_search(query: str, author: Literal["me", "ai", "all"] = "me", k: int = 10, project: str | None = None) -> str:
         user = current_user()
         k = max(1, min(k, 30))
-        ideas = search_ideas(store, user, query, author, k, embedder, search_floors(store, user, floor))
+        ideas = search_ideas(store, user, query, author, k, embedder, search_projects(store, user, project, "ideas"))
         if not ideas:
             return f"idea_search {query!r} (author={author}): 결과 없음"
-        labels = labels_for(store, user, "ideas")  # 생각이 여러 층에 있을 때만 결과마다 층을 적는다
+        labels = labels_for(store, user, "ideas")  # 생각이 여러 프로젝트에 있을 때만 결과마다 프로젝트를 적는다
         parents = store.get_ideas(user, [i.parent_id for i in ideas if i.parent_id])
         lines = [f"idea_search {query!r} (author={author}) — {len(ideas)}건. author=me 항목이 사용자의 주장이다."]
         for n, idea in enumerate(ideas, 1):
@@ -119,7 +119,7 @@ def build_tools(
             description=(
                 "저자가 '생각'에 넣으라고 분명히 말했을 때만 부른다. " + ASK
                 + "저자의 생각 한 조각을 생각에 기록한다(author=me). kind=thought|ai|article|conversation|tv|other, "
-                "origin은 출처(책·기사·방송 이름 등). " + FLOOR_PUT + TITLE_RULE
+                "origin은 출처(책·기사·방송 이름 등). " + PROJECT_PUT + TITLE_RULE
             ),
             structured_output=False,
         ),
@@ -130,7 +130,7 @@ def build_tools(
                 "대화 기록 markdown을 발화 단위로 나눠 생각에 저장한다. markdown 본문 또는 올린 .md 파일 이름(path, files_list로 확인) 중 하나를 준다. "
                 "마커: **사용자:**/**Claude:**, 질문:/답변:, '> 인용' 뒤의 **Claude 요지**. "
                 "사용자 발화 → author=me, 바로 뒤 AI 발화 → author=ai(parent_id=그 사용자 발화). "
-                "리포트: me N건, ai N건, 분리 실패 구간. " + FLOOR_PUT
+                "리포트: me N건, ai N건, 분리 실패 구간. " + PROJECT_PUT
             ),
             structured_output=False,
         ),
@@ -139,7 +139,7 @@ def build_tools(
             name="idea_search",
             description=(
                 "생각에서 찾는다. author=me(기본, 저자의 생각만)|ai|all(me를 먼저). k=10. 결과마다 id가 있다. "
-                "author=me 결과가 사용자의 주장이다. ai 결과에는 응답한 사용자 발화를 함께 보여 준다. " + FLOOR_FIND
+                "author=me 결과가 사용자의 주장이다. ai 결과에는 응답한 사용자 발화를 함께 보여 준다. " + PROJECT_FIND
             ),
             structured_output=False,
         ),

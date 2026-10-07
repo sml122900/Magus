@@ -29,7 +29,7 @@ Lane = Literal["ref_picked", "ref_full", "idea_me", "idea_ai", "style", "style_p
 WEB_ONLY_LANES: tuple[str, ...] = ("style_passage", "ref_bib", "document")
 TagsBy = Literal["ai", "author"]  # 문체 태그를 누가 정했나: Claude가 뽑음(ai) / 저자가 말함(author). 기록 전 항목은 None
 # 휴지통에 옮길 수 있는 책장 항목(#88). 카테고리는 통째(category, id = 카테고리 id)와 항목(category_item, id = "<카테고리 id>/<항목 id>")
-TrashKind = Literal["idea", "style", "category", "category_item"]
+TrashKind = Literal["idea", "style", "category", "category_item", "node"]
 TitleBy = Literal["ai", "author"]  # 항목 제목을 누가 지었나(#92). 태그의 tags_by와 같은 방식
 TitleMode = Literal["ask", "ai", "none"]
 EditedBy = Literal["author", "ai"]  # 항목을 나중에 고친 사람(웹에서 저자가 고치면 author). 처음 쓴 사람(author 필드)은 그대로 둔다  # 저자가 제목을 말하지 않았을 때: 매번 묻기 / AI가 짓기 / 비워 두기
@@ -326,22 +326,24 @@ class Document:
 
 @dataclass(frozen=True)
 class Floor:
-    """책장의 한 층(#93). 공용(id "common", number 0) 또는 작업물(프로젝트) 하나. 번호는 위에서 아래로 1층, 2층…"""
+    """프로젝트 하나(#95. 옛 '층', #93). 「내 서재」(id "common", number 0, 옛 공용 층) 또는 작업물 하나.
+    number는 만든 순서(1, 2…)이고 저자에게 보이지 않는다. 이름(label)은 「내 서재」 또는 작업물 제목이다."""
 
     id: str
     number: int
     title: str
-    builtins: tuple[str, ...] = ()  # 이 층에 꽂힌 기본 카테고리(ideas|styles|refs)
-    has_manuscript: bool = False  # 장이 하나라도 있나(빈 층이면 False)
-    updated_at: str = ""  # 최근 수정: 그 층 원고·카테고리·항목·옮기기 중 가장 최근
+    builtins: tuple[str, ...] = ()  # 이 프로젝트에 있는 기본 책(ideas|styles|refs)
+    has_manuscript: bool = False  # 장이 하나라도 있나(원고 없는 프로젝트면 False)
+    updated_at: str = ""  # 최근 수정: 그 프로젝트의 원고·책·항목·지도·옮기기 중 가장 최근
 
     @property
     def common(self) -> bool:
+        """「내 서재」인가(옛 공용 층)."""
         return self.number == 0
 
     @property
     def label(self) -> str:
-        return "공용" if self.number == 0 else f"{self.number}층"
+        return self.title
 
 
 @dataclass(frozen=True)
@@ -358,6 +360,44 @@ class FloorMove:
     to_floor: str
     merged: bool = False
     items: tuple[str, ...] = ()
+    from_node: str | None = None  # 지도(#95): 옮기기 전 노드와 옮긴 노드(되돌릴 때 그 노드로)
+    to_node: str | None = None
+    made_node: bool = False  # 옮기며 받는 지도에 새로 생긴 노드(이름이 같은 새 노드). 되돌릴 때 비면 치운다
+
+
+@dataclass(frozen=True)
+class MapNode:
+    """지도의 노드 하나(#95). books는 책 주소 이름(ms.<프로젝트>·ideas.<프로젝트>·<카테고리 id>·doc.<id>).
+    연결 노드(link)는 책을 갖지 않고 원본(프로젝트, 노드)을 가리킨다. 이름은 원본 노드 이름이고, 원본이 없으면 missing."""
+
+    id: str
+    name: str
+    x: float
+    y: float
+    color: str | None = None
+    books: tuple[str, ...] = ()
+    center: bool = False
+    link: tuple[str, str] | None = None  # (원본 프로젝트 id, 원본 노드 id)
+    link_title: str = ""  # 원본 프로젝트 이름
+    missing: bool = False  # 연결 노드의 원본이 없다
+
+
+@dataclass(frozen=True)
+class ProjectMap:
+    """프로젝트 하나의 지도(#95): 노드와 선. stored: 지도 파일이 있나(없으면 지금 배치에서 계산한 지도)."""
+
+    floor: str
+    title: str
+    nodes: tuple[MapNode, ...]
+    edges: tuple[tuple[str, str], ...]
+    stored: bool = False
+    updated_at: str = ""
+
+    def node(self, node_id: str) -> MapNode | None:
+        return next((n for n in self.nodes if n.id == node_id), None)
+
+    def node_of(self, book: str) -> MapNode | None:
+        return next((n for n in self.nodes if book in n.books), None)
 
 
 @dataclass(frozen=True)
@@ -452,6 +492,9 @@ class Store(Protocol):
         ...
     def read_original(self, user_id: str, project_id: str, filename: str) -> str | None:
         """original/의 리포트 md(import-report.md, E2-reupload-report.md). 없으면 None."""
+        ...
+    def original_bytes(self, user_id: str, project_id: str, filename: str | None = None) -> tuple[str, bytes] | None:
+        """(파일 이름, 내용): original/의 원고 파일. filename이 없으면 마지막 수정본의 원고(내려받기용, #95)."""
         ...
     def get_non_citation_terms(self, user_id: str, project_id: str) -> list[str]:
         """인용 추출에서 뺄 낱말(지명·사건 등). 프로젝트의 book/non_citation_terms.txt, 한 줄에 하나."""
@@ -607,9 +650,10 @@ class Store(Protocol):
         ...
     def get_category(self, user_id: str, category_id: str) -> Category | None: ...
     def create_category(self, user_id: str, name: str, template: str, color: str, fields: tuple[str, ...],
-                        floor: str | None = None) -> Category:
+                        floor: str | None = None, node: str | None = None) -> Category:
         """이름·템플릿·색은 호출자가 magus.category.rules로 검사한 값이다. id는 저장소가 짓는다.
-        이름은 층마다 하나(같은 층에 같은 이름이 있으면 ValueError). floor가 None이면 공용."""
+        이름은 프로젝트마다 하나(같은 프로젝트에 같은 이름이 있으면 ValueError). floor가 None이면 「내 서재」.
+        node: 꽂을 노드(#95). 없으면 이름이 같은 노드, 그것도 없으면 이름이 같은 새 노드."""
         ...
     def update_category(self, user_id: str, category_id: str, *, name: str | None = None, color: str | None = None) -> Category: ...
     def trash_category(self, user_id: str, category_id: str, note: str) -> Category | None:
@@ -628,29 +672,59 @@ class Store(Protocol):
         """색은 #rrggbb만 남기고, 내 색은 최대 12개."""
         ...
 
-    # 층(#93) — 공용 + 작업물(프로젝트)마다 한 층. 원본은 shelf/floors.json과 각 항목 파일의 "floor"
+    # 프로젝트(#95, 옛 층 #93) — 「내 서재」(id common) + 작업물마다 하나. 원본은 shelf/floors.json과 각 항목 파일의 "floor"
     def list_floors(self, user_id: str) -> list[Floor]:
-        """공용이 먼저, 그다음 작업물 층(위에서 아래로). updated_at(최근 수정)을 채운다."""
+        """「내 서재」가 먼저, 그다음 프로젝트(만든 순서). updated_at(최근 수정)을 채운다."""
         ...
     def get_floor(self, user_id: str, floor_id: str) -> Floor | None: ...
-    def place(self, user_id: str, kind: str, floor: str | None) -> str:
-        """새 항목이 들어갈 층: floor에 그 기본 카테고리(kind)가 있으면 floor, 없고 공용에 있으면 공용,
-        둘 다 없으면 floor에 그 기본 카테고리를 다시 꽂고 floor. floor가 None이면 위에서부터 그 종류가 있는 첫 층."""
+    def book_targets(self, user_id: str, kind: str, floor: str) -> list[str]:
+        """기본 책(kind)에 넣으면 들어갈 프로젝트 후보: 자기 책, 없으면 연결 노드가 가리키는 그 책들."""
         ...
-    def move_category(self, user_id: str, category_id: str, to_floor: str) -> FloorMove:
+    def add_builtin(self, user_id: str, kind: str, floor: str, node: str | None = None) -> bool:
+        """그 프로젝트에 기본 책을 다시 꽂는다(노드를 주면 그 노드에). 이미 있으면 False."""
+        ...
+    def place(self, user_id: str, kind: str, floor: str | None) -> str:
+        """새 항목이 들어갈 프로젝트: 자기 책 → 연결 노드로 이어진 책(하나일 때) → 그 프로젝트에 기본 책을 다시 꽂는다.
+        floor가 None이면 「내 서재」부터 그 종류가 있는 첫 프로젝트."""
+        ...
+
+    # 지도(#95) — shelf/maps/<프로젝트>.json(노드·선·책 배치). 파일이 없으면 지금 배치에서 계산한 지도
+    def get_map(self, user_id: str, floor: str) -> ProjectMap | None: ...
+    def ensure_maps(self, user_id: str) -> list[str]:
+        """모든 프로젝트의 지도를 파일로 적는다(이미 적힌 것은 그대로). 적은 프로젝트 id."""
+        ...
+    def map_updated(self, user_id: str, floor: str) -> str: ...
+    def book_floor(self, user_id: str, key: str) -> str | None: ...
+    def node_of_book(self, user_id: str, key: str) -> tuple[str, str] | None: ...
+    def cite_scope(self, user_id: str, floor: str) -> tuple[str, ...]:
+        """그 프로젝트 원고의 인용 점검이 보는 문헌의 프로젝트: 자기 + 연결 노드가 가리키는 노드에 꽂힌 문헌."""
+        ...
+    def add_node(self, user_id: str, floor: str, name: str, *, x: float | None = None, y: float | None = None,
+                 color: str | None = None) -> MapNode: ...
+    def add_link_node(self, user_id: str, floor: str, target_floor: str, target_node: str, *, x: float | None = None,
+                      y: float | None = None) -> MapNode: ...
+    def ensure_link(self, user_id: str, floor: str, target_floor: str, kind: str) -> MapNode | None: ...
+    def update_node(self, user_id: str, floor: str, node_id: str, *, name: str | None = None, color: str | None = None,
+                    x: float | None = None, y: float | None = None) -> MapNode: ...
+    def connect_nodes(self, user_id: str, floor: str, a: str, b: str) -> bool: ...
+    def disconnect_nodes(self, user_id: str, floor: str, a: str, b: str) -> bool: ...
+    def trash_node(self, user_id: str, floor: str, node_id: str, note: str) -> MapNode: ...
+    def place_book(self, user_id: str, floor: str, key: str, node_id: str) -> tuple[str | None, str]: ...
+    def move_category(self, user_id: str, category_id: str, to_floor: str, to_node: str | None = None) -> FloorMove:
         """저자의 카테고리를 통째로 다른 층에. 받는 층에 같은 이름이 있으면 ValueError."""
         ...
-    def move_builtin(self, user_id: str, kind: str, from_floor: str, to_floor: str) -> FloorMove:
+    def move_builtin(self, user_id: str, kind: str, from_floor: str, to_floor: str, to_node: str | None = None) -> FloorMove:
         """기본 카테고리(생각·문체·문헌)를 그 항목과 함께 다른 층에. 받는 층에 같은 종류가 있으면 합친다."""
         ...
     def last_move(self, user_id: str) -> FloorMove | None: ...
+    def record_move(self, user_id: str, move: FloorMove) -> FloorMove: ...
     def last_undone(self, user_id: str) -> FloorMove | None:
         """마지막으로 되돌린 옮기기(웹의 '되돌렸습니다' 한 줄)."""
         ...
     def undo_move(self, user_id: str, move_id: str) -> FloorMove:
         """마지막 옮기기를 되돌린다. 마지막 옮기기가 아니거나 이미 되돌렸으면 ValueError."""
         ...
-    def move_document(self, user_id: str, doc_id: str, to_floor: str) -> FloorMove:
+    def move_document(self, user_id: str, doc_id: str, to_floor: str, to_node: str | None = None) -> FloorMove:
         """문서 책을 다른 작업물 층으로(공용은 MoveError common_only)."""
         ...
     def trash_manuscript(self, user_id: str, project_id: str, note: str) -> str:
@@ -659,7 +733,7 @@ class Store(Protocol):
     def set_project_color(self, user_id: str, project_id: str, color: str | None) -> None: ...
 
     # 문서 책(#94) — shelf/documents/<id>/{document.json, v1.md…}
-    def create_document(self, user_id: str, doc: Document, content: str) -> Document: ...
+    def create_document(self, user_id: str, doc: Document, content: str, node: str | None = None) -> Document: ...
     def add_document_version(self, user_id: str, doc_id: str, version: DocVersion, content: str) -> Document: ...
     def get_document(self, user_id: str, doc_id: str) -> Document | None: ...
     def list_documents(self, user_id: str, *, floors: Iterable[str] | None = None, project_id: str | None = None) -> list[Document]: ...

@@ -17,7 +17,6 @@ import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from magus.floors import COMMON
 from magus.melchior.citations import Citation, find_citations, make_ref_key, strip_particle
 from magus.melchior.translit import best_match
 from magus.store import Ref, Store
@@ -93,18 +92,19 @@ class CheckResult:
         }
 
 
-def cite_floors(project_id: str) -> tuple[str, str]:
-    """작업물 원고의 인용 점검이 보는 층: 그 작업물 층 + 공용(#93). 다른 작업물 층의 문헌은 보지 않는다."""
-    return (project_id, COMMON)
+def cite_floors(store: Store, user_id: str, project_id: str) -> tuple[str, ...]:
+    """원고의 인용 점검이 보는 문헌의 프로젝트: 그 프로젝트의 문헌 + 지도의 연결 노드가 가리키는 노드에 꽂힌 문헌(#95).
+    다른 프로젝트의 문헌은 연결하지 않으면 보지 않는다."""
+    return store.cite_scope(user_id, project_id)
 
 
 class Resolver:
     """인용 → ref. 한 번의 검사(또는 일괄 집계) 동안 연도별 문헌 목록을 한 번만 읽는다.
-    project_id를 주면 그 작업물 층 + 공용의 문헌만 본다(#93). 없으면 사람의 모든 문헌."""
+    project_id를 주면 그 원고가 보는 문헌(cite_floors)만 본다. 없으면 사람의 모든 문헌."""
 
     def __init__(self, store: Store, user_id: str, project_id: str | None = None):
         self.store, self.user_id = store, user_id
-        self.floors = cite_floors(project_id) if project_id else None
+        self.floors = cite_floors(store, user_id, project_id) if project_id else None
         self._by_year: dict[str, list[tuple[str, str]]] | None = None
 
     def _years(self) -> dict[str, list[tuple[str, str]]]:
@@ -227,7 +227,7 @@ def check_chapter(store: Store, user_id: str, project_id: str, number: int, reso
 
 
 def refresh_cite_counts(store: Store, user_id: str) -> None:
-    """refs가 바뀐 뒤(층 옮기기 포함)나 인덱스를 다시 만든 뒤에 사용자의 모든 장 집계를 다시 계산한다."""
+    """refs가 바뀐 뒤(책 옮기기·연결 노드 포함)나 인덱스를 다시 만든 뒤에 사용자의 모든 장 집계를 다시 계산한다."""
     for project in store.list_projects(user_id):
         resolver = Resolver(store, user_id, project.id)
         terms = terms_of(store, user_id, project.id)

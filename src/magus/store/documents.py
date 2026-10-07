@@ -47,11 +47,13 @@ class DocumentMixin:
         return self._documents_dir(user_id) / safe_id(doc_id, "document id")
 
     @locked
-    def create_document(self, user_id: str, doc: Document, content: str) -> Document:
-        """doc.versions에는 첫 판 하나(내용은 content). 층은 작업물 층이어야 한다(공용이면 ValueError)."""
+    def create_document(self, user_id: str, doc: Document, content: str, node: str | None = None) -> Document:
+        """doc.versions에는 첫 판 하나(내용은 content). 원고가 있는 프로젝트여야 한다(「내 서재」면 ValueError).
+        node: 꽂을 노드(#95, 없으면 가운데 노드)."""
         floor = self._check_floor(user_id, self._layout(user_id), doc.floor)
         if floor == COMMON:
-            raise ValueError("공용 층에는 문서 책을 둘 수 없다(공용 층에는 모음 책만)")
+            raise ValueError("「내 서재」에는 문서 책을 둘 수 없다(원고가 있는 프로젝트에만)")
+        self.ensure_maps(user_id)  # type: ignore[attr-defined]
         if not HEX.fullmatch(doc.color):
             raise ValueError(f"색은 #RRGGBB: {doc.color!r}")
         now = utcnow()
@@ -62,6 +64,7 @@ class DocumentMixin:
         write_json(ddir / "document.json", _record(doc))
         with self._db:
             self._index_document(user_id, doc, content)
+        self._persist_map(user_id, floor, {f"doc.{doc.id}": node} if node else None)  # type: ignore[attr-defined]
         return doc
 
     @locked

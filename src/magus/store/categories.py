@@ -76,10 +76,12 @@ class CategoryMixin:
 
     @locked
     def create_category(self, user_id: str, name: str, template: str, color: str, fields: tuple[str, ...],
-                        floor: str | None = None) -> Category:
+                        floor: str | None = None, node: str | None = None) -> Category:
+        """node: 꽂을 노드(#95). 없으면 이름이 같은 노드, 그것도 없으면 이름이 같은 새 노드(가운데와 이음)."""
         if not HEX.fullmatch(color):
             raise ValueError(f"색은 #RRGGBB: {color!r}")
         floor = self._check_floor(user_id, self._layout(user_id), floor or COMMON)
+        self.ensure_maps(user_id)  # type: ignore[attr-defined]  # 지도를 먼저 적고(이 책 없이), 만든 뒤 그 지도에 꽂는다
         if self._db.execute("SELECT 1 FROM categories WHERE user_id = ? AND floor = ? AND name_key = ?",
                             (user_id, floor, name_key(name))).fetchone():
             raise ValueError(f"'{name}' 카테고리가 이미 있다")
@@ -88,6 +90,7 @@ class CategoryMixin:
         write_json(self._category_dir(user_id, category.id) / "category.json", _category_record(category))
         with self._db:
             self._index_category(user_id, category)
+        self._persist_map(user_id, floor, {category.id: node} if node else None)  # type: ignore[attr-defined]
         return category
 
     @locked

@@ -13,8 +13,7 @@ from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 from typing import Any
 
-from magus.floor_args import shared_reason
-from magus.floors import COMMON
+from magus.project_args import needs_share, share_ref
 from magus.melchior.citations import make_ref_key
 from magus.store import Ref, Store
 
@@ -38,7 +37,7 @@ class BibReport:
     collisions: list[str] = field(default_factory=list)
     duplicates: list[str] = field(default_factory=list)  # 같은 문헌(저자·연도·제목)이 목록에 두 번: 원고 오류일 수 있다
     differs: list[str] = field(default_factory=list)  # 이미 있는 key인데 새 목록의 제목·연도가 다름(갱신하지 않음)
-    # 다른 작업물 층에 있던 문헌을 이 작업물도 쓰게 되어 공용으로 옮긴 것(#93: 문헌은 사람마다 한 권, 두 작업물이 쓰면 공용)
+    # 다른 프로젝트에만 있던 문헌을 이 원고도 쓰게 되어 「내 서재」로 옮긴 것(#93·#95: 문헌은 사람마다 한 권, 두 프로젝트가 쓰면 내 서재)
     shared: list[str] = field(default_factory=list)
 
     def render(self) -> str:
@@ -52,7 +51,7 @@ class BibReport:
         out += [f"- 중복 서지(목록에 두 번): {d}" for d in self.duplicates]
         out += [f"- 기존 서지와 다름(갱신하지 않음): {d}" for d in self.differs]
         if self.shared:  # 저자 모르게 배치가 바뀌지 않게 언제나 한 줄로 알린다(#93-a 더함)
-            out.append(f"- 공용으로 옮긴 문헌 {len(self.shared)}편(다른 작업물의 원고도 쓰는 문헌. 각 문헌에 옮긴 시각과 이유를 남김): "
+            out.append(f"- 「내 서재」로 옮긴 문헌 {len(self.shared)}편(다른 프로젝트의 원고도 쓰는 문헌. 두 지도에 연결 노드를 붙이고, 각 문헌에 옮긴 시각과 이유를 남김): "
                        + ", ".join(self.shared[:20]) + (f" 외 {len(self.shared) - 20}편" if len(self.shared) > 20 else ""))
         return "\n".join(out)
 
@@ -200,8 +199,9 @@ def _assign_keys(store: Store, user_id: str, refs: list[Ref]) -> list[tuple[Ref,
 
 
 def import_bibliography(store: Store, user_id: str, text: str, floor: str | None = None) -> BibReport:
-    """floor: 이 참고문헌을 쓰는 작업물 층(#93). 새 문헌은 그 층의 문헌(없으면 공용의 문헌)에 꽂는다.
-    이미 다른 작업물 층에 있는 문헌이면 두 작업물이 함께 쓰도록 공용으로 옮긴다(인용 점검은 그 층 + 공용을 본다)."""
+    """floor: 이 참고문헌을 쓰는 프로젝트(#95). 새 문헌은 그 프로젝트의 문헌(없으면 지도의 연결 노드가 가리키는 문헌)에 꽂는다.
+    이 원고의 인용 점검이 보지 못하는 다른 프로젝트에 이미 있는 문헌이면, 두 프로젝트가 함께 쓰도록 「내 서재」의 문헌으로 옮기고
+    두 지도에 그 노드로 가는 연결 노드를 붙인다(인용 점검은 자기 문헌 + 연결 노드가 가리키는 문헌을 본다)."""
     report = BibReport()
     home = store.place(user_id, "refs", floor) if floor else None
     lines, refs = [], []
@@ -232,8 +232,8 @@ def import_bibliography(store: Store, user_id: str, text: str, floor: str | None
             report.existing.append(ref.key)
             if diff := _differences(existing, ref):
                 report.differs.append(f"{ref.key}: {'; '.join(diff)}")
-            if floor and existing.floor not in (floor, COMMON) and ref.key not in report.shared:
-                store.set_ref_floor(user_id, ref.key, COMMON, shared_reason(store, user_id, existing.floor, floor))
+            if floor and needs_share(store, user_id, existing.floor, floor) and ref.key not in report.shared:
+                share_ref(store, user_id, ref.key, existing.floor, floor)
                 report.shared.append(ref.key)
             continue
         store.put_ref(user_id, replace(ref, floor=home) if home else ref)

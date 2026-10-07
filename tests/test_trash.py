@@ -97,7 +97,7 @@ async def test_delete_tools_and_tags_by(settings: Settings, store: LocalStore):
         assert gone.startswith("휴지통으로 옮김: 문체 20261005180731312-380da3")
         descriptions = {t.name: t.description for t in (await c.list_tools()).tools}
     assert "idea_delete" not in descriptions and "style_delete" not in descriptions
-    assert descriptions["category_trash"].startswith("저자가 그 항목(또는 저자가 만든 카테고리)을 지우라고 분명히 말했을 때만 부른다. "
+    assert descriptions["category_trash"].startswith("저자가 그 항목·카테고리·노드를 지우라고 분명히 말했을 때만 부른다. "
                                                      "여러 개면 목록을 보여 주고 확인받는다.")
     for name, place in (("idea_add", "생각"), ("style_add", "문체"), ("ref_add", "문헌")):
         assert descriptions[name].startswith(f"저자가 '{place}'에 넣으라고 분명히 말했을 때만 부른다. '저장해 줘'처럼 넣을 곳이 정해지지 않았으면 부르지 말고")

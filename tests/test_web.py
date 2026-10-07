@@ -266,7 +266,7 @@ def test_remote_requires_session_secret(tmp_path: Path):
 
 
 def test_add_book_choices_follow_the_floor(server_proc):
-    """책 추가(#94): 빈 작업물 층이면 원고 올리기, 원고 책이 있으면 수정본으로 안내, 공용이면 새 층에 올리기. 모음·문서도 고른다."""
+    """책 추가(#94·#95): 원고 없는 프로젝트면 원고 올리기, 원고 책이 있으면 수정본으로 안내, 「내 서재」면 새 프로젝트로 올리기."""
     from magus.store import LocalStore
 
     base, data_dir, _ = server_proc({})
@@ -277,17 +277,18 @@ def test_add_book_choices_follow_the_floor(server_proc):
     store.close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         c.get("/login?next=/shelf")
-        empty = c.get("/shelf/add?floor=empty").text
-        assert 'name="floor" value="empty"' in empty and '<button class="primary">올리기</button>' in empty
-        full = c.get("/shelf/add?floor=full").text
-        assert "이 층에는 원고 책이 이미 있습니다." in full and 'action="/shelf/manuscript"' not in full
-        common = c.get("/shelf/add?floor=common").text
-        assert 'name="floor" value="new"' in common and "새 층에 올리기" in common
-        assert c.get("/shelf/add?floor=nothing").status_code == 404
+        empty = c.get("/shelf/add?project=empty&node=center").text
+        assert 'name="project" value="empty"' in empty and '<button class="primary">올리기</button>' in empty
+        assert c.get("/shelf/add?floor=empty").text.count('name="project" value="empty"') == 1  # 옛 주소 이름(floor)도 받는다
+        full = c.get("/shelf/add?project=full").text
+        assert "이 프로젝트에는 원고 책이 이미 있습니다(가운데 노드)." in full and 'action="/shelf/manuscript"' not in full
+        common = c.get("/shelf/add?project=common").text
+        assert 'name="project" value="new"' in common and "새 프로젝트로 올리기" in common
+        assert c.get("/shelf/add?project=nothing").status_code == 404
         assert c.get("/book", follow_redirects=False).headers["location"] == "/shelf/book/full?tab=chapters"
-    assert "aria-current=page>책장</a>" in empty  # 메뉴는 책장 하나
+    assert "aria-current=page>프로젝트</a>" in empty  # 메뉴는 프로젝트 하나(#95)
     assert "border:1px solid var(--mute)" in empty and "--input" not in empty  # 입력칸 테두리 대비 4.75
-    for word in ("새 판", "미해결", "받은함", "인용 체크리스트"):
+    for word in ("새 판", "미해결", "받은함", "인용 체크리스트", "층", "공용"):
         assert word not in empty and word not in common
 
 
@@ -324,16 +325,18 @@ def test_shelf_books_and_board_lists(server_proc):
         empty = {path: c.get(path).text for path in ("/shelf/ideas", "/shelf/refs", "/shelf/styles")}
         assert 'Claude에게 이렇게 말하면 쌓입니다. 예: "생각에 기록해 줘: …"' in empty["/shelf/ideas"]  # 기존 안내 문구 그대로
         assert "아직 등록한 문헌이 없습니다." in empty["/shelf/refs"] and "아직 모은 문장이 없습니다." in empty["/shelf/styles"]
-        assert 'aria-label="생각, 항목 0개"' in c.get("/shelf").text
+        assert 'aria-label="생각, 항목 0개"' in c.get("/shelf/p/common", params={"node": "b-ideas"}).text
         _seed_shelf(data_dir)
 
-        shelf = c.get("/shelf").text  # 책장 전체(3D, #93): 생각·문헌은 작업물이 생기기 전에 쌓여 공용에 있다
-        for label in ("생각, 항목 123개", "문체, 항목 2개", "문헌, 확인 1편, 전체 2편"):
-            assert f'aria-label="{label}"' in shelf
-        assert 'aria-current=page>책장</a>' in shelf and '<span class="fl-name">공용</span>' in shelf
-        floor = c.get("/shelf/floor/common").text  # 옛 한 층 화면 → 한 화면 책장의 그 층(책등은 장 안의 상자 책)
-        assert '<span class="mb-name">생각</span>' in floor and 'class="scene" data-floor="common"' in floor
-        assert re.search(r'data-open="/shelf/ideas.common"[^>]*style="--c:#[0-9a-f]{6};--fg:#[0-9a-f]{6};', floor)
+        # 생각·문헌은 프로젝트가 생기기 전에 쌓여 「내 서재」에 있다. 노드를 열면 그 노드의 책장(정면 2D)
+        for node, label in (("b-ideas", "생각, 항목 123개"), ("b-styles", "문체, 항목 2개"), ("b-refs", "문헌, 확인 1편, 전체 2편")):
+            assert f'aria-label="{label}"' in c.get("/shelf/p/common", params={"node": node}).text
+        shelf = c.get("/shelf").text  # 첫 화면은 프로젝트 목록
+        assert 'aria-current=page>프로젝트</a>' in shelf and '<span class="pname">내 서재</span>' in shelf
+        floor = c.get("/shelf/floor/common")  # 옛 층 주소 → 그 프로젝트 지도
+        assert str(floor.url).endswith("/shelf/p/common") and 'data-node="b-ideas"' in floor.text
+        panel = c.get("/shelf/p/common", params={"node": "b-ideas"}).text  # 책등의 색과 글자색
+        assert re.search(r'href="/shelf/ideas.common" style="--c:#[0-9a-f]{6};--fg:#[0-9a-f]{6};', panel)
         for old, new in (("/ideas?author=ai", "/shelf/ideas?author=ai"), ("/refs", "/shelf/refs"), ("/styles?tag=x", "/shelf/styles?tag=x")):
             moved = c.get(old, follow_redirects=False)
             assert moved.status_code == 302 and moved.headers["location"] == new
@@ -358,7 +361,7 @@ def test_shelf_books_and_board_lists(server_proc):
         assert listed.index("Clack(2012) 『Gaining ground』") < listed.index("Diamond(1997)")  # 확인한 문헌부터
         assert "🟢 확인 · 인용된 장 1" in refs and "<p>인용된 장: 제1장</p>" in refs
         assert '<p>「tetrapods came ashore」<br><span class="muted">1장의 근거 · p.45</span></p>' in refs
-        assert '인용 현황은 <a href="/checklist?project=b&">인용 체크리스트</a>' in refs
+        assert '인용 현황은 원고 책의 <a href="/shelf/book/b?tab=cites">인용 상태</a>' in refs
         assert "Gaining ground" not in c.get("/shelf/refs?status=unverified").text
         styles = c.get("/shelf/styles").text
         assert '<a class="tag" href="/shelf/styles.common?tag=%EC%A7%A7%EC%9D%8C">짧음</a>' in styles and "출처: 유홍준" in styles
@@ -378,7 +381,7 @@ def test_shelf_books_and_board_lists(server_proc):
         assert refs.count('method="post"') == 2  # 로그아웃 · 논문 파일로 문헌 등록(#94)
         assert shelf.count('method="post"') == 3  # 로그아웃 · 끌어 옮기기(숨은 폼) · 새 층 만들기
         assert ideas.count('method="post"') == 2  # 생각에는 바로 적기 폼이 있다(#92)
-        assert "<h1>생각</h1>" in ideas and 'aria-current=page>책장</a>' in styles
+        assert "<h1>생각</h1>" in ideas and 'aria-current=page>프로젝트</a>' in styles
 
 
 def test_shelf_search_marks_hits(server_proc):
@@ -406,11 +409,10 @@ def test_shelf_search_marks_hits(server_proc):
         assert "<mark>Gaining</mark> ground" in c.get("/shelf/refs", params={"q": "gaining"}).text  # 서지
         hit = c.get("/shelf/refs", params={"q": "ashore"}).text
         assert re.search(r'<small class="hit">[^<]*tetrapods came <mark>ashore</mark></small>', hit)  # 제목 밖에서 맞으면 맞은 곳 한 줄
-        both = c.get("/shelf", params={"q": "물"}).text  # 층 → 카테고리로 묶고 최근 수정을 붙인다(#93)
-        assert re.search(r'<h3><a href="/shelf/ideas.common">생각</a> <small>\d+개 · 최근 수정 ', both)
-        assert '<h3><a href="/shelf/styles.common">문체</a> <small>1개 · 최근 수정 ' in both
-        assert "찾은 층 1곳" in both and ">문헌</a>" not in both and "찾는 말이 없는 층: 1층" in both
-        assert 'data-result-floor="common"' in both
+        both = c.get("/shelf", params={"q": "물"}).text  # 프로젝트 → 노드 · 책으로 묶는다(#95)
+        assert re.search(r'<a href="/shelf/p/common\?node=b-ideas&amp;book=ideas.common">생각</a> <small>모음 책 · \d+개</small>', both)
+        assert '<a href="/shelf/p/common?node=b-styles&amp;book=styles.common">문체</a> <small>모음 책 · 1개</small>' in both
+        assert "찾은 프로젝트 1곳" in both and ">문헌</a>" not in both and '<h2><a href="/shelf/p/common">내 서재</a>' in both
         evil = c.get("/shelf/ideas", params={"q": "<script>"}).text
         assert "<script>alert" not in evil and "&lt;script&gt;alert(1)&lt;/script&gt;" in c.get("/shelf/ideas").text
         assert 'value="&lt;script&gt;"' in evil

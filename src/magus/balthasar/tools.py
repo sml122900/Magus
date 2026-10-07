@@ -9,7 +9,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 from pydantic import BaseModel, ConfigDict, Field
 
-from magus.floor_args import FLOOR_FIND, FLOOR_PUT, floor_name, labels_for, resolve_floor, search_floors
+from magus.project_args import PROJECT_FIND, PROJECT_PUT, floor_name, labels_for, resolve_put, search_projects
 from magus.balthasar.style import tags_text, validate_tags
 from magus.ids import new_id
 from magus.search import Embedder, hybrid_search
@@ -37,7 +37,7 @@ TAGS_BY = {"ai": "태그는 AI가 뽑음", "author": "태그는 저자가 정함
 def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedder | None = None) -> list[Tool]:
     def style_add(
         passage: str, reason: str, tags: StyleTags, work: str | None = None, tags_by: Literal["ai", "author"] = "ai",
-        floor: str | None = None,
+        project: str | None = None,
     ) -> str:
         if not passage.strip() or not reason.strip():
             raise ToolError("passage(구절)와 reason(왜 좋은지)이 모두 필요하다. 저자가 이유를 말하지 않았으면 " + NO_REASON + "이라고 쓴다")
@@ -46,15 +46,15 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
         except ValueError as e:
             raise ToolError(str(e)) from e
         user = current_user()
-        where = store.place(user, "styles", resolve_floor(store, user, floor))  # 층(#93): 그 층에 문체가 없으면 공용의 문체
+        where = resolve_put(store, user, "styles", project)  # 그 프로젝트의 문체, 없으면 연결 노드가 가리키는 문체(#95)
         entry = store.add_style(user, StyleEntry(new_id(), passage.strip(), reason.strip(), clean, work, tags_by=tags_by, floor=where))
         return (f"문체에 기록함 {entry.id}" + (f" · {work}" if work else "") + f" · {floor_name(store, user, where)}의 문체"
                 + f" · {tags_text(clean)} ({TAGS_BY[tags_by]})")
 
-    def style_search(query: str, k: int = 5, floor: str | None = None) -> str:
+    def style_search(query: str, k: int = 5, project: str | None = None) -> str:
         user = current_user()
         k = max(1, min(k, 20))
-        only = search_floors(store, user, floor)
+        only = search_projects(store, user, project, "styles")
         ids: list[str] = []
         for chunk in hybrid_search(store, user, query, ["style"], k * (6 if only else 2), embedder):
             if chunk.owner_id not in ids:
@@ -84,14 +84,14 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
                 "reason에는 저자가 말한 이유만 쓴다. 말하지 않았으면 지어내지 말고 " + NO_REASON + "이라고 남긴다(저자가 나중에 더할 수 있다). "
                 "tags는 구절과 이유에서 먼저 추출해 넘긴다: {호흡, 시점, 열기, 장치: [], 어미, 톤}. 서버는 스키마만 검증한다. "
                 "tags_by: Claude가 뽑았으면 ai(기본), 저자가 직접 말한 태그면 author. "
-                "검색은 reason + tags로 한다(구절의 주제가 아니라 문체로 찾기 위해). " + FLOOR_PUT
+                + PROJECT_PUT
             ),
             structured_output=False,
         ),
         Tool.from_function(
             style_search,
             name="style_search",
-            description="문체에서 찾는다(reason + tags 기준). id, passage, reason, tags를 돌려준다. k=5. 문체 작업 전에 먼저 부른다. " + FLOOR_FIND,
+            description="문체에서 찾는다(reason + tags 기준). id, passage, reason, tags를 돌려준다. k=5. 문체 작업 전에 먼저 부른다. " + PROJECT_FIND,
             structured_output=False,
         ),
     ]

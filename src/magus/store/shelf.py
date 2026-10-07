@@ -323,6 +323,10 @@ class ShelfMixin:
             preview = (f"카테고리 「{data.get('name', '')}」" if kind == "category"
                        else str(data.get("title") or data.get("content") or "")[:80])
             items.append(TrashItem(kind, item_id, at, mark.get("note", ""), preview))  # type: ignore[arg-type]
+        for ref, data in self._trashed_nodes(user_id):  # type: ignore[attr-defined]  # 지도의 노드(#95)
+            mark = data.get("_trash") or {}
+            preview = "연결 노드" if data.get("link") else f"노드 「{data.get('name', '')}」"
+            items.append(TrashItem("node", ref, mark.get("at", ""), mark.get("note", ""), preview))
         return sorted(items, key=lambda i: i.trashed_at, reverse=True)
 
     @locked
@@ -331,6 +335,8 @@ class ShelfMixin:
             return self._restore_category(user_id, item_id, name)
         if kind == "category_item":
             return self._restore_category_item(user_id, item_id)
+        if kind == "node":
+            return self._restore_node(user_id, item_id)  # type: ignore[attr-defined]
         safe_id(item_id, f"{kind} id")
         trash = self._trash_dir(user_id, kind)
         if not (trash / f"{item_id}.json").exists():

@@ -307,14 +307,16 @@ def test_shelf_pages_show_only_own_shelf(server_proc, fake_issuer):  # noqa: F81
             assert _login(c, issuer_state, f"sub-{user}").status_code == 303
             # 예전 주소는 그 사용자의 층 주소로 넘어간다(#93): 넘어간 뒤의 화면으로 본다
             pages[user] = {path: c.get(path, follow_redirects=True) for path in (
-                *lists, "/shelf", *(f"/shelf/ideas/2026100600000000{n}-aaaaaa" for n in (1, 2)), "/shelf/ideas/20261006000000009-cccccc")}
+                *lists, "/shelf", "/shelf/p/book?node=b-ideas", *(f"/shelf/ideas/2026100600000000{n}-aaaaaa" for n in (1, 2)),
+                "/shelf/ideas/20261006000000009-cccccc")}
     for user, word, other in (("alice", "앨리스", "밥"), ("bob", "밥", "앨리스")):
         for path, response in pages[user].items():
             assert f"{other}의" not in response.text, (user, path)
         for path in lists:
             assert pages[user][path].status_code == 200 and word in pages[user][path].text, (user, path)
     assert "밥만의" not in "".join(r.text for r in pages["alice"].values())
-    assert 'aria-label="생각, 항목 1개"' in pages["alice"]["/shelf"].text and 'aria-label="생각, 항목 2개"' in pages["bob"]["/shelf"].text
+    assert 'aria-label="생각, 항목 1개"' in pages["alice"]["/shelf/p/book?node=b-ideas"].text
+    assert 'aria-label="생각, 항목 2개"' in pages["bob"]["/shelf/p/book?node=b-ideas"].text
     # 남의 항목 id로 들어가면 없는 항목(404)이다. 자기 항목은 펼쳐진 채 보인다
     assert pages["alice"]["/shelf/ideas/20261006000000002-aaaaaa"].status_code == 404
     assert pages["bob"]["/shelf/ideas/20261006000000001-aaaaaa"].status_code == 404
