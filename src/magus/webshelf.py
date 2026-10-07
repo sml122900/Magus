@@ -786,6 +786,8 @@ class ShelfPages:
                   + (f" · {html.escape(p.locator)}" if p.locator else "") + "</span></p>" for p in passages),
                 f"<p>인용된 장: {html.escape(chapters_text(chapters) or '-')}</p>",
                 *([f'<p class="muted">한글 표기: {html.escape(", ".join(r.aliases))}</p>'] if r.aliases else []),
+                *([f'<p class="muted">공용으로 옮김({local_time(r.moved.get("at", ""), WHEN)}): {html.escape(r.moved.get("reason", ""))}</p>']
+                  if r.moved and r.moved.get("to") == r.floor else []),  # 저자 모르게 배치가 바뀌지 않게(#93-a 더함)
             ])
             text = "\n".join([str(r.bib.get("authors") or ""), str(r.bib.get("container") or ""), *(p.text for p in passages)])
             rows.append((r.key, Row(r.key, f"/shelf/{kind.key}/{urllib.parse.quote(r.key)}", r.created_at, cite_label(r, r.key),

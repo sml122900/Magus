@@ -210,6 +210,8 @@ class Ref:
     created_at: str = ""
     floor: str | None = None  # 꽂힌 층(공용 "common" 또는 프로젝트 id, #93). None이면 저장소가 정한다
     updated_at: str = ""  # 마지막으로 고친 시각(층의 최근 수정에 쓴다). 기록 전 문헌은 created_at
+    # 두 작업물이 함께 쓰게 되어 공용으로 옮겨졌을 때의 기록(#93-a 더함): {"at", "from", "to", "reason"}. 저자 모르게 배치가 바뀌지 않게
+    moved: dict[str, str] | None = None
 
 
 IdeaKind = Literal["thought", "ai", "article", "conversation", "tv", "other"]
@@ -614,8 +616,9 @@ class Store(Protocol):
     def undo_move(self, user_id: str, move_id: str) -> FloorMove:
         """마지막 옮기기를 되돌린다. 마지막 옮기기가 아니거나 이미 되돌렸으면 ValueError."""
         ...
-    def set_ref_floor(self, user_id: str, key: str, floor: str) -> Ref:
-        """문헌 한 편의 층만 바꾼다(두 작업물이 함께 쓰게 된 문헌을 공용으로 옮길 때)."""
+    def set_ref_floor(self, user_id: str, key: str, floor: str, reason: str | None = None) -> Ref:
+        """문헌 한 편의 층만 바꾼다(두 작업물이 함께 쓰게 된 문헌을 공용으로 옮길 때). reason을 주면 bib.json의 "moved"에
+        옮긴 시각·원래 층·이유를 남긴다(웹 문헌 항목에 보인다)."""
         ...
     def category_updated(self, user_id: str, category_id: str) -> str:
         """카테고리의 최근 수정(카테고리·항목 중 가장 최근)."""

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 from typing import Any
 
+from magus.floor_args import shared_reason
 from magus.floors import COMMON
 from magus.melchior.citations import make_ref_key
 from magus.store import Ref, Store
@@ -50,9 +51,9 @@ class BibReport:
         out += [f"- key 충돌: {c}" for c in self.collisions]
         out += [f"- 중복 서지(목록에 두 번): {d}" for d in self.duplicates]
         out += [f"- 기존 서지와 다름(갱신하지 않음): {d}" for d in self.differs]
-        if self.shared:
-            out.append(f"- 다른 작업물도 쓰는 문헌이라 공용으로 옮김 {len(self.shared)}건: {', '.join(self.shared[:20])}"
-                       + (f" 외 {len(self.shared) - 20}건" if len(self.shared) > 20 else ""))
+        if self.shared:  # 저자 모르게 배치가 바뀌지 않게 언제나 한 줄로 알린다(#93-a 더함)
+            out.append(f"- 공용으로 옮긴 문헌 {len(self.shared)}편(다른 작업물의 원고도 쓰는 문헌. 각 문헌에 옮긴 시각과 이유를 남김): "
+                       + ", ".join(self.shared[:20]) + (f" 외 {len(self.shared) - 20}편" if len(self.shared) > 20 else ""))
         return "\n".join(out)
 
 
@@ -232,7 +233,7 @@ def import_bibliography(store: Store, user_id: str, text: str, floor: str | None
             if diff := _differences(existing, ref):
                 report.differs.append(f"{ref.key}: {'; '.join(diff)}")
             if floor and existing.floor not in (floor, COMMON) and ref.key not in report.shared:
-                store.set_ref_floor(user_id, ref.key, COMMON)
+                store.set_ref_floor(user_id, ref.key, COMMON, shared_reason(store, user_id, existing.floor, floor))
                 report.shared.append(ref.key)
             continue
         store.put_ref(user_id, replace(ref, floor=home) if home else ref)

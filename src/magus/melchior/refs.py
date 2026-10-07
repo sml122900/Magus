@@ -15,6 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from magus.floor_args import shared_reason
 from magus.floors import COMMON
 from magus.melchior.bibliography import first_author
 from magus.melchior.citations import make_ref_key
@@ -134,8 +135,8 @@ def add_ref(
             created_at=existing.created_at,
         )
         stored = store.put_ref(user_id, ref, passages=[*old, *new], full_text=full_text)
-        if floor and stored.floor not in (floor, COMMON):
-            stored = store.set_ref_floor(user_id, stored.key, COMMON)
+        if floor and stored.floor not in (floor, COMMON):  # 두 작업물이 함께 쓰게 됐다: 공용으로, 이유를 남긴다(#93-a 더함)
+            stored = store.set_ref_floor(user_id, stored.key, COMMON, shared_reason(store, user_id, stored.floor, floor))
         return stored, existing.status, len(new)
     target = floor or (default_floor() if default_floor else None)
     home = store.place(user_id, "refs", target) if target else None

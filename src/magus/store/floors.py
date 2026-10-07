@@ -16,6 +16,7 @@ floors.json이 없는 사용자(층 이전 전)는 이전 규칙과 같은 배�
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from collections import Counter
@@ -440,11 +441,19 @@ class FloorMixin:
         return FloorMove(**{**last, "items": tuple(last.get("items") or ())}) if last else None
 
     @locked
-    def set_ref_floor(self, user_id: str, key: str, floor: str) -> Any:
+    def set_ref_floor(self, user_id: str, key: str, floor: str, reason: str | None = None) -> Any:
         layout = self.ensure_layout(user_id)
         floor = self._check_floor(user_id, layout, floor)
         self._ensure_builtin(user_id, "refs", floor)
+        path = self._user_dir(user_id) / "shelf" / "melchior" / key / "bib.json"
+        before = read_json(path).get("floor") if path.exists() else None
         self._set_items_floor(user_id, "refs", [key], floor)
+        if reason and path.exists():  # 저자가 알 수 있게 옮긴 시각·원래 층·이유를 남긴다(#93-a 더함)
+            moved = {"at": utcnow(), "from": str(before or ""), "to": floor, "reason": reason}
+            write_json(path, {**read_json(path), "moved": moved})
+            with self._db:
+                self._db.execute("UPDATE refs SET moved = ? WHERE user_id = ? AND key = ?",
+                                 (json.dumps(moved, ensure_ascii=False), user_id, key))
         return self.get_ref(user_id, key)  # type: ignore[attr-defined]
 
     # ---- 최근 수정 -----------------------------------------------------------------------------

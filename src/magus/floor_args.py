@@ -84,6 +84,12 @@ def labels_for(store: Store, user: str, kind: str) -> dict[str, str]:
     return {f.id: f.label for f in floors}
 
 
+def shared_reason(store: Store, user: str, before: str | None, now: str) -> str:
+    """두 작업물이 같은 문헌을 쓰게 되어 공용으로 옮길 때 남기는 이유(#93-a 더함)."""
+    floors = [floor_name(store, user, f) for f in dict.fromkeys(f for f in (before, now) if f and f != COMMON)]
+    return f"{'·'.join(floors)} 원고가 함께 쓰는 문헌이라 공용으로 옮김"
+
+
 def floor_name(store: Store, user: str, floor_id: str) -> str:
     """'공용' 또는 '1층 「제목」'."""
     found = store.get_floor(user, floor_id)

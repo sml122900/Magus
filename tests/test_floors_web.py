@@ -88,6 +88,16 @@ def test_overview_floor_page_move_and_undo(server_proc):  # noqa: F811
         found = c.get("/shelf", params={"q": "제이콥스"}).text
         assert 'data-result-floor="city"' in found and f'<a href="/shelf/{ids["person"]}">인물</a>' in found
         assert "찾는 말이 없는 층:" in found
+        # 두 작업물이 같은 문헌을 쓰게 되어 공용으로 옮긴 문헌: 항목에 옮긴 시각과 이유(#93-a 더함)
+        from magus.melchior.bibliography import import_bibliography  # noqa: PLC0415
+
+        store = LocalStore(data_dir)
+        line = "Jacobs, J. (1969). The economy of cities. Random House."
+        import_bibliography(store, "alice", line, "city")
+        assert import_bibliography(store, "alice", line, "river").shared == ["jacobs1969"]
+        store.close()
+        refs = c.get("/shelf/refs.common").text
+        assert "공용으로 옮김(" in refs and "1층 「도시는 어떻게 태어났나」·2층 「강과 사람」 원고가 함께 쓰는 문헌이라 공용으로 옮김" in refs
 
 
 def test_floor_pages_are_per_user(server_proc, fake_issuer):  # noqa: F811

@@ -130,6 +130,7 @@ class ShelfMixin:
                 "created_at": ref.created_at or old.get("created_at") or utcnow(),
                 "updated_at": utcnow(),
                 "floor": floor,
+                **({"moved": old["moved"]} if isinstance(old.get("moved"), dict) else {}),  # 공용으로 옮긴 기록은 그대로(#93-a)
             },
         )
         with self._db:
@@ -145,12 +146,12 @@ class ShelfMixin:
         passages = read_json(rdir / "passages.json") if (rdir / "passages.json").exists() else []
         ref_id = self._db.execute(
             """
-            INSERT INTO refs (user_id, key, aliases, bib, status, has_fulltext, file_path, created_at, updated_at, floor)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO refs (user_id, key, aliases, bib, status, has_fulltext, file_path, created_at, updated_at, floor, moved)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (user_id, key) DO UPDATE SET
                 aliases = excluded.aliases, bib = excluded.bib, status = excluded.status,
                 has_fulltext = excluded.has_fulltext, file_path = excluded.file_path, updated_at = excluded.updated_at,
-                floor = excluded.floor
+                floor = excluded.floor, moved = excluded.moved
             RETURNING id
             """,
             (
@@ -164,6 +165,7 @@ class ShelfMixin:
                 record.get("created_at") or utcnow(),
                 record.get("updated_at"),
                 floor or str(record.get("floor") or COMMON),
+                json.dumps(record["moved"], ensure_ascii=False) if isinstance(record.get("moved"), dict) else None,
             ),
         ).fetchone()[0]
         self._db.execute("DELETE FROM ref_passages WHERE ref_id = ?", (ref_id,))
@@ -500,4 +502,5 @@ def _ref(r: sqlite3.Row) -> Ref:
         created_at=r["created_at"],
         floor=r["floor"],
         updated_at=r["updated_at"] or r["created_at"],
+        moved=json.loads(r["moved"]) if r["moved"] else None,
     )

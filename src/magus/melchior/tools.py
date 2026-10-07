@@ -10,6 +10,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 from pydantic import BaseModel, Field
 
+from magus.ids import utcnow
 from magus.floor_args import FLOOR_FIND, FLOOR_PUT, floor_name, labels_for, resolve_floor, search_floors
 from magus.melchior.bibliography import import_bibliography
 from magus.melchior.check import after_refs_changed, chapters_citing, check_chapter
@@ -51,6 +52,7 @@ def build_tools(
         floor: str | None = None,
     ) -> str:
         user = current_user()
+        started = utcnow()
         try:
             given = resolve_floor(store, user, floor) if floor else None
             path, label = resolve_file(user, file_path) if file_path else (None, None)
@@ -75,7 +77,9 @@ def build_tools(
         return (
             f"{ref.key}: {before or '새 문헌'} → verified · 발췌 {added}건 추가(총 {total}건) · "
             f"전문 {'있음' if ref.has_fulltext else '없음'} · aliases {list(ref.aliases) or '없음'} · "
-            f"{floor_name(store, user, ref.floor or '')}의 문헌\n"
+            f"{floor_name(store, user, ref.floor or '')}의 문헌"
+            + (f" (방금 옮김: {ref.moved['reason']}. 저자에게 알린다)" if ref.moved and ref.moved.get("at", "") >= started else "")
+            + "\n"
             f"문헌 확인 요청과의 연결 변경 {linked}건 · 이 문헌을 인용하는 장: {where or '없음'}"
         )
 

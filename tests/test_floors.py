@@ -180,6 +180,18 @@ def test_shared_refs_move_to_common(store: LocalStore):
     assert "refs" in store.get_floor("alice", COMMON).builtins  # 공용에 문헌이 새로 꽂혔다
     assert _gate(store, "alice", "book")["unverified"] == ["clack2012", "daeschler2006"]  # 1층은 그대로 본다
     assert _gate(store, "alice", "second", 1)["unverified"] == ["clack2012"]
+    # 저자 모르게 배치가 바뀌지 않게(#93-a 더함): 리포트 한 줄 + 문헌 항목에 옮긴 시각·원래 층·이유
+    assert "- 공용으로 옮긴 문헌 1편(다른 작업물의 원고도 쓰는 문헌. 각 문헌에 옮긴 시각과 이유를 남김): clack2012" in report.render()
+    moved = store.get_ref("alice", "clack2012").moved
+    assert moved and moved["from"] == "book" and moved["to"] == COMMON and moved["at"]
+    assert moved["reason"] == "1층 「물에서 뭍으로」·2층 「둘째」 원고가 함께 쓰는 문헌이라 공용으로 옮김"
+    from magus.melchior.refs import add_alias  # noqa: PLC0415
+
+    add_alias(store, "alice", "clack2012", "클랙(2012)")  # 문헌을 고쳐도(put_ref) 기록은 그대로
+    store.reindex()  # 원본은 bib.json
+    assert store.get_ref("alice", "clack2012").moved == moved
+    bib = json.loads((store.root / "users/alice/shelf/melchior/clack2012/bib.json").read_text(encoding="utf-8"))
+    assert bib["moved"] == moved and bib["floor"] == COMMON
 
 
 # ---- 이전 ---------------------------------------------------------------------------------
@@ -305,6 +317,19 @@ def test_isolation(store: LocalStore):
     store.add_ideas("alice", [Idea("a1", "앨리스", "thought", "me")])
     store.move_builtin("alice", "ideas", "book", COMMON)
     assert [i.id for i in store.list_ideas("bob")] == ["b1"] and store.get_ideas("bob", ["b1"])["b1"].floor == "book"
+
+
+async def test_ref_add_tells_when_moved_to_common(settings: Settings, store: LocalStore):
+    _book(store)
+    import_bibliography(store, "alice", BIB, "book")
+    store.create_project("alice", "둘째", project_id="second")
+    async with Client(build_server(settings, store)) as c:
+        added = _text(await c.call_tool("ref_add", {"bib": {"key": "clack2012"}, "floor": "2층",
+                                                    "passages": [{"text": "네발동물의 기원", "reason": "2층 1장의 근거"}]}))
+        assert "공용의 문헌 (방금 옮김: 1층 「물에서 뭍으로」·2층 「둘째」 원고가 함께 쓰는 문헌이라 공용으로 옮김. 저자에게 알린다)" in added
+        again = _text(await c.call_tool("ref_add", {"bib": {"key": "clack2012"}, "floor": "2층",
+                                                    "passages": [{"text": "더 고른 문장", "reason": "보탬"}]}))
+        assert "방금 옮김" not in again  # 이미 공용이면 다시 알리지 않는다
 
 
 def test_passage_ref_keeps_floor(store: LocalStore):
