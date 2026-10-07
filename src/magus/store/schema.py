@@ -1,7 +1,7 @@
 """SQLite 인덱스 스키마. 인덱스는 언제든 원본 파일에서 다시 만들 수 있으므로,
 스키마가 바뀌면 SCHEMA_VERSION을 올린다. 그러면 LocalStore가 인덱스를 지우고 다시 만든다."""
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17  # 17: 층(#93) — refs·ideas·style_entries·categories의 floor, refs.updated_at
 
 # 지울 때는 역순으로 지운다. chunks_fts는 가상 테이블이다(그림자 테이블도 함께 지워진다).
 TABLES = (
@@ -122,6 +122,8 @@ CREATE TABLE refs (
     has_fulltext  INTEGER NOT NULL DEFAULT 0,
     file_path     TEXT,
     created_at    TEXT NOT NULL,
+    updated_at    TEXT,
+    floor         TEXT NOT NULL DEFAULT 'common',
     UNIQUE (user_id, key)
 );
 
@@ -147,6 +149,7 @@ CREATE TABLE ideas (
     title_by    TEXT CHECK (title_by IN ('ai', 'author')),
     edited_at   TEXT,
     edited_by   TEXT CHECK (edited_by IN ('author', 'ai')),
+    floor       TEXT NOT NULL DEFAULT 'common',
     PRIMARY KEY (user_id, id)
 );
 
@@ -159,6 +162,7 @@ CREATE TABLE style_entries (
     tags        TEXT NOT NULL DEFAULT '{}',
     created_at  TEXT NOT NULL,
     tags_by     TEXT CHECK (tags_by IN ('ai', 'author')),
+    floor       TEXT NOT NULL DEFAULT 'common',
     PRIMARY KEY (user_id, id)
 );
 
@@ -174,8 +178,9 @@ CREATE TABLE categories (
     schema_version  INTEGER NOT NULL,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
+    floor           TEXT NOT NULL DEFAULT 'common',
     PRIMARY KEY (user_id, id),
-    UNIQUE (user_id, name_key)
+    UNIQUE (user_id, floor, name_key)
 );
 
 CREATE TABLE category_items (

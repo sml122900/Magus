@@ -12,6 +12,7 @@ from typing import Literal
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 
+from magus.floor_args import FLOOR_FIND, FLOOR_PUT, floor_name, labels_for, resolve_floor, search_floors
 from magus.casper.conversation import split_conversation
 from magus.category.titles import TITLE_RULE, decide_title
 from magus.ids import local_time, new_id
@@ -26,17 +27,20 @@ ASK = ("'저장해 줘'처럼 넣을 곳이 정해지지 않았으면 부르지 
 DELETE_RULE = '저자가 그 항목을 지우라고 분명히 말했을 때만 부른다. 여러 개면 목록을 보여 주고 확인받는다. '
 
 
-def add_conversation(store: Store, user_id: str, markdown: str, origin: str | None) -> tuple[str, list[Idea]]:
+def add_conversation(store: Store, user_id: str, markdown: str, origin: str | None,
+                     floor: str | None = None) -> tuple[str, list[Idea]]:
+    """floor: 넣을 층(#93, place로 정한 층). None이면 위에서부터 생각이 꽂힌 첫 층."""
     split = split_conversation(markdown)
     ideas: list[Idea] = []
     for u in split.utterances:
         parent = ideas[u.parent].id if u.parent is not None else None
-        ideas.append(Idea(new_id(), u.text, "conversation", u.speaker, origin, parent))
+        ideas.append(Idea(new_id(), u.text, "conversation", u.speaker, origin, parent, floor=floor))
     return split.render(), store.add_ideas(user_id, ideas)
 
 
 def search_ideas(
-    store: Store, user_id: str, query: str, author: str, k: int, embedder: Embedder | None = None
+    store: Store, user_id: str, query: str, author: str, k: int, embedder: Embedder | None = None,
+    floors: list[str] | None = None,
 ) -> list[Idea]:
     lanes_by_author: list[list[Lane]] = {"me": [["idea_me"]], "ai": [["idea_ai"]], "all": [["idea_me"], ["idea_ai"]]}[author]
     ordered: list[str] = []
@@ -44,7 +48,7 @@ def search_ideas(
         for chunk in hybrid_search(store, user_id, query, lanes, k * 3, embedder):
             if chunk.owner_id not in ordered:
                 ordered.append(chunk.owner_id)
-    ideas = store.get_ideas(user_id, ordered)
+    ideas = {i: idea for i, idea in store.get_ideas(user_id, ordered).items() if floors is None or idea.floor in floors}
     me_first = sorted((i for i in ordered if i in ideas), key=lambda i: ideas[i].author != "me")
     return [ideas[i] for i in me_first[:k]]
 
@@ -61,39 +65,47 @@ def build_tools(
         title: str | None = None,
         title_by: Literal["ai", "author"] | None = None,
         untitled: bool = False,
+        floor: str | None = None,
     ) -> str:
         if not text.strip():
             raise ToolError("text가 비어 있다")
         kind_: IdeaKind = kind
         user = current_user()
+        where = store.place(user, "ideas", resolve_floor(store, user, floor))  # 층(#93): 그 층에 생각이 없으면 공용의 생각
         name, by, said = decide_title(store, user, title, title_by, untitled)  # 제목(#92): 기본값이 '매번 묻기'면 먼저 묻게 한다
-        [idea] = store.add_ideas(user, [Idea(new_id(), text.strip(), kind_, "me", origin, title=name, title_by=by)])
-        return f"기록함 [me] {idea.id} · {kind}" + (f" · {origin}" if origin else "") + f" · {said}"
+        [idea] = store.add_ideas(user, [Idea(new_id(), text.strip(), kind_, "me", origin, title=name, title_by=by, floor=where)])
+        return (f"기록함 [me] {idea.id} · {kind}" + (f" · {origin}" if origin else "")
+                + f" · {floor_name(store, user, where)}의 생각 · {said}")
 
-    def idea_add_conversation(markdown: str | None = None, path: str | None = None, origin: str | None = None) -> str:
+    def idea_add_conversation(markdown: str | None = None, path: str | None = None, origin: str | None = None,
+                              floor: str | None = None) -> str:
         if bool(markdown) == bool(path):
             raise ToolError("markdown(대화 기록 본문)과 path(로컬 .md 파일) 중 하나만 준다")
+        where = store.place(current_user(), "ideas", resolve_floor(store, current_user(), floor))
         if path:
             try:
                 file = resolve_file(current_user(), path)[0]
             except (FileNotFoundError, ValueError) as e:
                 raise ToolError(str(e)) from e
             markdown, origin = file.read_text(encoding="utf-8"), origin or file.stem
-        report, ideas = add_conversation(store, current_user(), markdown or "", origin)
+        report, ideas = add_conversation(store, current_user(), markdown or "", origin, where)
         if not ideas:
             raise ToolError("발화를 하나도 나누지 못했다. 지원 마커: **사용자:**/**Claude:**, 질문:/답변:, > 인용 뒤 **Claude 요지**\n" + report)
-        return report + f"\n저장: me·ai 발화 {len(ideas)}건 (origin={origin or '-'}). ai 발화에는 응답한 사용자 발화의 id(parent_id)가 붙어 있다."
+        return (report + f"\n저장: me·ai 발화 {len(ideas)}건 (origin={origin or '-'}, {floor_name(store, current_user(), where)}의 생각). "
+                "ai 발화에는 응답한 사용자 발화의 id(parent_id)가 붙어 있다.")
 
-    def idea_search(query: str, author: Literal["me", "ai", "all"] = "me", k: int = 10) -> str:
+    def idea_search(query: str, author: Literal["me", "ai", "all"] = "me", k: int = 10, floor: str | None = None) -> str:
         user = current_user()
         k = max(1, min(k, 30))
-        ideas = search_ideas(store, user, query, author, k, embedder)
+        ideas = search_ideas(store, user, query, author, k, embedder, search_floors(store, user, floor))
         if not ideas:
             return f"idea_search {query!r} (author={author}): 결과 없음"
+        labels = labels_for(store, user, "ideas")  # 생각이 여러 층에 있을 때만 결과마다 층을 적는다
         parents = store.get_ideas(user, [i.parent_id for i in ideas if i.parent_id])
         lines = [f"idea_search {query!r} (author={author}) — {len(ideas)}건. author=me 항목이 사용자의 주장이다."]
         for n, idea in enumerate(ideas, 1):
             head = f"{n}. [{idea.author}] {local_time(idea.created_at, '%Y-%m-%d')} · {idea.kind}"
+            head += f" · {labels[idea.floor]}" if idea.floor in labels else ""
             head += (f" · {idea.origin}" if idea.origin else "") + f" · {idea.id}"
             head += (f" · 제목 「{idea.title}」" + (" (AI가 지은 제목)" if idea.title_by == "ai" else "")) if idea.title else ""
             lines += [head, f"   “{one_line(idea.text)[:300]}”"]
@@ -121,7 +133,7 @@ def build_tools(
             description=(
                 "저자가 '생각'에 넣으라고 분명히 말했을 때만 부른다. " + ASK
                 + "저자의 생각 한 조각을 생각에 기록한다(author=me). kind=thought|ai|article|conversation|tv|other, "
-                "origin은 출처(책·기사·방송 이름 등). " + TITLE_RULE
+                "origin은 출처(책·기사·방송 이름 등). " + FLOOR_PUT + TITLE_RULE
             ),
             structured_output=False,
         ),
@@ -132,7 +144,7 @@ def build_tools(
                 "대화 기록 markdown을 발화 단위로 나눠 생각에 저장한다. markdown 본문 또는 받은함의 .md 파일 이름(path, files_list로 확인) 중 하나를 준다. "
                 "마커: **사용자:**/**Claude:**, 질문:/답변:, '> 인용' 뒤의 **Claude 요지**. "
                 "사용자 발화 → author=me, 바로 뒤 AI 발화 → author=ai(parent_id=그 사용자 발화). "
-                "리포트: me N건, ai N건, 분리 실패 구간."
+                "리포트: me N건, ai N건, 분리 실패 구간. " + FLOOR_PUT
             ),
             structured_output=False,
         ),
@@ -141,7 +153,7 @@ def build_tools(
             name="idea_search",
             description=(
                 "생각에서 찾는다. author=me(기본, 저자의 생각만)|ai|all(me를 먼저). k=10. 결과마다 id가 있다. "
-                "author=me 결과가 사용자의 주장이다. ai 결과에는 응답한 사용자 발화를 함께 보여 준다."
+                "author=me 결과가 사용자의 주장이다. ai 결과에는 응답한 사용자 발화를 함께 보여 준다. " + FLOOR_FIND
             ),
             structured_output=False,
         ),

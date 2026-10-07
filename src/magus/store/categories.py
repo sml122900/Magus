@@ -16,7 +16,7 @@ import json
 import shutil
 import sqlite3
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,7 @@ from typing import Any
 from magus.category.rules import (
     DEFAULT_COLORS, HEX, MAX_MY_COLORS, SCHEMA_VERSION, TITLE_MODES, name_key,
 )
+from magus.floors import COMMON
 from magus.ids import new_id, safe_id, utcnow
 from magus.store.base import Category, CategoryItem, ShelfSettings
 from magus.store.fileio import locked, read_json, write_json
@@ -39,6 +40,9 @@ class CategoryMixin:
     _user_dir: Callable[[str], Path]
     _replace_chunks: Callable[..., None]
     _drop_chunks: Callable[[str, str, str], None]
+    _layout: Callable[[str], Any]  # FloorMixin
+    _known: Callable[[str, Any], set[str]]
+    _check_floor: Callable[[str, Any, str], str]
 
     def _categories_dir(self, user_id: str) -> Path:
         return self._user_dir(user_id) / "shelf" / "categories"
@@ -49,11 +53,15 @@ class CategoryMixin:
     # ---- 카테고리 ---------------------------------------------------------------------------
 
     @locked
-    def list_categories(self, user_id: str) -> list[Category]:
+    def list_categories(self, user_id: str, *, floors: Iterable[str] | None = None) -> list[Category]:
+        where, values = "", []
+        if floors is not None:
+            values = list(dict.fromkeys(floors))
+            where = f" AND c.floor IN ({','.join('?' * len(values))})" if values else " AND 0"
         rows = self._db.execute(
             "SELECT c.*, (SELECT COUNT(*) FROM category_items i WHERE i.user_id = c.user_id AND i.category_id = c.id) AS n "
-            "FROM categories c WHERE c.user_id = ? ORDER BY c.created_at, c.id",
-            (user_id,),
+            f"FROM categories c WHERE c.user_id = ?{where} ORDER BY c.created_at, c.id",
+            (user_id, *values),
         )
         return [_category(r) for r in rows]
 
@@ -67,13 +75,16 @@ class CategoryMixin:
         return _category(row) if row else None
 
     @locked
-    def create_category(self, user_id: str, name: str, template: str, color: str, fields: tuple[str, ...]) -> Category:
+    def create_category(self, user_id: str, name: str, template: str, color: str, fields: tuple[str, ...],
+                        floor: str | None = None) -> Category:
         if not HEX.fullmatch(color):
             raise ValueError(f"색은 #RRGGBB: {color!r}")
-        if self._db.execute("SELECT 1 FROM categories WHERE user_id = ? AND name_key = ?", (user_id, name_key(name))).fetchone():
+        floor = self._check_floor(user_id, self._layout(user_id), floor or COMMON)
+        if self._db.execute("SELECT 1 FROM categories WHERE user_id = ? AND floor = ? AND name_key = ?",
+                            (user_id, floor, name_key(name))).fetchone():
             raise ValueError(f"'{name}' 카테고리가 이미 있다")
         now = utcnow()
-        category = Category(new_id(), name, template, color.lower(), tuple(fields), now, now)
+        category = Category(new_id(), name, template, color.lower(), tuple(fields), now, now, floor=floor)
         write_json(self._category_dir(user_id, category.id) / "category.json", _category_record(category))
         with self._db:
             self._index_category(user_id, category)
@@ -87,8 +98,8 @@ class CategoryMixin:
         if color is not None and not HEX.fullmatch(color):
             raise ValueError(f"색은 #RRGGBB: {color!r}")
         if name is not None and name_key(name) != name_key(current.name):
-            clash = self._db.execute("SELECT name FROM categories WHERE user_id = ? AND name_key = ? AND id != ?",
-                                     (user_id, name_key(name), category_id)).fetchone()
+            clash = self._db.execute("SELECT name FROM categories WHERE user_id = ? AND floor = ? AND name_key = ? AND id != ?",
+                                     (user_id, current.floor, name_key(name), category_id)).fetchone()
             if clash:
                 raise ValueError(f"'{clash[0]}' 카테고리가 이미 있다")
         changed = replace(current, name=name or current.name, color=(color or current.color).lower(), updated_at=utcnow())
@@ -127,8 +138,10 @@ class CategoryMixin:
             raise ValueError(f"휴지통에 category {category_id}가 없다")
         record = {k: v for k, v in read_json(src / "category.json").items() if k != "_trash"}
         record["name"] = name or record["name"]
-        clash = self._db.execute("SELECT name FROM categories WHERE user_id = ? AND name_key = ?",
-                                 (user_id, name_key(record["name"]))).fetchone()
+        if record.get("floor") not in self._known(user_id, self._layout(user_id)):
+            record["floor"] = COMMON  # 층이 없거나 그사이 사라진 층이면 공용으로
+        clash = self._db.execute("SELECT name FROM categories WHERE user_id = ? AND floor = ? AND name_key = ?",
+                                 (user_id, record["floor"], name_key(record["name"]))).fetchone()
         if clash:
             raise ValueError(f"'{clash[0]}' 카테고리가 이미 있어 되살리지 못했다. --name으로 새 이름을 준다")
         dst = self._category_dir(user_id, category_id)
@@ -138,7 +151,7 @@ class CategoryMixin:
         shutil.move(str(src), str(dst))
         write_json(dst / "category.json", record)
         with self._db:
-            self._reindex_category(user_id, dst)
+            self._reindex_category(user_id, dst, {record["floor"]})
         return [category_id]
 
     # ---- 항목 -------------------------------------------------------------------------------
@@ -241,10 +254,10 @@ class CategoryMixin:
 
     def _index_category(self, user_id: str, c: Category) -> None:
         self._db.execute(
-            "INSERT OR REPLACE INTO categories (id, user_id, name, name_key, template, color, fields, schema_version, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO categories (id, user_id, name, name_key, template, color, fields, schema_version, created_at, updated_at,"
+            " floor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (c.id, user_id, c.name, name_key(c.name), c.template, c.color, json.dumps(list(c.fields), ensure_ascii=False),
-             SCHEMA_VERSION, c.created_at, c.updated_at),
+             SCHEMA_VERSION, c.created_at, c.updated_at, c.floor),
         )
 
     def _index_item(self, user_id: str, item: CategoryItem) -> None:
@@ -259,30 +272,34 @@ class CategoryMixin:
         text = "\n".join([item.title or "", item.content, *(f"{k}: {v}" for k, v in item.fields.items() if v), " ".join(item.tags)])
         self._replace_chunks(user_id, "category", f"{item.category_id}/{item.id}", "category", chunk_text(text.strip()))
 
-    def _reindex_category(self, user_id: str, cdir: Path) -> None:
+    def _reindex_category(self, user_id: str, cdir: Path, known: set[str]) -> None:
         record = read_json(cdir / "category.json")
         category = _category_from_record(record, cdir.name)
+        if category.floor not in known:  # 층이 없거나 모르는 층(휴지통으로 간 작업물)이면 공용(파일은 그대로, #93)
+            category = replace(category, floor=COMMON)
         self._index_category(user_id, category)
         for path in sorted((cdir / "items").glob("*.json")):
             self._index_item(user_id, _item_from_record(category.id, read_json(path)))
 
     def _reindex_categories(self, user_id: str) -> None:
+        known = self._known(user_id, self._layout(user_id))
         for path in sorted(self._categories_dir(user_id).glob("*/category.json")):
-            self._reindex_category(user_id, path.parent)
+            self._reindex_category(user_id, path.parent, known)
 
 
 # ---- 파일 ↔ 객체 ----------------------------------------------------------------------------
 
 def _category_record(c: Category) -> dict[str, Any]:
     return {"schema_version": SCHEMA_VERSION, "id": c.id, "name": c.name, "template": c.template, "color": c.color,
-            "fields": list(c.fields), "created_at": c.created_at, "updated_at": c.updated_at}
+            "fields": list(c.fields), "created_at": c.created_at, "updated_at": c.updated_at, "floor": c.floor}
 
 
 def _category_from_record(r: dict[str, Any], folder: str) -> Category:
     color = str(r.get("color") or "")
     return Category(folder, str(r.get("name") or folder), str(r.get("template") or "blank"),
                     color.lower() if HEX.fullmatch(color) else "#3b4652", tuple(str(f) for f in r.get("fields") or ()),
-                    str(r.get("created_at") or ""), str(r.get("updated_at") or r.get("created_at") or ""))
+                    str(r.get("created_at") or ""), str(r.get("updated_at") or r.get("created_at") or ""),
+                    floor=str(r.get("floor") or COMMON))
 
 
 def _item_record(item: CategoryItem) -> dict[str, Any]:
@@ -307,7 +324,7 @@ def _item_from_record(category_id: str, r: dict[str, Any]) -> CategoryItem:
 
 def _category(r: sqlite3.Row) -> Category:
     return Category(r["id"], r["name"], r["template"], r["color"], tuple(json.loads(r["fields"])), r["created_at"],
-                    r["updated_at"], r["n"])
+                    r["updated_at"], r["n"], r["floor"])
 
 
 def _item(r: sqlite3.Row) -> CategoryItem:

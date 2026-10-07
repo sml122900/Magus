@@ -88,7 +88,7 @@ class CiteReport:
 
 
 def build_cite_report(store: Store, user_id: str, project_id: str) -> CiteReport:
-    resolver = Resolver(store, user_id)
+    resolver = Resolver(store, user_id, project_id)
     terms = terms_of(store, user_id, project_id)
     docs: dict[str, DocStat] = {}
     per_chapter = []
@@ -110,7 +110,7 @@ def build_cite_report(store: Store, user_id: str, project_id: str) -> CiteReport
             doc.cited_as.update(c for _, c in g.occurrences)
             if g.matched_by not in ("", "alias"):
                 doc.inferred.update(f"{c} [{g.matched_by}]" for _, c in g.occurrences)
-    refs = store.list_refs(user_id)
+    refs = store.list_refs(user_id, floors=resolver.floors)  # 그 작업물 층 + 공용(#93)
     for doc in docs.values():
         if doc.status == "unknown" and (name := re.sub(r"\d{4}[a-z]?(-\d+)?$", "", doc.key)):
             similar = [r.key for r in refs if re.sub(r"\d{4}[a-z]?(-\d+)?$", "", r.key) == name]

@@ -142,7 +142,8 @@ async def test_category_tools_round_trip(settings: Settings, store: LocalStore):
     store.write_chapter("alice", "book", 3, "항구 이야기.", "x", title="항구")
     async with Client(build_server(settings, store)) as c:
         listed = _text(await c.call_tool("category_list", {}))
-        assert "기본 카테고리(넣을 때는 각자의 도구): 생각 0개(idea_add" in listed and "제목 기본값: 매번 묻기" in listed
+        assert "## 1층 「책」(book) · 원고 있음\n- 생각 0개 · 기본(idea_add)" in listed and "제목 기본값: 매번 묻기" in listed
+        assert "## 공용\n- 문체 0개 · 기본(style_add)" in listed  # 층(#93): 문체는 공용, 생각·문헌은 작업물 층
         made = _text(await c.call_tool("category_create", {"name": "사례 카테고리", "template": "사례", "color": "빨간색"}))
         assert made.startswith("카테고리를 만듦: 「사례」 · 사례 템플릿(칸: 시기, 장소, 출처) · 색 빨강(#b3261e)")
         for args, why in (({"name": "사례"}, "이미 있습니다"), ({"name": "문헌"}, "정해진 이름"),

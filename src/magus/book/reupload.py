@@ -250,7 +250,7 @@ def reupload_manuscript(
 
     _merge_comments(store, user_id, project.id, manuscript, split, n, report)
 
-    report.bib = import_bibliography(store, user_id, "\n".join(b.text for b in split.bib_blocks if b.kind == "para"))
+    report.bib = import_bibliography(store, user_id, "\n".join(b.text for b in split.bib_blocks if b.kind == "para"), project.id)
     after_refs_changed(store, user_id)
     questions_after = {q.id: q for q in build_questions(store, user_id, project.id)}
     report.questions_new = [(TYPES[q.type], q.text) for k, q in questions_after.items() if k not in questions_before]

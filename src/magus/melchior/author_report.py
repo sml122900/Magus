@@ -135,13 +135,13 @@ def build_author_report(store: Store, user_id: str, project_id: str, date: str) 
     if project is None:
         raise ValueError(f"프로젝트 {project_id!r}가 없다")
     report = build_cite_report(store, user_id, project_id)
-    refs = {r.key: r for r in store.list_refs(user_id)}
+    resolver, terms = Resolver(store, user_id, project_id), terms_of(store, user_id, project_id)
+    refs = {r.key: r for r in store.list_refs(user_id, floors=resolver.floors)}  # 그 작업물 층 + 공용(#93)
     unchecked = report.of("unverified", "unknown")
     occurrences = sum(d.count for d in report.docs.values() if d.status in ("unverified", "unknown", "verified"))
     verified = len(report.of("verified"))
 
     # 추정 연결과 동명 판별을 장 단위로 다시 모은다(어느 장의 어떤 표기인지 보여 주려고)
-    resolver, terms = Resolver(store, user_id), terms_of(store, user_id, project_id)
     inferred: dict[tuple[str, str], list[str]] = defaultdict(list)  # (표기, ref key) → 장
     same_author: dict[str, list[str]] = defaultdict(list)  # ref key → 장
     ambiguous: dict[str, list[str]] = {}  # 연도 a/b 모호로 잇지 않은 것 → 후보 key

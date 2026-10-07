@@ -8,6 +8,7 @@ from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+from magus.floors import COMMON
 from magus.ids import local_time
 from magus.store import ChapterMeta, Project, Store
 
@@ -88,6 +89,35 @@ def edition_line(store: Store, user_id: str, project: Project, chapters: list[Ch
     return line
 
 
+_FLOOR_BOOKS_SHOWN = 12
+
+
+def floor_lines(store: Store, user_id: str, project_id: str) -> list[str]:
+    """이 작업물 층에 꽂힌 카테고리와 공용 층 요약(#93). 한 줄씩, 많으면 '외 N'."""
+    floors = {f.id: f for f in store.list_floors(user_id)}
+    cats = store.list_categories(user_id)
+
+    def books(floor_id: str) -> str:
+        floor = floors.get(floor_id)
+        if floor is None:
+            return "(없음)"
+        names = []
+        for kind in floor.builtins:
+            if kind == "refs":
+                refs = store.list_refs(user_id, floors=[floor_id])
+                names.append(f"문헌 {len(refs)}(확인 {sum(1 for r in refs if r.status == 'verified')})")
+            elif kind == "ideas":
+                names.append(f"생각 {len(store.list_ideas(user_id, floors=[floor_id]))}")
+            else:
+                names.append(f"문체 {len(store.list_styles(user_id, floors=[floor_id]))}")
+        names += [f"{_clip(c.name, 12)} {c.items}" for c in cats if c.floor == floor_id]
+        more = f" 외 {len(names) - _FLOOR_BOOKS_SHOWN}" if len(names) > _FLOOR_BOOKS_SHOWN else ""
+        return " · ".join(names[:_FLOOR_BOOKS_SHOWN]) + more if names else "(비어 있음)"
+
+    label = floors[project_id].label if project_id in floors else "?"
+    return [f"이 작업물 층({label})의 카테고리: {books(project_id)}", f"공용 층: {books(COMMON)}"]
+
+
 def build_outline(
     store: Store, user_id: str, project_id: str | None = None, budget: int = TOKEN_BUDGET, now: datetime | None = None
 ) -> str:
@@ -130,6 +160,7 @@ def build_outline(
         f"미확인 문헌 {unique_unverified}편 · 미연결 {unlinked} · 열린 확인 요청 {len(issues)}"
     )
     header_lines.append(edition_line(store, user_id, project, chapters, now))
+    header_lines += floor_lines(store, user_id, project.id)
     header = "\n".join(header_lines)
 
     # 목차 줄에는 집계만 싣는다. 장별 미해결 수에는 코멘트 유래까지 모두 센다.
@@ -183,7 +214,9 @@ def build_outline(
         lambda n: f"- … 외 {n}건 — book_issues로 조회",
     )
     remaining -= used
-    decided, used = _fit("## 최근 결정", decision_items or ["- (없음)"], remaining, lambda n: f"- … 외 {n}건")
+    # 가장 최근 변경 한 줄은 결정보다 먼저 자리를 잡아 둔다(층 줄이 머리에 더해진 뒤로 큰 책에서 변경이 통째로 빠지지 않게, #93)
+    keep = estimate_tokens("## 최근 변경\n" + change_items[0]) + 2 if change_items else 0
+    decided, used = _fit("## 최근 결정", decision_items or ["- (없음)"], remaining - keep, lambda n: f"- … 외 {n}건")
     remaining -= used
     recent, _ = _fit("## 최근 변경", change_items or ["- (없음)"], remaining, lambda n: f"- … 외 {n}건")
     return "\n\n".join([header, toc, decided, open_issues, recent])

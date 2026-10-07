@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from magus.ids import utcnow
 from magus.melchior.author_report import chapters_text, cite_label, name_mentions, surnames
-from magus.melchior.check import Resolver, after_refs_changed, check_text, terms_of
+from magus.melchior.check import cite_floors, Resolver, after_refs_changed, check_text, terms_of
 from magus.melchior.refs import add_alias
 from magus.melchior.report import build_cite_report
 from magus.melchior.translit import score
@@ -55,8 +55,8 @@ def _base(key: str) -> str:
 def build_questions(store: Store, user_id: str, project_id: str) -> list[Question]:
     """지금 원고·문헌에서 질문을 계산하고, answers.md의 답으로 상태를 붙인다."""
     report = build_cite_report(store, user_id, project_id)
-    refs = {r.key: r for r in store.list_refs(user_id)}
-    resolver, terms = Resolver(store, user_id), terms_of(store, user_id, project_id)
+    resolver, terms = Resolver(store, user_id, project_id), terms_of(store, user_id, project_id)
+    refs = {r.key: r for r in store.list_refs(user_id, floors=resolver.floors)}  # 그 작업물 층 + 공용(#93)
     inferred: dict[tuple[str, str], list[str]] = defaultdict(list)  # (표기, key) → 장
     ambiguous: dict[str, tuple[list[str], list[str], set[str]]] = {}  # 모호 key → (후보, 장, 표기)
     linked: dict[str, list[str]] = defaultdict(list)  # 형제가 있는 key → 장
@@ -196,7 +196,7 @@ def answer_question(store: Store, user_id: str, project_id: str, question: Quest
     applied, decision = "", ""
     if question.type in ("translit", "ab", "unlinked") and kind in ("yes", "ref"):
         key = choice[4:] if kind == "ref" else question.id.split(">")[1]
-        if store.get_ref(user_id, key) is None:
+        if store.get_ref(user_id, key, floors=cite_floors(project_id)) is None:
             raise ValueError(f"문헌 {key}가 없다")
         ref, alias = add_alias(store, user_id, key, question.surface)
         after_refs_changed(store, user_id)

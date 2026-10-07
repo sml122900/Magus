@@ -44,6 +44,7 @@ from magus.melchior.author_report import cite_label
 from magus.melchior.questions import TYPES as QUESTION_TYPES
 from magus.melchior.questions import build_questions
 from magus.melchior.report import build_cite_report
+from magus.melchior.check import cite_floors
 from magus.signing import sign, unsign
 from magus.store import Profile, Store
 from magus.store.base import STALE_REASONS
@@ -743,7 +744,7 @@ class Web(ShelfPages):
         if project is None:
             return self._page("인용 체크리스트", "<p>원고가 없습니다. <a href=\"/book\">원고</a>에서 임포트하세요.</p>", session)
         report = await run_in_threadpool(build_cite_report, self.store, uid, project.id)
-        refs = {r.key: r for r in self.store.list_refs(uid)}
+        refs = {r.key: r for r in self.store.list_refs(uid, floors=cite_floors(project.id))}  # 그 작업물 층 + 공용(#93)
         status = request.query_params.get("status") or ""
         docs = [d for d in report.docs.values() if not status or d.status == status]
         order = {"unknown": 0, "unverified": 1, "uncertain": 2, "verified": 3}

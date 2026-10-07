@@ -26,7 +26,9 @@ from magus.store.fileio import read_text as _read_text
 from magus.store.fileio import to_int as _int
 from magus.store.fileio import write_json as _write_json
 from magus.store.fileio import write_text as _write_text
+from magus.floors import COMMON, MAX_FLOORS
 from magus.store.categories import CategoryMixin
+from magus.store.floors import FloorMixin
 from magus.store.shelf import ShelfMixin
 from magus.store.base import (
     ANCHOR_MAX,
@@ -62,7 +64,7 @@ ANSWERS_HEADER = ("# 저자 답\n\n질문은 매번 원고와 문헌에서 계�
 _CHAPTER_FILE = re.compile(r"ch-(\d+)\.md")
 _VERSION_FILE = re.compile(r"ch-(\d+)\.v(\d+)\.md")
 
-class LocalStore(ShelfMixin, CategoryMixin):
+class LocalStore(ShelfMixin, CategoryMixin, FloorMixin):
     def __init__(self, data_dir: Path):
         self.root = Path(data_dir)
         self.root.mkdir(parents=True, exist_ok=True)
@@ -105,9 +107,14 @@ class LocalStore(ShelfMixin, CategoryMixin):
         self, user_id: str, title: str, project_id: str | None = None, *, titles: BookTitles | None = None
     ) -> Project:
         project_id = safe_id(project_id or secrets.token_hex(4), "project_id")
+        if project_id == COMMON:
+            raise ValueError(f"{COMMON!r}은 공용 층의 이름이라 작업물 id로 쓸 수 없다")
         pdir = self._project_dir(user_id, project_id)
         if (pdir / "project.json").exists():
             raise ValueError(f"프로젝트 {project_id!r}가 이미 있다")
+        layout = self.ensure_layout(user_id)  # 층 배치를 먼저 파일로 적는다(이전 전 사용자, #93)
+        if project_id not in layout.order and len(self._existing(user_id, layout)) >= MAX_FLOORS:
+            raise ValueError(f"작업물 층은 {MAX_FLOORS}개까지다(공용 빼고)")
         now = utcnow()
         for sub in ("book", "versions", "original"):
             (pdir / sub).mkdir(parents=True, exist_ok=True)
@@ -115,6 +122,7 @@ class LocalStore(ShelfMixin, CategoryMixin):
         _write_json(pdir / "project.json", {"title": title, **extra, "created_at": now, "parts": []})
         with self._db:
             self._index_project(user_id, project_id, title, now, extra)
+        self._register_floor(user_id, project_id, layout)  # 새 층에는 생각·문헌(#93)
         return Project(project_id, user_id, title, now, now, **extra)
 
     @_locked

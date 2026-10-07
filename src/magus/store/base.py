@@ -208,6 +208,8 @@ class Ref:
     has_fulltext: bool = False
     file_path: str | None = None
     created_at: str = ""
+    floor: str | None = None  # 꽂힌 층(공용 "common" 또는 프로젝트 id, #93). None이면 저장소가 정한다
+    updated_at: str = ""  # 마지막으로 고친 시각(층의 최근 수정에 쓴다). 기록 전 문헌은 created_at
 
 
 IdeaKind = Literal["thought", "ai", "article", "conversation", "tv", "other"]
@@ -229,6 +231,7 @@ class Idea:
     title_by: TitleBy | None = None
     edited_at: str | None = None  # 처음 쓴 뒤 고친 시각과 고친 사람(웹에서 저자가 고침). 고친 적이 없으면 None
     edited_by: EditedBy | None = None
+    floor: str | None = None  # 꽂힌 층(#93). None이면 저장소가 정한다
 
 
 @dataclass(frozen=True)
@@ -242,6 +245,7 @@ class StyleEntry:
     work: str | None = None
     created_at: str = ""
     tags_by: TagsBy | None = None  # 태그를 누가 정했나(#89). 웹 /styles에 보인다
+    floor: str | None = None  # 꽂힌 층(#93). None이면 저장소가 정한다
 
 
 @dataclass(frozen=True)
@@ -256,6 +260,7 @@ class Category:
     created_at: str = ""
     updated_at: str = ""
     items: int = 0  # 항목 수(목록에서 채운다)
+    floor: str = "common"  # 꽂힌 층(#93): 공용 "common" 또는 프로젝트 id
 
 
 @dataclass(frozen=True)
@@ -284,6 +289,42 @@ class ShelfSettings:
     colors: dict[str, str] = field(default_factory=dict)  # ideas|styles|refs → #rrggbb
     my_colors: tuple[str, ...] = ()
     title_default: TitleMode = "ask"
+
+
+@dataclass(frozen=True)
+class Floor:
+    """책장의 한 층(#93). 공용(id "common", number 0) 또는 작업물(프로젝트) 하나. 번호는 위에서 아래로 1층, 2층…"""
+
+    id: str
+    number: int
+    title: str
+    builtins: tuple[str, ...] = ()  # 이 층에 꽂힌 기본 카테고리(ideas|styles|refs)
+    has_manuscript: bool = False  # 장이 하나라도 있나(빈 층이면 False)
+    updated_at: str = ""  # 최근 수정: 그 층 원고·카테고리·항목·옮기기 중 가장 최근
+
+    @property
+    def common(self) -> bool:
+        return self.number == 0
+
+    @property
+    def label(self) -> str:
+        return "공용" if self.number == 0 else f"{self.number}층"
+
+
+@dataclass(frozen=True)
+class FloorMove:
+    """카테고리 옮기기 한 번(#93). 마지막 옮기기만 floors.json에 남아 한 번 되돌릴 수 있다.
+    book: 저자의 카테고리 id 또는 기본 카테고리 종류(ideas|styles|refs). items: 기본 카테고리를 옮겼을 때 함께 간 항목 id(문헌은 key).
+    merged: 받는 층에 같은 기본 카테고리가 있어 합쳤나. kept: 되돌릴 때 받은 층의 기본 카테고리를 남겨 둬야 하나(합쳤으면 True)."""
+
+    id: str
+    at: str
+    book: str
+    name: str
+    from_floor: str
+    to_floor: str
+    merged: bool = False
+    items: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -485,11 +526,13 @@ class Store(Protocol):
         ...
 
     # 문헌 (Melchior) — 사람 소유. 프로젝트와 무관하다.
-    def get_ref(self, user_id: str, key: str) -> Ref | None: ...
-    def resolve_ref(self, user_id: str, key: str) -> Ref | None:
-        """key로 찾고, 없으면 aliases에서 찾는다."""
+    def get_ref(self, user_id: str, key: str, *, floors: Iterable[str] | None = None) -> Ref | None: ...
+    def resolve_ref(self, user_id: str, key: str, *, floors: Iterable[str] | None = None) -> Ref | None:
+        """key로 찾고, 없으면 aliases에서 찾는다. floors를 주면 그 층들 안에서만."""
         ...
-    def list_refs(self, user_id: str, status: RefStatus | None = None) -> list[Ref]: ...
+    def list_refs(self, user_id: str, status: RefStatus | None = None, *, floors: Iterable[str] | None = None) -> list[Ref]:
+        """floors를 주면 그 층들의 문헌만(인용 점검: 그 작업물 층 + 공용, #93)."""
+        ...
     def get_passages(self, user_id: str, key: str) -> list[Passage]: ...
     def put_ref(
         self, user_id: str, ref: Ref, passages: list[Passage] | None = None, full_text: str | None = None
@@ -502,14 +545,14 @@ class Store(Protocol):
         """한 번에 여러 개를 쓴다(대화 기록 한 편). 각자 shelf/casper/<id>.json이 된다."""
         ...
     def get_ideas(self, user_id: str, ids: list[str]) -> dict[str, Idea]: ...
-    def list_ideas(self, user_id: str, author: Author | None = None) -> list[Idea]: ...
+    def list_ideas(self, user_id: str, author: Author | None = None, *, floors: Iterable[str] | None = None) -> list[Idea]: ...
 
     # 문체 (Balthasar) — 사람 소유
     def add_style(self, user_id: str, entry: StyleEntry) -> StyleEntry:
         """reason + tags만 색인·임베딩한다(balthasar.style.search_text). passage는 색인하지 않는다."""
         ...
     def get_styles(self, user_id: str, ids: list[str]) -> dict[str, StyleEntry]: ...
-    def list_styles(self, user_id: str) -> list[StyleEntry]: ...
+    def list_styles(self, user_id: str, *, floors: Iterable[str] | None = None) -> list[StyleEntry]: ...
 
     # 휴지통(생각·문체, #88) — 지우지 않고 trash/shelf/로 옮긴다. 검색·목록·웹에서 빠지고 되살릴 수 있다
     def trash_idea(self, user_id: str, idea_id: str, note: str) -> list[Idea]:
@@ -523,12 +566,14 @@ class Store(Protocol):
         ...
 
     # 카테고리(#92) — 사람 소유. 원본은 shelf/categories/<id>/{category.json, items/<항목 id>.json}
-    def list_categories(self, user_id: str) -> list[Category]:
-        """만든 순서. items에 항목 수를 채운다."""
+    def list_categories(self, user_id: str, *, floors: Iterable[str] | None = None) -> list[Category]:
+        """만든 순서. items에 항목 수를 채운다. floors를 주면 그 층들의 카테고리만."""
         ...
     def get_category(self, user_id: str, category_id: str) -> Category | None: ...
-    def create_category(self, user_id: str, name: str, template: str, color: str, fields: tuple[str, ...]) -> Category:
-        """이름·템플릿·색은 호출자가 magus.category.rules로 검사한 값이다. id는 저장소가 짓는다."""
+    def create_category(self, user_id: str, name: str, template: str, color: str, fields: tuple[str, ...],
+                        floor: str | None = None) -> Category:
+        """이름·템플릿·색은 호출자가 magus.category.rules로 검사한 값이다. id는 저장소가 짓는다.
+        이름은 층마다 하나(같은 층에 같은 이름이 있으면 ValueError). floor가 None이면 공용."""
         ...
     def update_category(self, user_id: str, category_id: str, *, name: str | None = None, color: str | None = None) -> Category: ...
     def trash_category(self, user_id: str, category_id: str, note: str) -> Category | None:
@@ -545,6 +590,35 @@ class Store(Protocol):
     def get_shelf_settings(self, user_id: str) -> ShelfSettings: ...
     def save_shelf_settings(self, user_id: str, settings: ShelfSettings) -> ShelfSettings:
         """색은 #rrggbb만 남기고, 내 색은 최대 12개."""
+        ...
+
+    # 층(#93) — 공용 + 작업물(프로젝트)마다 한 층. 원본은 shelf/floors.json과 각 항목 파일의 "floor"
+    def list_floors(self, user_id: str) -> list[Floor]:
+        """공용이 먼저, 그다음 작업물 층(위에서 아래로). updated_at(최근 수정)을 채운다."""
+        ...
+    def get_floor(self, user_id: str, floor_id: str) -> Floor | None: ...
+    def place(self, user_id: str, kind: str, floor: str | None) -> str:
+        """새 항목이 들어갈 층: floor에 그 기본 카테고리(kind)가 있으면 floor, 없고 공용에 있으면 공용,
+        둘 다 없으면 floor에 그 기본 카테고리를 다시 꽂고 floor. floor가 None이면 위에서부터 그 종류가 있는 첫 층."""
+        ...
+    def move_category(self, user_id: str, category_id: str, to_floor: str) -> FloorMove:
+        """저자의 카테고리를 통째로 다른 층에. 받는 층에 같은 이름이 있으면 ValueError."""
+        ...
+    def move_builtin(self, user_id: str, kind: str, from_floor: str, to_floor: str) -> FloorMove:
+        """기본 카테고리(생각·문체·문헌)를 그 항목과 함께 다른 층에. 받는 층에 같은 종류가 있으면 합친다."""
+        ...
+    def last_move(self, user_id: str) -> FloorMove | None: ...
+    def undo_move(self, user_id: str, move_id: str) -> FloorMove:
+        """마지막 옮기기를 되돌린다. 마지막 옮기기가 아니거나 이미 되돌렸으면 ValueError."""
+        ...
+    def set_ref_floor(self, user_id: str, key: str, floor: str) -> Ref:
+        """문헌 한 편의 층만 바꾼다(두 작업물이 함께 쓰게 된 문헌을 공용으로 옮길 때)."""
+        ...
+    def category_updated(self, user_id: str, category_id: str) -> str:
+        """카테고리의 최근 수정(카테고리·항목 중 가장 최근)."""
+        ...
+    def builtin_updated(self, user_id: str, kind: str, floor: str) -> str:
+        """그 층 기본 카테고리의 최근 수정(항목 중 가장 최근)."""
         ...
 
     # 검색 청크 (모든 책장 공용)

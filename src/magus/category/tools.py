@@ -1,7 +1,9 @@
 """카테고리(category_*) MCP 도구(#92). 카테고리 이름을 인자로 받는 범용 도구 일곱 개로 끝낸다.
 
 카테고리마다 도구를 만들지 않는다: 사용자마다 도구 목록이 달라지고, instructions 조립(등록된 도구만 언급)이 깨진다.
-생각·문체·문헌은 기본 카테고리다. 넣는 것·찾는 것은 각자의 도구(idea_*·style_*·ref_*)로 하고, 여기서는 책 색만 바꾼다.
+생각·문체·문헌은 기본 카테고리다. 넣는 것·찾는 것은 각자의 도구(idea_*·style_*·ref_*)로 하고, 여기서는 책 색과 층만 바꾼다.
+층(#93): 카테고리는 공용 층이나 작업물 층에 꽂힌다. 이름은 층마다 하나라서, 같은 이름이 여러 층에 있으면 floor로 가린다.
+옮기기·되돌리기는 도구 수를 늘리지 않고 category_edit의 move_to·undo_move로 한다.
 """
 
 from __future__ import annotations
@@ -17,7 +19,11 @@ from magus.category.rules import (
     TEMPLATE_BY_KEY, TEMPLATE_NAMES, TITLE_MODES, check_name, clean_name, clean_tags, color_label, name_key, parse_color,
     template_of,
 )
+from magus.category.moves import error_message, move_book, tool_message, undo_move as undo_last
 from magus.category.titles import TITLE_RULE, decide_title
+from magus.floor_args import FLOOR_PUT, floors_text, match_floor, resolve_floor, search_floors, short
+from magus.floors import COMMON
+from magus.store.floors import MoveError
 from magus.ids import local_time, new_id
 from magus.search import Embedder, hybrid_search
 from magus.store import Category, CategoryItem, Idea, ShelfSettings, Store
@@ -44,18 +50,46 @@ def _template_line(c: Category) -> str:
 
 
 def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedder | None = None) -> list[Tool]:
-    def resolve(category: str) -> Category | str:
-        """카테고리 이름(또는 id) → 저자의 카테고리, 또는 기본 카테고리의 주소 이름(ideas|styles|refs)."""
+    def resolve(category: str, floor: str | None = None) -> Category | str:
+        """카테고리 이름(또는 id) → 저자의 카테고리, 또는 기본 카테고리의 주소 이름(ideas|styles|refs).
+        같은 이름이 여러 층에 있으면 floor로 가린다(#93)."""
         key = name_key(clean_name(category))
         if key in BUILTIN_BY_KEY:
             return BUILTIN_BY_KEY[key]
-        for c in store.list_categories(current_user()):
-            if name_key(c.name) == key or c.id == category.strip():
-                return c
-        raise ToolError(f"'{category}' 카테고리가 없다. category_list로 이름을 확인한다.")
+        user = current_user()
+        found = [c for c in store.list_categories(user, floors=search_floors(store, user, floor))
+                 if name_key(c.name) == key or c.id == category.strip()]
+        if len(found) == 1:
+            return found[0]
+        if not found:
+            raise ToolError(f"'{category}' 카테고리가 없다. category_list로 이름을 확인한다.")
+        order = [f for f in store.list_floors(user) if any(c.floor == f.id for c in found)]  # 위에서 아래로(공용 먼저)
+        raise ToolError(f"「{found[0].name}」 카테고리가 여러 층에 있다({', '.join(f.label for f in order)}). "
+                        "floor로 어느 층의 것인지 준다.")
 
-    def own(category: str, action: str, tools: dict[str, str] = BUILTIN_TOOLS) -> Category:
-        found = resolve(category)
+    def builtin_floor(user: str, kind: str, floor: str | None, put: bool = False) -> str:
+        """기본 카테고리(kind)의 층. put이면 넣을 층(규칙 12: 그 층에 없으면 공용의 것)."""
+        floors = store.list_floors(user)
+        where = [f for f in floors if kind in f.builtins]
+        if floor and floor.strip():
+            found = match_floor(floors, floor)
+            if found is None:
+                raise ToolError(f"'{floor}' 층을 찾지 못했다. 층: {floors_text(floors)}")
+            if put:
+                return store.place(user, kind, found.id)
+            if kind not in found.builtins:
+                raise ToolError(f"{found.label}에는 {BUILTINS[kind]}이 없다. {BUILTINS[kind]}이 있는 층: "
+                                f"{', '.join(f.label for f in where) or '없음'}")
+            return found.id
+        if put:
+            return store.place(user, kind, resolve_floor(store, user, None))
+        if len(where) == 1:
+            return where[0].id
+        raise ToolError(f"{BUILTINS[kind]}이 여러 층에 있다({', '.join(f.label for f in where)}). floor로 어느 층의 것인지 준다."
+                        if where else f"{BUILTINS[kind]}이 꽂힌 층이 없다.")
+
+    def own(category: str, action: str, tools: dict[str, str] = BUILTIN_TOOLS, floor: str | None = None) -> Category:
+        found = resolve(category, floor)
         if isinstance(found, str):
             raise ToolError(f"'{BUILTINS[found]}'은 기본 카테고리라 {action} 수 없다. {tools[found]} 도구를 찾아 쓴다.")
         return found
@@ -76,20 +110,33 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
             raise ToolError(f"『{project.title}』에 없는 장 번호: {missing}. book_outline의 장 번호를 쓴다.")
         return tuple((project.id, n) for n in dict.fromkeys(chapters))
 
-    def category_list() -> str:
+    def category_list(floor: str | None = None) -> str:
         user = current_user()
         settings = store.get_shelf_settings(user)
-        counts = {"ideas": len(store.list_ideas(user)), "styles": len(store.list_styles(user)), "refs": len(store.list_refs(user))}
+        floors = store.list_floors(user)
+        show = [f for f in floors if f.id in (search_floors(store, user, floor) or [f.id])]
         mine = store.list_categories(user)
-        lines = [f"책장의 카테고리 {3 + len(mine)}개(기본 3 + 저자가 만든 {len(mine)}) · 제목 기본값: {TITLE_MODES[settings.title_default]}"]
-        lines.append(BUILTIN_LINE.strip())
-        lines.append("기본 카테고리(넣을 때는 각자의 도구): " + " · ".join(
-            f"{BUILTINS[k]} {counts[k]}개({BUILTIN_TOOLS[k]}, 색 {color_label(settings.colors.get(k, DEFAULT_COLORS[k]))})"
-            for k in BUILTINS))
-        if mine:
-            lines.append("저자가 만든 카테고리(넣을 때는 category_put, 이름 그대로):")
-            lines += [f"- {c.name} · {_template_line(c)} · 항목 {c.items} · 색 {color_label(c.color)}" for c in mine]
-        else:
+        verified = {f.id: 0 for f in floors}
+        counts: dict[tuple[str, str], int] = {}
+        for kind, items in (("ideas", store.list_ideas(user)), ("styles", store.list_styles(user)), ("refs", store.list_refs(user))):
+            for item in items:
+                counts[(kind, item.floor or COMMON)] = counts.get((kind, item.floor or COMMON), 0) + 1
+                if kind == "refs" and item.status == "verified":
+                    verified[item.floor or COMMON] = verified.get(item.floor or COMMON, 0) + 1
+        total = sum(len(f.builtins) for f in floors) + len(mine)
+        lines = [f"책장: 층 {len(floors)}개({floors_text(floors)}) · 카테고리 {total}개 · 제목 기본값: {TITLE_MODES[settings.title_default]}"]
+        lines.append(BUILTIN_LINE.strip() + " 저자가 만든 카테고리는 category_put으로 넣는다(이름 그대로).")
+        for f in show:
+            lines.append(f"## {f.label}" + ("" if f.common else f" 「{short(f.title)}」({f.id}) · 원고 {'있음' if f.has_manuscript else '없음'}"))
+            for k in f.builtins:
+                n = counts.get((k, f.id), 0)
+                extra = f"(확인 {verified.get(f.id, 0)})" if k == "refs" else ""
+                lines.append(f"- {BUILTINS[k]} {n}개{extra} · 기본({BUILTIN_TOOLS[k]}) · 색 "
+                             f"{color_label(settings.colors.get(k, DEFAULT_COLORS[k]))}")
+            lines += [f"- {c.name} · {_template_line(c)} · 항목 {c.items} · 색 {color_label(c.color)}" for c in mine if c.floor == f.id]
+            if not f.builtins and not any(c.floor == f.id for c in mine):
+                lines.append("- (비어 있음)")
+        if not mine:
             lines.append("저자가 만든 카테고리는 아직 없다(category_create로 만든다).")
         if settings.title_default == "ask":
             lines.append("제목: 저자가 제목을 말하지 않았으면 저장하기 전에 직접 지을지·지어 드릴지·비워 둘지 묻는다.")
@@ -100,42 +147,70 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
         return "\n".join(lines)
 
     def category_create(name: str, template: Literal["빈 카테고리", "인물", "사례", "수치", "용어"] = "빈 카테고리",
-                        color: str | None = None) -> str:
+                        color: str | None = None, floor: str | None = None) -> str:
         user = current_user()
         mine = store.list_categories(user)
         if len(mine) >= MAX_CATEGORIES:
             raise ToolError(f"카테고리는 {MAX_CATEGORIES}개까지 만들 수 있다(기본 셋 빼고). 쓰지 않는 카테고리를 휴지통으로 옮긴 뒤 만든다.")
+        where = resolve_floor(store, user, floor)
         try:
-            clean = check_name(name, {name_key(c.name): c.name for c in mine})
+            clean = check_name(name, {name_key(c.name): c.name for c in mine if c.floor == where})
             kind = template_of(template)
             hex_ = parse_color(color) if color else PALETTE_BY_NAME[NEW_COLOR_ORDER[len(mine) % len(NEW_COLOR_ORDER)]]
-            made = store.create_category(user, clean, kind.key, hex_, tuple(f for f, _ in kind.fields))
+            made = store.create_category(user, clean, kind.key, hex_, tuple(f for f, _ in kind.fields), where)
         except ValueError as e:
             raise ToolError(str(e)) from e
-        return f"카테고리를 만듦: 「{made.name}」 · {_template_line(made)} · 색 {color_label(made.color)}. 책장에 꽂혔다."
+        return (f"카테고리를 만듦: 「{made.name}」 · {_template_line(made)} · 색 {color_label(made.color)}. "
+                f"{floor_label(user, where)}에 꽂혔다.")
 
-    def category_edit(category: str, new_name: str | None = None, color: str | None = None) -> str:
-        if not new_name and not color:
-            raise ToolError("바꿀 것(new_name 또는 color)을 준다.")
+    def floor_label(user: str, floor_id: str) -> str:
+        found = store.get_floor(user, floor_id)
+        return found.label if found else floor_id
+
+    def category_edit(category: str, new_name: str | None = None, color: str | None = None, floor: str | None = None,
+                      move_to: str | None = None, undo_move: bool = False) -> str:
+        if not new_name and not color and not move_to and not undo_move:
+            raise ToolError("바꿀 것(new_name·color·move_to) 또는 undo_move를 준다.")
         user = current_user()
-        found = resolve(category)
+        found = resolve(category, floor)
+        book = found if isinstance(found, str) else found.id
+        if undo_move:  # 마지막 옮기기 되돌리기(#93). 그 카테고리를 옮긴 것일 때만
+            last = store.last_move(user)
+            if last is None or last.book != book:
+                raise ToolError(f"되돌릴 수 있는 것은 마지막 옮기기뿐이다. 마지막으로 옮긴 것: 「{last.name}」." if last else "되돌릴 옮기기가 없다.")
+            try:
+                return tool_message(store, user, undo_last(store, user, last.id), undone=True)
+            except MoveError as e:
+                raise ToolError(error_message(e, polite=False)) from e
+        done: list[str] = []
         try:
             hex_ = parse_color(color) if color else None
-            if isinstance(found, str):  # 기본 카테고리: 색만
+            if isinstance(found, str):  # 기본 카테고리: 색과 층만
                 if new_name:
-                    raise ToolError(f"'{BUILTINS[found]}'은 기본 카테고리라 이름을 바꿀 수 없다(색은 바꿀 수 있다).")
-                settings = store.get_shelf_settings(user)
-                assert hex_ is not None
-                store.save_shelf_settings(user, ShelfSettings({**settings.colors, found: hex_}, settings.my_colors,
-                                                              settings.title_default))
-                return f"「{BUILTINS[found]}」 책 색을 {color_label(hex_)}으로 바꿈."
-            taken = {name_key(c.name): c.name for c in store.list_categories(user) if c.id != found.id}
-            clean = check_name(new_name, taken) if new_name else None
-            changed = store.update_category(user, found.id, name=clean, color=hex_)
+                    raise ToolError(f"'{BUILTINS[found]}'은 기본 카테고리라 이름을 바꿀 수 없다(색·층은 바꿀 수 있다).")
+                if hex_:
+                    settings = store.get_shelf_settings(user)
+                    store.save_shelf_settings(user, ShelfSettings({**settings.colors, found: hex_}, settings.my_colors,
+                                                                  settings.title_default))
+                    done.append(f"「{BUILTINS[found]}」 책 색을 {color_label(hex_)}으로 바꿈")  # 색은 종류마다 하나(모든 층의 생각)
+            elif new_name or hex_:
+                taken = {name_key(c.name): c.name for c in store.list_categories(user, floors=[found.floor]) if c.id != found.id}
+                clean = check_name(new_name, taken) if new_name else None
+                changed = store.update_category(user, found.id, name=clean, color=hex_)
+                done += ([f"이름 「{found.name}」 → 「{changed.name}」"] if clean else []) + (
+                    [f"책 색 {color_label(changed.color)}"] if hex_ else [])
         except ValueError as e:
             raise ToolError(str(e)) from e
-        done = ([f"이름 「{found.name}」 → 「{changed.name}」"] if clean else []) + ([f"책 색 {color_label(changed.color)}"] if hex_ else [])
-        return f"카테고리를 고침: {' · '.join(done)}."
+        if move_to:  # 기본 카테고리는 어느 층의 것인지 알아야 한다(색은 종류마다 하나라 층이 필요 없다)
+            source = builtin_floor(user, found, floor) if isinstance(found, str) else found.floor
+            target = match_floor(store.list_floors(user), move_to)
+            if target is None:
+                raise ToolError(f"'{move_to}' 층을 찾지 못했다. 층: {floors_text(store.list_floors(user))}")
+            try:
+                done.append(tool_message(store, user, move_book(store, user, book, source, target.id)))
+            except MoveError as e:
+                raise ToolError(" · ".join([*done, error_message(e, polite=False)])) from e
+        return (" · ".join(done) + "." if isinstance(found, str) else "카테고리를 고침: " + " · ".join(done) + ".").replace("..", ".")
 
     def category_put(
         category: str,
@@ -149,11 +224,13 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
         chapters: list[int] | None = None,
         item_id: str | None = None,
         project_id: str | None = None,
+        floor: str | None = None,
     ) -> str:
         user = current_user()
-        found = resolve(category)
+        found = resolve(category, floor)
         if found == "ideas":
-            return put_idea(user, author, content, title, title_by, untitled, fields, tags, chapters, item_id)
+            return put_idea(user, author, content, title, title_by, untitled, fields, tags, chapters, item_id,
+                            builtin_floor(user, "ideas", floor, put=True))
         if isinstance(found, str):
             raise ToolError(BUILTIN_PUT[found])
         target = found
@@ -179,6 +256,8 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
         if old is None and not text and not (title or "").strip() and not values:  # 내용·제목·칸이 모두 비었을 때만 거부
             raise ToolError("제목이나 내용 중 하나는 있어야 한다." if not target.fields else
                             f"내용·제목·칸({', '.join(target.fields)}) 중 하나는 있어야 한다.")
+        if chapters and not project_id and target.floor != COMMON:  # 작업물 층의 카테고리면 그 작업물의 장
+            project_id = target.floor
         links = chapter_refs(chapters, project_id) if chapters is not None else (old.chapters if old else ())
         if old is not None and not title and not untitled:  # 고칠 때 제목을 주지 않으면 그대로
             name, by, said = old.title, old.title_by, "제목 그대로"
@@ -196,7 +275,7 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
 
     def put_idea(user: str, author: Literal["me", "ai"], content: str | None, title: str | None,
                  title_by: Literal["ai", "author"] | None, untitled: bool, fields: dict[str, str] | None,
-                 tags: list[str] | None, chapters: list[int] | None, item_id: str | None) -> str:
+                 tags: list[str] | None, chapters: list[int] | None, item_id: str | None, where: str) -> str:
         """category_put(category=생각): idea_add와 같은 규칙(제목 기본값·title_by)으로 생각에 넣는다. 누가는 author를 따른다."""
         if item_id:
             raise ToolError("생각은 이 도구로 고치지 않는다. 저자가 웹 책장에서 고치거나, 새로 넣는다.")
@@ -206,19 +285,20 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
             raise ToolError("생각에 넣을 내용(content)이 비어 있다.")
         name, by, said = decide_title(store, user, title, title_by, untitled)
         [idea] = store.add_ideas(user, [Idea(new_id(), text[:CONTENT_MAX], "thought" if author == "me" else "ai", author,
-                                             title=name, title_by=by)])
+                                             title=name, title_by=by, floor=where)])
         skipped = " · 생각에는 장 연결·태그가 없어 넣지 않았다" if chapters or tags else ""
-        return f"생각에 저장함 [{author}] {idea.id} · {said}{skipped}"
+        return f"생각에 저장함 [{author}] {idea.id} · {said} · {floor_label(user, where)}의 생각{skipped}"
 
-    def category_search(query: str, category: str | None = None, k: int = 8) -> str:
+    def category_search(query: str, category: str | None = None, k: int = 8, floor: str | None = None) -> str:
         user = current_user()
         k = max(1, min(k, 30))
-        only = own(category, "category_search로 찾을", BUILTIN_SEARCH) if category else None
-        cats = {c.id: c for c in store.list_categories(user)}
+        only = own(category, "category_search로 찾을", BUILTIN_SEARCH, floor) if category else None
+        cats = {c.id: c for c in store.list_categories(user, floors=search_floors(store, user, floor))}
+        labels = {f.id: f.label for f in store.list_floors(user)} if len({c.floor for c in store.list_categories(user)}) > 1 else {}
         found: list[CategoryItem] = []
         for chunk in hybrid_search(store, user, query, ["category"], k * 4, embedder):
             cid, _, iid = chunk.owner_id.partition("/")
-            if (only and cid != only.id) or any(i.id == iid and i.category_id == cid for i in found):
+            if (only and cid != only.id) or cid not in cats or any(i.id == iid and i.category_id == cid for i in found):
                 continue
             if item := store.get_category_item(user, cid, iid):
                 found.append(item)
@@ -233,7 +313,8 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
             cat = cats.get(item.category_id)
             if item.chapters and item.chapters[0][0] not in names:
                 names[item.chapters[0][0]] = {c.number: c.display for c in store.list_chapters(user, item.chapters[0][0])}
-            head = f"{n}. 「{cat.name if cat else '?'}」 {item.id} · [{item.author}] {local_time(item.created_at, '%Y-%m-%d')}"
+            head = f"{n}. 「{cat.name if cat else '?'}」" + (f"({labels[cat.floor]})" if cat and cat.floor in labels else "")
+            head += f" {item.id} · [{item.author}] {local_time(item.created_at, '%Y-%m-%d')}"
             head += f" · 제목 「{item.title}」" + (" (AI가 지은 제목)" if item.title_by == "ai" else "") if item.title else ""
             lines += [head, f"   “{summary(item)[:200]}”"]
             if item.fields:
@@ -242,9 +323,9 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
                 lines.append("   연결된 장: " + ", ".join(names.get(p, {}).get(num, f"{num}") for p, num in item.chapters))
         return "\n".join(lines)
 
-    def category_trash(category: str, note: str, item_id: str | None = None) -> str:
+    def category_trash(category: str, note: str, item_id: str | None = None, floor: str | None = None) -> str:
         user = current_user()
-        target = own(category, "휴지통으로 옮길")
+        target = own(category, "휴지통으로 옮길", floor=floor)
         try:
             if item_id:
                 moved = store.trash_category_item(user, target.id, item_id.strip(), note.strip())
@@ -272,8 +353,9 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
         Tool.from_function(
             category_list, name="category_list",
             description=(
-                "책장의 카테고리 목록: 기본 카테고리(생각·문체·문헌)와 저자가 만든 카테고리의 이름·템플릿·칸·항목 수·책 색, "
-                "그리고 저자의 제목 기본값. 넣을 곳을 되묻거나 카테고리에 넣기 전에 먼저 부른다."
+                "책장의 층(공용·작업물마다 한 층)과 층마다 꽂힌 카테고리: 기본 카테고리(생각·문체·문헌)와 저자가 만든 카테고리의 "
+                "이름·템플릿·칸·항목 수·책 색, 그리고 저자의 제목 기본값. 넣을 곳을 되묻거나 카테고리에 넣기 전에 먼저 부른다. "
+                "floor를 주면 그 층만."
             ),
             structured_output=False,
         ),
@@ -284,16 +366,21 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
                 f"template: {template_names}(칸은 템플릿마다 몇 개뿐이고, 모든 항목에 제목·내용이 있다). "
                 "color는 기본 색 이름(빨강·주황·노랑·초록·파랑·남색·보라·분홍·갈색·회색·검정·미색·자주·짙은 초록·청록·겨자·하늘·먹색) "
                 "또는 #RRGGBB이고, 주지 않으면 차례대로 정해진다. 색에 뜻을 붙이지 않는다(뜻은 저자가 정한다). "
-                "이름은 12자까지이고, 정해진 이름(생각·문체·문헌·원고·전체·확인 요청 등)과 이미 있는 이름은 쓸 수 없다."
+                "이름은 12자까지이고, 정해진 이름(생각·문체·문헌·원고·전체·확인 요청 등)과 그 층에 이미 있는 이름은 쓸 수 없다. "
+                + FLOOR_PUT
             ),
             structured_output=False,
         ),
         Tool.from_function(
             category_edit, name="category_edit",
             description=(
-                "저자가 카테고리의 이름이나 책 색을 바꾸라고 분명히 말했을 때만 부른다. category는 지금 이름. "
-                "기본 카테고리(생각·문체·문헌)는 색만 바꿀 수 있다. color는 기본 색 이름 또는 #RRGGBB "
-                "(예: '사례 카테고리를 빨간색으로' → category=사례, color=빨강)."
+                "저자가 카테고리의 이름·책 색·층을 바꾸라고 분명히 말했을 때만 부른다. category는 지금 이름, "
+                "같은 이름이 여러 층에 있으면 floor로 가린다. "
+                "기본 카테고리(생각·문체·문헌)는 이름은 못 바꾸고 색·층만 바꾼다. color는 기본 색 이름 또는 #RRGGBB "
+                "(예: '사례 카테고리를 빨간색으로' → category=사례, color=빨강). "
+                "move_to: 옮길 층(공용·1층·작업물 id). 항목이 모두 함께 간다. 받는 층에 같은 기본 카테고리가 있으면 합치고, "
+                "같은 이름의 저자 카테고리가 있으면 옮기지 않는다. "
+                "undo_move=true: 저자가 방금 옮긴 것을 되돌리라고 할 때(마지막 옮기기만)."
             ),
             structured_output=False,
         ),
@@ -306,7 +393,8 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
                 "category는 category_list의 이름 그대로. author: 저자의 말을 옮긴 것이면 me, Claude가 쓴 글(요약·설명)이면 ai. "
                 "fields는 그 카테고리의 칸 이름: 값이다. 저자가 말하지 않은 칸은 지어내지 말고 비워 둔다. "
                 "수치·출처는 저자가 말했거나 확인한 것만 넣고, Claude의 기억으로 채우지 않는다. "
-                "chapters는 연결할 장 번호(지금 책, book_outline의 번호). tags는 짧은 낱말 목록. " + TITLE_RULE
+                "chapters는 연결할 장 번호(그 카테고리가 꽂힌 작업물 또는 지금 책, book_outline의 번호). tags는 짧은 낱말 목록. "
+                "floor: 같은 이름이 여러 층에 있을 때 가린다(생각이면 넣을 층). " + TITLE_RULE
             ),
             structured_output=False,
         ),
@@ -314,7 +402,7 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
             category_search, name="category_search",
             description=(
                 "저자가 만든 카테고리의 항목을 찾는다(category를 주면 그 카테고리만). k=8. 결과마다 카테고리·id·누가·작성 날짜·제목·내용 앞부분·칸·연결된 장. "
-                "생각·문체·문헌은 각자의 검색 도구로 찾는다."
+                "생각·문체·문헌은 각자의 검색 도구로 찾는다. floor를 주면 그 층의 카테고리에서만 찾는다."
             ),
             structured_output=False,
         ),
@@ -324,7 +412,7 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
                 "저자가 그 카테고리(또는 그 안의 항목)를 지우라고 분명히 말했을 때만 부른다. 여러 개면 목록을 보여 주고 확인받는다. "
                 "item_id를 주면 그 항목만, 없으면 카테고리를 통째로 휴지통으로 옮긴다(지우지 않는다. 운영자가 되살릴 수 있다). "
                 "통째로 옮길 때는 항목 수를 저자에게 말하고 확인받은 뒤 부른다. note에는 지우는 이유를 쓴다. "
-                "기본 카테고리(생각·문체·문헌)는 통째로 옮길 수 없다."
+                "기본 카테고리(생각·문체·문헌)는 통째로 옮길 수 없다. 같은 이름이 여러 층에 있으면 floor로 가린다."
             ),
             structured_output=False,
         ),

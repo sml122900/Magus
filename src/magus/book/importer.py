@@ -14,6 +14,7 @@ import hashlib
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from dataclasses import replace as replace_titles
 from pathlib import Path
 
 from magus.book.comments import author_kind, classify_comment, comment_fingerprint
@@ -363,18 +364,25 @@ def import_manuscript(
 
     terms: list[str] = []
     ai_names: list[str] = []
-    if project_id and store.get_project(user_id, project_id):
+    existing = store.get_project(user_id, project_id) if project_id else None
+    # 원고 없이 제목만 만든 빈 층(#93)이면 그 층에 원고를 채운다(층의 카테고리·자리는 그대로, 제목은 저자가 지은 것)
+    empty = (existing is not None and not replace and not store.list_chapters(user_id, existing.id)
+             and not store.list_editions(user_id, existing.id))
+    if existing is not None and not empty:
         if not replace:
             raise ValueError(
                 f"프로젝트 {project_id!r}가 이미 있다. 같은 책을 Word에서 고쳐 다시 올리는 것이면 수정본으로 올린다"
                 "(book_import new_edition=true, 웹 '수정본으로 올리기'). 다른 책이면 새 project_id를 쓴다. "
                 "replace=True는 결정·확인 요청까지 휴지통으로 보내고 새로 만든다."
             )
-        terms = store.get_non_citation_terms(user_id, project_id)  # 사람이 정한 비인용 용어는 다시 임포트해도 유지
-        ai_names = store.get_ai_authors(user_id, project_id)  # AI 작성자 이름 목록도 같다
-        store.archive_project(user_id, project_id)
+        terms = store.get_non_citation_terms(user_id, existing.id)  # 사람이 정한 비인용 용어는 다시 임포트해도 유지
+        ai_names = store.get_ai_authors(user_id, existing.id)  # AI 작성자 이름 목록도 같다
+        store.archive_project(user_id, existing.id)
     titles = book_titles(manuscript, split, title, subtitle, path)
-    project = store.create_project(user_id, titles.title or path.stem, project_id=project_id, titles=titles)
+    if empty and existing is not None:
+        project = store.set_titles(user_id, existing.id, replace_titles(titles, title=title or existing.title))
+    else:
+        project = store.create_project(user_id, titles.title or path.stem, project_id=project_id, titles=titles)
     files = {"original": store.save_original(user_id, project.id, path.name, path.read_bytes())}
     if terms:
         store.set_non_citation_terms(user_id, project.id, terms)
@@ -421,7 +429,7 @@ def import_manuscript(
         if c.author:
             authors[c.author + ("(AI)" if issue.by_ai else "")] += 1
 
-    bib_report = import_bibliography(store, user_id, "\n".join(b.text for b in split.bib_blocks if b.kind == "para"))
+    bib_report = import_bibliography(store, user_id, "\n".join(b.text for b in split.bib_blocks if b.kind == "para"), project.id)
     after_refs_changed(store, user_id)  # 장별 미확인 인용 수, citation 이슈 → refs 연결(ref_id)
     linked = sum(1 for i in store.list_issues(user_id, project.id, None, kind="citation") if i.ref_id)
     numbers = [c.number for c in split.chapters if not c.label]  # 서장(0)·맺음(90)·부록(9N)·부 들어가며(100+N)는 빼고 본다

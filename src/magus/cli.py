@@ -58,6 +58,11 @@ def main(argv: list[str] | None = None) -> None:
     trash.add_argument("id", nargs="?", help="category-item은 <카테고리 id>/<항목 id>")
     trash.add_argument("--note", default="", help="put: 휴지통으로 옮기는 이유")
     trash.add_argument("--name", default=None, help="restore category: 같은 이름이 이미 있으면 이 이름으로 되살린다")
+    floors = sub.add_parser("floors", help="층 이전(#93, 운영자용): plan(미리보기) | apply --backup 폴더 | revert(옛 코드로 되돌리기 전)")
+    floors.add_argument("action", choices=["plan", "apply", "revert"])
+    floors.add_argument("--user", action="append", default=None, help="사용자(여러 번 줄 수 있다). 없으면 USER_ID")
+    floors.add_argument("--all-users", action="store_true", help="데이터 폴더의 모든 사용자")
+    floors.add_argument("--backup", type=Path, help="apply: 사용자 책장 폴더를 복사해 둘 곳(필수)")
     synth = sub.add_parser("synth", help="합성 fixture(원고 docx·pdf, 대화 기록 md)를 만든다")
     synth.add_argument("folder", type=Path)
     sub.add_parser("seed-demo", help="1단계 확인용 가짜 프로젝트 생성")
@@ -231,6 +236,25 @@ def main(argv: list[str] | None = None) -> None:
         for t in items:
             print(f"- {t.kind} {t.id} · {t.trashed_at} · {t.note or '-'}" + (f" · 함께 옮긴 생각 {t.with_id}" if t.with_id else "")
                   + f" · “{t.preview[:40]}”")
+    elif args.cmd == "floors":  # 층 이전(#93). 실행은 백업 뒤에, 전후 비교를 보인다
+        from magus import floor_migrate
+
+        users = store.list_users() if args.all_users else (args.user or [settings.user_id])
+        if args.action == "apply" and args.backup is None:
+            parser.exit(2, "apply에는 --backup 폴더가 필요합니다(사용자 책장 폴더를 먼저 복사해 둡니다).\n")
+        failed = False
+        for user in users:
+            if args.action == "plan":
+                lines = floor_migrate.plan(store, user)
+            elif args.action == "apply":
+                args.backup.mkdir(parents=True, exist_ok=True)
+                lines, same = floor_migrate.apply(store, user, args.backup)
+                failed |= not same
+            else:
+                lines = floor_migrate.revert(store, user)
+            print("\n".join(lines) + "\n")
+        if failed:
+            parser.exit(1, "전후가 다른 사용자가 있습니다. 위 보고를 확인하세요(백업에서 되살릴 수 있습니다).\n")
     elif args.cmd == "conversation":
         from magus.casper.tools import add_conversation
 

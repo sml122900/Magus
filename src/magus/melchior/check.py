@@ -17,6 +17,7 @@ import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+from magus.floors import COMMON
 from magus.melchior.citations import Citation, find_citations, make_ref_key, strip_particle
 from magus.melchior.translit import best_match
 from magus.store import Ref, Store
@@ -92,18 +93,25 @@ class CheckResult:
         }
 
 
-class Resolver:
-    """인용 → ref. 한 번의 검사(또는 일괄 집계) 동안 연도별 문헌 목록을 한 번만 읽는다."""
+def cite_floors(project_id: str) -> tuple[str, str]:
+    """작업물 원고의 인용 점검이 보는 층: 그 작업물 층 + 공용(#93). 다른 작업물 층의 문헌은 보지 않는다."""
+    return (project_id, COMMON)
 
-    def __init__(self, store: Store, user_id: str):
+
+class Resolver:
+    """인용 → ref. 한 번의 검사(또는 일괄 집계) 동안 연도별 문헌 목록을 한 번만 읽는다.
+    project_id를 주면 그 작업물 층 + 공용의 문헌만 본다(#93). 없으면 사람의 모든 문헌."""
+
+    def __init__(self, store: Store, user_id: str, project_id: str | None = None):
         self.store, self.user_id = store, user_id
+        self.floors = cite_floors(project_id) if project_id else None
         self._by_year: dict[str, list[tuple[str, str]]] | None = None
 
     def _years(self) -> dict[str, list[tuple[str, str]]]:
         """네 자리 연도 → (key, 영문 성). 1930a·1930b는 1930으로 묶는다."""
         if self._by_year is None:
             self._by_year = defaultdict(list)
-            for ref in self.store.list_refs(self.user_id):
+            for ref in self.store.list_refs(self.user_id, floors=self.floors):
                 year, surname = str(ref.bib.get("year", ""))[:4], str(ref.bib.get("first_author", ""))
                 if year.isdigit() and surname and not re.search(r"[가-힣一-鿿]", surname):
                     self._by_year[year].append((ref.key, surname))
@@ -118,7 +126,7 @@ class Resolver:
     ) -> tuple[Ref | None, str, tuple[Ref, ...]]:
         """(ref, 어떻게 이었나, 후보). 연도 a/b가 모호하면 잇지 않고 후보만 돌려준다(ref=None, 사용자 결정 #31)."""
         for key in keys:
-            if ref := self.store.resolve_ref(self.user_id, key):
+            if ref := self.store.resolve_ref(self.user_id, key, floors=self.floors):
                 return self._disambiguate(ref, coauthors), ("" if ref.key == key else "alias"), ()
         for key in keys:  # Keynes(1930)인데 참고문헌에는 1930a·1930b만 있는 경우
             if re.search(r"\d$", key) and (variants := self._suffixed(key)):
@@ -130,7 +138,7 @@ class Resolver:
             bases = {re.sub(r"(\d{4})[a-z]$", r"\1", k): s for k, s in candidates}
             if base := best_match(hangul, list(bases.items())):
                 variants = sorted(k for k, _ in candidates if re.sub(r"(\d{4})[a-z]$", r"\1", k) == base)
-                refs = tuple(r for r in (self.store.get_ref(self.user_id, k) for k in variants) if r)
+                refs = tuple(r for r in (self.store.get_ref(self.user_id, k, floors=self.floors) for k in variants) if r)
                 if len(refs) == 1:
                     return refs[0], "음역 추정", ()
                 return None, "음역 추정·연도 a/b 모호", refs
@@ -140,7 +148,7 @@ class Resolver:
         """key + a, b, c … 로 있는 문헌들."""
         out = []
         for suffix in "abcdefgh":
-            if not (ref := self.store.get_ref(self.user_id, key + suffix)):
+            if not (ref := self.store.get_ref(self.user_id, key + suffix, floors=self.floors)):
                 break
             out.append(ref)
         return out
@@ -149,10 +157,10 @@ class Resolver:
     def _disambiguate(self, ref: Ref, coauthors: tuple[str, ...]) -> Ref:
         """같은 첫 저자·연도 문헌(acemoglu2001, acemoglu2001-2)이 있으면 인용의 공저자 이름으로 가린다."""
         base = re.sub(r"-\d+$", "", ref.key)
-        siblings = [r for r in (self.store.get_ref(self.user_id, f"{base}-{n}") for n in range(2, 10)) if r]
+        siblings = [r for r in (self.store.get_ref(self.user_id, f"{base}-{n}", floors=self.floors) for n in range(2, 10)) if r]
         if not siblings or not coauthors:
             return ref
-        candidates = [r for r in (self.store.get_ref(self.user_id, base), *siblings) if r]
+        candidates = [r for r in (self.store.get_ref(self.user_id, base, floors=self.floors), *siblings) if r]
         folded = [_fold(c) for c in coauthors]
         matches = [r for r in candidates if all(c in _fold(str(r.bib.get("authors", ""))) for c in folded)]
         return matches[0] if len(matches) == 1 else ref
@@ -212,15 +220,16 @@ def check_chapter(store: Store, user_id: str, project_id: str, number: int, reso
     chapter = store.read_chapter(user_id, project_id, number)
     if chapter is None:
         return None
+    resolver = resolver or Resolver(store, user_id, project_id)
     result = check_text(store, user_id, chapter.content, resolver, terms_of(store, user_id, project_id))
     store.set_cite_keys(user_id, project_id, {number: CiteKeys(result.unchecked_keys, result.uncertain_keys)})
     return result
 
 
 def refresh_cite_counts(store: Store, user_id: str) -> None:
-    """refs가 바뀐 뒤나 인덱스를 다시 만든 뒤에 사용자의 모든 장 집계를 다시 계산한다."""
-    resolver = Resolver(store, user_id)
+    """refs가 바뀐 뒤(층 옮기기 포함)나 인덱스를 다시 만든 뒤에 사용자의 모든 장 집계를 다시 계산한다."""
     for project in store.list_projects(user_id):
+        resolver = Resolver(store, user_id, project.id)
         terms = terms_of(store, user_id, project.id)
         cites = {}
         for meta in store.list_chapters(user_id, project.id):
@@ -245,9 +254,9 @@ def link_citation_issues(store: Store, user_id: str) -> int:
     저장된 ref_key로 찾는다(사람이 issues.md에 직접 적은 경우)."""
     from magus.book.comments import COMMENT_ANCHOR_SPLIT
 
-    resolver = Resolver(store, user_id)
     changed = 0
     for project in store.list_projects(user_id):
+        resolver = Resolver(store, user_id, project.id)
         terms = terms_of(store, user_id, project.id)
         updates: dict[int, str | None] = {}
         for issue in store.list_issues(user_id, project.id, None, kind="citation"):
@@ -273,9 +282,9 @@ def after_refs_changed(store: Store, user_id: str) -> int:
 
 def chapters_citing(store: Store, user_id: str, key: str) -> dict[str, list[int]]:
     """이 ref를 인용하는 장들(프로젝트별). ref_add 응답에서 영향받는 장을 알려 줄 때 쓴다."""
-    resolver = Resolver(store, user_id)
     out: dict[str, list[int]] = defaultdict(list)
     for project in store.list_projects(user_id):
+        resolver = Resolver(store, user_id, project.id)
         terms = terms_of(store, user_id, project.id)
         for meta in store.list_chapters(user_id, project.id):
             chapter = store.read_chapter(user_id, project.id, meta.number)

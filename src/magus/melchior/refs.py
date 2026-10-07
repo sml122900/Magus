@@ -7,12 +7,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import re
 import unicodedata
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from magus.floors import COMMON
 from magus.melchior.bibliography import first_author
 from magus.melchior.citations import make_ref_key
 from magus.store import Passage, Ref, Store
@@ -96,8 +99,12 @@ def add_ref(
     full_text: str | None = None,
     aliases: list[str] | None = None,
     file_label: str | None = None,
+    floor: str | None = None,
+    default_floor: Callable[[], str] | None = None,
 ) -> tuple[Ref, str | None, int]:
-    """(저장된 ref, 이전 상태 또는 None, 새로 추가된 발췌 수)."""
+    """(저장된 ref, 이전 상태 또는 None, 새로 추가된 발췌 수).
+    층(#93): 새 문헌은 floor(없으면 default_floor())의 문헌에 꽂는다. 이미 있는 문헌은 제자리에 두되,
+    floor를 줬고 그 문헌이 다른 작업물 층에 있으면 두 작업물이 함께 쓰도록 공용으로 옮긴다."""
     passages = [p for p in passages if p.text.strip()]
     if not passages:
         raise ValueError("passages가 비어 있다. 직접 읽고 고른 발췌(text, reason)가 있어야 verified가 된다.")
@@ -127,6 +134,10 @@ def add_ref(
             created_at=existing.created_at,
         )
         stored = store.put_ref(user_id, ref, passages=[*old, *new], full_text=full_text)
+        if floor and stored.floor not in (floor, COMMON):
+            stored = store.set_ref_floor(user_id, stored.key, COMMON)
         return stored, existing.status, len(new)
-    ref = Ref(key=key, status="verified", bib=clean_bib, aliases=tuple(aliases or ()), file_path=file_label or file_path)
+    target = floor or (default_floor() if default_floor else None)
+    home = store.place(user_id, "refs", target) if target else None
+    ref = Ref(key=key, status="verified", bib=clean_bib, aliases=tuple(aliases or ()), file_path=file_label or file_path, floor=home)
     return store.put_ref(user_id, ref, passages=passages, full_text=full_text), None, len(passages)

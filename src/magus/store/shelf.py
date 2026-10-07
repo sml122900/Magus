@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
@@ -20,15 +20,26 @@ from typing import Any
 import numpy as np
 
 from magus.balthasar.style import search_text as style_search_text
+from magus.floors import COMMON
 from magus.ids import safe_id, utcnow
 from magus.store.base import (
     WEB_ONLY_LANES, Author, Chunk, Idea, Lane, Passage, Ref, RefStatus, StyleEntry, TrashItem, TrashKind,
 )
 from magus.store.fileio import locked, read_json, read_text, write_json, write_text
+from magus.store.floors import Layout
 from magus.textindex import chunk_text, index_text
 
-# 생각 파일에서 값이 없으면 쓰지 않는 키(#92 전 코드로 되돌려도 그 파일을 그대로 읽도록)
+# 생각 파일에서 값이 없으면 쓰지 않는 키(#92 전 코드로 되돌려도 그 파일을 그대로 읽도록).
+# "floor"(#93)는 언제나 적는다. 층 전 코드로 되돌릴 때는 magus floors revert로 먼저 뗀다.
 OPTIONAL_IDEA_KEYS = ("title", "title_by", "edited_at", "edited_by")
+
+
+def _in(floors: Iterable[str] | None, column: str = "floor") -> tuple[str, list[str]]:
+    """floors 거르기 SQL 조각과 값. None이면 거르지 않는다."""
+    if floors is None:
+        return "", []
+    values = list(dict.fromkeys(floors))
+    return (f" AND {column} IN ({','.join('?' * len(values))})", values) if values else (" AND 0", [])
 _REF_KEY = re.compile(r"[a-z0-9가-힣一-鿿㐀-䶿][a-z0-9가-힣一-鿿㐀-䶿_-]{0,79}")
 
 
@@ -44,6 +55,10 @@ class ShelfMixin:
     _lock: threading.RLock
 
     def _user_dir(self, user_id: str) -> Path: ...  # LocalStore가 구현한다
+    # FloorMixin이 구현한다
+    _layout: Callable[[str], Layout]
+    _known: Callable[[str, Layout], set[str]]
+    place: Callable[[str, str, str | None], str]
     # CategoryMixin이 구현한다(메서드 껍데기를 두면 MRO에서 진짜를 가리므로 주석만 둔다)
     _trashed_categories: Callable[[str], list[tuple[str, str, dict[str, Any], str]]]
     _restore_category: Callable[[str, str, str | None], list[str]]
@@ -55,23 +70,27 @@ class ShelfMixin:
         return self._user_dir(user_id) / "shelf" / "melchior"
 
     @locked
-    def get_ref(self, user_id: str, key: str) -> Ref | None:
-        row = self._db.execute("SELECT * FROM refs WHERE user_id = ? AND key = ?", (user_id, key)).fetchone()
+    def get_ref(self, user_id: str, key: str, *, floors: Iterable[str] | None = None) -> Ref | None:
+        where, values = _in(floors)
+        row = self._db.execute(f"SELECT * FROM refs WHERE user_id = ? AND key = ?{where}", (user_id, key, *values)).fetchone()
         return _ref(row) if row else None
 
     @locked
-    def resolve_ref(self, user_id: str, key: str) -> Ref | None:
-        if ref := self.get_ref(user_id, key):
+    def resolve_ref(self, user_id: str, key: str, *, floors: Iterable[str] | None = None) -> Ref | None:
+        floors = list(floors) if floors is not None else None
+        if ref := self.get_ref(user_id, key, floors=floors):
             return ref
+        where, values = _in(floors, "r.floor")
         row = self._db.execute(
-            "SELECT r.* FROM refs r, json_each(r.aliases) a WHERE r.user_id = ? AND a.value = ? ORDER BY r.key LIMIT 1",
-            (user_id, key),
+            f"SELECT r.* FROM refs r, json_each(r.aliases) a WHERE r.user_id = ? AND a.value = ?{where} ORDER BY r.key LIMIT 1",
+            (user_id, key, *values),
         ).fetchone()
         return _ref(row) if row else None
 
     @locked
-    def list_refs(self, user_id: str, status: RefStatus | None = None) -> list[Ref]:
-        sql, args = "SELECT * FROM refs WHERE user_id = ?", [user_id]
+    def list_refs(self, user_id: str, status: RefStatus | None = None, *, floors: Iterable[str] | None = None) -> list[Ref]:
+        where, values = _in(floors)
+        sql, args = f"SELECT * FROM refs WHERE user_id = ?{where}", [user_id, *values]
         if status:
             sql, args = sql + " AND status = ?", [*args, status]
         return [_ref(r) for r in self._db.execute(sql + " ORDER BY key", args)]
@@ -91,6 +110,11 @@ class ShelfMixin:
     ) -> Ref:
         key = safe_ref_key(ref.key)
         rdir = self._melchior_dir(user_id) / key
+        old = read_json(rdir / "bib.json") if (rdir / "bib.json").exists() else {}
+        known = self._known(user_id, self._layout(user_id))
+        # 층: 준 것(호출자가 place로 정한 층), 없으면 지금 꽂힌 층, 새 문헌이면 위에서부터 문헌이 꽂힌 첫 층(#93)
+        floor = (next((f for f in (ref.floor, old.get("floor")) if isinstance(f, str) and f in known), None)
+                 or self.place(user_id, "refs", None))
         if full_text is not None:
             write_text(rdir / "full.txt", full_text)
         if passages is not None:
@@ -103,7 +127,9 @@ class ShelfMixin:
                 "aliases": list(dict.fromkeys(ref.aliases)),
                 "bib": ref.bib,
                 "file_path": ref.file_path,
-                "created_at": ref.created_at or utcnow(),
+                "created_at": ref.created_at or old.get("created_at") or utcnow(),
+                "updated_at": utcnow(),
+                "floor": floor,
             },
         )
         with self._db:
@@ -112,17 +138,19 @@ class ShelfMixin:
         assert stored is not None
         return stored
 
-    def _index_ref(self, user_id: str, rdir: Path) -> None:
+    def _index_ref(self, user_id: str, rdir: Path, floor: str | None = None) -> None:
+        """floor: reindex가 배치에서 정해 준 층(파일에 층이 없거나 모르는 층일 때). None이면 파일의 층."""
         record = read_json(rdir / "bib.json")
         full = read_text(rdir / "full.txt")
         passages = read_json(rdir / "passages.json") if (rdir / "passages.json").exists() else []
         ref_id = self._db.execute(
             """
-            INSERT INTO refs (user_id, key, aliases, bib, status, has_fulltext, file_path, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO refs (user_id, key, aliases, bib, status, has_fulltext, file_path, created_at, updated_at, floor)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (user_id, key) DO UPDATE SET
                 aliases = excluded.aliases, bib = excluded.bib, status = excluded.status,
-                has_fulltext = excluded.has_fulltext, file_path = excluded.file_path
+                has_fulltext = excluded.has_fulltext, file_path = excluded.file_path, updated_at = excluded.updated_at,
+                floor = excluded.floor
             RETURNING id
             """,
             (
@@ -134,6 +162,8 @@ class ShelfMixin:
                 int(bool(full.strip())),
                 record.get("file_path"),
                 record.get("created_at") or utcnow(),
+                record.get("updated_at"),
+                floor or str(record.get("floor") or COMMON),
             ),
         ).fetchone()[0]
         self._db.execute("DELETE FROM ref_passages WHERE ref_id = ?", (ref_id,))
@@ -153,9 +183,10 @@ class ShelfMixin:
     @locked
     def add_ideas(self, user_id: str, ideas: list[Idea]) -> list[Idea]:
         stored = []
+        default = self.place(user_id, "ideas", None) if any(i.floor is None for i in ideas) else None
         for idea in ideas:
             safe_id(idea.id, "idea id")
-            idea = replace(idea, created_at=idea.created_at or utcnow())
+            idea = replace(idea, created_at=idea.created_at or utcnow(), floor=idea.floor or default)
             # 제목이 없으면 title·title_by 키를 쓰지 않는다: 제목 전(#92 전) 코드로 되돌려도 파일을 그대로 읽는다
             record = {k: v for k, v in asdict(idea).items() if not (k in OPTIONAL_IDEA_KEYS and v is None)}
             write_json(self._casper_dir(user_id) / f"{idea.id}.json", record)
@@ -168,9 +199,9 @@ class ShelfMixin:
     def _index_idea(self, user_id: str, idea: Idea) -> None:
         self._db.execute(
             "INSERT OR REPLACE INTO ideas (id, user_id, text, kind, origin, author, parent_id, created_at, title, title_by, "
-            "edited_at, edited_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "edited_at, edited_by, floor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (idea.id, user_id, idea.text, idea.kind, idea.origin, idea.author, idea.parent_id, idea.created_at, idea.title,
-             idea.title_by, idea.edited_at, idea.edited_by),
+             idea.title_by, idea.edited_at, idea.edited_by, idea.floor or COMMON),
         )
         lane: Lane = "idea_me" if idea.author == "me" else "idea_ai"
         text = f"{idea.title}\n{idea.text}" if idea.title else idea.text  # 제목(#92)도 찾는다
@@ -185,8 +216,9 @@ class ShelfMixin:
         return {r["id"]: _idea(r) for r in rows}
 
     @locked
-    def list_ideas(self, user_id: str, author: Author | None = None) -> list[Idea]:
-        sql, args = "SELECT * FROM ideas WHERE user_id = ?", [user_id]
+    def list_ideas(self, user_id: str, author: Author | None = None, *, floors: Iterable[str] | None = None) -> list[Idea]:
+        where, values = _in(floors)
+        sql, args = f"SELECT * FROM ideas WHERE user_id = ?{where}", [user_id, *values]
         if author:
             sql, args = sql + " AND author = ?", [*args, author]
         return [_idea(r) for r in self._db.execute(sql + " ORDER BY id", args)]
@@ -199,7 +231,7 @@ class ShelfMixin:
     @locked
     def add_style(self, user_id: str, entry: StyleEntry) -> StyleEntry:
         safe_id(entry.id, "style id")
-        entry = replace(entry, created_at=entry.created_at or utcnow())
+        entry = replace(entry, created_at=entry.created_at or utcnow(), floor=entry.floor or self.place(user_id, "styles", None))
         write_json(self._balthasar_dir(user_id) / f"{entry.id}.json", asdict(entry))
         with self._db:
             self._index_style(user_id, entry)
@@ -207,10 +239,10 @@ class ShelfMixin:
 
     def _index_style(self, user_id: str, entry: StyleEntry) -> None:
         self._db.execute(
-            "INSERT OR REPLACE INTO style_entries (id, user_id, passage, reason, work, tags, created_at, tags_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO style_entries (id, user_id, passage, reason, work, tags, created_at, tags_by, floor) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (entry.id, user_id, entry.passage, entry.reason, entry.work, json.dumps(entry.tags, ensure_ascii=False),
-             entry.created_at, entry.tags_by),
+             entry.created_at, entry.tags_by, entry.floor or COMMON),
         )
         # 문체 검색의 대상은 reason + tags다. passage를 색인하면 문체가 아니라 주제가 검색된다.
         # work(출전)는 키워드 색인에만 더한다: "유홍준 그 문장"처럼 출전으로 찾는 경우가 있다(사용자 결정 #24).
@@ -229,8 +261,10 @@ class ShelfMixin:
         return {r["id"]: _style(r) for r in rows}
 
     @locked
-    def list_styles(self, user_id: str) -> list[StyleEntry]:
-        return [_style(r) for r in self._db.execute("SELECT * FROM style_entries WHERE user_id = ? ORDER BY id", (user_id,))]
+    def list_styles(self, user_id: str, *, floors: Iterable[str] | None = None) -> list[StyleEntry]:
+        where, values = _in(floors)
+        return [_style(r) for r in self._db.execute(f"SELECT * FROM style_entries WHERE user_id = ?{where} ORDER BY id",
+                                                    (user_id, *values))]
 
     # ---- 휴지통(생각·문체, #88) -------------------------------------------------------
     # 지우지 않고 trash/shelf/<casper|balthasar>/<id>.json으로 옮긴다. 파일에 "_trash"(시각·이유·함께 옮긴 생각)를 덧붙인다.
@@ -301,9 +335,13 @@ class ShelfMixin:
             raise ValueError(f"휴지통에 {kind} {item_id}가 없다")
         names = [item_id] + ([p.stem for p in sorted(trash.glob("*.json")) if (read_json(p).get("_trash") or {}).get("with") == item_id]
                              if kind == "idea" else [])
+        layout = self._layout(user_id)
+        known = self._known(user_id, layout)
         with self._db:
             for name in names:
                 data = {k: v for k, v in read_json(trash / f"{name}.json").items() if k != "_trash"}
+                if data.get("floor") not in known:  # 층이 없거나 그사이 사라진 층이면 그 종류가 꽂힌 첫 층으로
+                    data["floor"] = layout.fallback("ideas" if kind == "idea" else "styles")
                 write_json(self._shelf_dir(user_id, kind) / f"{name}.json", data)
                 (trash / f"{name}.json").unlink()
                 if kind == "idea":
@@ -313,12 +351,21 @@ class ShelfMixin:
         return names
 
     def _reindex_shelf(self, user_id: str) -> None:
+        """층이 없거나 모르는 층(휴지통으로 간 작업물)이면 배치에서 정한 층으로 색인한다(파일은 그대로, #93)."""
+        layout = self._layout(user_id)
+        known = self._known(user_id, layout)
+
+        def floor(data: dict[str, Any], kind: str) -> str:
+            return data["floor"] if data.get("floor") in known else layout.fallback(kind)
+
         for bib in sorted(self._melchior_dir(user_id).glob("*/bib.json")):
-            self._index_ref(user_id, bib.parent)
+            self._index_ref(user_id, bib.parent, floor(read_json(bib), "refs"))
         for path in sorted(self._casper_dir(user_id).glob("*.json")):
-            self._index_idea(user_id, Idea(**read_json(path)))
+            data = read_json(path)
+            self._index_idea(user_id, Idea(**{**data, "floor": floor(data, "ideas")}))
         for path in sorted(self._balthasar_dir(user_id).glob("*.json")):
-            self._index_style(user_id, StyleEntry(**read_json(path)))
+            data = read_json(path)
+            self._index_style(user_id, StyleEntry(**{**data, "floor": floor(data, "styles")}))
 
     # ---- 검색 청크 -------------------------------------------------------------------
 
@@ -429,7 +476,7 @@ def bib_text(record: dict[str, Any]) -> str:
 def _style(r: sqlite3.Row) -> StyleEntry:
     return StyleEntry(
         id=r["id"], passage=r["passage"], reason=r["reason"], tags=json.loads(r["tags"]), work=r["work"],
-        created_at=r["created_at"], tags_by=r["tags_by"],
+        created_at=r["created_at"], tags_by=r["tags_by"], floor=r["floor"],
     )
 
 
@@ -437,6 +484,7 @@ def _idea(r: sqlite3.Row) -> Idea:
     return Idea(
         id=r["id"], text=r["text"], kind=r["kind"], author=r["author"], origin=r["origin"], parent_id=r["parent_id"],
         created_at=r["created_at"], title=r["title"], title_by=r["title_by"], edited_at=r["edited_at"], edited_by=r["edited_by"],
+        floor=r["floor"],
     )
 
 
@@ -450,4 +498,6 @@ def _ref(r: sqlite3.Row) -> Ref:
         has_fulltext=bool(r["has_fulltext"]),
         file_path=r["file_path"],
         created_at=r["created_at"],
+        floor=r["floor"],
+        updated_at=r["updated_at"] or r["created_at"],
     )

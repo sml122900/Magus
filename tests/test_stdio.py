@@ -41,7 +41,7 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
         # 2단계
         imported = _text(await client.call_tool("book_import", {"path": manuscript.name, "project_id": "synth"}))
         assert "장 7개(" in imported and "· 부 3개" in imported and "| ch-04.md | 제4장 | 닿으려는 손 | 2 |" in imported
-        bib = _text(await client.call_tool("ref_import_bibliography", {"text": "Zimmer, C. (1998). At the water's edge. Free Press."}))
+        bib = _text(await client.call_tool("ref_import_bibliography", {"text": "Zimmer, C. (1998). At the water's edge. Free Press.", "floor": "synth"}))
         assert "이미 있음 1건" in bib
 
         # 1단계 검토 반영(미리 구현된 도구)
@@ -66,14 +66,17 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
         assert "clack2012 (verified)" in _text(await client.call_tool("ref_search", {"query": "네발동물"}))
 
         # 5단계
-        convo = _text(await client.call_tool("idea_add_conversation", {"markdown": "**사용자:** 고래는 돌아갔다\n**Claude:** 맞습니다"}))
+        convo = _text(await client.call_tool("idea_add_conversation", {"markdown": "**사용자:** 고래는 돌아갔다\n**Claude:** 맞습니다",
+                                                                        "floor": "synth"}))  # 작업물이 둘이라 층을 준다(#93)
         assert convo.startswith("me 1건, ai 1건")
-        assert _text(await client.call_tool("idea_add", {"text": "물가의 망설임", "kind": "thought", "untitled": True})).startswith("기록함 [me]")
+        assert _text(await client.call_tool("idea_add", {"text": "물가의 망설임", "kind": "thought", "untitled": True,
+                                                         "floor": "2층"})).startswith("기록함 [me]")
         assert "[me]" in _text(await client.call_tool("idea_search", {"query": "고래"}))
 
         # 6단계
         tags = {"호흡": "짧음", "시점": "1인칭", "열기": "장면", "장치": ["반복"], "어미": "-다", "톤": "건조"}
-        styled = _text(await client.call_tool("style_add", {"passage": "고래는 돌아갔다.", "reason": "짧은 문장의 리듬", "tags": tags}))
+        styled = _text(await client.call_tool("style_add", {"passage": "고래는 돌아갔다.", "reason": "짧은 문장의 리듬", "tags": tags,
+                                                            "floor": "공용"}))
         assert styled.startswith("문체에 기록함 ")
         assert "구절: “고래는 돌아갔다.”" in _text(await client.call_tool("style_search", {"query": "짧은 리듬"}))
 

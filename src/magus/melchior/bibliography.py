@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 from typing import Any
 
+from magus.floors import COMMON
 from magus.melchior.citations import make_ref_key
 from magus.store import Ref, Store
 
@@ -36,6 +37,8 @@ class BibReport:
     collisions: list[str] = field(default_factory=list)
     duplicates: list[str] = field(default_factory=list)  # 같은 문헌(저자·연도·제목)이 목록에 두 번: 원고 오류일 수 있다
     differs: list[str] = field(default_factory=list)  # 이미 있는 key인데 새 목록의 제목·연도가 다름(갱신하지 않음)
+    # 다른 작업물 층에 있던 문헌을 이 작업물도 쓰게 되어 공용으로 옮긴 것(#93: 문헌은 사람마다 한 권, 두 작업물이 쓰면 공용)
+    shared: list[str] = field(default_factory=list)
 
     def render(self) -> str:
         out = [
@@ -47,6 +50,9 @@ class BibReport:
         out += [f"- key 충돌: {c}" for c in self.collisions]
         out += [f"- 중복 서지(목록에 두 번): {d}" for d in self.duplicates]
         out += [f"- 기존 서지와 다름(갱신하지 않음): {d}" for d in self.differs]
+        if self.shared:
+            out.append(f"- 다른 작업물도 쓰는 문헌이라 공용으로 옮김 {len(self.shared)}건: {', '.join(self.shared[:20])}"
+                       + (f" 외 {len(self.shared) - 20}건" if len(self.shared) > 20 else ""))
         return "\n".join(out)
 
 
@@ -192,8 +198,11 @@ def _assign_keys(store: Store, user_id: str, refs: list[Ref]) -> list[tuple[Ref,
     return [o for o in out if o is not None]
 
 
-def import_bibliography(store: Store, user_id: str, text: str) -> BibReport:
+def import_bibliography(store: Store, user_id: str, text: str, floor: str | None = None) -> BibReport:
+    """floor: 이 참고문헌을 쓰는 작업물 층(#93). 새 문헌은 그 층의 문헌(없으면 공용의 문헌)에 꽂는다.
+    이미 다른 작업물 층에 있는 문헌이면 두 작업물이 함께 쓰도록 공용으로 옮긴다(인용 점검은 그 층 + 공용을 본다)."""
     report = BibReport()
+    home = store.place(user_id, "refs", floor) if floor else None
     lines, refs = [], []
     for line in (raw.strip() for raw in text.splitlines()):
         if not line or _HEADING.match(line):
@@ -222,7 +231,10 @@ def import_bibliography(store: Store, user_id: str, text: str) -> BibReport:
             report.existing.append(ref.key)
             if diff := _differences(existing, ref):
                 report.differs.append(f"{ref.key}: {'; '.join(diff)}")
+            if floor and existing.floor not in (floor, COMMON) and ref.key not in report.shared:
+                store.set_ref_floor(user_id, ref.key, COMMON)
+                report.shared.append(ref.key)
             continue
-        store.put_ref(user_id, ref)
+        store.put_ref(user_id, replace(ref, floor=home) if home else ref)
         report.created.append(ref.key)
     return report
