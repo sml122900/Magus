@@ -219,7 +219,7 @@ class FloorMixin:
             data = read_json(path)
             if isinstance(data, dict) and "floor" in data:
                 write_json(path, {k: v for k, v in data.items() if k != "floor"})
-                counts[path.parent.name if path.name != "bib.json" else "melchior"] += 1
+                counts["melchior" if path.name == "bib.json" else "categories" if path.name == "category.json" else path.parent.name] += 1
         floors = self._floors_path(user_id)
         if floors.exists():
             floors.rename(floors.with_name(f"floors.json.reverted-{utcnow().replace(':', '').replace('.', '')}"))

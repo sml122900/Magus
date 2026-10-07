@@ -18,6 +18,8 @@
   - 사용자 격리: 아버지 계정 추가 전에 점검했다(status.md 0-6절, `tests/test_isolation.py`).
 - 다음 배포에 함께(커밋만): #90 되묻기 선택지에서 원고 빼기.
 - **야간 자율 작업(2026-10-06 밤, #92, 서버 배포 없음)**: 책장 화면(`/shelf`, 양장본 책장 + 게시판형 목록 + 검색, 태그 `shelf-web`), 저자의 카테고리·책 색·항목 제목(도구 21 → 28, 인덱스 v15, 태그 `shelf-categories`). #92는 사용자 확인(e만 바꿈). 아침 보완과 함께 2026-10-06 14:51 `p1-shelf`로 서버에 배포했다(status.md 0-10절).
+- **층·3D 책장(2026-10-07, 사용자 결정 #93, 로컬만, 태그 `floors-local`)**: 작업물마다 책장의 한 층, 맨 위 공용 층. 카테고리(기본 포함)는 층에 꽂히고 옮긴다(#92-a 대체, `docs/decisions/floors.md`).
+  인용 점검은 그 작업물 층 + 공용 문헌. 이전은 `magus floors plan|apply|revert`. **서버 배포 안 함**(검토 대기 status.md 4절 #93, 배포 순서 0-14절).
 - 서버(2026-10-06 18:28부터): master `p1-profile-email`(`ec6c40b`: 책장·카테고리 #92·질문지 #84·시험 수정·문헌 책등·상단 바 이름 + 메일 받기 수정). 되돌리기 기준은 `e08bb79`(이미지 `magus:rollback-e08bb79`, 그 앞 `magus:rollback-ebb98fc`). `74bbbf4`까지 갈 때는 이미지가 없어 코드로 빌드하고 **생각 파일의 제목 키를 먼저 정리한다**(status.md 0-10절, 서버 ROLLBACK.txt).
   - 다음 배포도 docs/deploy.md "업데이트" 절차(`git fetch … master && git checkout -B master FETCH_HEAD`)로 한다.
 - (고침 2026-10-06 밤) `tests/test_http.py::test_request_size_limit`의 Windows 간헐 실패: 머리만 보내고 응답을 먼저 읽게 고쳤다(status.md 7절).
@@ -70,6 +72,8 @@
 | 수정본 | Word에서 고친 원고를 다시 올린 것. 번호 E2, E3…는 "수정본 번호". 첫 업로드 E1은 "처음 올린 원고" | 새 판, 다시 올리기 | book_import new_edition |
 | 책장 | 생각·문체·문헌과 카테고리를 모아 보는 화면(웹 `/shelf`, #92) | 세 책장(옛 메뉴 생각·문헌·문체) | webshelf.py |
 | 카테고리 | 책장에 꽂힌 묶음 하나. 생각·문체·문헌은 기본 카테고리다. 원고를 가리키는 "책"과 섞이지 않게 "책"이라고 부르지 않는다 | 서랍(설계안 #91) | category_* |
+| 층 | 책장의 한 칸. 작업물(원고 하나)마다 한 층, 번호는 위에서 1층·2층…(#93) | | floor 인자, floors.json |
+| 공용 | 맨 위 층. 모든 작업물이 함께 쓰고 원고는 없다(#93) | | floor "common" |
 
 - Claude에게는 서버 instructions 규칙 7~9로 전한다: 이 이름으로 답하기, "전체 보여 줘"·"수정본 올렸어" 같은 말을 도구로 옮기기, 넣을 곳을 말하지 않은 "저장해 줘"에는 먼저 묻기(아래 "서버 instructions").
 
@@ -80,7 +84,7 @@
   - Claude의 원고 수정안은 대화로 내고, 저자가 Word에 반영한다. Magus 안의 원고를 Claude가 고쳐 쓰는 것(book_write_chapter)은 기본 흐름이 아니다.
   - 서버 instructions 규칙 4도 이에 맞게 바꿨다(사용자 결정 #74). book_write_chapter는 저자가 Magus 원고에 저장하라고 명시했을 때만 쓴다.
 - **에이전트는 책 전체를 들고 있지 않는다.** 한 작업의 컨텍스트는 목차·결정·미해결(book_outline) + 장 1개 + 검색 top-k로 이루어진다. 책 전체를 반환하는 도구는 만들지 않는다.
-- **인용 게이트**: refs에 `status=verified`로 있는 출처만 인용할 수 있다. 없는 출처는 본문에 `[출처 필요: 주장 요약]`으로 남긴다. 쓰기를 막지는 않는다. 표시하고 집계만 하며, 판단은 사용자가 한다.
+- **인용 게이트**: refs에 `status=verified`로 있는 출처만 인용할 수 있다. 작업물 원고는 **그 작업물 층 + 공용 층의 문헌**과 대조한다(#93, `melchior.check.cite_floors`). 없는 출처는 본문에 `[출처 필요: 주장 요약]`으로 남긴다. 쓰기를 막지는 않는다. 표시하고 집계만 하며, 판단은 사용자가 한다.
 - **누가 말했는지 보존한다.** Casper는 사용자 발화(`author=me`)와 AI 발화(`author=ai`)를 구분해 저장하고, 검색에서는 me를 먼저 보여 준다.
 - **Magus 안의 원본은 사람이 읽을 수 있는 파일(markdown/json)이다. SQLite는 인덱스일 뿐이다.** (원고 본문의 ch-NN.md는 그 자체가 저자 파일의 사본이다.) 인덱스는 언제든 파일에서 다시 만들 수 있어야 한다(`magus reindex`). 파일에 없는 정보를 SQLite에만 두지 않는다. 예외는 계산으로 얻는 값(char_count, unverified_cite_count, chunks)이다.
 - **프로젝트 폴더 밖의 파일·폴더는 만들지도 지우지도 않는다. 경로가 프로젝트 밖으로 풀리면 그 자리에서 멈추고 보고한다. 프로젝트 안이라도 내가 이 세션에서 만들지 않은 폴더를 통째로 지우지 않는다.**(2026-10-06 사용자 지시. 그 전날 밤 캡처 스크립트가 경로를 `C:\c\…`로 잘못 풀어 파일을 만들었고, 정리하며 `C:\c`를 통째로 지웠다.) 임시 파일은 프로젝트 안 `private/tmp/`(gitignore)에 둔다.
@@ -180,6 +184,10 @@
 - categories(id, user_id, name, name_key, template, color, fields json, schema_version, created_at, updated_at) — 저자의 카테고리(#92). (user_id, name_key) 유일
 - category_items(id, user_id, category_id, title?, title_by?, content, fields json, author: me|ai, tags json, chapters json, schema_version, created_at, updated_at, edited_at?, edited_by?)
 - 책장 설정(shelf/settings.json, 인덱스 없음): 기본 카테고리 책 색, 내 색(12개까지), 제목 기본값 ask|ai|none
+- **층(#93)**: 공용(id `common`) + 작업물(프로젝트)마다 한 층. ideas·style_entries·refs·categories에 `floor`(인덱스 v17, 파일의 "floor"가 원본).
+  `shelf/floors.json` = {order(작업물 층 순서), builtins(층마다 꽂힌 기본 카테고리), changed_at, last_move, last_undone}. 층 이름은 층마다 하나, 기본 카테고리는 한 층에 종류마다 하나.
+  문헌은 사람마다 한 권(key 하나): 두 작업물이 쓰면 공용으로 옮긴다. floors.json이 없으면 이전 규칙과 같은 배치로 읽는다(`store/floors.py: legacy_layout`).
+  refs.updated_at(층 최근 수정용). 작업물 층은 20개까지, 프로젝트 id `common`은 못 쓴다.
 - chunks(id, user_id, owner_type, owner_id, lane: ref_picked|ref_full|idea_me|idea_ai|style|style_passage|ref_bib|category, text, embedding blob?) + chunks_fts
   - style_passage(문체 구절·출전)·ref_bib(문헌 서지)는 **웹 책장 검색 전용**이다. 도구 검색(style_search·ref_search)은 보지 않고 임베딩도 하지 않는다(#92). category는 owner_id `<카테고리 id>/<항목 id>`. SCHEMA_VERSION 15
 
@@ -200,6 +208,7 @@ data/users/<user_id>/trash/<project_id>-<시각>/                   # book_impor
 data/users/<user_id>/trash/shelf/{casper,balthasar}/<id>.json    # 휴지통의 생각·문체(#88). 원래 파일 + "_trash": {at, note, with?}
 data/users/<user_id>/shelf/categories/<id>/{category.json, items/<항목 id>.json}   # 저자의 카테고리(#92, schema_version 1)
 data/users/<user_id>/shelf/settings.json                          # 책 색·내 색·제목 기본값(#92)
+data/users/<user_id>/shelf/floors.json                            # 층 순서·층마다 기본 카테고리·마지막 옮기기(#93)
 data/users/<user_id>/profile.json                                # 메일(웹 로그인 때 userinfo)·표시 이름(내 정보에서). 로그에 남기지 않는다
 data/users/<user_id>/trash/shelf/categories/<id>/                 # 휴지통의 카테고리 통째. 항목 하나는 trash/shelf/category-items/<카테고리 id>/
 data/users/<user_id>/inbox/                                       # 받은함(업로드한 원고·논문·대화 기록). 도구는 파일 이름으로 가리킨다
@@ -325,6 +334,14 @@ data/index.sqlite
 - `idea_delete(id, note)` → 생각을 휴지통으로 옮긴다(지우지 않음, #88). 그 생각에 응답한 AI 발화도 함께 옮긴다. 설명 첫 문장: 저자가 지우라고 분명히 말했을 때만, 여러 개면 목록을 보여 주고 확인받는다.
 - `idea_search(query, author=me|ai|all, k=10)` → 기본값은 me다. all이면 me를 먼저 정렬한다. ai 결과에는 응답한 사용자 발화를 함께 보여 준다.
 
+### 층 인자(#93, `magus/floor_args.py`)
+- 넣는 도구(idea_add·idea_add_conversation·style_add·ref_add·ref_import_bibliography·category_create·category_put)에 `floor`(공용·N층·작업물 id·제목).
+  말하지 않았으면 작업물이 하나면 그 층, 없으면 공용, 둘 이상이면 넣지 않고 묻게 하는 오류(층 목록). 그 층에 그 기본 카테고리가 없으면 공용의 것에 들어간다.
+- 찾는 도구(idea_search·style_search·ref_search·category_search·category_list)는 floor가 없으면 모든 층. 같은 종류가 여러 층에 있으면 결과마다 층.
+- ref_add: 새 문헌만 층이 필요하다. 이미 있는 문헌은 제자리, floor를 줬고 다른 작업물 층에 있으면 공용으로 옮긴다. ref_import_bibliography·book_import의 참고문헌도 같다.
+- category_edit `move_to`(층 옮기기, 항목 모두 함께)·`undo_move`(마지막 옮기기만). book_import에 path 없이 title이면 빈 층(원고는 나중에 같은 project_id로).
+- book_outline 머리에 `이 작업물 층(1층)의 카테고리: …`와 `공용 층: …` 두 줄. 도구 목록 9,566 → 10,957토큰(2026-10-07).
+
 ### 카테고리 (`magus/category/`, #92)
 - 기본 카테고리는 생각·문체·문헌이다(이름·삭제 불가, 책 색만 바꿈, 넣는 것은 각자의 도구). 그 옆에 저자가 만든 카테고리가 책장에 꽂힌다. 설계·고른 것: `docs/decisions/user-drawers.md`.
 - `category_list()` → 기본 셋과 저자의 카테고리(이름·템플릿·칸·항목 수·책 색), 제목 기본값.
@@ -361,6 +378,7 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
 - 예외: **사용자 결정 #85(2026-10-06, 용어 통일)로 머리말의 '영감'을 '생각'으로 바꾸고 규칙 7~9를 더했다.** 7 저자에게 보이는 이름(용어집), 8 저자의 말 해석("전체 보여 줘" → book_outline, "전체 읽어 줘" → 한 장씩 안내, "수정본 올렸어" → files_list의 최신 원고를 new_edition으로), 9 넣을 곳을 말하지 않은 "저장해 줘"·"기록해 줘"·"등록해 줘"·"넣어 줘"에는 쓰기 도구를 바로 부르지 않고 생각·문체·문헌 중 어디인지 먼저 묻기. 원문은 `tests/test_instructions.py`의 SPEC.
 - 예외: **2026-10-06 비밀 대화 시험(사용자 요청)으로 규칙 11을 더했다**: "어떤 도구가 이 대화에 없어 보이면 '연결돼 있지 않다'고 답하기 전에 도구 이름으로 찾아본다." 도구를 부르지 않는 규칙이라 규칙 7처럼 언제나 실린다.
 - 예외: **사용자 결정 #92(2026-10-06 밤, 책장·카테고리)로 머리말에 '카테고리'를 넣고("이 서버는 사용자의 생각·문헌·문체·카테고리와 원고를 관리한다."), 규칙 7에 책장·카테고리를 더하고 쓰지 않는 이름에서 '책장'을 빼고, 규칙 9의 선택지에 저자의 카테고리를 더하고(category_list, 많으면 목록), 규칙 10(제목: 직접·지어 드림·비워 둠 중에서 묻고 '앞으로는'이면 category_title_default)을 더했다.**
+- 예외: **사용자 결정 #93(2026-10-07, 층, 승인 대기)로 규칙 7에 '층'을 더하고 규칙 12(층을 말하지 않았을 때 넣을 층·찾을 층)를 더했다.** 도구 이름을 부르지 않아 언제나 실린다.
 - **instructions는 등록된 도구만 언급한다.** `build_instructions(등록된 도구 이름)`은 규칙 문장에 나오는 도구(`book_|ref_|idea_|style_|files_|category_` 이름)가 모두 등록된 규칙만 넣고, 번호는 다시 매긴다. 도구를 부르지 않는 규칙 7은 언제나 실린다. 도구가 모두 등록되면 SPEC과 똑같아진다(`tests/test_instructions.py`).
 - 새 도구를 추가하면 그 도구가 필요한 규칙이 자동으로 instructions에 들어간다. 따로 손댈 것은 없다.
 
@@ -407,7 +425,11 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
   - book_export는 exports/에 만들고, 로그인이 필요하고 만료가 있는 다운로드 URL을 돌려준다.
 - 웹(`magus/web.py`): 같은 프로세스의 Starlette 라우트로 서버에서 그린 최소 HTML이다(디자인은 P1 범위가 아니다).
   - 페이지: `/login`, `/inbox`(업로드·목록·삭제), `/book`(임포트·docx 내보내기), `/checklist`(문헌 신호등 🟢확인 🟡미확인 🔴참고문헌에 없음 ⚪미연결 + 장별), `/issues`(메뉴 "확인 요청": 목록, AI 확인 요청 🤖 표시, #71), `/download/{token}`.
-  - **책장**(메뉴 "책장", `magus/webshelf.py`, #92): `/shelf`는 양장본 책장(기본 셋 + 저자의 카테고리 + 점선 "카테고리 추가", 책등 세로쓰기·위 띠·아래 항목 수·두께는 항목 수 단계). 책을 누르면 게시판형 목록 `/shelf/{ideas|styles|refs|카테고리 id}`(한 줄 = 제목·작성 시각·보조 정보, 누르면 펼침, 100개씩, 기존 거르기 유지), 항목 고유 주소 `/shelf/<…>/<항목 id>`(펼친 채 열림). 검색 `?q=`(두 글자 이상 FTS, 한 글자는 그대로 포함, `<mark>`), `/shelf?q=`는 카테고리별로 묶는다. 예전 `/ideas`·`/refs`·`/styles`는 넘긴다.
+  - **층·3D 책장**(#93, `magus/webfloors.py`): `/shelf`는 정면·오른쪽 옆면·윗면이 보이는 3D 책장(공용 맨 위, 층마다 이름·작업물 제목·최근 수정, 작은 책).
+    층을 누르면 다가가며(0.65초, 움직임 줄이기면 바로) `/shelf/floor/<id>`(한 층 화면: 전체 책장 버튼, 층 이름 띠, 아래의 큰 책장)로.
+    끌어 옮기기(마우스 6px·손가락 길게 누르기) → `POST /shelf/move`, 카테고리 설정의 '위치', 되돌리기 `POST /shelf/undo`, 층 만들기 `POST /shelf/floors`.
+    기본 카테고리 주소는 `<종류>.<층 id>`(ideas.book), 예전 주소(/shelf/ideas…)는 그 층으로 넘긴다. 검색은 층 → 카테고리로 묶는다.
+  - **책장**(메뉴 "책장", `magus/webshelf.py`, #92): 한 층 화면은 양장본 책장(기본 셋 + 저자의 카테고리 + 점선 "카테고리 추가", 책등 세로쓰기·위 띠·아래 항목 수·두께는 항목 수 단계). 책을 누르면 게시판형 목록 `/shelf/{ideas|styles|refs|카테고리 id}`(한 줄 = 제목·작성 시각·보조 정보, 누르면 펼침, 100개씩, 기존 거르기 유지), 항목 고유 주소 `/shelf/<…>/<항목 id>`(펼친 채 열림). 검색 `?q=`(두 글자 이상 FTS, 한 글자는 그대로 포함, `<mark>`), `/shelf?q=`는 카테고리별로 묶는다. 예전 `/ideas`·`/refs`·`/styles`는 넘긴다.
     - 문헌 책등 아래는 "확인 n · 전체 m" 두 줄(낭독기 "문헌, 확인 n편, 전체 m편"), 두께는 전체 수 기준. 문헌 목록 머리줄도 "문헌 확인 n편 · 전체 m편(미확인 k편)". 원고 참고문헌에서 들여온 미확인 항목까지 세어 '원문을 읽고 등록한 책'으로 오해하지 않게.
     - 생각과 저자의 카테고리 항목은 펼친 곳의 "고치기 · 휴지통으로"로 웹에서 고치고 옮긴다(`/shelf/<…>/<항목 id>/edit`·`/trash`, 자기 책장만, CSRF, 휴지통은 확인 화면 한 번). AI가 쓴 항목을 고치면 "저자가 고침(시각)"이 남는다.
     - 만들기 `/shelf/new`, 이름·색 `/shelf/edit/<…>`(기본 셋은 색만, 색 격자 18 + 내 색 12 + 색 선택기·#RRGGBB·R·G·B), 휴지통 `/shelf/trash/<id>`(확인 화면), 바로 적기 `POST /shelf/write/<ideas|카테고리 id>`(누가 = 저자). 문체·문헌은 대화로 넣는다. 책장 전용 색은 web-style.md "책장 전용".
@@ -474,6 +496,7 @@ magus author-report --project-id book --out private/reports/<날짜>-인용-점�
 magus terms --project-id book [--add …] [--remove …]                         # 비인용 용어 보기·고치기
 magus trash list | put idea|style|category <id> --note … | restore idea|style|category|category-item <id> [--name …]   # 책장 휴지통(운영자, USER_ID 사용자, #88·#92)
 magus alias <key> <표기>                                                      # 저자가 확정한 표기를 aliases에(예: keynes1930b "케인스(1930)")
+magus floors plan|apply|revert [--user …|--all-users] [--backup 폴더]          # 층 이전(#93): 미리보기 / 백업 뒤 실행·전후 비교 / 옛 코드용 되돌리기
 magus inbox [--add 파일…] [--remove 이름…]                                    # 받은함(로컬 개발용, 원격은 웹 업로드)
 magus outline [--project-id …]                                               # book_outline과 같은 출력(USER_ID). 복구 확인용
 magus alert-test                                                             # 운영자 알림 채널 시험
