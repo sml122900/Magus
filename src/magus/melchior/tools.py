@@ -149,7 +149,7 @@ def build_tools(
                 + "저자가 실제로 읽은 문헌을 verified로 넣는다. bib: {authors|author, year, title, …} 또는 {key}. "
                 "저자·연도를 모르면 bib를 비우고 file_path만 줘도 된다: 전문 첫머리의 제목으로 참고문헌에서 찾는다. "
                 "passages: [{text, reason, locator?}] 하나 이상 필수(직접 고른 발췌와 고른 이유). "
-                "file_path(받은함 파일 이름, txt/md/pdf/docx. files_list로 확인. 예: kremer1993.pdf) "
+                "file_path(올린 파일 이름, txt/md/pdf/docx. files_list로 확인. 예: kremer1993.pdf) "
                 "또는 full_text로 전문을 함께 넣을 수 있다. "
                 "같은 key나 alias가 unverified로 있으면 verified로 올린다. aliases로 한글 표기(예: 갤러2022)를 더한다. " + FLOOR_PUT
                 + "이미 있는 문헌은 제자리에 둔다."

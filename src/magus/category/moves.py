@@ -15,7 +15,11 @@ BUILTIN_NAMES = {"ideas": "생각", "styles": "문체", "refs": "문헌"}
 
 
 def move_book(store: Store, user: str, book: str, from_floor: str, to_floor: str) -> FloorMove:
-    """book: 저자의 카테고리 id 또는 기본 카테고리 종류(ideas|styles|refs, from_floor에 꽂힌 것)."""
+    """book: 저자의 카테고리 id, 기본 카테고리 종류(ideas|styles|refs, from_floor에 꽂힌 것), 문서 책 'doc.<id>', 원고 책 'ms.<id>'."""
+    if book.startswith("ms."):
+        raise MoveError("fixed", "원고 책은 그 층 자체라 옮기지 않는다")
+    if book.startswith("doc."):
+        return store.move_document(user, book[4:], to_floor)
     if book in KINDS:
         move = store.move_builtin(user, book, from_floor, to_floor)
         if book == "refs":
@@ -49,7 +53,7 @@ def tool_message(store: Store, user: str, move: FloorMove, undone: bool = False)
     if undone:
         return f"되돌림: 「{move.name}」 {dst} → {src}(옮기기 전 자리)."
     merged = f"({dst}의 {move.name}과 합침, 항목 {len(move.items)}개)" if move.merged else (
-        f"(항목 {len(move.items)}개 함께)" if move.book in KINDS else "(항목 모두 함께)")
+        f"(항목 {len(move.items)}개 함께)" if move.book in KINDS else "" if move.book.startswith("doc.") else "(항목 모두 함께)")
     out = f"옮김: 「{move.name}」 {src} → {dst}{merged}. 되돌리려면 저자에게 확인하고 같은 카테고리로 category_edit(undo_move=true)."
     if refs_warning(store, user, move):
         out += f" 주의: {src} 원고의 인용 점검은 이제 이 문헌을 보지 않는다(그 층과 공용의 문헌만 본다)."
@@ -85,6 +89,9 @@ def error_message(e: MoveError, polite: bool) -> str:
         "unknown_floor": ("없는 층입니다.", "없는 층이다."),
         "no_builtin": ("그 층에 그 카테고리가 없습니다.", "그 층에 그 카테고리가 없다."),
         "unknown_category": ("없는 카테고리입니다.", "없는 카테고리다."),
+        "common_only": ("공용 층에는 모음 책만 둘 수 있습니다.", "공용 층에는 모음 책만 둘 수 있다."),
+        "fixed": ("원고 책은 그 층 자체라 다른 층으로 옮길 수 없습니다. 다른 작업물이면 새 층을 만들어 원고를 올려 주세요.",
+                  "원고 책은 그 층 자체라 옮기지 않는다."),
     }
     polite_text, plain = texts.get(e.code, (str(e), str(e)))
     return polite_text if polite else plain

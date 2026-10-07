@@ -34,7 +34,8 @@ KINDS = ("ideas", "styles", "refs")
 
 
 class MoveError(ValueError):
-    """옮기기를 할 수 없는 까닭. code: same | clash | unknown_floor | no_builtin | not_last | undo_clash | full.
+    """옮기기를 할 수 없는 까닭. code: same | clash | unknown_floor | no_builtin | not_last | undo_clash | unknown_category
+    | common_only(공용에는 모음 책만) | fixed(원고 책).
     도구와 웹이 code로 저자에게 보일 문장을 만든다(메시지는 운영자용)."""
 
     def __init__(self, code: str, message: str, **info: Any):
@@ -240,6 +241,7 @@ class FloorMixin:
                 UNION ALL SELECT COALESCE(edited_at, created_at) FROM ideas WHERE user_id = ?1 AND floor = ?2
                 UNION ALL SELECT created_at FROM style_entries WHERE user_id = ?1 AND floor = ?2
                 UNION ALL SELECT COALESCE(updated_at, created_at) FROM refs WHERE user_id = ?1 AND floor = ?2
+                UNION ALL SELECT updated_at FROM documents WHERE user_id = ?1 AND floor = ?2
             )
             """,
             (user_id, floor),
@@ -397,6 +399,26 @@ class FloorMixin:
         return move
 
     @locked
+    def move_document(self, user_id: str, doc_id: str, to_floor: str) -> FloorMove:
+        """문서 책을 다른 작업물 층으로(#94). 공용 층에는 모음 책만 둘 수 있다."""
+        layout = self.ensure_layout(user_id)
+        to_floor = self._check_floor(user_id, layout, to_floor)
+        row = self._db.execute("SELECT title, floor FROM documents WHERE user_id = ? AND id = ?", (user_id, doc_id)).fetchone()
+        if row is None:
+            raise MoveError("unknown_category", f"문서 {doc_id}가 없다")
+        if to_floor == COMMON:
+            raise MoveError("common_only", "공용 층에는 모음 책만 둘 수 있다", name=row["title"])
+        if row["floor"] == to_floor:
+            raise MoveError("same", "이미 그 층에 있다", name=row["title"])
+        at = utcnow()
+        self._set_document_floor(user_id, doc_id, to_floor, at)  # type: ignore[attr-defined]
+        move = FloorMove(new_id(), at, f"doc.{doc_id}", row["title"], row["floor"], to_floor)
+        layout.last_move = asdict(move)
+        layout.changed_at.update({row["floor"]: at, to_floor: at})
+        self._write_layout(user_id, layout)
+        return move
+
+    @locked
     def last_move(self, user_id: str) -> FloorMove | None:
         last = self._layout(user_id).last_move
         if not last:
@@ -412,7 +434,12 @@ class FloorMixin:
         if move.from_floor not in self._known(user_id, layout):
             raise MoveError("unknown_floor", f"층 {move.from_floor!r}가 없다", floor=move.from_floor)
         at = utcnow()
-        if move.book in KINDS:
+        if move.book.startswith("doc."):  # 문서 책(#94)
+            doc_id = move.book[4:]
+            if self._db.execute("SELECT 1 FROM documents WHERE user_id = ? AND id = ?", (user_id, doc_id)).fetchone() is None:
+                raise MoveError("unknown_category", f"문서 {doc_id}가 없다")
+            self._set_document_floor(user_id, doc_id, move.from_floor, at)  # type: ignore[attr-defined]
+        elif move.book in KINDS:
             kind = move.book
             here = set(self._builtin_items(user_id, kind, move.to_floor))
             back = [i for i in move.items if i in here]  # 그사이 다른 곳으로 간 항목은 그대로 둔다

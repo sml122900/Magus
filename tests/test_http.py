@@ -25,7 +25,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "synthetic"
 TOOLS = {
     "files_list", "book_outline", "book_issues", "book_read_chapter", "book_write_chapter", "book_decide", "book_issue_add",
     "book_issue_close", "book_import", "book_export", "ref_import_bibliography", "ref_add", "ref_search", "ref_check",
-    "idea_add", "idea_add_conversation", "idea_search", "idea_delete", "style_add", "style_search", "style_delete",
+    "idea_add", "idea_add_conversation", "idea_search", "style_add", "style_search", "book_document",
     "category_list", "category_create", "category_edit", "category_put", "category_search", "category_trash", "category_title_default",
     "book_questions", "book_answer",
 }
@@ -115,9 +115,10 @@ async def test_all_tools_over_http_and_log_has_no_content(http_server, data_dir:
             ("book_answer", {"question_id": "bibonly:zimmer1998", "choice": "keep", "note": SECRET[4]}),
         ]
         out = {name: _text(await client.call_tool(name, args)) for name, args in calls}
-        deletes = [("idea_delete", {"id": out["idea_add"].split()[2], "note": "시험"}),  # 휴지통으로 옮긴 내용도 로그에는 없다
-                   ("style_delete", {"id": out["style_add"].split()[2], "note": "시험"}),
-                   ("category_trash", {"category": "사례", "note": "시험"})]
+        deletes = [("category_trash", {"category": "생각", "item_id": out["idea_add"].split()[2], "note": "시험"}),  # 옮긴 내용도 로그에 없다
+                   ("category_trash", {"category": "문체", "item_id": out["style_add"].split()[2], "note": "시험"}),
+                   ("category_trash", {"category": "사례", "note": "시험"}),
+                   ("book_document", {"title": SECRET[0], "title_by": "author", "preface": SECRET[1]})]  # 문서 책(#94)
         for name, args in deletes:
             _text(await client.call_tool(name, args))
         calls += deletes
@@ -126,7 +127,7 @@ async def test_all_tools_over_http_and_log_has_no_content(http_server, data_dir:
         assert (await client.call_tool("book_read_chapter", {"number": 99})).is_error
         # 원격에서는 서버의 파일 경로를 받지 않는다(받은함 이름만)
         escaped = await client.call_tool("book_import", {"path": str(FIXTURES / "닿으려는_종_합성.docx"), "project_id": "x"})
-        assert escaped.is_error and "받은함에" in escaped.content[0].text
+        assert escaped.is_error and "올린 파일에" in escaped.content[0].text
     time.sleep(0.3)
     log = log_path.read_text(encoding="utf-8")
     lines = [line for line in log.splitlines() if "magus.audit" in line]

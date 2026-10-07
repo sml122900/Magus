@@ -141,7 +141,7 @@ def test_outline_shows_edition_and_asks_for_latest_upload(store: LocalStore, tmp
     assert "(e2.docx) · 그 뒤 Magus에서 고친 장 0" in text and "지남" not in text
     assert "- 그중 해결됐을 수 있음 2건(수정본에서 코멘트나 걸린 문장이 사라짐)" in text
     later = build_outline(store, U, P, now=datetime.now(UTC) + timedelta(days=8))
-    assert "업로드 뒤 8일 지남. 그사이 저자가 Word에서 고쳤다면, 최신본을 받은함에 올려 수정본으로 올리도록" in later
+    assert "업로드 뒤 8일 지남. 그사이 저자가 Word에서 고쳤다면, 최신본을 책장의 원고 책에서 수정본으로 올리도록" in later
 
 
 def test_same_file_again_changes_nothing(store: LocalStore, tmp_path: Path, e1):

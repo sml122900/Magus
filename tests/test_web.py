@@ -62,25 +62,26 @@ def server_proc(tmp_path: Path):
 
 
 def test_local_round_trip_upload_import_checklist_download(server_proc):
+    """올린 파일(설정 아래, #94) → 책장에서 원고 책 만들기 → 인용 상태 → docx 내려받기(로그인 필요한 링크)."""
     base, _, log_path = server_proc({})
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
-        assert c.get("/inbox", follow_redirects=False).headers["location"].startswith("/login")  # 로그인 전
-        page = c.get("/login?next=/inbox").text  # 로컬 개발: USER_ID로 바로 로그인
-        assert "받은함" in page and "비어 있습니다" in page
+        assert c.get("/me/files", follow_redirects=False).headers["location"].startswith("/login")  # 로그인 전
+        assert c.get("/inbox", follow_redirects=False).headers["location"].startswith("/login")
+        page = c.get("/login?next=/me/files").text  # 로컬 개발: USER_ID로 바로 로그인
+        assert "<h1>올린 파일</h1>" in page and "비어 있습니다" in page
         csrf = _csrf(page)
         assert c.post("/inbox/upload", data={"csrf": "틀림"}, files={"files": ("x.md", b"a")}).status_code == 403
         with (FIXTURES / "닿으려는_종_합성.docx").open("rb") as f:
-            page = c.post("/inbox/upload", data={"csrf": csrf},
-                          files=[("files", ("원고.docx", f.read())), ("files", ("나쁜.exe", b"x"))]).text
+            data = f.read()
+        page = c.post("/inbox/upload", data={"csrf": csrf}, files=[("files", ("원고.docx", data)), ("files", ("나쁜.exe", b"x"))]).text
         assert "올림: 원고.docx" in page and "나쁜.exe: 받을 수 있는 형식은" in page
-        page = c.get("/book").text
-        assert '<option value="원고.docx">' in page
-        page = c.post("/book/import", data={"csrf": csrf, "name": "원고.docx", "project_id": "synth", "title": ""}).text
-        assert "장 7개(" in page and "<td>synth</td>" in page
-        page = c.get("/checklist?project=synth").text
-        assert "인용 체크리스트" in page and "🔴 참고문헌에 없음" in page and "🟡 미확인" in page and "<h2>장별</h2>" in page
-        assert "🔴 참고문헌에 없음" in c.get("/checklist?project=synth&status=unknown").text
-        exported = c.post("/book/export", data={"csrf": csrf, "project_id": "synth"})
+        made = c.post("/shelf/manuscript", data={"csrf": csrf, "floor": "new"}, files={"file": ("원고.docx", data, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")})
+        assert "원고 책을 만들었습니다: 7장" in made.text
+        pid = str(made.url).split("/shelf/book/")[1].split("?")[0]
+        page = c.get(f"/shelf/book/{pid}?tab=cites").text
+        assert "🔴 참고문헌에 없음" in page and "🟡 미확인" in page and "<h2>장별</h2>" in page
+        assert "🔴 참고문헌에 없음" in c.get(f"/shelf/book/{pid}?tab=cites&status=unknown").text
+        exported = c.post("/book/export", data={"csrf": csrf, "project_id": pid})
         assert exported.status_code == 200 and exported.content[:2] == b"PK"  # docx(zip)
         token = str(exported.url).rsplit("/download/", 1)[1]
         page = c.post("/inbox/delete", data={"csrf": csrf, "name": "원고.docx"}).text
@@ -186,19 +187,21 @@ def test_remote_web_login_with_oauth(server_proc, fake_issuer):
     with httpx2.Client(base_url=base, timeout=60) as alice:
         done = _login(alice, issuer_state, "sub-alice")
         assert done.status_code == 303 and done.headers["location"] == "/inbox"
-        page = alice.get("/inbox").text
+        page = alice.get("/me/files").text
         assert '<a href="/me" class="me" aria-label="내 정보, sub-alice@example.com">sub-alice@example.com</a>' in page
         csrf = _csrf(page)
         alice.post("/inbox/upload", data={"csrf": csrf}, files={"files": ("원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes())})
-        alice.post("/book/import", data={"csrf": csrf, "name": "원고.docx", "project_id": "synth"})
-        exported = alice.post("/book/export", data={"csrf": csrf, "project_id": "synth"}, follow_redirects=False)
+        made = alice.post("/shelf/manuscript", data={"csrf": csrf, "floor": "new"},  # 원고 책은 책장에서(#94)
+                          files={"file": ("원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}, follow_redirects=False)
+        pid = made.headers["location"].split("/shelf/book/")[1].split("?")[0]
+        exported = alice.post("/book/export", data={"csrf": csrf, "project_id": pid}, follow_redirects=False)
         link = exported.headers["location"]
         assert link.startswith("/download/") and alice.get(link).content[:2] == b"PK"
         # 상태(state)가 다르거나 이미 쓴 콜백은 거절
         assert alice.get("/auth/callback?code=x&state=y").status_code == 400
     with httpx2.Client(base_url=base, timeout=60) as bob:
         assert _login(bob, issuer_state, "sub-bob").status_code == 303
-        assert "비어 있습니다" in bob.get("/inbox").text  # 앨리스의 받은함이 보이지 않는다
+        assert "비어 있습니다" in bob.get("/me/files").text  # 앨리스가 올린 파일이 보이지 않는다
         assert bob.get(link).status_code == 403  # 앨리스의 내려받기 링크
     with httpx2.Client(base_url=base, timeout=60) as carol:
         denied = _login(carol, issuer_state, "sub-carol")
@@ -262,26 +265,30 @@ def test_remote_requires_session_secret(tmp_path: Path):
     assert proc.returncode == 2 and "SESSION_SECRET" in proc.stderr
 
 
-def test_book_import_defaults_follow_whether_a_book_exists(server_proc):
-    """책이 없으면 '새 책으로 가져오기'가 기본이고 '수정본'은 비활성. 책이 있으면 '수정본'이 기본. '바꾸기'는 접힌 영역 안."""
-    base, _, _ = server_proc({})
+def test_add_book_choices_follow_the_floor(server_proc):
+    """책 추가(#94): 빈 작업물 층이면 원고 올리기, 원고 책이 있으면 수정본으로 안내, 공용이면 새 층에 올리기. 모음·문서도 고른다."""
+    from magus.store import LocalStore
+
+    base, data_dir, _ = server_proc({})
+    store = LocalStore(data_dir)
+    store.create_project("alice", "빈 책", project_id="empty")
+    store.create_project("alice", "있는 책", project_id="full")
+    store.write_chapter("alice", "full", 1, "본문.", "x", title="하나")
+    store.close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
-        empty = c.get("/login?next=/book").text
-        assert '<label class="off"><input type="radio" name="mode" value="edition" disabled> <b>수정본으로 올리기</b></label>' in empty
-        assert '<input type="radio" name="mode" value="new" checked>' in empty
-        assert re.search(r'<details><summary>드물게 쓰는 선택</summary>.*?name="replace".*?</details>', empty, re.S)
-        csrf = _csrf(empty)
-        c.post("/inbox/upload", data={"csrf": csrf}, files={"files": ("원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes())})
-        c.post("/book/import", data={"csrf": csrf, "name": "원고.docx", "project_id": "synth", "mode": "new"})
-        has_book = c.get("/book").text
-    assert '<label><input type="radio" name="mode" value="edition" checked>' in has_book
-    assert '<input type="radio" name="mode" value="new">' in has_book and 'value="edition" disabled' not in has_book
-    assert 'aria-current=page>원고</a>' in has_book  # 지금 보고 있는 메뉴
-    # 용어 통일(#85): 저자에게는 확인 요청·수정본·생각으로 보인다
-    assert '<th class="num">열린 확인 요청</th><th class="num">수정본·올린 시각</th>' in has_book
-    assert "(수정본) 장 제목이 많이 달라도" in has_book and "새 판" not in has_book and "미해결" not in has_book
-    assert '<a href="/issues">확인 요청</a>' in has_book and '<a href="/shelf">책장</a>' in has_book  # 생각·문헌·문체는 책장 하나로
-    assert "border:1px solid var(--mute)" in has_book and "--input" not in has_book  # 입력칸 테두리 대비 4.75
+        c.get("/login?next=/shelf")
+        empty = c.get("/shelf/add?floor=empty").text
+        assert 'name="floor" value="empty"' in empty and '<button class="primary">올리기</button>' in empty
+        full = c.get("/shelf/add?floor=full").text
+        assert "이 층에는 원고 책이 이미 있습니다." in full and 'action="/shelf/manuscript"' not in full
+        common = c.get("/shelf/add?floor=common").text
+        assert 'name="floor" value="new"' in common and "새 층에 올리기" in common
+        assert c.get("/shelf/add?floor=nothing").status_code == 404
+        assert c.get("/book", follow_redirects=False).headers["location"] == "/shelf/book/full?tab=chapters"
+    assert "aria-current=page>책장</a>" in empty  # 메뉴는 책장 하나
+    assert "border:1px solid var(--mute)" in empty and "--input" not in empty  # 입력칸 테두리 대비 4.75
+    for word in ("새 판", "미해결", "받은함", "인용 체크리스트"):
+        assert word not in empty and word not in common
 
 
 def _seed_shelf(data_dir: Path) -> None:
@@ -347,7 +354,8 @@ def test_shelf_books_and_board_lists(server_proc):
         assert "그 관점은" in only_ai and "물가는 궁지다" not in only_ai
 
         refs = c.get("/shelf/refs").text
-        assert refs.index("Clack(2012) 『Gaining ground』") < refs.index("Diamond(1997)")  # 확인한 문헌부터
+        listed = refs.split('<ol class="board">')[1]  # 위의 '문헌 등록' 선택지가 아니라 목록
+        assert listed.index("Clack(2012) 『Gaining ground』") < listed.index("Diamond(1997)")  # 확인한 문헌부터
         assert "🟢 확인 · 인용된 장 1" in refs and "<p>인용된 장: 제1장</p>" in refs
         assert '<p>「tetrapods came ashore」<br><span class="muted">1장의 근거 · p.45</span></p>' in refs
         assert '인용 현황은 <a href="/checklist?project=b&">인용 체크리스트</a>' in refs
@@ -366,8 +374,8 @@ def test_shelf_books_and_board_lists(server_proc):
         assert '<details id="i-clack2012" open data-here>' in c.get("/shelf/refs/clack2012").text
         assert c.get("/shelf/ideas/20260101000000000-ffffff").status_code == 404
         assert c.get("/shelf/nothing").status_code == 404
-        for page in (refs, styles):
-            assert page.count('method="post"') == 1  # 로그아웃뿐(문체·문헌은 대화로 넣는다)
+        assert styles.count('method="post"') == 1  # 로그아웃뿐(문체는 대화로 넣는다)
+        assert refs.count('method="post"') == 2  # 로그아웃 · 논문 파일로 문헌 등록(#94)
         assert shelf.count('method="post"') == 3  # 로그아웃 · 끌어 옮기기(숨은 폼) · 새 층 만들기
         assert ideas.count('method="post"') == 2  # 생각에는 바로 적기 폼이 있다(#92)
         assert "<h1>생각</h1>" in ideas and 'aria-current=page>책장</a>' in styles
@@ -431,18 +439,18 @@ def test_display_name_from_email_and_editable(server_proc, fake_issuer):
         assert too_long.status_code == 400 and "표시 이름은 40자까지입니다. 지금 41자" in too_long.text
         saved = alice.post("/me", data={"csrf": csrf, "display_name": "  <b>표시명시험</b>  교수 "}, follow_redirects=True).text
         assert "저장했습니다." in saved and ">&lt;b&gt;표시명시험&lt;/b&gt; 교수</a>" in saved and "<b>표시명시험" not in saved
-        assert ">sub-bob@example.com</a>" in bob.get("/inbox").text  # 밥의 상단 바는 밥의 것
+        assert ">sub-bob@example.com</a>" in bob.get("/shelf").text  # 밥의 상단 바는 밥의 것
         bob_csrf = _csrf(bob.get("/me").text)
         bob.post("/me", data={"csrf": bob_csrf, "display_name": "밥"})
-        assert ">&lt;b&gt;표시명시험&lt;/b&gt; 교수</a>" in alice.get("/inbox").text  # 밥이 바꿔도 앨리스 것은 그대로
+        assert ">&lt;b&gt;표시명시험&lt;/b&gt; 교수</a>" in alice.get("/shelf").text  # 밥이 바꿔도 앨리스 것은 그대로
         cleared = alice.post("/me", data={"csrf": csrf, "display_name": "   "}, follow_redirects=True).text
         assert ">sub-alice@example.com</a>" in cleared  # 비우면 다시 메일
     with httpx2.Client(base_url=base, timeout=120) as liar:
         _login(liar, issuer_state, "sub-liar", {"id_aud": "다른-클라이언트"})
-        assert ">liar</a>" in liar.get("/inbox").text  # userinfo의 sub가 다르고 id_token의 aud도 틀리면 메일을 적지 않는다
+        assert ">liar</a>" in liar.get("/shelf").text  # userinfo의 sub가 다르고 id_token의 aud도 틀리면 메일을 적지 않는다
     with httpx2.Client(base_url=base, timeout=120) as noinfo:
         _login(noinfo, issuer_state, "sub-noinfo")
-        assert ">sub-noinfo@id.example.com</a>" in noinfo.get("/inbox").text  # userinfo가 실패하면 검증한 id_token의 메일
+        assert ">sub-noinfo@id.example.com</a>" in noinfo.get("/shelf").text  # userinfo가 실패하면 검증한 id_token의 메일
     profile = json.loads((data_dir / "users" / "alice" / "profile.json").read_text(encoding="utf-8"))
     assert profile["email"] == "sub-alice@example.com" and "display_name" not in profile and profile["schema_version"] == 1
     assert json.loads((data_dir / "users" / "bob" / "profile.json").read_text(encoding="utf-8"))["display_name"] == "밥"

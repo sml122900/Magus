@@ -230,7 +230,7 @@ def build_tools(
             if new_edition or replace:
                 raise ToolError("수정본·바꾸기에는 원고 파일(path)이 필요하다.")
             if not title or not title.strip():
-                raise ToolError("원고 없이 빈 층을 만들려면 작업물 제목(title)을 준다. 원고를 가져오려면 path에 받은함 파일 이름을 준다.")
+                raise ToolError("원고 없이 빈 층을 만들려면 작업물 제목(title)을 준다. 원고를 가져오려면 path에 올린 파일 이름을 준다.")
             try:
                 made = store.create_project(user, " ".join(title.split())[:120], project_id=project_id or None,
                                             titles=BookTitles(subtitle=subtitle) if subtitle else None)
@@ -239,7 +239,7 @@ def build_tools(
             floor = store.get_floor(user, made.id)
             label = floor.label if floor else "?"
             return (f"빈 층을 만듦: {label} 「{made.title}」({made.id}). 생각·문헌이 꽂혀 있다. "
-                    f"원고는 나중에 book_import(path=받은함 파일 이름, project_id={made.id})로 이 층에 가져온다.")
+                    f"원고는 저자가 그 층의 '책 추가 → 원고'로 올리거나, book_import(path=올린 파일 이름, project_id={made.id})로 가져온다.")
         if new_edition:
             if not project_id:
                 raise ToolError("수정본으로 올릴 책의 project_id를 주세요(book_outline 첫 줄의 괄호 안).")
@@ -303,8 +303,8 @@ def build_tools(
             book_import,
             name="book_import",
             description=(
-                "받은함의 원고 파일(docx, 없으면 pdf)을 새 프로젝트(책장의 새 작업물 층)로 임포트한다. "
-                "path에는 받은함 파일 이름을 준다(files_list로 확인). "
+                "올린 원고 파일(docx, 없으면 pdf)로 원고 책을 만든다(새 작업물 층, 또는 project_id가 빈 층이면 그 층). "
+                "path에는 올린 파일 이름을 준다(files_list로 확인). "
                 "저자가 원고 없이 새 작업물 층을 만들자고 하면 path 없이 title만 준다(빈 층. 원고는 나중에 같은 project_id로 가져온다). "
                 "'제N부'·'제N장' 제목으로 장을 나누고, "
                 "Word 코멘트는 확인 요청(import_comment, kind=citation|fact|general)으로, 참고문헌은 문헌(unverified)으로 넣는다. "

@@ -24,8 +24,9 @@ CHAPTER_STATUSES: tuple[str, ...] = ("draft", "revising", "done")
 RefStatus = Literal["unverified", "verified"]
 # style_passage·ref_bib는 웹 책장 검색 전용이다(문체 구절·문헌 서지). 도구 검색(style_search·ref_search)은 쓰지 않고 임베딩도 하지 않는다.
 # category는 저자가 만든 카테고리의 항목(#92). owner_id는 "<카테고리 id>/<항목 id>"다.
-Lane = Literal["ref_picked", "ref_full", "idea_me", "idea_ai", "style", "style_passage", "ref_bib", "category"]
-WEB_ONLY_LANES: tuple[str, ...] = ("style_passage", "ref_bib")
+# document는 문서 책의 지금 판 내용(#94). 웹 책장 검색 전용이다.
+Lane = Literal["ref_picked", "ref_full", "idea_me", "idea_ai", "style", "style_passage", "ref_bib", "category", "document"]
+WEB_ONLY_LANES: tuple[str, ...] = ("style_passage", "ref_bib", "document")
 TagsBy = Literal["ai", "author"]  # 문체 태그를 누가 정했나: Claude가 뽑음(ai) / 저자가 말함(author). 기록 전 항목은 None
 # 휴지통에 옮길 수 있는 책장 항목(#88). 카테고리는 통째(category, id = 카테고리 id)와 항목(category_item, id = "<카테고리 id>/<항목 id>")
 TrashKind = Literal["idea", "style", "category", "category_item"]
@@ -44,6 +45,7 @@ class Project:
     subtitle: str | None = None  # 책 제목과 부제를 따로 둔다(#77). 영문 제목·부제도 있으면 둔다
     title_en: str | None = None
     subtitle_en: str | None = None
+    color: str | None = None  # 원고 책의 책 색(#94). 없으면 원고 책 기본 색
 
 
 @dataclass(frozen=True)
@@ -294,6 +296,35 @@ class ShelfSettings:
 
 
 @dataclass(frozen=True)
+class DocVersion:
+    """문서 책의 한 판(#94). edition: 기준 원고의 수정본 번호(기록 없으면 None). method: server(사실 부분을 서버가 만듦) |
+    server+preface(머리말을 더함). preface_by: 머리말을 누가 썼나(ai | author). stats: 다음 판과 견줄 수치(미확인 문헌 수 등)."""
+
+    number: int
+    at: str
+    edition: int | None
+    method: str = "server"
+    preface_by: str | None = None
+    stats: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Document:
+    """문서 책(#94): 원고에서 만든 읽기용 문서. 그 시점의 사진이고, 다시 만들면 판이 하나 늘어난다."""
+
+    id: str
+    title: str
+    title_by: TitleBy | None
+    doc_type: str  # source_check(출처 확인 문서)
+    floor: str
+    project_id: str  # 기준 원고 책
+    color: str
+    created_at: str = ""
+    updated_at: str = ""
+    versions: tuple[DocVersion, ...] = ()
+
+
+@dataclass(frozen=True)
 class Floor:
     """책장의 한 층(#93). 공용(id "common", number 0) 또는 작업물(프로젝트) 하나. 번호는 위에서 아래로 1층, 2층…"""
 
@@ -418,6 +449,9 @@ class Store(Protocol):
         ...
     def save_original(self, user_id: str, project_id: str, filename: str, data: bytes) -> str:
         """original/<filename>에 저장하고 데이터 루트 기준 상대 경로를 돌려준다(원본 사본·임포트 리포트용)."""
+        ...
+    def read_original(self, user_id: str, project_id: str, filename: str) -> str | None:
+        """original/의 리포트 md(import-report.md, E2-reupload-report.md). 없으면 None."""
         ...
     def get_non_citation_terms(self, user_id: str, project_id: str) -> list[str]:
         """인용 추출에서 뺄 낱말(지명·사건 등). 프로젝트의 book/non_citation_terms.txt, 한 줄에 하나."""
@@ -616,6 +650,24 @@ class Store(Protocol):
     def undo_move(self, user_id: str, move_id: str) -> FloorMove:
         """마지막 옮기기를 되돌린다. 마지막 옮기기가 아니거나 이미 되돌렸으면 ValueError."""
         ...
+    def move_document(self, user_id: str, doc_id: str, to_floor: str) -> FloorMove:
+        """문서 책을 다른 작업물 층으로(공용은 MoveError common_only)."""
+        ...
+    def trash_manuscript(self, user_id: str, project_id: str, note: str) -> str:
+        """원고 책을 휴지통으로: 작업물 폴더를 통째로 trash/로 옮기고, 같은 id·제목의 빈 층을 남긴다(층의 다른 책은 그대로)."""
+        ...
+    def set_project_color(self, user_id: str, project_id: str, color: str | None) -> None: ...
+
+    # 문서 책(#94) — shelf/documents/<id>/{document.json, v1.md…}
+    def create_document(self, user_id: str, doc: Document, content: str) -> Document: ...
+    def add_document_version(self, user_id: str, doc_id: str, version: DocVersion, content: str) -> Document: ...
+    def get_document(self, user_id: str, doc_id: str) -> Document | None: ...
+    def list_documents(self, user_id: str, *, floors: Iterable[str] | None = None, project_id: str | None = None) -> list[Document]: ...
+    def read_document(self, user_id: str, doc_id: str, number: int | None = None) -> str | None: ...
+    def update_document(self, user_id: str, doc_id: str, *, title: str | None = None, color: str | None = None,
+                        title_by: str | None = None) -> Document: ...
+    def trash_document(self, user_id: str, doc_id: str, note: str) -> Document | None: ...
+
     def set_ref_floor(self, user_id: str, key: str, floor: str, reason: str | None = None) -> Ref:
         """문헌 한 편의 층만 바꾼다(두 작업물이 함께 쓰게 된 문헌을 공용으로 옮길 때). reason을 주면 bib.json의 "moved"에
         옮긴 시각·원래 층·이유를 남긴다(웹 문헌 항목에 보인다)."""

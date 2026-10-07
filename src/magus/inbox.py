@@ -63,7 +63,7 @@ def save_upload(store: Store, user_id: str, name: str, data: bytes, max_upload: 
     if used - replaced + len(data) > max_user:
         raise LimitError(
             f"저장 용량 한도를 넘는다: 지금 {mb(used)} + 새 파일 {mb(len(data))} > 한도 {mb(max_user)}. "
-            "받은함에서 안 쓰는 파일을 지우세요."
+            "설정의 '올린 파일'에서 안 쓰는 파일을 지우세요."
         )
     return store.put_inbox(user_id, clean, data)
 
@@ -84,13 +84,13 @@ class FileResolver:
         if self.local_paths:  # 로컬(stdio) 개발용: 절대 경로나 FILES_DIR 기준 상대 경로
             path = resolve_input(name, self.files_root)
             return path, str(path)
-        raise FileNotFoundError(f"받은함에 {name!r}이 없다. files_list로 이름을 확인하거나, 웹의 받은함에 먼저 올린다.")
+        raise FileNotFoundError(f"올린 파일에 {name!r}이 없다. files_list로 이름을 확인하거나, 저자에게 웹 책장에서 먼저 올려 달라고 한다.")
 
 
 def describe(files: list[InboxFile], used: int, limit: int) -> str:
-    head = f"받은함 {len(files)}개 · 사용 {mb(used)} / 한도 {mb(limit)}"
+    head = f"올린 파일 {len(files)}개 · 사용 {mb(used)} / 한도 {mb(limit)}"
     if not files:
-        return head + "\n받은함이 비어 있다. 웹의 받은함 페이지에서 올린다(로컬 개발: magus inbox --add <파일>)."
+        return head + "\n올린 파일이 없다. 저자는 웹 책장(원고 책·문헌 책)이나 설정의 '올린 파일'에서 올린다(로컬 개발: magus inbox --add <파일>)."
     lines = [
         f"- {f.name} · {size_text(f.size)} · {local_time(f.modified)} · {INBOX_TYPES.get(Path(f.name).suffix.lower(), '')}"
         for f in files
@@ -113,7 +113,7 @@ def build_tools(store: Store, current_user: Callable[[], str], max_user_bytes: i
             files_list,
             name="files_list",
             description=(
-                "받은함(사용자가 웹에서 올린 파일) 목록: 이름, 크기, 올린 시각, 쓰임. "
+                "저자가 웹에서 올린 파일 목록: 이름, 크기, 올린 시각, 쓰임. "
                 "book_import·ref_add·idea_add_conversation의 파일 인자에는 여기 나온 **이름만** 준다."
             ),
             structured_output=False,

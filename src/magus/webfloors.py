@@ -33,7 +33,7 @@ from magus.store.floors import KINDS as BUILTIN_KINDS
 from magus.store.floors import MoveError
 from magus.store.formats import one_line
 from magus.webshelf import (
-    GROUP_SIZE, KINDS, Book, Kind, add_book, book_html, builtin_kind, category_kind, clean_query, one_char, row_html,
+    GROUP_SIZE, KINDS, Book, Kind, add_book, book_html, builtin_kind, category_kind, clean_query, find, one_char, row_html,
     safe_color, shelf_html, text_color,
 )
 
@@ -238,7 +238,8 @@ def mini_book_html(book: Book, floor: str) -> str:
     width = 26 if book.count < 10 else 30 if book.count < 50 else 34 if book.count < 200 else 38
     label = (f"{book.name}, 확인 {book.verified}편, 전체 {book.count}편" if book.verified is not None
              else f"{book.name}, 항목 {book.count}개")
-    return (f'<li><span class="mbook" data-book="{html.escape(book.key)}" data-from="{html.escape(floor)}" role="img" '
+    drag = f' data-book="{html.escape(book.key)}" data-from="{html.escape(floor)}"' if book.movable else ""
+    return (f'<li><span class="mbook"{drag} role="img" '
             f'aria-label="{html.escape(label)}" title="{html.escape(label)}" '
             f'style="--c:{color};--fg:{text_color(color)};height:{height}px;width:{width}px">'
             f'<span class="mb-name" aria-hidden="true">{html.escape(book.name)}</span></span></li>')
@@ -282,7 +283,8 @@ class FloorPages:
     def _notices(self, uid: str, request: Request, session: tuple[str, str], here: str) -> str:
         out = self._done_message(uid, request)
         params = request.query_params
-        done = {"floor": "새 층을 만들었습니다. 원고는 원고 화면에서 이 층으로 가져올 수 있습니다."}.get(params.get("done") or "")
+        done = {"floor": "새 층을 만들었습니다. 원고는 아래 점선 자리 '책 추가'에서 원고 파일을 고르면 이 층의 원고 책이 됩니다."}.get(
+            params.get("done") or "")
         if done:
             out += f'<p class="msg">{done}</p>'
         if err := {"empty": "작업물 제목을 적어 주세요.", "full": f"층은 공용 빼고 {MAX_FLOORS}개까지 만들 수 있습니다."}.get(
@@ -354,7 +356,7 @@ class FloorPages:
         room = sum(1 for f in floors if not f.common) < MAX_FLOORS
         new_floor = (
             '<details class="card"><summary>새 층 만들기</summary>'
-            "<p>원고 없이 제목만 있는 층을 만듭니다. 원고는 나중에 원고 화면에서 이 층으로 가져올 수 있습니다.</p>"
+            "<p>원고 없이 제목만 있는 층을 만듭니다. 원고는 그 층의 '책 추가'에서 원고 파일을 고르면 원고 책이 됩니다.</p>"
             f'<form method="post" action="/shelf/floors">{self._csrf_input(session)}'
             f'<label class="block">작업물 제목 <input name="title" maxlength="{FLOOR_TITLE_MAX}" required></label>'
             '<p><button>층 만들기</button></p></form></details>'
@@ -381,6 +383,7 @@ class FloorPages:
     def _search_groups(self, uid: str, floors: list[Floor], q: str) -> list[str]:
         """층마다 한 덩어리(HTML). 찾은 것이 없으면 빈 문자열."""
         needle = q.replace(" ", "").lower()
+        doc_hits = set(find(self.store, uid, ["document"], q))  # 문서 책 내용(웹 검색 전용 레인)
         out = []
         for f in floors:
             kinds: list[Kind] = [builtin_kind(k, f.id) for k in f.builtins]
@@ -400,6 +403,11 @@ class FloorPages:
                 parts.append(f'<section class="group"><h3><a href="/shelf/{kind.key}">{html.escape(kind.name)}</a> '
                              f'<small>{len(rows)}개 · {when_text(updated)}</small>{more}</h3>'
                              f'<ol class="board">{"".join(row_html(r, q) for r in rows[:GROUP_SIZE])}</ol></section>')
+            for d in self.store.list_documents(uid, floors=[f.id]):  # 문서 책(#94): 제목·내용
+                in_title = needle and needle in d.title.replace(" ", "").lower()
+                if in_title or d.id in doc_hits:
+                    parts.append(f'<section class="group"><h3><a href="/shelf/doc/{html.escape(d.id)}">{html.escape(d.title)}</a> '
+                                 f'<small>문서 책 · {when_text(d.updated_at)}</small></h3></section>')
             if not (parts or by_name or named):
                 out.append("")
                 continue
@@ -432,10 +440,10 @@ class FloorPages:
         if floor.common:
             meta = f"{when_text(floor.updated_at)} · 공용 층은 모든 작업물이 함께 쓰는 층입니다."
         elif floor.has_manuscript:
-            meta = f'{when_text(floor.updated_at)} · 이 층의 원고는 <a href="/book">원고</a> 화면에서 봅니다.'
+            meta = f'{when_text(floor.updated_at)} · 이 층의 원고는 <a href="/shelf/book/{html.escape(floor.id)}">원고 책</a>을 누르면 열립니다.'
         else:
-            meta = (f"{when_text(floor.updated_at)} · 원고가 아직 없습니다. <a href=\"/book\">원고</a> 화면의 "
-                    f"'새 책으로 가져오기'에서 프로젝트 id 칸에 이 층의 id(<b>{html.escape(floor.id)}</b>)를 적으면 이 층으로 들어옵니다.")
+            meta = (f"{when_text(floor.updated_at)} · 원고가 아직 없습니다. 아래 점선 자리 '책 추가'에서 원고 파일을 고르면 "
+                    "이 층의 원고 책이 됩니다.")
         notices = await run_in_threadpool(self._notices, uid, request, session, here)
         books = await run_in_threadpool(self.books, uid, floor.id)
         body = (
@@ -451,17 +459,19 @@ class FloorPages:
 
     # ---- 위치(카테고리 설정 화면) ---------------------------------------------------------------
     def location_form(self, uid: str, session: tuple[str, str], kind: Kind) -> str:
-        floors = self.store.list_floors(uid)
+        floors = [f for f in self.store.list_floors(uid) if not (kind.base == "doc" and f.common)]  # 공용에는 모음 책만(#94)
         options = "".join(
             f'<option value="{html.escape(f.id)}"{" selected" if f.id == kind.floor else ""}>{html.escape(floor_name(f))}</option>'
             for f in floors)
-        rule = ("받는 층에 같은 기본 카테고리가 있으면 하나로 합쳐집니다." if kind.category is None
+        rule = ("문서 책은 작업물 층에만 둘 수 있습니다(공용 층에는 모음 책만)." if kind.base == "doc"
+                else "받는 층에 같은 기본 카테고리가 있으면 하나로 합쳐집니다." if kind.category is None
                 else "받는 층에 같은 이름의 카테고리가 있으면 옮기지 않습니다.")
         refs = " 원고의 인용 점검은 그 작업물 층과 공용의 문헌만 봅니다." if kind.base == "refs" else ""
         return (f'<h2>위치</h2><form method="post" action="/shelf/move" class="card">{self._csrf_input(session)}'
                 f'<input type="hidden" name="book" value="{html.escape(kind.key)}"><input type="hidden" name="next" value="dest">'
                 f'<label class="block">꽂힌 층 <select name="to">{options}</select></label>'
-                f'<p class="muted">항목은 모두 함께 옮겨집니다. {rule}{refs}</p><p><button>옮기기</button></p></form>')
+                f'<p class="muted">{"" if kind.base == "doc" else "항목은 모두 함께 옮겨집니다. "}{rule}{refs}</p>'
+                "<p><button>옮기기</button></p></form>")
 
     # ---- 옮기기·되돌리기·층 만들기 ---------------------------------------------------------------
     async def shelf_move(self, request: Request) -> Response:
@@ -478,7 +488,9 @@ class FloorPages:
         back = safe_next(nxt) if nxt != "dest" else "/shelf"
         base, _, source = book.partition(".")
         try:
-            if base in BUILTIN_KINDS and source:
+            if book.startswith(("doc.", "ms.")):  # 문서 책·원고 책(#94): 옮기기 규칙은 move_book이 안다
+                move = await run_in_threadpool(move_book, self.store, uid, book, "", to)
+            elif base in BUILTIN_KINDS and source:
                 move = await run_in_threadpool(move_book, self.store, uid, base, source, to)
             else:
                 try:

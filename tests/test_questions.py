@@ -155,16 +155,19 @@ def test_questions_web_page(tmp_path):
             base = f"http://127.0.0.1:{port}"
             _wait_healthy(f"{base}/healthz", proc)
             with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
-                book = c.get("/login?next=/book").text
-                assert '<a href="/questions?project=book">답해 주실 질문</a>' in book
-                page = c.get("/questions?project=book").text
-                assert "<h1>답해 주실 질문</h1>" in page and "질문 9건(열림 9 · 원고 반영 대기 0 · 답함 0)" in page
+                cites = c.get("/login?next=/shelf/book/book").text  # 원고 책(#94): 인용 상태 탭 안에서 연다
+                cites = c.get("/shelf/book/book?tab=cites").text
+                assert '<a href="/shelf/book/book?tab=cites&view=questions"><b>답해 주실 질문 9건</b></a>' in cites
+                moved = c.get("/questions?project=book", follow_redirects=False)  # 옛 주소
+                assert moved.headers["location"] == "/shelf/book/book?tab=cites&view=questions"
+                page = c.get("/shelf/book/book?tab=cites&view=questions").text
+                assert "<h2>답해 주실 질문 9건</h2>" in page and "열림 9 · 원고 반영 대기 0 · 답함 0" in page
                 assert "<b>연도 불일치</b> · 열림" in page and "고를 수 있는 답: 맞다 / 다른 문헌 / 참고문헌에 없음" in page
                 assert "ref:" not in page and "fix_text" not in page  # 저자에게는 코드가 보이지 않는다
                 assert "<script>alert" not in page and "Evil &lt;script&gt;alert(1)&lt;/script&gt; title" in page
-                only = c.get("/questions?project=book&type=ab").text
+                only = c.get("/shelf/book/book?tab=cites&view=questions&type=ab").text
                 assert "연도 a/b 모호" in only and "연도 불일치</b>" not in only
-                assert c.get("/questions?project=book&status=waiting").text.count('<li class="card">') == 0
+                assert c.get("/shelf/book/book?tab=cites&view=questions&status=waiting").text.count('<li class="card">') == 0
         finally:
             proc.terminate()
             proc.wait(timeout=10)

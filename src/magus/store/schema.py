@@ -1,7 +1,7 @@
 """SQLite 인덱스 스키마. 인덱스는 언제든 원본 파일에서 다시 만들 수 있으므로,
 스키마가 바뀌면 SCHEMA_VERSION을 올린다. 그러면 LocalStore가 인덱스를 지우고 다시 만든다."""
 
-SCHEMA_VERSION = 18  # 17: 층(#93) — refs·ideas·style_entries·categories의 floor, refs.updated_at. 18: refs.moved(공용으로 옮긴 기록)
+SCHEMA_VERSION = 19  # 17: 층(#93). 18: refs.moved(공용으로 옮긴 기록). 19: 문서 책(documents, 레인 document)·원고 책 색(#94)
 
 # 지울 때는 역순으로 지운다. chunks_fts는 가상 테이블이다(그림자 테이블도 함께 지워진다).
 TABLES = (
@@ -18,6 +18,7 @@ TABLES = (
     "style_entries",
     "categories",
     "category_items",
+    "documents",
     "chunks",
     "chunks_fts",
 )
@@ -36,6 +37,7 @@ CREATE TABLE projects (
     subtitle_en TEXT,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
+    color       TEXT,
     PRIMARY KEY (user_id, id)
 );
 
@@ -203,13 +205,28 @@ CREATE TABLE category_items (
     PRIMARY KEY (user_id, category_id, id)
 );
 
+CREATE TABLE documents (
+    id          TEXT NOT NULL,
+    user_id     TEXT NOT NULL,
+    floor       TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    doc_type    TEXT NOT NULL,
+    project_id  TEXT NOT NULL,
+    color       TEXT NOT NULL,
+    edition     INTEGER,
+    versions    INTEGER NOT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (user_id, id)
+);
+
 CREATE TABLE chunks (
     id          INTEGER PRIMARY KEY,
     user_id     TEXT NOT NULL,
     owner_type  TEXT NOT NULL,
     owner_id    TEXT NOT NULL,
     lane        TEXT NOT NULL CHECK (lane IN ('ref_picked', 'ref_full', 'idea_me', 'idea_ai', 'style', 'style_passage', 'ref_bib',
-                                              'category')),
+                                              'category', 'document')),
     text        TEXT NOT NULL,
     embedding   BLOB
 );

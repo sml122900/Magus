@@ -15,8 +15,7 @@ from magus.floors import COMMON, COMMON_NAME
 from magus.store import Floor, Store
 
 # 도구 설명에 붙이는 한 줄(자세한 규칙은 instructions)
-FLOOR_PUT = ("floor: 넣을 층(공용·1층·작업물 id). 저자가 말하지 않았으면 이 대화에서 다루는 작업물의 층을 주고, "
-             "모르면 비워 둔다(작업물이 하나면 그 층). ")
+FLOOR_PUT = "floor: 넣을 층(공용·1층·작업물 id. 정하는 법은 instructions의 층 규칙). "
 FLOOR_FIND = "floor를 주면 그 층에서만 찾는다(없으면 모든 층). "
 
 

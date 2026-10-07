@@ -232,7 +232,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         shelf = c.get("/login?next=/shelf").text
         csrf = _csrf(shelf)
         # 카테고리 추가 자리는 한 층 화면에 있다(#93). 작업물이 없으면 공용 층 하나
-        assert '<a class="book add" href="/shelf/new?floor=common" aria-label="카테고리 추가">' in c.get("/shelf/floor/common").text
+        assert '<a class="book add" href="/shelf/add?floor=common" aria-label="책 추가">' in c.get("/shelf/floor/common").text
         form = c.get("/shelf/new").text
         assert 'name="template" value="case"' in form and form.count('name="color" value="#') == 18 and 'value="custom"' in form
         assert c.post("/shelf/new", data={"csrf": "틀림", "name": "사례", "template": "case", "color": "#b3261e"}).status_code == 403
@@ -285,7 +285,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         assert "「옛 사례」 카테고리를 휴지통으로 옮길까요?" in confirm and "항목 1개가 함께 옮겨집니다." in confirm
         assert c.get("/shelf/trash/ideas").status_code == 400
         trashed = c.post(f"/shelf/trash/{cid}", data={"csrf": csrf}).text
-        assert "카테고리를 휴지통으로 옮겼습니다." in trashed and "옛 사례" not in trashed
+        assert "책을 휴지통으로 옮겼습니다." in trashed and "옛 사례" not in trashed  # 책 종류와 상관없이 같은 문장(#94)
         assert c.get(f"/shelf/{cid}").status_code == 404
     assert (data_dir / "users" / "alice" / "trash" / "shelf" / "categories" / cid / "category.json").exists()
 

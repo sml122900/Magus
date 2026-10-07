@@ -27,7 +27,9 @@ from magus.store.fileio import to_int as _int
 from magus.store.fileio import write_json as _write_json
 from magus.store.fileio import write_text as _write_text
 from magus.floors import COMMON, MAX_FLOORS
+from magus.category.rules import HEX
 from magus.store.categories import CategoryMixin
+from magus.store.documents import DocumentMixin
 from magus.store.floors import FloorMixin
 from magus.store.shelf import ShelfMixin
 from magus.store.base import (
@@ -64,7 +66,7 @@ ANSWERS_HEADER = ("# 저자 답\n\n질문은 매번 원고와 문헌에서 계�
 _CHAPTER_FILE = re.compile(r"ch-(\d+)\.md")
 _VERSION_FILE = re.compile(r"ch-(\d+)\.v(\d+)\.md")
 
-class LocalStore(ShelfMixin, CategoryMixin, FloorMixin):
+class LocalStore(ShelfMixin, CategoryMixin, FloorMixin, DocumentMixin):
     def __init__(self, data_dir: Path):
         self.root = Path(data_dir)
         self.root.mkdir(parents=True, exist_ok=True)
@@ -173,11 +175,43 @@ class LocalStore(ShelfMixin, CategoryMixin, FloorMixin):
         return self._rel(target)
 
     @_locked
+    def trash_manuscript(self, user_id: str, project_id: str, note: str) -> str:
+        """원고 책을 휴지통으로(#94): 작업물 폴더(장·확인 요청·결정·수정본 이력·원본)를 통째로 trash/<id>-<시각>/으로 옮기고,
+        같은 id·제목의 빈 층을 남긴다. 층에 꽂힌 다른 책(생각·문헌·카테고리·문서)은 그대로다. 지우지 않는다."""
+        project = self.get_project(user_id, project_id)
+        if project is None:
+            raise ValueError(f"프로젝트 {project_id!r}가 없다")
+        moved = self.archive_project(user_id, project_id)
+        _write_json(self.root / moved / "trash-note.json", {"at": utcnow(), "note": note})
+        self.create_project(user_id, project.title, project_id, titles=BookTitles(project.title, project.subtitle,
+                                                                                    project.title_en, project.subtitle_en))
+        return moved
+
+    @_locked
+    def set_project_color(self, user_id: str, project_id: str, color: str | None) -> None:
+        path = self._require_project(user_id, project_id) / "project.json"
+        if color is not None and not HEX.fullmatch(color):
+            raise ValueError(f"색은 #RRGGBB: {color!r}")
+        data = _read_json(path)
+        data.pop("color", None)
+        _write_json(path, {**data, **({"color": color.lower()} if color else {})})
+        with self._db:
+            self._db.execute("UPDATE projects SET color = ? WHERE user_id = ? AND id = ?",
+                             (color.lower() if color else None, user_id, project_id))
+
+    @_locked
     def save_original(self, user_id: str, project_id: str, filename: str, data: bytes) -> str:
         path = self._require_project(user_id, project_id) / "original" / Path(filename).name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
         return self._rel(path)
+
+    @_locked
+    def read_original(self, user_id: str, project_id: str, filename: str) -> str | None:
+        """original/의 글 파일(임포트·수정본 리포트 md). 없거나 밖을 가리키면 None."""
+        folder = self._project_dir(user_id, project_id) / "original"
+        path = folder / Path(filename).name
+        return path.read_text(encoding="utf-8") if path.suffix == ".md" and path.is_file() else None
 
     @_locked
     def get_non_citation_terms(self, user_id: str, project_id: str) -> list[str]:
@@ -606,6 +640,7 @@ class LocalStore(ShelfMixin, CategoryMixin, FloorMixin):
                     self._reindex_project(udir.name, project_json.parent)
                 self._reindex_shelf(udir.name)
                 self._reindex_categories(udir.name)
+                self._reindex_documents(udir.name)
         db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _reindex_project(self, user_id: str, pdir: Path) -> None:
@@ -647,12 +682,13 @@ class LocalStore(ShelfMixin, CategoryMixin, FloorMixin):
         self, user_id: str, project_id: str, title: str, created_at: str, extra: dict | None = None
     ) -> None:
         extra = extra or {}
+        color = extra.get("color") if isinstance(extra.get("color"), str) and HEX.fullmatch(extra["color"]) else None
         self._db.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (user_id,))
         self._db.execute(
-            "INSERT INTO projects (id, user_id, title, subtitle, title_en, subtitle_en, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO projects (id, user_id, title, subtitle, title_en, subtitle_en, created_at, updated_at, color)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (project_id, user_id, title, extra.get("subtitle"), extra.get("title_en"), extra.get("subtitle_en"),
-             created_at, created_at),
+             created_at, created_at, color),
         )
 
     def _index_parts(self, user_id: str, project_id: str, parts: list[Part]) -> None:
@@ -733,7 +769,8 @@ def _inbox_entry(path: Path) -> InboxFile:
 
 def _project(r: sqlite3.Row) -> Project:
     return Project(
-        r["id"], r["user_id"], r["title"], r["created_at"], r["updated_at"], r["subtitle"], r["title_en"], r["subtitle_en"]
+        r["id"], r["user_id"], r["title"], r["created_at"], r["updated_at"], r["subtitle"], r["title_en"], r["subtitle_en"],
+        r["color"],
     )
 
 

@@ -11,8 +11,10 @@ import re
 import tempfile
 from collections import defaultdict
 from collections.abc import Iterable
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from magus.melchior.check import Resolver, check_text, terms_of
 from magus.melchior.report import build_cite_report
@@ -130,16 +132,42 @@ def name_mentions(chapters: list[tuple[str, str]], ref: Ref) -> tuple[list[str],
     return list(shown)[:2], where
 
 
-def build_author_report(store: Store, user_id: str, project_id: str, date: str) -> str:
+@dataclass
+class ReportParts:
+    """저자용 보고서와 출처 확인 문서(#94)가 함께 쓰는 재료: 인용 집계, 문헌, 추정 연결·동명 판별, 장 본문."""
+
+    project: Any
+    report: Any
+    refs: dict[str, Ref]
+    inferred: dict[tuple[str, str], list[str]]
+    same_author: dict[str, list[str]]
+    ambiguous: dict[str, list[str]]
+    texts: list[tuple[str, str]]
+
+    @property
+    def unchecked(self) -> list[Any]:
+        return self.report.of("unverified", "unknown")
+
+    @property
+    def occurrences(self) -> int:
+        return sum(d.count for d in self.report.docs.values() if d.status in ("unverified", "unknown", "verified"))
+
+    @property
+    def verified(self) -> int:
+        return len(self.report.of("verified"))
+
+    @property
+    def documents(self) -> int:
+        return len(self.report.docs) - len(self.report.of("uncertain"))
+
+
+def gather(store: Store, user_id: str, project_id: str) -> ReportParts:
     project = store.get_project(user_id, project_id)
     if project is None:
         raise ValueError(f"프로젝트 {project_id!r}가 없다")
     report = build_cite_report(store, user_id, project_id)
     resolver, terms = Resolver(store, user_id, project_id), terms_of(store, user_id, project_id)
     refs = {r.key: r for r in store.list_refs(user_id, floors=resolver.floors)}  # 그 작업물 층 + 공용(#93)
-    unchecked = report.of("unverified", "unknown")
-    occurrences = sum(d.count for d in report.docs.values() if d.status in ("unverified", "unknown", "verified"))
-    verified = len(report.of("verified"))
 
     # 추정 연결과 동명 판별을 장 단위로 다시 모은다(어느 장의 어떤 표기인지 보여 주려고)
     inferred: dict[tuple[str, str], list[str]] = defaultdict(list)  # (표기, ref key) → 장
@@ -159,16 +187,18 @@ def build_author_report(store: Store, user_id: str, project_id: str, date: str) 
                 ambiguous[g.key] = [k for k, _ in g.candidates]
             if re.search(r"-\d+$", g.key) or any(k.startswith(g.key + "-") for k in refs):
                 same_author[g.key].append(meta.display)
+    return ReportParts(project, report, refs, inferred, same_author, ambiguous, texts)
 
+
+def summary_line(p: ReportParts) -> str:
+    return (f"원고 전체 인용 **{p.occurrences}곳**, 문헌 **{p.documents}편**, "
+            f"원문 대조 완료 **{p.verified}편**입니다.")
+
+
+def mismatch_lines(p: ReportParts) -> list[str]:
+    """연도가 맞지 않는 것과 참고문헌에만 있는 것(원고 불일치)."""
+    report, refs = p.report, p.refs
     lines = [
-        f"# 『{project.title}』 인용 점검 보고서",
-        f"{date} · Magus가 원고 전체를 읽고 정리했습니다.",
-        "",
-        "## 1. 한 줄 요약",
-        f"원고 전체 인용 **{occurrences}곳**, 문헌 **{len(report.docs) - len(report.of('uncertain'))}편**, "
-        f"원문 대조 완료 **{verified}편**입니다.",
-        "",
-        "## 2. 바로 확인할 것",
         f"**연도가 맞지 않는 {len(report.of('unknown'))}건.** 본문 연도의 문헌이 참고문헌에 없고, 같은 저자의 다른 해 문헌만 있습니다. "
         "연도를 잘못 적었는지, 참고문헌에서 빠졌는지 확인해 주세요.",
     ]
@@ -183,38 +213,44 @@ def build_author_report(store: Store, user_id: str, project_id: str, date: str) 
     ]
     for key, _ in report.uncited:
         ref = refs.get(key)
-        shown, where = name_mentions(texts, ref) if ref else ([], [])
+        shown, where = name_mentions(p.texts, ref) if ref else ([], [])
         note = f" — 본문에는 이름만 나옵니다: '{', '.join(shown)}'({chapters_text(where)})" if where else " — 본문에서 이름도 찾지 못했습니다"
         lines.append(f"- {cite_label(ref, key)}{note}")
+    return lines
 
-    lines += ["", "## 3. 답해 주실 질문", "본문의 한글 표기를 참고문헌의 영문 문헌으로 추정해 이었습니다. 맞는지 알려 주세요."]
-    for (surface, key), chapters in sorted(inferred.items(), key=lambda kv: kv[0][1]):
+
+def inferred_lines(p: ReportParts) -> list[str]:
+    refs, lines = p.refs, []
+    for (surface, key), chapters in sorted(p.inferred.items(), key=lambda kv: kv[0][1]):
         ref = refs.get(key)
-        if key in ambiguous:
-            options = ", ".join(cite_label(refs.get(k), k) for k in ambiguous[key])
+        if key in p.ambiguous:
+            options = ", ".join(cite_label(refs.get(k), k) for k in p.ambiguous[key])
             lines.append(f"- {chapters_text(chapters)} {surface}: {options} 중 어느 것인가요?")
         else:
             lines.append(f"- {chapters_text(chapters)} {surface} → {cite_label(ref, key)} 맞나요?")
-    for base in sorted({re.sub(r"-\d+$", "", k) for k in same_author}):
+    for base in sorted({re.sub(r"-\d+$", "", k) for k in p.same_author}):
         works = [k for k in refs if k == base or re.fullmatch(rf"{re.escape(base)}-\d+", k)]
         if len(works) > 1:
             first = refs[works[0]].bib
             pairs = ", ".join(
-                f"{chapters_text(same_author[k]) if k in same_author else '인용 없음'}은 {cite_label(refs[k], k, all_authors=True)}"
-                for k in sorted(works, key=lambda k: same_author.get(k, ["~"])[0])
+                f"{chapters_text(p.same_author[k]) if k in p.same_author else '인용 없음'}은 {cite_label(refs[k], k, all_authors=True)}"
+                for k in sorted(works, key=lambda k: p.same_author.get(k, ["~"])[0])
             )
             lines.append(
                 f"- 참고문헌에 {first.get('first_author')}({first.get('year')}) 문헌이 {len(works)}편 있습니다. "
                 f"본문의 공저자 이름으로 {pairs}로 이었습니다. 맞나요?"
             )
+    return lines
 
-    lines += ["", "## 4. 확인을 시작할 순서", "가장 많이 인용된 문헌부터 원문을 확인하시면 한 번에 여러 곳이 해결됩니다.", ""]
-    ranked = sorted(unchecked, key=lambda d: (-d.count, -len(d.chapters), d.key))[:20]
-    lines += [
-        f"{n}. {cite_label(refs.get(d.key), d.key)} — {d.count}곳({chapters_text(d.chapters)})"
-        for n, d in enumerate(ranked, 1)
-    ]
 
+def ranked_lines(p: ReportParts, top: int = 20) -> list[str]:
+    ranked = sorted(p.unchecked, key=lambda d: (-d.count, -len(d.chapters), d.key))[:top]
+    return [f"{n}. {cite_label(p.refs.get(d.key), d.key)} — {d.count}곳({chapters_text(d.chapters)})"
+            for n, d in enumerate(ranked, 1)]
+
+
+def fact_lines(store: Store, user_id: str, project_id: str) -> tuple[int, list[str]]:
+    """(사실·수치 확인 요청 수, 설명과 장별 줄)."""
     facts: dict[str, list[str]] = defaultdict(list)
     chapter_names = {m.number: m.display for m in store.list_chapters(user_id, project_id)}
     fact_issues = store.list_issues(user_id, project_id, "open", kind="fact")
@@ -225,9 +261,7 @@ def build_author_report(store: Store, user_id: str, project_id: str, date: str) 
         facts[chapter_names.get(issue.chapter_number, "장 밖")].append(f"{head} (I{issue.id}{', AI' if issue.by_ai else ''})")
     by_ai = [i for i in fact_issues if i.by_ai]
     ai_names = "·".join(sorted({i.author for i in by_ai if i.author})) or "AI"
-    lines += [
-        "",
-        f"## 5. 사실·수치 확인 요청 {len(fact_issues)}건",
+    lines = [
         "특정 문헌이 아니라 사실이나 수치를 확인해 달라는 원고 메모입니다. 장별로 모아 앞 40자만 옮겼습니다. "
         "괄호 속 번호(I3 등)로 말씀하시면 해당 메모를 바로 찾습니다.",
         *([f"이 중 {len(by_ai)}건은 {ai_names}(AI)가 원고에 단 확인 요청입니다(괄호 속 'AI')."] if by_ai else []),
@@ -236,14 +270,36 @@ def build_author_report(store: Store, user_id: str, project_id: str, date: str) 
     order = {m.display: n for n, m in enumerate(store.list_chapters(user_id, project_id))}  # 읽는 순서
     for name in sorted(facts, key=lambda n: order.get(n, 999)):
         lines.append(f"- **{name}**: " + " / ".join(facts[name]))
+    return len(fact_issues), lines
 
-    lines += ["", "## 6. 장별 미확인 문헌 수", "", "| 장 | 편 | 장 | 편 | 장 | 편 | 장 | 편 |", "|---|---:|---|---:|---|---:|---|---:|"]
-    cells = [(d, u) for d, _, u, _, _ in report.per_chapter]
+
+def per_chapter_lines(p: ReportParts) -> list[str]:
+    lines = ["| 장 | 편 | 장 | 편 | 장 | 편 | 장 | 편 |", "|---|---:|---|---:|---|---:|---|---:|"]
+    cells = [(d, u) for d, _, u, _, _ in p.report.per_chapter]
     for i in range(0, len(cells), 4):
         row = cells[i : i + 4] + [("", "")] * (4 - len(cells[i : i + 4]))
         lines.append("| " + " | ".join(f"{d} | {u}" for d, u in row) + " |")
+    return lines
 
-    lines += [
+
+def build_author_report(store: Store, user_id: str, project_id: str, date: str) -> str:
+    p = gather(store, user_id, project_id)
+    count, facts = fact_lines(store, user_id, project_id)
+    lines = [
+        f"# 『{p.project.title}』 인용 점검 보고서",
+        f"{date} · Magus가 원고 전체를 읽고 정리했습니다.",
+        "",
+        "## 1. 한 줄 요약",
+        summary_line(p),
+        "",
+        "## 2. 바로 확인할 것",
+        *mismatch_lines(p),
+        "", "## 3. 답해 주실 질문", "본문의 한글 표기를 참고문헌의 영문 문헌으로 추정해 이었습니다. 맞는지 알려 주세요.",
+        *inferred_lines(p),
+        "", "## 4. 확인을 시작할 순서", "가장 많이 인용된 문헌부터 원문을 확인하시면 한 번에 여러 곳이 해결됩니다.", "",
+        *ranked_lines(p),
+        "", f"## 5. 사실·수치 확인 요청 {count}건", *facts,
+        "", "## 6. 장별 미확인 문헌 수", "", *per_chapter_lines(p),
         "",
         "## 7. 앞으로의 방식",
         "- 논문 원문을 올리고 쓸 부분과 그 이유를 말씀하시면 '확인 완료'로 바뀝니다.",

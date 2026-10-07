@@ -198,12 +198,12 @@ def test_web_marks_ai_comments(server_proc, tmp_path: Path):  # noqa: F811 - tes
     base, _, _ = server_proc({})
     docx_bytes = _authored_manuscript(tmp_path / "a.docx").read_bytes()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
-        csrf = re.search(r'name="csrf" value="([0-9a-f]+)"', c.get("/login?next=/inbox").text).group(1)
-        c.post("/inbox/upload", data={"csrf": csrf}, files={"files": ("원고.docx", docx_bytes)})
-        page = c.post("/book/import", data={"csrf": csrf, "name": "원고.docx", "project_id": "b", "title": ""}).text
-        assert "1장 + " not in page and "<td>1장</td>" in page  # outline과 같은 장 수 표기
-        assert "2 (🤖 AI 확인 요청 1)" in page
-        issues = c.get("/issues?project=b").text
+        csrf = re.search(r'name="csrf" value="([0-9a-f]+)"', c.get("/login?next=/shelf").text).group(1)
+        made = c.post("/shelf/manuscript", data={"csrf": csrf, "floor": "new"}, files={"file": ("원고.docx", docx_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")})
+        page = made.text  # 원고 책(#94)
+        assert "1장 + " not in page and "원고 책 · 1장 ·" in page  # outline과 같은 장 수 표기
+        assert "열린 확인 요청 2건" in page
+        issues = c.get(str(made.url).split("?")[0] + "?tab=issues").text
     assert "그중 🤖 AI 확인 요청 1건(AI가 원고에 단 코멘트입니다)" in issues
     assert '<td><span class="tag">🤖 AI 확인 요청(Claude)</span></td><td>문헌 확인</td>' in issues  # 문구는 그대로, 알약 태그
     assert "<td>원고 코멘트(편집자)</td><td>기타</td>" in issues

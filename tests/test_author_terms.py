@@ -40,7 +40,7 @@ async def test_author_facing_text_has_no_old_or_core_names(settings: Settings, s
         assert not _hits(c.instructions.replace(AVOID, "")), _hits(c.instructions.replace(AVOID, ""))
         assert c.instructions.count(AVOID) == 1
         tools = (await c.list_tools()).tools
-        assert len(tools) == 30
+        assert len(tools) == 29  # #94: 문서 책 하나 더하고 지우기 둘을 category_trash로 합쳤다
         for tool in tools:
             seen[f"설명 {tool.name}"] = f"{tool.description}\n{json.dumps(tool.input_schema, ensure_ascii=False)}"
 
@@ -75,11 +75,14 @@ async def test_author_facing_text_has_no_old_or_core_names(settings: Settings, s
         idea = await call("idea_add", {"text": "바다는 돌아가는 곳이다", "kind": "thought", "title": "바다", "title_by": "ai"})
         await call("idea_add_conversation", {"path": "대화.md"})
         await call("idea_search", {"query": "바다", "author": "all"})
-        await call("idea_delete", {"id": idea.split()[2], "note": "시험"})
-        await call("idea_delete", {"id": "20260101000000000-ffffff", "note": "x"}, "idea_delete 오류")
+        await call("category_trash", {"category": "생각", "item_id": idea.split()[2], "note": "시험"}, "category_trash 생각")
+        await call("category_trash", {"category": "생각", "item_id": "20260101000000000-ffffff", "note": "x"}, "category_trash 생각 오류")
         style = await call("style_add", {"passage": "짧다.", "reason": "(저자가 이유를 밝히지 않음)", "tags": TAGS})
         await call("style_search", {"query": "짧음"})
-        await call("style_delete", {"id": style.split()[2], "note": "시험"})
+        await call("category_trash", {"category": "문체", "item_id": style.split()[2], "note": "시험"}, "category_trash 문체")
+        await call("book_document", {"untitled": True}, "book_document 오류(제목을 묻게 함)")
+        doc = await call("book_document", {"title": "출처 확인", "title_by": "author", "preface": "머리말"})
+        await call("book_document", {"document_id": re.search(r"\((\d{17}-[0-9a-f]{6})\)", doc).group(1)}, "book_document 다시")
         await call("category_list", {})
         await call("category_create", {"name": "사례", "template": "사례", "color": "빨강"})
         await call("category_create", {"name": "생각"}, "category_create 오류(정해진 이름)")

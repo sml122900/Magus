@@ -86,17 +86,21 @@ def safe_color(value: str | None, fallback: str) -> str:
 
 @dataclass(frozen=True)
 class Book:
-    """책장에 꽂힌 책 하나(카테고리 하나)."""
+    """책장에 꽂힌 책 하나: 원고 책·모음 책(기본 카테고리와 저자의 카테고리)·문서 책(#94)."""
 
-    key: str  # 주소에 쓰는 이름: ideas | styles | refs | 카테고리 id
+    key: str  # 주소에 쓰는 이름: <종류>.<층>(ideas.book) | 카테고리 id | ms.<작업물 id> | doc.<문서 id>
     name: str
-    band: str  # 위쪽 띠: 기본 카테고리면 "기본", 저자의 카테고리면 템플릿 이름
+    band: str  # 위쪽 띠: 책 종류(원고·모음·문서, #94)
     count: int
     color: str
     href: str | None  # None이면 누를 수 없는 미리보기
     # 문헌만: 원문을 확인한 편수. 책등 아래를 "확인 n · 전체 m" 두 줄로 보인다(두께는 전체 수 기준 그대로).
     # 문헌 수에는 원고 참고문헌에서 들여온 미확인 항목도 들어 있어, 전체만 보이면 '원문을 읽고 등록한 책'으로 오해한다.
     verified: int | None = None
+    note: str | None = None  # 아래 띠 글(줄바꿈은 두 줄). 원고 책 "N장", 문서 책 "E2 기준"·"옛 판 기준"
+    label: str | None = None  # 낭독기 이름(없으면 "이름, 항목 N개")
+    movable: bool = True  # 끌어 옮길 수 있나(원고 책은 그 층 자체라 옮기지 않는다)
+    stale: bool = False  # 문서 책: 기준 원고에 새 수정본이 왔다
 
 
 def book_style(book: Book) -> str:
@@ -120,20 +124,24 @@ def book_html(book: Book, floor: str | None = None) -> str:
     if book.verified is not None:
         count = f'<span class="line">확인 {book.verified}</span><span class="line">전체 {book.count}</span>'
         label = html.escape(f"{book.name}, 확인 {book.verified}편, 전체 {book.count}편")
+    if book.note is not None:
+        count = "".join(f'<span class="line">{html.escape(line)}</span>' for line in book.note.split("\n"))
+    if book.label is not None:
+        label = html.escape(book.label)
     inner = (f'<span class="band top" aria-hidden="true">{html.escape(book.band)}</span>'
              f'<span class="spine-title" aria-hidden="true">{html.escape(book.name)}</span>'
-             f'<span class="band bottom" aria-hidden="true">{count}</span>')
+             f'<span class="band bottom{" stale" if book.stale else ""}" aria-hidden="true">{count}</span>')
     if book.href is None:
         return f'<li><span class="book" style="{book_style(book)}" role="img" aria-label="{label}">{inner}</span></li>'
-    drag = f' data-book="{html.escape(book.key)}" data-from="{html.escape(floor)}"' if floor else ""
+    drag = f' data-book="{html.escape(book.key)}" data-from="{html.escape(floor)}"' if floor and book.movable else ""
     return (f'<li><a class="book" href="{html.escape(book.href)}" style="{book_style(book)}" aria-label="{label}"{drag}>'
             f'{inner}</a></li>')
 
 
 def add_book(floor: str) -> str:
-    """'카테고리 추가' 자리. 그 층에 꽂는다(#93)."""
-    return (f'<li><a class="book add" href="/shelf/new?floor={urllib.parse.quote(floor)}" aria-label="카테고리 추가">'
-            '<span class="plus" aria-hidden="true">+</span><span class="spine-title" aria-hidden="true">카테고리 추가</span></a></li>')
+    """'책 추가' 자리(#94): 누르면 책 종류(원고·모음·문서)를 고른다. 그 층에 꽂는다."""
+    return (f'<li><a class="book add" href="/shelf/add?floor={urllib.parse.quote(floor)}" aria-label="책 추가">'
+            '<span class="plus" aria-hidden="true">+</span><span class="spine-title" aria-hidden="true">책 추가</span></a></li>')
 
 
 def shelf_html(books: list[str], extra: str = "") -> str:
@@ -176,6 +184,7 @@ a.book:hover,a.book:focus-visible{color:var(--fg);transform:translateY(-14px);bo
 padding:6px 2px;background:rgb(var(--away)/.22);border-top:2px solid rgb(var(--fgrgb)/.45);
 border-bottom:2px solid rgb(var(--fgrgb)/.45);font-variant-numeric:tabular-nums;white-space:nowrap}
 .band.top{margin-top:14px}.band.bottom{margin-bottom:12px}.band .line{display:block;font-size:13px;line-height:1.35}
+.band.bottom.stale{background:#fff0a8;color:#1a1a1a;border-color:#1a1a1a}
 .spine-title{writing-mode:vertical-rl;text-orientation:mixed;font-size:var(--fs);font-weight:600;line-height:1.1;
 letter-spacing:.06em;margin:auto 0;padding:10px 0;white-space:nowrap}
 .book.add{--fs:18px;background:transparent;color:var(--ink2);border:2px dashed var(--ink2);box-shadow:none;justify-content:center;
@@ -479,11 +488,17 @@ class ShelfPages:
     # FloorPages(webfloors)가 구현한다
     floor_routes: Callable[[], list[tuple[str, list[str], Callable[..., Any]]]]
     location_form: Callable[[str, tuple[str, str], Kind], str]
+    # BookPages(webbooks)가 구현한다
+    book_routes: Callable[[], list[tuple[str, list[str], Callable[..., Any]]]]
+    book_edit: Callable[[Request, str], Awaitable[Response]]
+    book_trash: Callable[[Request, str], Awaitable[Response]]
+    ref_register_form: Callable[[str, tuple[str, str], str], str]
 
     def shelf_routes(self) -> list[tuple[str, list[str], Callable[..., Any]]]:
         # 고정 주소를 먼저 둔다(/shelf/{kind}보다 앞에서 맞아야 한다).
         return [
             *self.floor_routes(),  # 책장 전체(3D)·한 층·옮기기·되돌리기·층 만들기(webfloors)
+            *self.book_routes(),  # 책 추가·원고 책·문서 책·문헌 등록(webbooks, #94)
             ("/shelf/new", ["GET", "POST"], self.shelf_new),
             ("/shelf/edit/{kind}", ["GET", "POST"], self.shelf_edit),
             ("/shelf/trash/{kind}", ["GET", "POST"], self.shelf_trash),
@@ -547,16 +562,29 @@ class ShelfPages:
     # --- 책장 ---
     def books(self, uid: str, floor: str) -> list[Book]:
         """그 층에 꽂힌 책(기본 카테고리 먼저, 그다음 저자의 카테고리를 만든 순서로)."""
+        from magus.book.documents import STALE_WORDS, is_stale  # noqa: PLC0415
+        from magus.webbooks import MANUSCRIPT_COLOR, short_name  # noqa: PLC0415
+
         settings = self.store.get_shelf_settings(uid)
         found = self.store.get_floor(uid, floor)
         out = []
+        if found and found.has_manuscript:  # 원고 책(#94): 그 층 자체라 옮기지 않는다
+            project = self.store.get_project(uid, floor)
+            chapters = len(self.store.list_chapters(uid, floor))
+            out.append(Book(f"ms.{floor}", short_name(project.title), "원고", chapters, project.color or MANUSCRIPT_COLOR,
+                            f"/shelf/book/{floor}", note=f"{chapters}장", label=f"원고 책 {project.title}, {chapters}장", movable=False))
         for k in found.builtins if found else ():
             items = {"ideas": self.store.list_ideas, "styles": self.store.list_styles, "refs": self.store.list_refs}[k](uid, floors=[floor])
             verified = sum(1 for r in items if r.status == "verified") if k == "refs" else None
-            out.append(Book(f"{k}.{floor}", KINDS[k].name, "기본", len(items), settings.colors.get(k, DEFAULT_COLORS[k]),
+            out.append(Book(f"{k}.{floor}", KINDS[k].name, "모음", len(items), settings.colors.get(k, DEFAULT_COLORS[k]),
                             f"/shelf/{k}.{floor}", verified))
-        out += [Book(c.id, c.name, TEMPLATE_BY_KEY[c.template].band if c.template in TEMPLATE_BY_KEY else "일반", c.items, c.color,
-                     f"/shelf/{c.id}") for c in self.store.list_categories(uid, floors=[floor])]
+        out += [Book(c.id, c.name, "모음", c.items, c.color, f"/shelf/{c.id}") for c in self.store.list_categories(uid, floors=[floor])]
+        for d in self.store.list_documents(uid, floors=[floor]):  # 문서 책(#94): 기준 원고에 새 수정본이 오면 '옛 판 기준'
+            stale = is_stale(self.store, uid, d)
+            basis = f"E{d.versions[-1].edition} 기준" if d.versions[-1].edition else "기록 전"
+            out.append(Book(f"doc.{d.id}", short_name(d.title), "문서", len(d.versions), d.color, f"/shelf/doc/{d.id}",
+                            note="옛 판\n기준" if stale else basis, stale=stale,
+                            label=f"문서 책 {d.title}, " + (STALE_WORDS if stale else basis)))
         return out
 
     def _done_message(self, uid: str, request: Request) -> str:
@@ -567,9 +595,14 @@ class ShelfPages:
         except ValueError:
             category = None
         shown = category.name if category else BUILTINS.get(cid.partition(".")[0], "")
+        if cid.startswith(("ms.", "doc.")):  # 원고 책·문서 책 이름(#94)
+            ident = cid.partition(".")[2]
+            book = self.store.get_project(uid, ident) if cid.startswith("ms.") else self.store.get_document(uid, ident)
+            shown = book.title if book else ""
         name = f"「{html.escape(shown)}」 " if shown else ""
-        text = {"made": f"{name}카테고리를 꽂았습니다.", "edit": f"{name}카테고리를 고쳤습니다.",
-                "trash": "카테고리를 휴지통으로 옮겼습니다. 지운 것이 아니라 운영자가 되살릴 수 있습니다."}.get(done or "")
+        what = "책" if cid.startswith(("ms.", "doc.")) else "카테고리"
+        text = {"made": f"{name}카테고리를 꽂았습니다.", "edit": f"{name}{what}을(를) 고쳤습니다." if what == "책" else f"{name}카테고리를 고쳤습니다.",
+                "trash": "책을 휴지통으로 옮겼습니다. 지운 것이 아니라 운영자가 되살릴 수 있습니다."}.get(done or "")
         if text and request.query_params.get("full") == "1":
             text += f" 내 색은 {MAX_MY_COLORS}개까지라 이번 색은 내 색에 넣지 못했습니다. 하나를 뺀 뒤 다시 저장하세요."
         return f'<p class="msg">{text}</p>' if text else ""
@@ -586,6 +619,9 @@ class ShelfPages:
         if not session:
             return self._need_login(request)
         uid = session[0]
+        if kind_key.startswith(("ms.", "doc.")):  # 원고 책·문서 책은 각자의 화면(#94)
+            kind_name, _, ident = kind_key.partition(".")
+            return RedirectResponse(f"/shelf/{'book' if kind_name == 'ms' else 'doc'}/{urllib.parse.quote(ident)}", status_code=302)
         if kind_key in KINDS:  # 예전 주소: 그 항목·종류가 꽂힌 층의 주소로 넘긴다(#93)
             target = await run_in_threadpool(self._legacy_target, uid, kind_key, item)
             if target:
@@ -600,6 +636,13 @@ class ShelfPages:
             request.query_params.get("done") or "")  # 고치기·휴지통 뒤 한 줄(정해진 문장만)
         done = f'<p class="msg">{done}</p>' if done else ""
         writable = kind.base == "ideas" or kind.category is not None
+        if kind.base == "refs":  # 문헌 책에 논문 파일을 넣어 확인한 문헌으로 등록하는 길(#94)
+            from magus.webbooks import REGISTER_ERRORS  # noqa: PLC0415
+
+            if text := REGISTER_ERRORS.get(request.query_params.get("registererr") or ""):
+                done += f'<p class="msg err">{text}</p>'
+            if request.query_params.get("done") == "registered":
+                done += '<p class="msg">확인한 문헌으로 등록했습니다.</p>'
         error = request.query_params.get("error") == "empty"
         missing = (f'{crumb}<p class="msg err">없는 항목입니다(휴지통으로 옮겨졌을 수 있습니다). '
                    f'<a href="/shelf/{kind.key}">{html.escape(kind.name)} 목록</a></p>')
@@ -652,6 +695,8 @@ class ShelfPages:
                      + f' · <a href="/shelf/{kind.key}">검색 지우기</a></p>')
         board = (f'<ol class="board">{"".join(row_html(r, q, r.id == item) for r in shown)}</ol>'
                  if shown else '<p class="msg">찾는 말이 들어간 항목이 없습니다.</p>' if q else '<p class="msg">없음</p>')
+        if kind.base == "refs":
+            write = await run_in_threadpool(self.ref_register_form, uid, session, kind.floor)
         body = f"{crumb}{done}{summary}{search}{write}{found}{pager}{board}{pager}" + (SCROLL_SCRIPT if item else "")
         return self._shelf_page(kind.name, body, session)
 
@@ -888,7 +933,7 @@ class ShelfPages:
             try:
                 form = await self._form(request, session)
             except PermissionError:
-                return self._shelf_page("카테고리 추가", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+                return self._shelf_page("모음 책 만들기", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
             values = {"name": str(form.get("name") or ""), "template": str(form.get("template") or "blank"),
                       "color": safe_color(str(form.get("hex") or ""), default_color)}
             try:
@@ -926,7 +971,7 @@ class ShelfPages:
             f'<p><button class="primary">책장에 꽂기</button> <a href="/shelf/floor/{html.escape(floor.id)}">그만두기</a></p></form>'
             + COLOR_SCRIPT
         )
-        return self._shelf_page("카테고리 추가", body, session, 400 if error else 200)
+        return self._shelf_page("모음 책 만들기", body, session, 400 if error else 200)
 
     def _keep_color(self, uid: str, form: Any, color: str) -> str:
         """'내 색에 저장'을 골랐으면 내 색에 더한다(기본 색 격자에 있는 색은 더하지 않는다). 다 찼으면 주소에 표시만 남긴다."""
@@ -941,6 +986,8 @@ class ShelfPages:
         return ""
 
     async def shelf_edit(self, request: Request) -> Response:
+        if request.path_params["kind"].startswith(("ms.", "doc.")):  # 원고 책·문서 책 설정(#94)
+            return await self.book_edit(request, request.path_params["kind"])
         session = self.user_of(request)
         if not session:
             return self._need_login(request)
@@ -1024,6 +1071,8 @@ class ShelfPages:
         return RedirectResponse(nxt if re.fullmatch(r"/shelf(/[A-Za-z0-9_/-]*)?", nxt) else "/shelf", status_code=303)
 
     async def shelf_trash(self, request: Request) -> Response:
+        if request.path_params["kind"].startswith(("ms.", "doc.")):  # 원고 책·문서 책 휴지통(#94)
+            return await self.book_trash(request, request.path_params["kind"])
         session = self.user_of(request)
         if not session:
             return self._need_login(request)

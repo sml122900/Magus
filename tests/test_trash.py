@@ -82,21 +82,23 @@ async def test_delete_tools_and_tags_by(settings: Settings, store: LocalStore):
     _seed(store, settings.user_id)
     _seed(store, "bob")
     async with Client(build_server(settings, store)) as c:
-        done = (await c.call_tool("idea_delete", {"id": ME, "note": "시험"})).content[0].text
+        # 생각·문체 지우기는 category_trash로 합쳤다(#94: idea_delete·style_delete 없앰)
+        done = (await c.call_tool("category_trash", {"category": "생각", "item_id": ME, "note": "시험"})).content[0].text
         assert done.startswith(f"휴지통으로 옮김: 생각 {ME}") and "AI 발화 1건도 함께" in done
         assert "결과 없음" in (await c.call_tool("idea_search", {"query": "바다", "author": "all"})).content[0].text
-        missing = await c.call_tool("idea_delete", {"id": ME, "note": "x"})
+        missing = await c.call_tool("category_trash", {"category": "생각", "item_id": ME, "note": "x"})
         assert missing.is_error and "없다" in missing.content[0].text
         added = (await c.call_tool("style_add", {"passage": "길게 이어진다", "reason": "(저자가 이유를 밝히지 않음)", "tags": TAGS})).content[0].text
         assert added.startswith("문체에 기록함 ") and added.endswith("(태그는 AI가 뽑음)")
         await c.call_tool("style_add", {"passage": "끊는다", "reason": "끊어 읽힘", "tags": TAGS, "tags_by": "author"})
         found = (await c.call_tool("style_search", {"query": "짧음"})).content[0].text
         assert "(태그는 AI가 뽑음)" in found and "(태그는 저자가 정함)" in found
-        gone = (await c.call_tool("style_delete", {"id": "20261005180731312-380da3", "note": "시험"})).content[0].text
+        gone = (await c.call_tool("category_trash", {"category": "문체", "item_id": "20261005180731312-380da3", "note": "시험"})).content[0].text
         assert gone.startswith("휴지통으로 옮김: 문체 20261005180731312-380da3")
         descriptions = {t.name: t.description for t in (await c.list_tools()).tools}
-    for name in ("idea_delete", "style_delete"):
-        assert descriptions[name].startswith("저자가 그 항목을 지우라고 분명히 말했을 때만 부른다. 여러 개면 목록을 보여 주고 확인받는다.")
+    assert "idea_delete" not in descriptions and "style_delete" not in descriptions
+    assert descriptions["category_trash"].startswith("저자가 그 항목(또는 저자가 만든 카테고리)을 지우라고 분명히 말했을 때만 부른다. "
+                                                     "여러 개면 목록을 보여 주고 확인받는다.")
     for name, place in (("idea_add", "생각"), ("style_add", "문체"), ("ref_add", "문헌")):
         assert descriptions[name].startswith(f"저자가 '{place}'에 넣으라고 분명히 말했을 때만 부른다. '저장해 줘'처럼 넣을 곳이 정해지지 않았으면 부르지 말고")
         assert "생각·문체·문헌과 저자의 카테고리(category_list) 중 어디인지 먼저 묻는다(원고는 선택지에 넣지 않는다)." in descriptions[name]  # #90·#92

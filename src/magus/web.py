@@ -34,20 +34,12 @@ from starlette.responses import FileResponse, HTMLResponse, RedirectResponse, Re
 
 from magus.auth import JwtVerifier
 from magus.book.export import export_docx
-from magus.book.importer import import_manuscript
-from magus.book.outline import chapter_count
-from magus.book.reupload import reupload_manuscript
 from magus.config import Settings
 from magus.ids import local_time, utcnow
 from magus.inbox import INBOX_TYPES, LimitError, mb, save_upload, size_text
-from magus.melchior.author_report import cite_label
-from magus.melchior.questions import TYPES as QUESTION_TYPES
-from magus.melchior.questions import build_questions
-from magus.melchior.report import build_cite_report
-from magus.melchior.check import cite_floors
 from magus.signing import sign, unsign
 from magus.store import Profile, Store
-from magus.store.base import STALE_REASONS
+from magus.webbooks import BookPages
 from magus.webfloors import FloorPages
 from magus.webshelf import ShelfPages
 
@@ -55,12 +47,8 @@ log = logging.getLogger("magus.web")
 SESSION_COOKIE, OAUTH_COOKIE = "magus_session", "magus_oauth"
 DISPLAY_NAME_MAX = 40  # 상단 바 표시 이름 길이 한도
 SESSION_TTL, OAUTH_TTL, DOWNLOAD_TTL = 12 * 3600, 600, 24 * 3600
-LIGHTS = {"verified": ("🟢", "확인"), "unverified": ("🟡", "미확인"), "unknown": ("🔴", "참고문헌에 없음"),
-          "uncertain": ("⚪", "미연결")}
-QUESTION_STATES = {"open": "열림", "waiting": "답함·원고 반영 대기", "answered": "답함"}
-ISSUE_KIND_NAMES = {"citation": "문헌 확인", "fact": "사실·수치 확인", "general": "기타"}
 # 생각·문헌·문체는 '책장' 하나로 모았다(2026-10-06). 책장 화면은 magus.webshelf.
-NAV = (("/book", "원고"), ("/inbox", "받은함"), ("/checklist", "인용 체크리스트"), ("/issues", "확인 요청"), ("/shelf", "책장"))
+NAV = (("/shelf", "책장"),)  # #94: 저자 화면은 책장 하나. 원고·확인 요청·인용 상태는 원고 책 안에, 올린 파일은 내 정보 아래
 
 # 화면 스타일은 여기 한 곳(결정 #56: 템플릿 엔진·외부 글꼴·CDN 없음). 토큰과 참고 문서에서 바꾼 점은 docs/decisions/web-style.md.
 # 입력칸 테두리는 --mute(흰 바탕 4.75:1)다. 참고 문서의 입력칸 색(1.82:1)은 칸이 보이지 않아 쓰지 않는다(사용자 결정 #86).
@@ -231,7 +219,7 @@ def _pkce() -> tuple[str, str]:
 
 
 @dataclass
-class Web(ShelfPages, FloorPages):
+class Web(ShelfPages, FloorPages, BookPages):
     store: Store
     settings: Settings
     base_url: str  # 바깥에서 보이는 주소(원격: PUBLIC_URL, 로컬: http://127.0.0.1:포트)
@@ -285,10 +273,14 @@ class Web(ShelfPages, FloorPages):
     def register(self, server: MCPServer) -> None:
         routes: list[tuple[str, list[str], Callable[[Request], Awaitable[Response]]]] = [
             ("/", ["GET"], self.home), ("/login", ["GET"], self.login), ("/auth/callback", ["GET"], self.callback),
-            ("/logout", ["POST"], self.logout), ("/me", ["GET", "POST"], self.me), ("/inbox", ["GET"], self.inbox), ("/inbox/upload", ["POST"], self.upload),
-            ("/inbox/delete", ["POST"], self.delete), ("/book", ["GET"], self.book), ("/book/import", ["POST"], self.do_import),
+            ("/logout", ["POST"], self.logout), ("/me", ["GET", "POST"], self.me), ("/me/files", ["GET"], self.inbox),
+            ("/inbox/upload", ["POST"], self.upload), ("/inbox/delete", ["POST"], self.delete),
             ("/book/export", ["POST"], self.do_export), ("/download/{token}", ["GET"], self.download),
-            ("/checklist", ["GET"], self.checklist), ("/issues", ["GET"], self.issues), ("/questions", ["GET"], self.questions),
+            # 옛 주소는 책장의 새 화면으로(#94)
+            ("/inbox", ["GET"], self.files_moved), ("/book", ["GET"], self._old_page("chapters", ())),
+            ("/issues", ["GET"], self._old_page("issues", ("status", "kind"))),
+            ("/checklist", ["GET"], self._old_page("cites", ("status",))),
+            ("/questions", ["GET"], self._old_page("cites", ("status", "type"), {"view": "questions"})),
             *self.shelf_routes(),
         ]
         for path, methods, handler in routes:
@@ -329,11 +321,11 @@ class Web(ShelfPages, FloorPages):
 
     # --- 로그인 ---
     async def home(self, request: Request) -> Response:
-        return RedirectResponse("/book" if self.user_of(request) else "/login", status_code=303)
+        return RedirectResponse("/shelf" if self.user_of(request) else "/login", status_code=303)
 
     async def login(self, request: Request) -> Response:
-        nxt = request.query_params.get("next", "/book")
-        nxt = nxt if nxt.startswith("/") and not nxt.startswith("//") else "/book"
+        nxt = request.query_params.get("next", "/shelf")
+        nxt = nxt if nxt.startswith("/") and not nxt.startswith("//") else "/shelf"
         if self.local_user is not None:  # 로컬 개발: 바로 로그인
             response = RedirectResponse(nxt, status_code=303)
             self._cookie(response, SESSION_COOKIE,
@@ -387,7 +379,7 @@ class Web(ShelfPages, FloorPages):
                 status=403,
             )
         await run_in_threadpool(self._remember_email, uid, str(claims.get("sub", "")), tokens)
-        response = RedirectResponse(str(pending.get("n") or "/book"), status_code=303)
+        response = RedirectResponse(str(pending.get("n") or "/shelf"), status_code=303)
         self._cookie(response, SESSION_COOKIE, sign({"uid": uid, "sid": secrets.token_hex(8)}, self.secret, "session",
                                                     SESSION_TTL), SESSION_TTL)
         response.delete_cookie(OAUTH_COOKIE, path="/")
@@ -463,6 +455,8 @@ class Web(ShelfPages, FloorPages):
             "<p>위쪽 막대에 보이는 이름입니다. 비우고 저장하면 메일이 보입니다.</p>"
             f'{email}<p class="muted">메일은 로그인한 계정의 것이라 여기서 바꾸지 않습니다.</p>'
             '<p><button class="primary">저장</button></p></form>'
+            '<h2>올린 파일</h2><p><a href="/me/files">올린 파일 보기·올리기·지우기</a> — 원고 책·문헌 책에서 올린 것 말고, '
+            "Claude에게 파일 이름으로 건넬 파일을 둡니다.</p>"
         )
         return self._page("내 정보", body, session, 400 if message.startswith('<p class="msg err">') else 200)
 
@@ -497,9 +491,11 @@ class Web(ShelfPages, FloorPages):
 <form method="post" action="/inbox/upload" enctype="multipart/form-data" class="card upload">{self._csrf_input(session)}
 <input type="file" name="files" multiple accept=".docx,.pdf,.md,.txt"> <button class="primary">올리기</button></form>
 <table><tr><th>이름</th><th class="num">크기</th><th class="num">올린 시각</th><th>쓰임</th><th></th></tr>{rows}</table>
-<p>Claude에서는 파일 이름으로 가리킵니다. 예: "받은함의 kremer1993.pdf를 문헌으로 등록해 줘. 쓸 부분은 「…」, 이유는 …"</p>
+<p><a href="/me">← 내 정보</a></p>
+<p>원고는 책장의 원고 책에서, 논문은 문헌 책에서 올리면 바로 쓰입니다. 여기서 올린 파일은 Claude에게 파일 이름으로 말씀하세요.
+예: "올린 파일 kremer1993.pdf를 문헌으로 등록해 줘. 쓸 부분은 「…」, 이유는 …"</p>
 {UPLOAD_SCRIPT}"""
-        return self._page("받은함", body, session)
+        return self._page("올린 파일", body, session, current="")
 
     async def upload(self, request: Request) -> Response:
         session = self.user_of(request)
@@ -507,11 +503,11 @@ class Web(ShelfPages, FloorPages):
             return self._need_login(request)
         limit = self.settings.max_upload_bytes * 20 + 1_000_000
         if int(request.headers.get("content-length") or 0) > limit:  # 다 받기 전에 거른다
-            return self._page("받은함", f'<p class="msg err">요청이 너무 큽니다(한도 {mb(limit)}).</p>', session, 413)
+            return self._page("올린 파일", f'<p class="msg err">요청이 너무 큽니다(한도 {mb(limit)}).</p>', session, 413)
         try:
             form = await self._form(request, session)
         except PermissionError:
-            return self._page("받은함", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            return self._page("올린 파일", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         saved, errors = [], []
         for item in form.getlist("files"):
             if not isinstance(item, UploadFile) or not item.filename:
@@ -534,90 +530,39 @@ class Web(ShelfPages, FloorPages):
             name = str(form.get("name", ""))
             ok = self.store.delete_inbox(session[0], name)
         except (PermissionError, ValueError):
-            return self._page("받은함", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            return self._page("올린 파일", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         return await self.inbox(request, f"지움: {name}" if ok else f"없음: {name}", not ok)
 
-    # --- 원고 ---
-    async def book(self, request: Request, flash: str = "", error: bool = False) -> Response:
-        session = self.user_of(request)
-        if not session:
-            return self._need_login(request)
-        uid = session[0]
-        projects = self.store.list_projects(uid)
-
-        def edition_of(project_id: str) -> str:
-            editions = self.store.list_editions(uid, project_id)
-            return f"E{editions[-1].number} · {local_time(editions[-1].uploaded_at)}" if editions else "-"
-
-        def issue_counts(project_id: str) -> str:
-            issues = self.store.list_issues(uid, project_id, "open")
-            ai = sum(1 for i in issues if i.by_ai)
-            return f"{len(issues)}" + (f" (🤖 AI 확인 요청 {ai})" if ai else "")
-
-        rows = "".join(
-            f"<tr><td>{html.escape(p.title)}" + (f"<br><small>{html.escape(p.subtitle)}</small>" if p.subtitle else "")
-            + f"</td><td>{html.escape(p.id)}</td>"
-            f"<td>{html.escape(chapter_count(self.store.list_chapters(uid, p.id)))}</td>"
-            f'<td class="num"><a href="/issues?project={urllib.parse.quote(p.id)}">{issue_counts(p.id)}</a></td>'
-            f'<td class="num">{edition_of(p.id)}</td><td class="num">{local_time(p.updated_at)}</td>'
-            f'<td><form method="post" action="/book/export" class="inline">{self._csrf_input(session)}'
-            f'<input type="hidden" name="project_id" value="{html.escape(p.id)}"><button>docx 내보내기</button></form> '
-            f'<a href="/checklist?project={urllib.parse.quote(p.id)}">인용 체크리스트</a> · '
-            f'<a href="/questions?project={urllib.parse.quote(p.id)}">답해 주실 질문</a></td></tr>'
-            for p in projects
-        ) or '<tr><td colspan="7">아직 원고가 없습니다. 받은함에 docx(또는 pdf)를 올리고 아래에서 임포트하세요.</td></tr>'
-        options = "".join(
-            f'<option value="{html.escape(f.name)}">{html.escape(f.name)}</option>'
-            for f in self.store.list_inbox(uid) if Path(f.name).suffix.lower() in (".docx", ".pdf")
-        )
-        message = f'<div class="msg{" err" if error else ""}">{html.escape(flash)}</div>' if flash else ""
-        body = f"""{message}
-<table><tr><th>제목</th><th>id</th><th>장</th><th class="num">열린 확인 요청</th><th class="num">수정본·올린 시각</th><th class="num">갱신</th><th></th></tr>{rows}</table>
-<h2>원고 올리기</h2>
-<form method="post" action="/book/import" class="card">{self._csrf_input(session)}
-<p><label>받은함 원고 <select name="name">{options or '<option value="">(받은함에 docx·pdf 없음)</option>'}</select></label></p>
-<p><label{'' if projects else ' class="off"'}><input type="radio" name="mode" value="edition"{' checked' if projects else ' disabled'}> <b>수정본으로 올리기</b></label>
- — Word에서 고친 원고를 다시 올릴 때. 바뀐 장만 바뀌고, 결정·확인 요청·생각·문체·문헌은 그대로입니다.<br>
-<label><input type="radio" name="mode" value="new"{'' if projects else ' checked'}> 새 책으로 가져오기</label> — 처음 올리는 원고</p>
-<p><label>프로젝트 id <input name="project_id" value="{html.escape(projects[0].id if projects else 'book')}" pattern="[A-Za-z0-9_-]+" required></label>
-<label>제목 <input name="title" placeholder="비우면 파일에서"></label>
-<label>부제 <input name="subtitle" placeholder="비우면 파일에서"></label></p>
-<p><label><input type="checkbox" name="force" value="1"> (수정본) 장 제목이 많이 달라도 같은 책으로 올리기</label></p>
-<details><summary>드물게 쓰는 선택</summary>
-<p><label><input type="checkbox" name="replace" value="1"> (새 책) 같은 id가 있으면 바꾸기 — 결정·확인 요청까지 휴지통으로 갑니다. 수정본을 올릴 때는 쓰지 마세요</label></p></details>
-<p><button class="primary">올리기</button> (큰 원고는 몇십 초 걸립니다)</p></form>"""
-        return self._page("원고", body, session)
-
-    async def do_import(self, request: Request) -> Response:
-        session = self.user_of(request)
-        if not session:
-            return self._need_login(request)
+    # --- 옛 주소(#94): 원고·확인 요청·답해 주실 질문·인용 체크리스트·받은함 → 책장의 새 화면으로 ---
+    def _moved_to(self, uid: str, project_id: str | None, tab: str, keep: dict[str, str]) -> str:
+        """옛 화면 주소 → 원고 책의 탭. 원고가 있는 작업물이 없으면 책장."""
         try:
-            form = await self._form(request, session)
-        except PermissionError:
-            return self._page("원고", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-        uid, name = session[0], str(form.get("name", ""))
-        try:
-            path = self.store.inbox_path(uid, name) if name else None
-            if path is None:
-                raise FileNotFoundError(f"받은함에 {name!r}이 없다")
-            project_id = str(form.get("project_id") or "") or None
-            title, subtitle = str(form.get("title") or "") or None, str(form.get("subtitle") or "") or None
-            if form.get("mode") == "edition":  # 같은 책의 수정본(#76)
-                if not project_id:
-                    raise ValueError("수정본으로 올릴 책의 프로젝트 id를 적어 주세요.")
-                again = await run_in_threadpool(
-                    reupload_manuscript, self.store, uid, path, project_id,
-                    title=title, subtitle=subtitle, force=form.get("force") == "1",
-                )
-                return await self.book(request, again.summary())
-            report = await run_in_threadpool(
-                import_manuscript, self.store, uid, path,
-                project_id=project_id, title=title, subtitle=subtitle, replace=form.get("replace") == "1",
-            )
-        except (ValueError, FileNotFoundError) as e:
-            return await self.book(request, str(e), True)
-        return await self.book(request, report.summary())
+            project = self.store.get_project(uid, project_id) if project_id else None
+        except ValueError:
+            project = None
+        if project is None:
+            project = next((p for p in self.store.list_projects(uid) if self.store.list_chapters(uid, p.id)), None)
+        if project is None:
+            return "/shelf"
+        query = urllib.parse.urlencode({"tab": tab, **{k: v for k, v in keep.items() if v}})
+        return f"/shelf/book/{urllib.parse.quote(project.id)}?{query}"
+
+    def _old_page(self, tab: str, keys: tuple[str, ...], extra: dict[str, str] | None = None) -> Callable[[Request], Awaitable[Response]]:
+        async def moved(request: Request) -> Response:
+            session = self.user_of(request)
+            if not session:
+                return self._need_login(request)
+            params = request.query_params
+            keep = {**{k: params.get(k, "") for k in keys}, **(extra or {})}
+            target = await run_in_threadpool(self._moved_to, session[0], params.get("project"), tab, keep)
+            return RedirectResponse(target, status_code=302)
+
+        return moved
+
+    async def files_moved(self, request: Request) -> Response:
+        if not self.user_of(request):
+            return self._need_login(request)
+        return RedirectResponse("/me/files", status_code=302)
 
     async def do_export(self, request: Request) -> Response:
         session = self.user_of(request)
@@ -626,10 +571,10 @@ class Web(ShelfPages, FloorPages):
         try:
             form = await self._form(request, session)
         except PermissionError:
-            return self._page("원고", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            return self._page("원고 책", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         project = self.store.get_project(session[0], str(form.get("project_id", "")))
-        if project is None:
-            return await self.book(request, "프로젝트가 없습니다.", True)
+        if project is None or not self.store.list_chapters(session[0], project.id):  # 빈 층에는 원고 책이 없다
+            return self._page("원고 책", '<p class="msg err">없는 원고 책입니다. <a href="/shelf">책장</a>으로 돌아가세요.</p>', session, 404)
         location = await run_in_threadpool(export_docx, self.store, session[0], project)
         return RedirectResponse(self.export_link(session[0], location).removeprefix(self.base_url), status_code=303)
 
@@ -647,129 +592,3 @@ class Web(ShelfPages, FloorPages):
             return self._page("내려받기", '<p class="msg err">파일이 없습니다. 다시 내보내세요.</p>', session, 404)
         return FileResponse(path, filename=path.name,
                             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-
-    # --- 확인 요청(issues) ---
-    async def issues(self, request: Request) -> Response:
-        """열린 확인 요청 목록(조회 전용). AI가 원고에 단 코멘트에서 온 것은 'AI 확인 요청'으로 드러낸다(#71)."""
-        session = self.user_of(request)
-        if not session:
-            return self._need_login(request)
-        uid = session[0]
-        project = self.store.get_project(uid, request.query_params.get("project") or None)
-        if project is None:
-            return self._page("확인 요청", "<p>원고가 없습니다. <a href=\"/book\">원고</a>에서 임포트하세요.</p>", session)
-        status = request.query_params.get("status") if request.query_params.get("status") in ("open", "closed", "all") else "open"
-        kind = request.query_params.get("kind") if request.query_params.get("kind") in ISSUE_KIND_NAMES else None
-        issues = self.store.list_issues(uid, project.id, None if status == "all" else status, kind=kind)  # type: ignore[arg-type]
-        names = {c.number: c.display for c in self.store.list_chapters(uid, project.id)}
-        q = urllib.parse.quote(project.id)
-
-        def who(i) -> str:
-            if i.origin == "import_comment":
-                name = f"({html.escape(i.author)})" if i.author else ""
-                return f'<span class="tag">🤖 AI 확인 요청{name}</span>' if i.by_ai else f"원고 코멘트{name}"
-            return "직접 남김" if i.origin == "user" else "Claude가 남김"
-
-        rows = "".join(
-            f"<tr><td>I{i.id}{'' if i.status == 'open' else ' (닫힘)'}</td>"
-            f"<td>{html.escape(names.get(i.chapter_number, f'{i.chapter_number}장') if i.chapter_number is not None else '장 밖')}</td>"
-            f"<td>{who(i)}</td><td>{ISSUE_KIND_NAMES[i.kind]}"
-            + (f"<br><small>해결됐을 수 있음: {STALE_REASONS[i.stale]}</small>" if i.stale else "") + "</td>"
-            f"<td>{html.escape(i.text).replace(chr(10), '<br>')}</td></tr>"
-            for i in issues
-        )
-        ai = sum(1 for i in issues if i.by_ai)
-        filters = " · ".join(
-            f'<a href="?project={q}&status={status}&kind={k}">{name}</a>' for k, name in ISSUE_KIND_NAMES.items()
-        )
-        body = f"""<p>『{html.escape(project.title)}』 · 확인 요청 {len(issues)}건""" + (
-            f" · 그중 🤖 AI 확인 요청 {ai}건(AI가 원고에 단 코멘트입니다)" if ai else "") + f"""</p>
-<p><a href="?project={q}&status=open">열린 것</a> · <a href="?project={q}&status=closed">닫힌 것</a> · <a href="?project={q}&status=all">전체</a> | {filters}</p>
-<table><tr><th>번호</th><th>장</th><th>누가</th><th>종류</th><th>내용</th></tr>{rows or '<tr><td colspan="5">없음</td></tr>'}</table>"""
-        return self._page("확인 요청", body, session)
-
-    # --- 답해 주실 질문(#84, 조회 전용): 답은 Claude 대화로(book_answer) ---
-    async def questions(self, request: Request) -> Response:
-        session = self.user_of(request)
-        if not session:
-            return self._need_login(request)
-        uid = session[0]
-        project = self.store.get_project(uid, request.query_params.get("project") or None)
-        if project is None:
-            return self._page("답해 주실 질문", "<p>원고가 없습니다. <a href=\"/book\">원고</a>에서 임포트하세요.</p>", session)
-        status = request.query_params.get("status") if request.query_params.get("status") in ("open", "waiting", "all") else "open"
-        kind = request.query_params.get("type") if request.query_params.get("type") in QUESTION_TYPES else None
-        everything = await run_in_threadpool(build_questions, self.store, uid, project.id)
-        chosen = [q for q in everything if (status == "all" or q.state == status) and (kind is None or q.type == kind)]
-        counts = {s: sum(1 for q in everything if q.state == s) for s in QUESTION_STATES}
-        q = urllib.parse.quote(project.id)
-
-        def options(question) -> str:  # 저자에게는 코드 대신 설명만(다른 문헌 고르기는 대화로)
-            return " / ".join(html.escape(label.replace("(그 key)", "")) for _, label in question.options)
-
-        def answered(question) -> str:
-            if not question.answer:
-                return ""
-            label = dict(question.options).get(question.answer.get("choice", ""), question.answer.get("choice", ""))
-            return (f'<p class="muted">답: {html.escape(label.replace("(그 key)", ""))}'
-                    + (f" · 결정 {html.escape(question.answer['decision'])}" if question.answer.get("decision") else "")
-                    + f" · {QUESTION_STATES[question.state]}</p>")
-
-        cards = "".join(
-            f'<li class="card"><p><b>{QUESTION_TYPES[x.type]}</b> · {QUESTION_STATES[x.state]}</p>'
-            f"<p>{html.escape(x.text)}</p><p class=\"muted\">고를 수 있는 답: {options(x)}</p>{answered(x)}</li>"
-            for x in chosen
-        )
-        types = " · ".join(
-            f'<a href="?project={q}&status={status}&type={t}">{name} {sum(1 for x in everything if x.type == t)}</a>'
-            for t, name in QUESTION_TYPES.items() if any(x.type == t for x in everything)
-        )
-        body = (
-            f"<p>『{html.escape(project.title)}』 · 질문 {len(everything)}건(열림 {counts['open']} · 원고 반영 대기 {counts['waiting']} · "
-            f"답함 {counts['answered']})</p>"
-            "<p>Magus가 원고와 참고문헌을 맞춰 보다가 저자만 답할 수 있는 것을 모았습니다. "
-            "답은 Claude에게 말씀해 주세요. 예: \"답해 주실 질문 보여 줘\", \"그 연도는 본문을 고칠게\"</p>"
-            f'<p><a href="?project={q}&status=open">열린 것</a> · <a href="?project={q}&status=waiting">원고 반영 대기</a> · '
-            f'<a href="?project={q}&status=all">전체</a>' + (f" | {types}" if types else "") + "</p>"
-            + (f'<ol class="qlist">{cards}</ol>' if cards else '<p class="msg">없음</p>')
-        )
-        return self._page("답해 주실 질문", body, session)
-
-    # --- 인용 체크리스트 ---
-    async def checklist(self, request: Request) -> Response:
-        session = self.user_of(request)
-        if not session:
-            return self._need_login(request)
-        uid = session[0]
-        project = self.store.get_project(uid, request.query_params.get("project") or None)
-        if project is None:
-            return self._page("인용 체크리스트", "<p>원고가 없습니다. <a href=\"/book\">원고</a>에서 임포트하세요.</p>", session)
-        report = await run_in_threadpool(build_cite_report, self.store, uid, project.id)
-        refs = {r.key: r for r in self.store.list_refs(uid, floors=cite_floors(project.id))}  # 그 작업물 층 + 공용(#93)
-        status = request.query_params.get("status") or ""
-        docs = [d for d in report.docs.values() if not status or d.status == status]
-        order = {"unknown": 0, "unverified": 1, "uncertain": 2, "verified": 3}
-        docs.sort(key=lambda d: (order[d.status], -d.count, d.key))
-        counts = {s: len(report.of(s)) for s in LIGHTS}
-        filters = " · ".join(
-            f'<a href="?project={urllib.parse.quote(project.id)}&status={s}">{LIGHTS[s][0]} {LIGHTS[s][1]} {counts[s]}</a>'
-            for s in LIGHTS
-        )
-        doc_rows = "".join(
-            f"<tr><td>{LIGHTS[d.status][0]} {LIGHTS[d.status][1]}</td>"
-            f"<td>{html.escape(cite_label(refs.get(d.key), d.key))}"
-            + (f"<br><small>후보: {html.escape(' / '.join(d.candidates))}</small>" if d.candidates else "")
-            + f'</td><td class="num">{d.count}</td><td>{html.escape(", ".join(d.chapters))}</td></tr>'
-            for d in docs
-        )
-        chapter_rows = "".join(
-            f'<tr><td>{html.escape(disp)}</td><td>{html.escape(title)}</td><td class="num">{unique}</td><td class="num">{occ}</td></tr>'
-            for disp, title, unique, occ, _ in report.per_chapter
-        )
-        body = f"""<p>『{html.escape(project.title)}』 · 문헌 {len(report.docs) - counts['uncertain']}편
-(확인 {counts['verified']} · 미확인 {counts['unverified']} · 참고문헌에 없음 {counts['unknown']}) · 미연결 {counts['uncertain']}
-· <a href="?project={urllib.parse.quote(project.id)}">전체</a></p>
-<p>{filters}</p>
-<table><tr><th>상태</th><th>문헌</th><th class="num">인용</th><th>장</th></tr>{doc_rows or '<tr><td colspan="4">없음</td></tr>'}</table>
-<h2>장별</h2><table><tr><th>장</th><th>제목</th><th class="num">미확인 문헌</th><th class="num">인용 출현</th></tr>{chapter_rows}</table>"""
-        return self._page("인용 체크리스트", body, session)

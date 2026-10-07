@@ -47,7 +47,7 @@ def test_overview_floor_page_move_and_undo(server_proc):  # noqa: F811
         floor = c.get("/shelf/floor/city").text
         assert '<h1>1층 · 도시는 어떻게 태어났나</h1>' in floor and '<a class="all-shelf" href="/shelf">전체 책장</a>' in floor
         assert '<a href="/shelf/floor/city" data-drop-floor="city" aria-current=page>1층</a>' in floor
-        assert f'data-book="{ids["person"]}" data-from="city"' in floor and 'href="/shelf/new?floor=city"' in floor
+        assert f'data-book="{ids["person"]}" data-from="city"' in floor and 'href="/shelf/add?floor=city"' in floor
         assert c.get("/shelf/floor/nothing").status_code == 404
         # 끌어 놓기 = POST /shelf/move(CSRF). 옮긴 뒤 안내와 되돌리기
         assert c.post("/shelf/move", data={"csrf": "틀림", "book": ids["person"], "to": COMMON}).status_code == 403

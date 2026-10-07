@@ -84,7 +84,7 @@ def edition_line(store: Store, user_id: str, project: Project, chapters: list[Ch
     except ValueError:
         return line
     if days >= STALE_UPLOAD_DAYS:
-        line += (f" — 업로드 뒤 {days}일 지남. 그사이 저자가 Word에서 고쳤다면, 최신본을 받은함에 올려 "
+        line += (f" — 업로드 뒤 {days}일 지남. 그사이 저자가 Word에서 고쳤다면, 최신본을 책장의 원고 책에서 "
                  "수정본으로 올리도록(book_import new_edition) 저자에게 먼저 묻는다")
     return line
 

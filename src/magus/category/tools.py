@@ -325,7 +325,10 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
 
     def category_trash(category: str, note: str, item_id: str | None = None, floor: str | None = None) -> str:
         user = current_user()
-        target = own(category, "휴지통으로 옮길", floor=floor)
+        found = resolve(category, floor)
+        if isinstance(found, str):  # 생각·문체 항목도 여기서(#94: idea_delete·style_delete를 합쳤다)
+            return trash_builtin(user, found, note, item_id)
+        target = found
         try:
             if item_id:
                 moved = store.trash_category_item(user, target.id, item_id.strip(), note.strip())
@@ -339,6 +342,27 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
         assert gone is not None
         return (f"휴지통으로 옮김: 카테고리 「{gone.name}」 통째(항목 {gone.items}개). 책장에서 빠졌다. "
                 "지운 것이 아니라 옮긴 것이라 운영자가 되살릴 수 있다.")
+
+    def trash_builtin(user: str, kind: str, note: str, item_id: str | None) -> str:
+        if not item_id:
+            raise ToolError(f"'{BUILTINS[kind]}'은 기본 카테고리라 통째로 옮길 수 없다. 항목 하나면 item_id를 준다.")
+        if kind == "refs":
+            raise ToolError("문헌은 휴지통으로 옮기지 않는다(확인한 문헌과 참고문헌 항목은 남긴다).")
+        try:
+            if kind == "ideas":
+                moved = store.trash_idea(user, item_id.strip(), note.strip())
+                if not moved:
+                    raise ToolError(f"생각 {item_id}가 없다. idea_search 결과의 id를 준다.")
+                replies = len(moved) - 1
+                return (f"휴지통으로 옮김: 생각 {moved[0].id} “{one_line(moved[0].text)[:60]}”"
+                        + (f" · 이 생각에 응답한 AI 발화 {replies}건도 함께" if replies else "")
+                        + ". 지운 것이 아니라 옮긴 것이라 운영자가 되살릴 수 있다.")
+            entry = store.trash_style(user, item_id.strip(), note.strip())
+        except ValueError as e:
+            raise ToolError(str(e)) from e
+        if entry is None:
+            raise ToolError(f"문체 {item_id}가 없다. style_search 결과의 id를 준다.")
+        return f"휴지통으로 옮김: 문체 {entry.id} “{one_line(entry.passage)[:60]}”. 지운 것이 아니라 옮긴 것이라 운영자가 되살릴 수 있다."
 
     def category_title_default(mode: Literal["ask", "ai", "none"]) -> str:
         user = current_user()
@@ -409,10 +433,10 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
         Tool.from_function(
             category_trash, name="category_trash",
             description=(
-                "저자가 그 카테고리(또는 그 안의 항목)를 지우라고 분명히 말했을 때만 부른다. 여러 개면 목록을 보여 주고 확인받는다. "
-                "item_id를 주면 그 항목만, 없으면 카테고리를 통째로 휴지통으로 옮긴다(지우지 않는다. 운영자가 되살릴 수 있다). "
-                "통째로 옮길 때는 항목 수를 저자에게 말하고 확인받은 뒤 부른다. note에는 지우는 이유를 쓴다. "
-                "기본 카테고리(생각·문체·문헌)는 통째로 옮길 수 없다. 같은 이름이 여러 층에 있으면 floor로 가린다."
+                "저자가 그 항목(또는 저자가 만든 카테고리)을 지우라고 분명히 말했을 때만 부른다. 여러 개면 목록을 보여 주고 확인받는다. "
+                "item_id를 주면 그 항목만 휴지통으로 옮긴다(생각·문체 항목도 여기서: category=생각이면 idea_search의 id, 그 생각에 응답한 AI 발화도 함께. "
+                "category=문체면 style_search의 id). item_id가 없으면 저자가 만든 카테고리를 통째로 옮긴다(항목 수를 말하고 확인받은 뒤). "
+                "지우지 않는다(운영자가 되살릴 수 있다). note에는 지우는 이유. 같은 이름이 여러 층에 있으면 floor로 가린다."
             ),
             structured_output=False,
         ),

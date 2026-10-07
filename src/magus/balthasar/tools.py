@@ -15,7 +15,7 @@ from magus.ids import new_id
 from magus.search import Embedder, hybrid_search
 from magus.store import Store, StyleEntry
 from magus.store.formats import one_line
-from magus.casper.tools import ASK, DELETE_RULE
+from magus.casper.tools import ASK
 
 
 class StyleTags(BaseModel):
@@ -50,15 +50,6 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
         entry = store.add_style(user, StyleEntry(new_id(), passage.strip(), reason.strip(), clean, work, tags_by=tags_by, floor=where))
         return (f"문체에 기록함 {entry.id}" + (f" · {work}" if work else "") + f" · {floor_name(store, user, where)}의 문체"
                 + f" · {tags_text(clean)} ({TAGS_BY[tags_by]})")
-
-    def style_delete(id: str, note: str) -> str:
-        try:
-            entry = store.trash_style(current_user(), id.strip(), note.strip())
-        except ValueError as e:
-            raise ToolError(str(e)) from e
-        if entry is None:
-            raise ToolError(f"문체 {id}가 없다. style_search 결과의 id를 준다.")
-        return f"휴지통으로 옮김: 문체 {entry.id} “{one_line(entry.passage)[:60]}”. 지운 것이 아니라 옮긴 것이라 운영자가 되살릴 수 있다."
 
     def style_search(query: str, k: int = 5, floor: str | None = None) -> str:
         user = current_user()
@@ -101,15 +92,6 @@ def build_tools(store: Store, current_user: Callable[[], str], embedder: Embedde
             style_search,
             name="style_search",
             description="문체에서 찾는다(reason + tags 기준). id, passage, reason, tags를 돌려준다. k=5. 문체 작업 전에 먼저 부른다. " + FLOOR_FIND,
-            structured_output=False,
-        ),
-        Tool.from_function(
-            style_delete,
-            name="style_delete",
-            description=(
-                DELETE_RULE + "문체 하나를 휴지통으로 옮긴다(지우지 않는다. 운영자가 되살릴 수 있다). "
-                "id는 style_search 결과의 id, note에는 지우는 이유를 쓴다. 휴지통의 문체는 검색·목록·웹 화면에서 빠진다."
-            ),
             structured_output=False,
         ),
     ]

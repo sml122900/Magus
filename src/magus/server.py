@@ -11,6 +11,7 @@ from mcp.server.mcpserver import MCPServer
 from magus.audit import ToolCallLog
 from magus.auth import USER_ID_CLAIM, JwtVerifier
 from magus.balthasar.tools import build_tools as balthasar_tools
+from magus.book.document_tools import build_tools as document_tools
 from magus.book.tools import build_tools as book_tools
 from magus.casper.tools import build_tools as casper_tools
 from magus.category.tools import build_tools as category_tools
@@ -57,6 +58,7 @@ def build_server(
     files = FileResolver(store, settings.files_root, local_paths=local_files)
     tools = [
         *book_tools(store, current_user, files, export_link),
+        *document_tools(store, current_user),
         *melchior_tools(store, current_user, embedder, files),
         *question_tools(store, current_user),
         *casper_tools(store, current_user, embedder, files),
