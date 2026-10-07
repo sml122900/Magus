@@ -39,29 +39,39 @@ def test_overview_floor_page_move_and_undo(server_proc):  # noqa: F811
         names = re.findall(r'<span class="fl-name">([^<]+)</span>', shelf)
         assert names == ["공용", "1층", "2층"]
         assert '<span class="fl-title" title="도시는 어떻게 태어났나">도시는 어떻게 태어났나</span>' in shelf
-        assert shelf.count("최근 수정 ") >= 3 and 'href="/shelf/floor/city"' in shelf
+        assert shelf.count("최근 수정 ") >= 3 and 'href="/shelf?floor=city"' in shelf
         assert f'data-book="{ids["person"]}" data-from="city"' in shelf and 'aria-label="인물, 항목 1개"' in shelf
         assert 'data-drop-floor="river"' in shelf and 'id="move-form"' in shelf and "MagusShelf" in shelf
         assert "prefers-reduced-motion" in shelf  # 움직임 줄이기면 바로 넘어간다
         # 하나의 장: 바깥 틀은 한 번, 층은 그 안의 칸(뒤판 등), 책은 상자(옆면·윗면), 장 안에도 책 추가 자리
         assert shelf.count('class="pl cab-side"') == 1 and shelf.count('class="pl c-back"') == 3
         assert 'class="pl mb-side"' in shelf and '<a class="madd" href="/shelf/add?floor=city"' in shelf
-        # 한 층 화면: 전체 책장 버튼, 층 이름 띠(끌어 놓을 자리), 큰 책(끌 수 있음), 그 층의 카테고리 추가
-        floor = c.get("/shelf/floor/city").text
-        assert '<h1>1층 · 도시는 어떻게 태어났나</h1>' in floor and '<a class="all-shelf" href="/shelf">전체 책장</a>' in floor
-        assert '<a href="/shelf/floor/city" data-drop-floor="city" aria-current=page>1층</a>' in floor
+        # 한 화면 책장: 옛 한 층 화면은 그 층으로 다가간 상태로. 층 버튼 줄(끌어 놓을 자리), 층 안내, 책 추가
+        floor_resp = c.get("/shelf/floor/city")
+        assert str(floor_resp.url) == f"{base}/shelf?floor=city"
+        floor = floor_resp.text
+        assert '<div class="scene" data-floor="city">' in floor and '<a class="all-shelf" href="/shelf" data-go="">전체 책장</a>' in floor
+        assert '<a href="/shelf?floor=city" data-go="city" data-drop-floor="city" aria-current="true">1층</a>' in floor
+        assert '<p class="floor-meta" data-meta="city"><b>1층 · 도시는 어떻게 태어났나</b> · 최근 수정' in floor
         assert f'data-book="{ids["person"]}" data-from="city"' in floor and 'href="/shelf/add?floor=city"' in floor
-        assert c.get("/shelf/floor/nothing").status_code == 404
+        assert c.get("/shelf/floor/nothing").status_code == 404 and '<div class="scene">' in c.get("/shelf?floor=nothing").text
+        # 책의 고유 주소: 그 층으로 다가가 그 책이 열린 상태(장면 아래 패널에 그 책 화면)
+        opened = c.get("/shelf", params={"floor": "city", "book": ids["person"]}).text
+        assert f'<div class="scene" data-floor="city" data-book="{ids["person"]}">' in opened
+        assert f'<iframe class="bp-frame" title="인물" src="/shelf/{ids["person"]}"></iframe>' in opened
+        by_at = c.get("/shelf", params={"at": f"/shelf/{ids['person']}/x"}).text  # 패널 안 주소만 주어도 층·책을 찾는다
+        assert f'data-floor="city" data-book="{ids["person"]}" data-at="/shelf/{ids["person"]}/x"' in by_at
+        assert '<section class="book-panel" id="book-panel" aria-labelledby="bp-title" hidden>' in floor
         # 끌어 놓기 = POST /shelf/move(CSRF). 옮긴 뒤 안내와 되돌리기
         assert c.post("/shelf/move", data={"csrf": "틀림", "book": ids["person"], "to": COMMON}).status_code == 403
-        moved = c.post("/shelf/move", data={"csrf": csrf, "book": ids["person"], "to": COMMON, "next": "/shelf/floor/city"})
-        assert str(moved.url).startswith(f"{base}/shelf/floor/city?moved=")
+        moved = c.post("/shelf/move", data={"csrf": csrf, "book": ids["person"], "to": COMMON, "next": "/shelf?floor=city"})
+        assert str(moved.url).startswith(f"{base}/shelf?floor=city&moved=")
         assert "「인물」을 공용으로 옮겼습니다." in moved.text and 'action="/shelf/undo"' in moved.text
-        assert f'data-book="{ids["person"]}"' not in moved.text  # 1층에서 빠졌다
+        assert f'data-book="{ids["person"]}" data-from="common"' in moved.text  # 1층에서 빠져 공용에 꽂혔다(한 화면이라 모든 층이 보인다)
         move_id = urllib.parse.parse_qs(urllib.parse.urlparse(str(moved.url)).query)["moved"][0]
-        undone = c.post("/shelf/undo", data={"csrf": csrf, "move": move_id, "next": "/shelf/floor/city"})
+        undone = c.post("/shelf/undo", data={"csrf": csrf, "move": move_id, "next": "/shelf?floor=city"})
         assert "「인물」을 원래 자리(1층)로 되돌렸습니다." in undone.text and f'data-book="{ids["person"]}"' in undone.text
-        again = c.post("/shelf/undo", data={"csrf": csrf, "move": move_id, "next": "/shelf/floor/city"})
+        again = c.post("/shelf/undo", data={"csrf": csrf, "move": move_id, "next": "/shelf?floor=city"})
         assert "되돌릴 수 있는 것은 마지막으로 옮긴 것뿐입니다." in again.text
         # 같은 이름이 받는 층에 있으면 옮기지 않는다
         store = LocalStore(data_dir)
@@ -74,18 +84,18 @@ def test_overview_floor_page_move_and_undo(server_proc):  # noqa: F811
         assert '<h2>위치</h2>' in edit and '<option value="city" selected>1층 · 도시는 어떻게 태어났나</option>' in edit
         assert "받는 층에 같은 기본 카테고리가 있으면 하나로 합쳐집니다." in edit
         dest = c.post("/shelf/move", data={"csrf": csrf, "book": "ideas.city", "to": "river", "next": "dest"})
-        assert str(dest.url).startswith(f"{base}/shelf/floor/river?moved=")
+        assert str(dest.url).startswith(f"{base}/shelf?floor=river&moved=")
         assert "「생각」을 2층의 생각과 합쳤습니다(항목 1개)." in dest.text
         assert c.get("/shelf/ideas.city").status_code == 404 and "도시는 서로를 찾는 곳" in c.get("/shelf/ideas.river").text
         # 돌아갈 주소는 책장 안만
         evil = c.post("/shelf/move", data={"csrf": csrf, "book": ids["case"], "to": "city", "next": "https://evil.example/x"})
         assert str(evil.url).startswith(f"{base}/shelf?moved=")
-        zoom = c.get("/shelf", params={"zoom": "city", "next": "//evil.example"}).text
-        assert 'data-zoom-floor="city" data-zoom-next="/shelf/floor/city"' in zoom
+        zoom = c.get("/shelf", params={"zoom": "city", "next": "//evil.example"}).text  # 옛 검색 결과 주소
+        assert '<div class="scene" data-floor="city">' in zoom
         # 층 만들기(원고 없는 빈 층)
         assert "floorerr=empty" in str(c.post("/shelf/floors", data={"csrf": csrf, "title": "  "}).url)
         made = c.post("/shelf/floors", data={"csrf": csrf, "title": "다음 책 <b>메모</b>"})
-        assert "새 층을 만들었습니다." in made.text and "<h1>3층 · 다음 책 &lt;b&gt;메모&lt;/b&gt;</h1>" in made.text
+        assert "새 층을 만들었습니다." in made.text and "<b>3층 · 다음 책 &lt;b&gt;메모&lt;/b&gt;</b>" in made.text
         assert "원고가 아직 없습니다." in made.text
         # 검색: 층 → 카테고리로 묶고, 결과를 누르면 그 층으로 다가간다(data-result-floor)
         found = c.get("/shelf", params={"q": "제이콥스"}).text
@@ -101,6 +111,29 @@ def test_overview_floor_page_move_and_undo(server_proc):  # noqa: F811
         store.close()
         refs = c.get("/shelf/refs.common").text
         assert "공용으로 옮김(" in refs and "1층 「도시는 어떻게 태어났나」·2층 「강과 사람」 원고가 함께 쓰는 문헌이라 공용으로 옮김" in refs
+
+
+def test_one_view_direct_addresses_and_panel(server_proc):  # noqa: F811
+    base, data_dir, _ = server_proc({})
+    ids = _seed(data_dir)
+    with httpx2.Client(base_url=base, timeout=120) as c:
+        c.get("/login?next=/shelf", follow_redirects=True)
+        # 주소창으로 책 화면을 바로 열면(브라우저가 Sec-Fetch-Dest: document를 붙인다) 한 화면 책장의 그 책으로
+        nav = {"sec-fetch-dest": "document", "sec-fetch-mode": "navigate"}
+        direct = c.get(f"/shelf/{ids['person']}?q=x", headers=nav)
+        assert direct.status_code == 303 and direct.headers["location"] == "/shelf?" + urllib.parse.urlencode({"at": f"/shelf/{ids['person']}?q=x"})
+        assert c.get("/shelf/floor/city", headers=nav).headers["location"] == "/shelf?floor=city"  # 옛 한 층 화면은 그 층으로
+        assert c.get("/shelf/doc/x/docx", headers=nav).status_code == 404  # 내려받기는 넘기지 않는다
+        assert c.get(f"/shelf/{ids['person']}").status_code == 200  # Sec-Fetch 머리가 없는 브라우저는 예전처럼
+        # 패널(iframe) 안: 머리(메뉴) 없이
+        panel = c.get(f"/shelf/{ids['person']}", headers={"sec-fetch-dest": "iframe"}).text
+        assert '<body class="embed">' in panel and '<header class="site">' not in panel and "<h1>인물</h1>" in panel
+        # 패널 안에서 책장 주소가 열리면(저장·휴지통 뒤) 바깥 화면을 그 주소로
+        out = c.get("/shelf?floor=city&done=trash", headers={"sec-fetch-dest": "iframe"}).text
+        assert '<a id="go" href="/shelf?floor=city&amp;done=trash" target="_top">' in out and "window.top.location.replace" in out
+        # 고치기 뒤 돌아오는 주소에는 그 책이 열려 있다
+        edited = c.post(f"/shelf/edit/{ids['person']}", data={"csrf": _csrf(c.get("/shelf").text), "name": "사람", "color": "#7a4e2d"})
+        assert edited.headers["location"] == f"/shelf?floor=city&book={ids['person']}&done=edit&c={ids['person']}"
 
 
 def test_cabinet_rows_break_where_books_no_longer_fit():

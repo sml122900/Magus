@@ -331,9 +331,9 @@ def test_shelf_books_and_board_lists(server_proc):
         for label in ("생각, 항목 123개", "문체, 항목 2개", "문헌, 확인 1편, 전체 2편"):
             assert f'aria-label="{label}"' in shelf
         assert 'aria-current=page>책장</a>' in shelf and '<span class="fl-name">공용</span>' in shelf
-        floor = c.get("/shelf/floor/common").text  # 한 층 화면: 지금의 큰 책등
-        assert '<span class="spine-title" aria-hidden="true">생각</span>' in floor
-        assert re.search(r'class="book" href="/shelf/ideas.common" style="--c:#[0-9a-f]{6};--fg:#[0-9a-f]{6};', floor)
+        floor = c.get("/shelf/floor/common").text  # 옛 한 층 화면 → 한 화면 책장의 그 층(책등은 장 안의 상자 책)
+        assert '<span class="mb-name">생각</span>' in floor and 'class="scene" data-floor="common"' in floor
+        assert re.search(r'data-open="/shelf/ideas.common"[^>]*style="--c:#[0-9a-f]{6};--fg:#[0-9a-f]{6};', floor)
         for old, new in (("/ideas?author=ai", "/shelf/ideas?author=ai"), ("/refs", "/shelf/refs"), ("/styles?tag=x", "/shelf/styles?tag=x")):
             moved = c.get(old, follow_redirects=False)
             assert moved.status_code == 302 and moved.headers["location"] == new

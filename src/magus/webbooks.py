@@ -39,7 +39,7 @@ from magus.melchior.refs import add_ref
 from magus.melchior.report import build_cite_report
 from magus.store import BookTitles, Floor, Passage, Store
 from magus.store.base import STALE_REASONS
-from magus.webshelf import color_fieldset, chosen_color, safe_color
+from magus.webshelf import color_fieldset, chosen_color, safe_color, state_url
 
 LIGHTS = {"verified": ("🟢", "확인"), "unverified": ("🟡", "미확인"), "unknown": ("🔴", "참고문헌에 없음"),
           "uncertain": ("⚪", "미연결")}
@@ -89,6 +89,7 @@ UPLOAD_PROGRESS = """<script>
       box.classList.add("on"); if (button) button.disabled = true;
       var xhr = new XMLHttpRequest();
       xhr.open("POST", form.getAttribute("action"));
+      if (window.top !== window.self) xhr.setRequestHeader("X-Magus-Embed", "1");
       xhr.upload.onprogress = function (ev) {
         if (!ev.lengthComputable) return;
         var p = Math.round(ev.loaded * 100 / ev.total); bar.style.width = p + "%"; say.textContent = "올리는 중 " + p + "%";
@@ -159,7 +160,7 @@ class BookPages:
 
     def _floor_crumb(self, uid: str, floor_id: str) -> str:
         floor = self.store.get_floor(uid, floor_id)
-        where = f' · <a href="/shelf/floor/{html.escape(floor_id)}">{floor.label}</a>' if floor else ""
+        where = f' · <a href="{html.escape(state_url(floor_id))}">{floor.label}</a>' if floor else ""
         return f'<p class="crumb"><a href="/shelf">← 책장</a>{where}</p>'
 
     # ---- 책 추가 ------------------------------------------------------------------------------
@@ -628,7 +629,7 @@ class BookPages:
                         uid, ident, title=new_name if new_name != name else None, color=new_color,
                         title_by="author" if new_name != name else None))
                 note = await run_in_threadpool(self._keep_color, uid, form, new_color)
-                return RedirectResponse(f"/shelf/floor/{floor_id}?done=edit&c={key}" + note, status_code=303)
+                return RedirectResponse(state_url(floor_id, key, done="edit", c=key) + note, status_code=303)
             except ValueError as e:
                 error = f'<p class="msg err">{html.escape(str(e))}</p>'
                 name, color = new_name or name, safe_color(str(form.get("hex") or ""), color)
@@ -682,7 +683,7 @@ class BookPages:
                 await run_in_threadpool(self.store.trash_manuscript, uid, ident, "웹 책장에서 옮김")
             else:
                 await run_in_threadpool(self.store.trash_document, uid, ident, "웹 책장에서 옮김")
-            return RedirectResponse(f"/shelf/floor/{floor_id}?done=trash", status_code=303)
+            return RedirectResponse(state_url(floor_id, done="trash"), status_code=303)
         body = (f'<p class="crumb"><a href="{html.escape(back)}">← {html.escape(name)}</a></p>'
                 f'<div class="card"><p>「{html.escape(name)}」을(를) 휴지통으로 옮길까요?</p>{what}'
                 "<p>지우는 것이 아니라 옮기는 것이라 운영자가 되살릴 수 있습니다.</p>"

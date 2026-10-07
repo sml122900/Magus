@@ -232,7 +232,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         shelf = c.get("/login?next=/shelf").text
         csrf = _csrf(shelf)
         # 카테고리 추가 자리는 한 층 화면에 있다(#93). 작업물이 없으면 공용 층 하나
-        assert '<a class="book add" href="/shelf/add?floor=common" aria-label="책 추가">' in c.get("/shelf/floor/common").text
+        assert '<a class="madd" href="/shelf/add?floor=common" aria-label="책 추가">' in c.get("/shelf/floor/common").text
         form = c.get("/shelf/new").text
         assert 'name="template" value="case"' in form and form.count('name="color" value="#') == 18 and 'value="custom"' in form
         assert c.post("/shelf/new", data={"csrf": "틀림", "name": "사례", "template": "case", "color": "#b3261e"}).status_code == 403
@@ -245,7 +245,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
                                           "r": "74", "g": "103", "b": "65", "keep": "1"})
         assert "「사례」 카테고리를 꽂았습니다." in made.text
         assert 'aria-label="사례, 항목 0개"' in made.text and "--c:#4a6741;" in made.text
-        cid = re.search(r'href="/shelf/(\d{17}-[0-9a-f]{6})"', made.text).group(1)
+        cid = re.search(r'data-open="/shelf/(\d{17}-[0-9a-f]{6})"', made.text).group(1)
         store = LocalStore(data_dir)
         assert store.get_shelf_settings("alice").my_colors == ("#4a6741",)  # 내 색에 저장
         store.close()
@@ -274,7 +274,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         assert 'name="name"' not in builtin and "기본 카테고리라 이름은 바꿀 수 없습니다." in builtin
         c.post("/shelf/edit/ideas", data={"csrf": csrf, "name": "엉뚱한 이름", "color": "#8db8de"})
         shelf = c.get("/shelf/floor/common").text
-        assert re.search(r'href="/shelf/ideas.common" style="--c:#8db8de;--fg:#1a1a1a;', shelf) and "엉뚱한 이름" not in shelf
+        assert re.search(r'data-open="/shelf/ideas.common"[^>]*style="--c:#8db8de;--fg:#1a1a1a;', shelf) and "엉뚱한 이름" not in shelf
         # 내 색 빼기
         c.post("/shelf/colors", data={"csrf": csrf, "remove": "#4a6741", "next": "https://evil.example/"})
         store = LocalStore(data_dir)

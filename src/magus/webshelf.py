@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import html
 import re
@@ -115,6 +116,27 @@ def color_style(color: str) -> str:
 def key_jitter(key: str, spread: int) -> int:
     """책마다 조금 다른 높이(주소 이름의 해시라 같은 책은 언제나 같다)."""
     return int(hashlib.sha256(key.encode()).hexdigest()[:4], 16) % spread
+
+
+# 한 화면 책장(2026-10-07 밤): 책을 열면 그 책 화면이 장면 아래 패널(iframe)에 뜬다. 패널 안의 요청은 머리(메뉴) 없이 그린다.
+EMBED: contextvars.ContextVar[bool] = contextvars.ContextVar("magus_panel", default=False)
+_AT = re.compile(r"/shelf/(?!floor/)[A-Za-z0-9_.\-/%]+(?:\?[A-Za-z0-9_.\-=&%+]*)?")
+
+
+def is_panel_request(request: Request) -> bool:
+    """책장 패널(iframe) 안에서 연 화면인가. 브라우저가 붙이는 Sec-Fetch-Dest, 패널 안 올리기(XHR)는 X-Magus-Embed."""
+    return request.headers.get("sec-fetch-dest") == "iframe" or request.headers.get("x-magus-embed") == "1"
+
+
+def safe_at(value: str | None) -> str | None:
+    """패널에 열 주소: 책장 아래의 책 화면만(바깥 주소·//·..·한 층 화면 주소는 받지 않는다)."""
+    return value if value and _AT.fullmatch(value) and "//" not in value and ".." not in value else None
+
+
+def state_url(floor: str | None = None, book: str | None = None, at: str | None = None, **extra: str) -> str:
+    """한 화면 책장의 주소: 층(카메라)·열린 책·패널 안의 주소. 그 밖의 값(done 등)은 뒤에 붙인다."""
+    pairs = [(k, v) for k, v in (("floor", floor), ("book", book), ("at", at)) if v] + [(k, v) for k, v in extra.items() if v]
+    return "/shelf" + ("?" + urllib.parse.urlencode(pairs) if pairs else "")
 
 
 def book_style(book: Book) -> str:
@@ -718,7 +740,7 @@ class ShelfPages:
     def _crumb(self, uid: str, kind: Kind) -> str:
         """'← 책장 · 1층' — 책장 전체와 그 카테고리가 꽂힌 층으로 돌아가는 길."""
         floor = self.store.get_floor(uid, kind.floor)
-        where = f' · <a href="/shelf/floor/{html.escape(kind.floor)}">{floor.label}</a>' if floor else ""
+        where = f' · <a href="{html.escape(state_url(kind.floor))}">{floor.label}</a>' if floor else ""
         return f'<p class="crumb"><a href="/shelf">← 책장</a>{where}</p>'
 
     def _has_any(self, uid: str, kind: Kind) -> bool:
@@ -963,7 +985,7 @@ class ShelfPages:
                 made = await run_in_threadpool(self.store.create_category, uid, name, template.key, color,
                                                tuple(f for f, _ in template.fields), floor.id)
                 note = await run_in_threadpool(self._keep_color, uid, form, color)
-                return RedirectResponse(f"/shelf/floor/{floor.id}?done=made&c={made.id}" + note, status_code=303)
+                return RedirectResponse(state_url(floor.id, made.id, done="made", c=made.id) + note, status_code=303)
             except ValueError as e:
                 error = f'<p class="msg err">{html.escape(str(e))}</p>'
         templates = "".join(
@@ -975,7 +997,7 @@ class ShelfPages:
         preview = shelf_html([book_html(Book("preview", values["name"] or "새 카테고리", "일반", 0, values["color"], None))])
         where = floor.label if floor.common else f"{floor.label} 「{floor.title}」"
         body = (
-            f'<p class="crumb"><a href="/shelf">← 책장</a> · <a href="/shelf/floor/{html.escape(floor.id)}">{floor.label}</a></p>{error}'
+            f'<p class="crumb"><a href="/shelf">← 책장</a> · <a href="{html.escape(state_url(floor.id))}">{floor.label}</a></p>{error}'
             f'<p>꽂을 층: <b>{html.escape(where)}</b></p>'
             f'<form method="post" action="/shelf/new?floor={urllib.parse.quote(floor.id)}" class="colors">{self._csrf_input(session)}'
             f'<label class="block">이름(12자까지) <input name="name" value="{html.escape(values["name"])}" maxlength="12" required></label>'
@@ -983,7 +1005,7 @@ class ShelfPages:
             f"<fieldset><legend>템플릿</legend>{templates}</fieldset>"
             + color_fieldset(values["color"], settings.my_colors)
             + f'<div class="preview"><p><b>미리보기</b></p>{preview}</div>'
-            f'<p><button class="primary">책장에 꽂기</button> <a href="/shelf/floor/{html.escape(floor.id)}">그만두기</a></p></form>'
+            f'<p><button class="primary">책장에 꽂기</button> <a href="{html.escape(state_url(floor.id))}">그만두기</a></p></form>'
             + COLOR_SCRIPT
         )
         return self._shelf_page("모음 책 만들기", body, session, 400 if error else 200)
@@ -1032,7 +1054,7 @@ class ShelfPages:
                     clean = check_name(name, taken) if name_key(name) != name_key(kind.category.name) else None
                     await run_in_threadpool(lambda: self.store.update_category(uid, kind.category.id, name=clean, color=color))
                 note = await run_in_threadpool(self._keep_color, uid, form, color)
-                return RedirectResponse(f"/shelf/floor/{kind.floor}?done=edit&c={kind.key}" + note, status_code=303)
+                return RedirectResponse(state_url(kind.floor, kind.key, done="edit", c=kind.key) + note, status_code=303)
             except ValueError as e:
                 error = f'<p class="msg err">{html.escape(str(e))}</p>'
             settings = await run_in_threadpool(self.store.get_shelf_settings, uid)
@@ -1105,7 +1127,7 @@ class ShelfPages:
             except PermissionError:
                 return self._shelf_page("휴지통으로", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
             await run_in_threadpool(self.store.trash_category, uid, category.id, "웹 책장에서 옮김")
-            return RedirectResponse(f"/shelf/floor/{category.floor}?done=trash", status_code=303)
+            return RedirectResponse(state_url(category.floor, done="trash"), status_code=303)
         body = (
             f'<p class="crumb"><a href="/shelf/{category.id}">← {html.escape(category.name)}</a></p>'
             f'<div class="card"><p>「{html.escape(category.name)}」 카테고리를 휴지통으로 옮길까요?</p>'

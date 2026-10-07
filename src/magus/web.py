@@ -41,7 +41,7 @@ from magus.signing import sign, unsign
 from magus.store import Profile, Store
 from magus.webbooks import BookPages
 from magus.webfloors import FloorPages
-from magus.webshelf import ShelfPages
+from magus.webshelf import EMBED, ShelfPages, is_panel_request, safe_at, state_url
 
 log = logging.getLogger("magus.web")
 SESSION_COOKIE, OAUTH_COOKIE = "magus_session", "magus_oauth"
@@ -113,6 +113,13 @@ border:2px solid currentColor;border-right-color:transparent;border-radius:50%;a
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (max-width:767px){main{padding:16px 12px 24px}h1{font-size:22px}table{min-width:640px}
 button,input[type=file]::file-selector-button,input:not([type=radio]):not([type=checkbox]):not([type=hidden]),select{min-height:44px}}
+"""
+# 책장 패널(iframe) 안의 화면: 흰 바탕, 좁은 여백. 제목(h1)은 패널 머리가 보이므로 숨기고, 책장으로 돌아가는 길('← 책장 · N층')도 뺀다.
+EMBED_STYLE = """
+body.embed{background:var(--canvas)}
+body.embed main{max-width:none;padding:12px 16px 24px}
+body.embed main>h1{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+body.embed .crumb:has(> a[href="/shelf"]){display:none}
 """
 # 받은함: 파일을 고르면 바로 올린다(자바스크립트가 꺼져 있으면 '올리기' 버튼으로). 올리는 동안 버튼 옆에 도는 표시가 보인다.
 UPLOAD_SCRIPT = """<script>
@@ -284,7 +291,27 @@ class Web(ShelfPages, FloorPages, BookPages):
             *self.shelf_routes(),
         ]
         for path, methods, handler in routes:
-            server.custom_route(path, methods=methods, include_in_schema=False)(handler)
+            server.custom_route(path, methods=methods, include_in_schema=False)(self._wrap(handler))
+
+    def _wrap(self, handler: Callable[[Request], Awaitable[Response]]) -> Callable[[Request], Awaitable[Response]]:
+        """한 화면 책장(2026-10-07 밤): 책 화면 주소를 브라우저 주소창으로 바로 열면 책장의 그 층·그 책 패널로 넘긴다.
+        책장 패널(iframe) 안의 요청이면 머리(메뉴) 없는 패널 모양으로 그린다(EMBED)."""
+
+        async def run(request: Request) -> Response:
+            path = request.url.path
+            if (request.method == "GET" and request.headers.get("sec-fetch-dest") == "document"
+                    and request.headers.get("sec-fetch-mode") == "navigate" and path.startswith("/shelf/")
+                    and not path.startswith("/shelf/floor/") and not path.endswith("/docx")):
+                at = safe_at(path + (f"?{request.url.query}" if request.url.query else ""))
+                if at:
+                    return RedirectResponse(state_url(at=at), status_code=303)
+            token = EMBED.set(is_panel_request(request))
+            try:
+                return await handler(request)
+            finally:
+                EMBED.reset(token)
+
+        return run
 
     # --- 공통 ---
     def _page(self, title: str, body: str, session: tuple[str, str] | None = None, status: int = 200, *,
@@ -299,6 +326,13 @@ class Web(ShelfPages, FloorPages, BookPages):
             nav = (f'<nav>{links}<a href="/me" class="me" aria-label="내 정보, {shown}">{shown}</a>'
                    f'<form method="post" action="/logout" class="inline">{self._csrf_input(session)}<button>로그아웃</button></form></nav>')
         body = body.replace("<table>", '<div class="table-wrap"><table>').replace("</table>", "</table></div>")
+        if EMBED.get():  # 책장 패널(iframe) 안: 머리(메뉴) 없이, 제목은 패널 머리가 보인다
+            return HTMLResponse(
+                f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{html.escape(title)} · Magus</title><style>{STYLE}{css}{EMBED_STYLE}</style></head><body class="embed">
+<main><h1>{html.escape(title)}</h1>{body}</main></body></html>""",
+                status_code=status,
+            )
         return HTMLResponse(
             f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)} · Magus</title><style>{STYLE}{css}</style></head><body>
@@ -317,7 +351,8 @@ class Web(ShelfPages, FloorPages, BookPages):
         return form
 
     def _need_login(self, request: Request) -> Response:
-        return RedirectResponse(f"/login?next={urllib.parse.quote(request.url.path)}", status_code=303)
+        here = request.url.path + (f"?{request.url.query}" if request.url.query else "")  # 책장의 층·책 상태도 이어서
+        return RedirectResponse(f"/login?next={urllib.parse.quote(here)}", status_code=303)
 
     # --- 로그인 ---
     async def home(self, request: Request) -> Response:

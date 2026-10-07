@@ -51,9 +51,9 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
         assert 'href="/shelf"' in nav and "/book" not in nav and "/inbox" not in nav and "/checklist" not in nav
         # 1. 층 만들기
         floor_page = c.post("/shelf/floors", data={"csrf": csrf, "title": "닿으려는 종"})
-        floor_id = urllib.parse.urlparse(str(floor_page.url)).path.rsplit("/", 1)[1]
+        floor_id = urllib.parse.parse_qs(urllib.parse.urlparse(str(floor_page.url)).query)["floor"][0]  # 한 화면 책장의 그 층
         assert "원고가 아직 없습니다. 아래 점선 자리 '책 추가'에서 원고 파일을 고르면 이 층의 원고 책이 됩니다." in floor_page.text
-        assert f'href="/shelf/add?floor={floor_id}" aria-label="책 추가"' in floor_page.text
+        assert f'<a class="madd" href="/shelf/add?floor={floor_id}" aria-label="책 추가">' in floor_page.text
         # 2. 책 추가: 종류 고르기
         add = c.get(f"/shelf/add?floor={floor_id}").text
         assert "<h2>원고 책</h2>" in add and "<h2>모음 책</h2>" in add and "<h2>문서 책</h2>" in add
@@ -90,9 +90,9 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
         said = await _make_document(data_dir, "alice", project_id=floor_id, title="닿으려는 종 출처 확인 문서", title_by="author",
                                     preface="저자께서 먼저 보실 것을 모았습니다.")
         doc_id = re.search(r"\((\d{17}-[0-9a-f]{6})\)", said).group(1)
-        floor = c.get(f"/shelf/floor/{floor_id}").text
-        assert f'href="/shelf/doc/{doc_id}"' in floor and "<span class=\"line\">E1 기준</span>" in floor
-        assert f'href="/shelf/book/{floor_id}"' in floor and '<span class="band top" aria-hidden="true">원고</span>' in floor
+        floor = c.get(f"/shelf?floor={floor_id}").text
+        assert f'data-open="/shelf/doc/{doc_id}"' in floor and '<span class="mb-band bottom"><span class="line">E1 기준</span>' in floor
+        assert f'data-open="/shelf/book/{floor_id}"' in floor and '<span class="mb-band top">원고</span>' in floor
         doc = c.get(f"/shelf/doc/{doc_id}").text
         assert "문서 책 · 출처 확인 문서 · 기준 원고" in doc and "(머리말은 Claude가 씀)" in doc
         assert "<h2>닿으려는 종 출처 확인 문서</h2>" in doc and "<i>Claude(AI)가 쓴 머리말입니다.</i>" in doc
@@ -105,8 +105,8 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
                          files={"file": (manuscript.name, manuscript.read_bytes(), DOCX)})
         assert str(edition.url).endswith("tab=editions&done=edition") and "수정본 E2 올리기를 마쳤습니다." in edition.text
         assert "리포트 — 수정본 E2" in edition.text
-        floor = c.get(f"/shelf/floor/{floor_id}").text
-        assert '<span class="band bottom stale" aria-hidden="true"><span class="line">옛 판</span><span class="line">기준</span>' in floor
+        floor = c.get(f"/shelf?floor={floor_id}").text
+        assert '<span class="mb-band bottom stale"><span class="line">옛 판</span><span class="line">기준</span>' in floor
         assert f"문서 책 닿으려는 종 출처 확인 문서, {STALE}" in floor
         doc = c.get(f"/shelf/doc/{doc_id}").text
         assert f"{STALE}: 기준 원고에 새 수정본(E2)이 올라왔습니다. 이 문서는 E1 기준입니다." in doc and "다시 만들기</button>" in doc
@@ -117,7 +117,7 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
         # 7. 문서 책 설정: 이름·색, 공용에는 못 옮김
         edit = c.get(f"/shelf/edit/doc.{doc_id}").text
         assert '<option value="common"' not in edit and "문서 책은 작업물 층에만 둘 수 있습니다(공용 층에는 모음 책만)." in edit
-        blocked = c.post("/shelf/move", data={"csrf": csrf, "book": f"doc.{doc_id}", "to": "common", "next": f"/shelf/floor/{floor_id}"})
+        blocked = c.post("/shelf/move", data={"csrf": csrf, "book": f"doc.{doc_id}", "to": "common", "next": f"/shelf?floor={floor_id}"})
         assert "공용 층에는 모음 책만 둘 수 있습니다." in blocked.text
         renamed = c.post(f"/shelf/edit/doc.{doc_id}", data={"csrf": csrf, "name": "출처 확인", "color": "#2f6db5"})
         assert "「출처 확인」 책을 고쳤습니다." in renamed.text and "--c:#2f6db5;" in renamed.text
@@ -126,7 +126,7 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
         confirm = c.get(f"/shelf/trash/ms.{floor_id}").text
         assert "장 7개" in confirm and "이 층은 원고가 없는 빈 층이 됩니다." in confirm
         gone = c.post(f"/shelf/trash/ms.{floor_id}", data={"csrf": csrf})
-        assert "책을 휴지통으로 옮겼습니다." in gone.text and "원고가 아직 없습니다." in gone.text and f'href="/shelf/doc/{doc_id}"' in gone.text
+        assert "책을 휴지통으로 옮겼습니다." in gone.text and "원고가 아직 없습니다." in gone.text and f'data-open="/shelf/doc/{doc_id}"' in gone.text
         assert c.get(f"/shelf/book/{floor_id}").status_code == 404
     store = LocalStore(data_dir)
     assert store.list_chapters("alice", floor_id) == [] and store.get_document("alice", doc_id) is not None
