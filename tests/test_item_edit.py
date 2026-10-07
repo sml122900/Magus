@@ -35,16 +35,18 @@ def test_edit_and_trash_on_the_shelf(server_proc):  # noqa: F811
     base, data_dir, _ = server_proc({})
     cid = _seed(data_dir)
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
-        listed = c.get("/login?next=/shelf/ideas").text
+        opened = c.get("/login?next=/shelf/ideas")  # 예전 주소: 생각이 꽂힌 층의 주소로 넘어간다(#93)
+        listed, ideas = opened.text, opened.url.path
         csrf = _csrf(listed)
-        assert f'<a href="/shelf/ideas/{AI}/edit">고치기</a> · <a href="/shelf/ideas/{AI}/trash">휴지통으로</a>' in listed
+        assert ideas.startswith("/shelf/ideas.")
+        assert f'<a href="{ideas}/{AI}/edit">고치기</a> · <a href="{ideas}/{AI}/trash">휴지통으로</a>' in listed
         assert ">고치기</a>" not in c.get("/shelf/styles").text and c.get("/shelf/styles/20261006000000003-dddddd/edit").status_code == 404
         form = c.get(f"/shelf/ideas/{AI}/edit").text
         assert "처음 쓴 사람: Claude(AI)." in form and ">그 관점은 흥미롭습니다</textarea>" in form
         assert c.post(f"/shelf/ideas/{AI}/edit", data={"csrf": "틀림", "content": "x"}).status_code == 403
         assert c.post(f"/shelf/ideas/{AI}/edit", data={"csrf": csrf, "title": "", "content": "  "}).status_code == 400
         done = c.post(f"/shelf/ideas/{AI}/edit", data={"csrf": csrf, "title": "관점", "content": "그 관점은 <b>새롭다</b>"})
-        assert str(done.url).endswith(f"/shelf/ideas/{AI}?done=edited") and "<p class=\"msg\">고쳤습니다.</p>" in done.text
+        assert str(done.url).endswith(f"{ideas}/{AI}?done=edited") and "<p class=\"msg\">고쳤습니다.</p>" in done.text
         assert "그 관점은 &lt;b&gt;새롭다&lt;/b&gt;" in done.text and "저자가 고침(" in done.text
         # 카테고리 항목: 칸까지 고치고, AI가 지은 제목을 그대로 두면 'AI가 지은 제목'도 그대로
         item = c.post(f"/shelf/{cid}/20261006000000002-cccccc/edit",
@@ -56,7 +58,7 @@ def test_edit_and_trash_on_the_shelf(server_proc):  # noqa: F811
         assert "이 항목을 휴지통으로 옮길까요?" in confirm and "이 생각에 응답한 AI 발화 1건도 함께 옮겨집니다." in confirm
         assert c.post(f"/shelf/ideas/{ME}/trash", data={"csrf": "틀림"}).status_code == 403
         gone = c.post(f"/shelf/ideas/{ME}/trash", data={"csrf": csrf})
-        assert str(gone.url).endswith("/shelf/ideas?done=trashed") and "항목을 휴지통으로 옮겼습니다." in gone.text
+        assert str(gone.url).endswith(f"{ideas}?done=trashed") and "항목을 휴지통으로 옮겼습니다." in gone.text
         assert c.get(f"/shelf/ideas/{AI}").status_code == 404
         c.post(f"/shelf/{cid}/20261006000000002-cccccc/trash", data={"csrf": csrf})
         assert c.get(f"/shelf/{cid}/20261006000000002-cccccc").status_code == 404

@@ -231,7 +231,8 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         shelf = c.get("/login?next=/shelf").text
         csrf = _csrf(shelf)
-        assert '<a class="book add" href="/shelf/new" aria-label="카테고리 추가">' in shelf
+        # 카테고리 추가 자리는 한 층 화면에 있다(#93). 작업물이 없으면 공용 층 하나
+        assert '<a class="book add" href="/shelf/new?floor=common" aria-label="카테고리 추가">' in c.get("/shelf/floor/common").text
         form = c.get("/shelf/new").text
         assert 'name="template" value="case"' in form and form.count('name="color" value="#') == 18 and 'value="custom"' in form
         assert c.post("/shelf/new", data={"csrf": "틀림", "name": "사례", "template": "case", "color": "#b3261e"}).status_code == 403
@@ -259,7 +260,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         assert "&lt;script&gt;alert(1)&lt;/script&gt; 강가 장날" in written.text and "<script>alert" not in written.text
         assert "<dt>시기</dt><dd>1850년대</dd>" in written.text and "누가: 저자의 말" in written.text
         idea = c.post("/shelf/write/ideas", data={"csrf": csrf, "title": "물가의 제목", "content": "물가는 궁지다"})
-        assert '<span class="t">물가의 제목</span>' in idea.text and "/shelf/ideas/" in str(idea.url)
+        assert '<span class="t">물가의 제목</span>' in idea.text and "/shelf/ideas.common/" in str(idea.url)  # 예전 주소로 적어도 그 층에
         assert c.post("/shelf/write/styles", data={"csrf": csrf, "content": "x"}).status_code == 404  # 문체·문헌은 대화로
         # 고치기: 이름과 색(기본 색 이름은 화면에서 격자로 고른다). 기본 카테고리는 색만
         edit = c.get(f"/shelf/edit/{cid}").text
@@ -272,8 +273,8 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         builtin = c.get("/shelf/edit/ideas").text
         assert 'name="name"' not in builtin and "기본 카테고리라 이름은 바꿀 수 없습니다." in builtin
         c.post("/shelf/edit/ideas", data={"csrf": csrf, "name": "엉뚱한 이름", "color": "#8db8de"})
-        shelf = c.get("/shelf").text
-        assert re.search(r'href="/shelf/ideas" style="--c:#8db8de;--fg:#1a1a1a;', shelf) and "엉뚱한 이름" not in shelf
+        shelf = c.get("/shelf/floor/common").text
+        assert re.search(r'href="/shelf/ideas.common" style="--c:#8db8de;--fg:#1a1a1a;', shelf) and "엉뚱한 이름" not in shelf
         # 내 색 빼기
         c.post("/shelf/colors", data={"csrf": csrf, "remove": "#4a6741", "next": "https://evil.example/"})
         store = LocalStore(data_dir)
@@ -307,7 +308,7 @@ def test_web_category_list_search_and_titles(server_proc):  # noqa: F811
         found = c.get(f"/shelf/{c1.id}", params={"q": "장날"}).text
         assert "찾은 항목 1개" in found and "<mark>장날</mark>" in found
         everywhere = c.get("/shelf", params={"q": "물결"}).text
-        assert "<h2>사례 <small>1개</small></h2>" in everywhere and "<mark>물결</mark>" in everywhere
+        assert f'<h3><a href="/shelf/{c1.id}">사례</a> <small>1개 · 최근 수정 ' in everywhere and "<mark>물결</mark>" in everywhere
         assert '<details id="i-20261006000000001-aaaaab" open data-here>' in c.get(f"/shelf/{c1.id}/20261006000000001-aaaaab").text
 
 

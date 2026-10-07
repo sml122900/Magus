@@ -48,6 +48,7 @@ from magus.melchior.check import cite_floors
 from magus.signing import sign, unsign
 from magus.store import Profile, Store
 from magus.store.base import STALE_REASONS
+from magus.webfloors import FloorPages
 from magus.webshelf import ShelfPages
 
 log = logging.getLogger("magus.web")
@@ -230,7 +231,7 @@ def _pkce() -> tuple[str, str]:
 
 
 @dataclass
-class Web(ShelfPages):
+class Web(ShelfPages, FloorPages):
     store: Store
     settings: Settings
     base_url: str  # 바깥에서 보이는 주소(원격: PUBLIC_URL, 로컬: http://127.0.0.1:포트)

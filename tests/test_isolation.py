@@ -298,8 +298,9 @@ def test_shelf_pages_show_only_own_shelf(server_proc, fake_issuer):  # noqa: F81
     for user in ("alice", "bob"):
         with httpx2.Client(base_url=base, timeout=120) as c:
             assert _login(c, issuer_state, f"sub-{user}").status_code == 303
-            pages[user] = {path: c.get(path) for path in (*lists, "/shelf", *(f"/shelf/ideas/2026100600000000{n}-aaaaaa" for n in (1, 2)),
-                                                          "/shelf/ideas/20261006000000009-cccccc")}
+            # 예전 주소는 그 사용자의 층 주소로 넘어간다(#93): 넘어간 뒤의 화면으로 본다
+            pages[user] = {path: c.get(path, follow_redirects=True) for path in (
+                *lists, "/shelf", *(f"/shelf/ideas/2026100600000000{n}-aaaaaa" for n in (1, 2)), "/shelf/ideas/20261006000000009-cccccc")}
     for user, word, other in (("alice", "앨리스", "밥"), ("bob", "밥", "앨리스")):
         for path, response in pages[user].items():
             assert f"{other}의" not in response.text, (user, path)

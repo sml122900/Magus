@@ -47,6 +47,7 @@ class Layout:
     builtins: dict[str, list[str]]
     changed_at: dict[str, str] = field(default_factory=dict)
     last_move: dict[str, Any] | None = None
+    last_undone: dict[str, Any] | None = None  # 마지막으로 되돌린 옮기기(웹 안내 한 줄용)
     stored: bool = False  # floors.json이 있나(이전을 마쳤나)
 
     def kinds(self, floor: str) -> list[str]:
@@ -64,7 +65,7 @@ class Layout:
     def record(self) -> dict[str, Any]:
         return {"schema_version": FLOORS_SCHEMA, "order": self.order,
                 "builtins": {f: self.kinds(f) for f in (COMMON, *self.order)},  # 빈 목록도 적는다(옮겨 비운 층)
-                "changed_at": self.changed_at, "last_move": self.last_move}
+                "changed_at": self.changed_at, "last_move": self.last_move, "last_undone": self.last_undone}
 
 
 def legacy_layout(project_ids: list[str]) -> Layout:
@@ -131,8 +132,9 @@ class FloorMixin:
             if p not in (data.get("order") or []) and p not in builtins:
                 builtins[p] = list(NEW_FLOOR_BUILTINS)
         last = data.get("last_move") if isinstance(data.get("last_move"), dict) else None
+        undone = data.get("last_undone") if isinstance(data.get("last_undone"), dict) else None
         changed = {str(k): str(v) for k, v in (data.get("changed_at") or {}).items()}
-        return Layout(order, builtins, changed, last, True)
+        return Layout(order, builtins, changed, last, undone, True)
 
     def _write_layout(self, user_id: str, layout: Layout) -> None:
         write_json(self._floors_path(user_id), layout.record())
@@ -427,9 +429,15 @@ class FloorMixin:
                                 name=clash, floor=self._label(user_id, layout, move.from_floor))
             self._set_category_floor(user_id, move.book, move.from_floor, at)
         layout.last_move = None
+        layout.last_undone = asdict(move)
         layout.changed_at.update({move.from_floor: at, move.to_floor: at})
         self._write_layout(user_id, layout)
         return move
+
+    @locked
+    def last_undone(self, user_id: str) -> FloorMove | None:
+        last = self._layout(user_id).last_undone
+        return FloorMove(**{**last, "items": tuple(last.get("items") or ())}) if last else None
 
     @locked
     def set_ref_floor(self, user_id: str, key: str, floor: str) -> Any:

@@ -320,11 +320,13 @@ def test_shelf_books_and_board_lists(server_proc):
         assert 'aria-label="생각, 항목 0개"' in c.get("/shelf").text
         _seed_shelf(data_dir)
 
-        shelf = c.get("/shelf").text
+        shelf = c.get("/shelf").text  # 책장 전체(3D, #93): 생각·문헌은 작업물이 생기기 전에 쌓여 공용에 있다
         for label in ("생각, 항목 123개", "문체, 항목 2개", "문헌, 확인 1편, 전체 2편"):
             assert f'aria-label="{label}"' in shelf
-        assert 'aria-current=page>책장</a>' in shelf and '<span class="spine-title" aria-hidden="true">생각</span>' in shelf
-        assert re.search(r'class="book" href="/shelf/ideas" style="--c:#[0-9a-f]{6};--fg:#[0-9a-f]{6};', shelf)
+        assert 'aria-current=page>책장</a>' in shelf and '<span class="fl-name">공용</span>' in shelf
+        floor = c.get("/shelf/floor/common").text  # 한 층 화면: 지금의 큰 책등
+        assert '<span class="spine-title" aria-hidden="true">생각</span>' in floor
+        assert re.search(r'class="book" href="/shelf/ideas.common" style="--c:#[0-9a-f]{6};--fg:#[0-9a-f]{6};', floor)
         for old, new in (("/ideas?author=ai", "/shelf/ideas?author=ai"), ("/refs", "/shelf/refs"), ("/styles?tag=x", "/shelf/styles?tag=x")):
             moved = c.get(old, follow_redirects=False)
             assert moved.status_code == 302 and moved.headers["location"] == new
@@ -336,7 +338,7 @@ def test_shelf_books_and_board_lists(server_proc):
         assert f'<time class="when" datetime="2026-10-01T05:07:00.000Z">{when}</time><span class="aux">나</span>' in ideas
         assert '<span class="aux"><span class="tag">AI</span></span>' in ideas
         assert 'AI의 답입니다. <a href="/shelf/ideas/20261001000000000-aaaaaa">응답한 생각</a>' in ideas
-        assert '<a href="/shelf/ideas/20261001000000000-aaaaaa">이 항목의 주소</a>' in ideas
+        assert '<a href="/shelf/ideas.common/20261001000000000-aaaaaa">이 항목의 주소</a>' in ideas
         first = ideas.split('<ol class="board">')[1].split("</summary>")[0]
         assert "가" * 70 in first and "가" * 80 not in first and "가" * 400 in ideas  # 줄에는 앞부분만, 펼치면 전부
         assert "1–100 / 123" in ideas and "다음</a>" in ideas and "오래된 생각 0<" not in ideas
@@ -351,7 +353,7 @@ def test_shelf_books_and_board_lists(server_proc):
         assert '인용 현황은 <a href="/checklist?project=b&">인용 체크리스트</a>' in refs
         assert "Gaining ground" not in c.get("/shelf/refs?status=unverified").text
         styles = c.get("/shelf/styles").text
-        assert '<a class="tag" href="/shelf/styles?tag=%EC%A7%A7%EC%9D%8C">짧음</a>' in styles and "출처: 유홍준" in styles
+        assert '<a class="tag" href="/shelf/styles.common?tag=%EC%A7%A7%EC%9D%8C">짧음</a>' in styles and "출처: 유홍준" in styles
         assert '<span class="t">「짧다. 끊긴다.」</span>' in styles
         short = c.get("/shelf/styles?tag=짧음").text
         assert "짧다. 끊긴다." in short and "길게 이어지는" not in short and "태그 「짧음」만" in short
@@ -364,8 +366,9 @@ def test_shelf_books_and_board_lists(server_proc):
         assert '<details id="i-clack2012" open data-here>' in c.get("/shelf/refs/clack2012").text
         assert c.get("/shelf/ideas/20260101000000000-ffffff").status_code == 404
         assert c.get("/shelf/nothing").status_code == 404
-        for page in (refs, styles, shelf):
+        for page in (refs, styles):
             assert page.count('method="post"') == 1  # 로그아웃뿐(문체·문헌은 대화로 넣는다)
+        assert shelf.count('method="post"') == 3  # 로그아웃 · 끌어 옮기기(숨은 폼) · 새 층 만들기
         assert ideas.count('method="post"') == 2  # 생각에는 바로 적기 폼이 있다(#92)
         assert "<h1>생각</h1>" in ideas and 'aria-current=page>책장</a>' in styles
 
@@ -395,9 +398,11 @@ def test_shelf_search_marks_hits(server_proc):
         assert "<mark>Gaining</mark> ground" in c.get("/shelf/refs", params={"q": "gaining"}).text  # 서지
         hit = c.get("/shelf/refs", params={"q": "ashore"}).text
         assert re.search(r'<small class="hit">[^<]*tetrapods came <mark>ashore</mark></small>', hit)  # 제목 밖에서 맞으면 맞은 곳 한 줄
-        both = c.get("/shelf", params={"q": "물"}).text
-        assert re.search(r"<h2>생각 <small>\d+개</small>", both) and "<h2>문체 <small>1개</small></h2>" in both
-        assert "찾은 카테고리 2곳" in both and "<h2>문헌" not in both and "찾는 말이 없는 카테고리: 문헌" in both
+        both = c.get("/shelf", params={"q": "물"}).text  # 층 → 카테고리로 묶고 최근 수정을 붙인다(#93)
+        assert re.search(r'<h3><a href="/shelf/ideas.common">생각</a> <small>\d+개 · 최근 수정 ', both)
+        assert '<h3><a href="/shelf/styles.common">문체</a> <small>1개 · 최근 수정 ' in both
+        assert "찾은 층 1곳" in both and ">문헌</a>" not in both and "찾는 말이 없는 층: 1층" in both
+        assert 'data-result-floor="common"' in both
         evil = c.get("/shelf/ideas", params={"q": "<script>"}).text
         assert "<script>alert" not in evil and "&lt;script&gt;alert(1)&lt;/script&gt;" in c.get("/shelf/ideas").text
         assert 'value="&lt;script&gt;"' in evil

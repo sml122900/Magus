@@ -11,6 +11,9 @@
 - 책 색은 ^#[0-9a-fA-F]{6}$ 형식만 스타일에 넣는다. 글자색은 책 색에 맞춰 흰색·짙은 색 중 대비가 높은 쪽(4.5:1 이상)이고,
   결·띠·가운데 밝은 줄은 글자와 반대 방향(글자가 희면 어둡게, 짙으면 밝게)으로만 얹어 글자 대비를 낮추지 않는다.
 - 모든 POST는 CSRF 토큰을 확인한다(Web._form). 카테고리 이름·항목 내용은 모든 출력에서 이스케이프한다.
+- 층(#93): 기본 카테고리는 층마다 따로 꽂히므로 주소 이름이 "<종류>.<층 id>"다(ideas.book, styles.common).
+  저자의 카테고리는 id 그대로. 예전 주소(/shelf/ideas, /shelf/ideas/<id>)는 그 항목·종류가 꽂힌 층의 주소로 넘긴다.
+  책장 전체(3D)·한 층 화면·옮기기·되돌리기는 magus.webfloors에 있다.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
+from magus.floors import COMMON
 from magus.category.rules import (
     BUILTINS, COLOR_NAMES, CONTENT_MAX, DEFAULT_COLORS, FIELD_MAX, HEX, MAX_CATEGORIES, MAX_MY_COLORS, NEW_COLOR_ORDER,
     PALETTE, PALETTE_BY_NAME, TEMPLATE_BY_KEY, TEMPLATES, TITLE_MAX, check_name, name_key,
@@ -109,7 +113,8 @@ def book_style(book: Book) -> str:
             f"--glow:{0 if light_text else .14};--fs:{size}px;height:{height}px;width:{width}px")
 
 
-def book_html(book: Book) -> str:
+def book_html(book: Book, floor: str | None = None) -> str:
+    """floor를 주면 끌어 옮길 수 있는 책(data-book·data-from, #93)."""
     count = f"{book.count}개" if book.count < 10000 else f"{book.count / 10000:.1f}만개"
     label = html.escape(f"{book.name}, 항목 {book.count}개")
     if book.verified is not None:
@@ -120,11 +125,15 @@ def book_html(book: Book) -> str:
              f'<span class="band bottom" aria-hidden="true">{count}</span>')
     if book.href is None:
         return f'<li><span class="book" style="{book_style(book)}" role="img" aria-label="{label}">{inner}</span></li>'
-    return f'<li><a class="book" href="{html.escape(book.href)}" style="{book_style(book)}" aria-label="{label}">{inner}</a></li>'
+    drag = f' data-book="{html.escape(book.key)}" data-from="{html.escape(floor)}"' if floor else ""
+    return (f'<li><a class="book" href="{html.escape(book.href)}" style="{book_style(book)}" aria-label="{label}"{drag}>'
+            f'{inner}</a></li>')
 
 
-ADD_BOOK = ('<li><a class="book add" href="/shelf/new" aria-label="카테고리 추가"><span class="plus" aria-hidden="true">+</span>'
-            '<span class="spine-title" aria-hidden="true">카테고리 추가</span></a></li>')
+def add_book(floor: str) -> str:
+    """'카테고리 추가' 자리. 그 층에 꽂는다(#93)."""
+    return (f'<li><a class="book add" href="/shelf/new?floor={urllib.parse.quote(floor)}" aria-label="카테고리 추가">'
+            '<span class="plus" aria-hidden="true">+</span><span class="spine-title" aria-hidden="true">카테고리 추가</span></a></li>')
 
 
 def shelf_html(books: list[str], extra: str = "") -> str:
@@ -138,6 +147,8 @@ def shelf_html(books: list[str], extra: str = "") -> str:
 
 # 책장 전용 스타일. 선반 나무색과 책 음영은 여기에만 있다(web-style.md "책장 전용").
 SHELF_STYLE = """
+@media (prefers-reduced-motion:no-preference){@view-transition{navigation:auto}
+::view-transition-old(root),::view-transition-new(root){animation-duration:.28s}}
 .crumb{margin:0 0 8px}.crumb a{text-decoration:none}
 .search{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0 16px}
 .search label{margin:0;flex:1 1 260px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
@@ -375,11 +386,13 @@ def style_tags(entry: Any) -> list[str]:
 class Kind:
     """목록 화면 하나(기본 카테고리 또는 저자의 카테고리)."""
 
-    key: str  # 주소 이름: ideas | styles | refs | 카테고리 id
+    key: str  # 주소 이름: <종류>.<층 id>(ideas.book) | 카테고리 id
     name: str
     lanes: list[Lane]
     empty: str  # 빈 목록 안내
     category: Category | None = None  # 저자의 카테고리면 그 카테고리
+    floor: str = COMMON  # 꽂힌 층(#93)
+    base: str = ""  # 기본 카테고리면 종류(ideas|styles|refs), 저자의 카테고리면 ""
 
 
 KINDS: dict[str, Kind] = {
@@ -393,7 +406,12 @@ KINDS: dict[str, Kind] = {
 
 def category_kind(c: Category) -> Kind:
     return Kind(c.id, c.name, ["category"],
-                f'아직 적은 것이 없습니다. 위에서 바로 적거나, {SAY}"{html.escape(c.name)}에 넣어 줘: …"', c)
+                f'아직 적은 것이 없습니다. 위에서 바로 적거나, {SAY}"{html.escape(c.name)}에 넣어 줘: …"', c, c.floor)
+
+
+def builtin_kind(base: str, floor: str) -> Kind:
+    """그 층에 꽂힌 기본 카테고리(#93). 주소 이름은 '<종류>.<층 id>'."""
+    return replace(KINDS[base], key=f"{base}.{floor}", floor=floor, base=base)
 
 
 def color_fieldset(current: str, my_colors: tuple[str, ...]) -> str:
@@ -458,11 +476,14 @@ class ShelfPages:
     _need_login: Callable[[Request], Response]
     _csrf_input: Callable[[tuple[str, str]], str]
     _form: Callable[[Request, tuple[str, str]], Awaitable[Any]]
+    # FloorPages(webfloors)가 구현한다
+    floor_routes: Callable[[], list[tuple[str, list[str], Callable[..., Any]]]]
+    location_form: Callable[[str, tuple[str, str], Kind], str]
 
     def shelf_routes(self) -> list[tuple[str, list[str], Callable[..., Any]]]:
         # 고정 주소를 먼저 둔다(/shelf/{kind}보다 앞에서 맞아야 한다).
         return [
-            ("/shelf", ["GET"], self.shelf),
+            *self.floor_routes(),  # 책장 전체(3D)·한 층·옮기기·되돌리기·층 만들기(webfloors)
             ("/shelf/new", ["GET", "POST"], self.shelf_new),
             ("/shelf/edit/{kind}", ["GET", "POST"], self.shelf_edit),
             ("/shelf/trash/{kind}", ["GET", "POST"], self.shelf_trash),
@@ -488,69 +509,64 @@ class ShelfPages:
         return self._page(title, body, session, status, current="책장", css=SHELF_STYLE)
 
     def _kind(self, uid: str, key: str) -> Kind | None:
+        """주소 이름 → 목록 화면. '<종류>.<층 id>'는 그 층에 그 기본 카테고리가 꽂혀 있을 때만. 예전 주소(종류만)는 None."""
+        base, _, floor = key.partition(".")
+        if floor and base in KINDS:
+            found = self.store.get_floor(uid, floor)
+            return builtin_kind(base, floor) if found and base in found.builtins else None
         if key in KINDS:
-            return KINDS[key]
+            return None
         try:
             category = self.store.get_category(uid, key)
         except ValueError:
             return None
         return category_kind(category) if category else None
 
-    # --- 책장 ---
-    def books(self, uid: str) -> list[Book]:
-        settings = self.store.get_shelf_settings(uid)
-        refs = self.store.list_refs(uid)
-        counts = {"ideas": len(self.store.list_ideas(uid)), "styles": len(self.store.list_styles(uid)), "refs": len(refs)}
-        verified = sum(1 for r in refs if r.status == "verified")
-        builtins = [Book(k, KINDS[k].name, "기본", counts[k], settings.colors.get(k, DEFAULT_COLORS[k]), f"/shelf/{k}",
-                         verified if k == "refs" else None) for k in KINDS]
-        mine = [Book(c.id, c.name, TEMPLATE_BY_KEY[c.template].band if c.template in TEMPLATE_BY_KEY else "일반", c.items, c.color,
-                     f"/shelf/{c.id}") for c in self.store.list_categories(uid)]
-        return builtins + mine
+    def _kind_any(self, uid: str, key: str, item: str | None = None) -> Kind | None:
+        """_kind와 같되, 예전 주소 이름(ideas·styles·refs)이면 그 항목이나 종류가 꽂힌 층의 것(층 전에 연 화면의 폼·링크)."""
+        if key in KINDS:
+            target = self._legacy_target(uid, key, item)
+            return self._kind(uid, target) if target else None
+        return self._kind(uid, key)
 
-    async def shelf(self, request: Request) -> Response:
-        session = self.user_of(request)
-        if not session:
-            return self._need_login(request)
-        uid = session[0]
-        q = clean_query(request.query_params.get("q"))
-        form = (f'<form method="get" action="/shelf" class="search" role="search"><label>책장 전체에서 찾기 '
-                f'<input type="search" name="q" value="{html.escape(q)}"></label><button>찾기</button></form>')
-        if not q:
-            done = await run_in_threadpool(self._done_message, uid, request)
-            books = await run_in_threadpool(self.books, uid)
-            room = len(books) - len(KINDS) < MAX_CATEGORIES
-            body = (f"{done}{form}{shelf_html([book_html(b) for b in books], ADD_BOOK if room else '')}"
-                    "<p>책을 누르면 그 카테고리의 목록이 열립니다."
-                    + (" 점선 자리를 누르면 카테고리를 새로 만듭니다." if room else f" 카테고리는 {MAX_CATEGORIES}개까지 만들 수 있습니다.") + "</p>")
-            return self._shelf_page("책장", body, session)
-        groups, missing = [], []
-        kinds = [*KINDS.values(), *(category_kind(c) for c in self.store.list_categories(uid))]
-        for kind in kinds:
-            rows = await run_in_threadpool(self._rows, uid, kind, None, q)
-            if not rows:  # 찾는 말이 없는 카테고리는 묶음을 만들지 않고 한 줄로만 알린다(카테고리가 많을 때 화면이 길어지지 않게)
-                missing.append(html.escape(kind.name))
-                continue
-            more = (f' <small><a href="/shelf/{kind.key}?q={urllib.parse.quote(q)}">{html.escape(kind.name)}에서 {len(rows)}개 모두 보기</a></small>'
-                    if len(rows) > GROUP_SIZE else "")
-            groups.append(
-                f'<section class="group"><h2>{html.escape(kind.name)} <small>{len(rows)}개</small>{more}</h2>'
-                f'<ol class="board">{"".join(row_html(r, q) for r in rows[:GROUP_SIZE])}</ol></section>'
-            )
-        head = (f'<p class="crumb"><a href="/shelf">← 책장</a></p>{form}'
-                f"<p>「{html.escape(q)}」 " + (f"찾은 카테고리 {len(groups)}곳" if groups else "찾는 말이 들어간 항목이 없습니다.")
-                + (" · 한 글자는 그 글자가 들어간 항목을 최근 것부터 보입니다." if one_char(q) else "") + "</p>"
-                + (f'<p class="muted">찾는 말이 없는 카테고리: {" · ".join(missing)}</p>' if groups and missing else ""))
-        return self._shelf_page("책장", head + "".join(groups), session)
+    def _legacy_target(self, uid: str, base: str, item: str | None) -> str | None:
+        """예전 주소(/shelf/ideas, /shelf/ideas/<id>)가 가리킬 지금 주소 이름: 그 항목의 층, 없으면 위에서부터 그 종류가 있는 첫 층."""
+        floor = None
+        if item:
+            if base == "ideas":
+                found = self.store.get_ideas(uid, [item]).get(item)
+            elif base == "styles":
+                found = self.store.get_styles(uid, [item]).get(item)
+            else:
+                found = self.store.get_ref(uid, item)
+            floor = found.floor if found else None
+        if floor is None:
+            floor = next((f.id for f in self.store.list_floors(uid) if base in f.builtins), None)
+        return f"{base}.{floor}" if floor else None
+
+    # --- 책장 ---
+    def books(self, uid: str, floor: str) -> list[Book]:
+        """그 층에 꽂힌 책(기본 카테고리 먼저, 그다음 저자의 카테고리를 만든 순서로)."""
+        settings = self.store.get_shelf_settings(uid)
+        found = self.store.get_floor(uid, floor)
+        out = []
+        for k in found.builtins if found else ():
+            items = {"ideas": self.store.list_ideas, "styles": self.store.list_styles, "refs": self.store.list_refs}[k](uid, floors=[floor])
+            verified = sum(1 for r in items if r.status == "verified") if k == "refs" else None
+            out.append(Book(f"{k}.{floor}", KINDS[k].name, "기본", len(items), settings.colors.get(k, DEFAULT_COLORS[k]),
+                            f"/shelf/{k}.{floor}", verified))
+        out += [Book(c.id, c.name, TEMPLATE_BY_KEY[c.template].band if c.template in TEMPLATE_BY_KEY else "일반", c.items, c.color,
+                     f"/shelf/{c.id}") for c in self.store.list_categories(uid, floors=[floor])]
+        return out
 
     def _done_message(self, uid: str, request: Request) -> str:
         """만들기·고치기·휴지통 뒤 책장으로 돌아왔을 때 한 줄(주소의 값을 그대로 보이지 않고 정해진 문장만)."""
         done, cid = request.query_params.get("done"), request.query_params.get("c") or ""
         try:
-            category = self.store.get_category(uid, cid) if cid else None
+            category = self.store.get_category(uid, cid) if cid and "." not in cid else None
         except ValueError:
             category = None
-        shown = category.name if category else BUILTINS.get(cid, "")
+        shown = category.name if category else BUILTINS.get(cid.partition(".")[0], "")
         name = f"「{html.escape(shown)}」 " if shown else ""
         text = {"made": f"{name}카테고리를 꽂았습니다.", "edit": f"{name}카테고리를 고쳤습니다.",
                 "trash": "카테고리를 휴지통으로 옮겼습니다. 지운 것이 아니라 운영자가 되살릴 수 있습니다."}.get(done or "")
@@ -570,15 +586,20 @@ class ShelfPages:
         if not session:
             return self._need_login(request)
         uid = session[0]
+        if kind_key in KINDS:  # 예전 주소: 그 항목·종류가 꽂힌 층의 주소로 넘긴다(#93)
+            target = await run_in_threadpool(self._legacy_target, uid, kind_key, item)
+            if target:
+                query = f"?{request.url.query}" if request.url.query else ""
+                return RedirectResponse(f"/shelf/{target}" + (f"/{urllib.parse.quote(item)}" if item else "") + query, status_code=302)
         kind = await run_in_threadpool(self._kind, uid, kind_key)
         if kind is None:
             return self._shelf_page("책장", '<p class="msg err">없는 카테고리입니다. <a href="/shelf">책장</a>으로 돌아가세요.</p>',
                                     session, 404)
-        crumb = '<p class="crumb"><a href="/shelf">← 책장</a></p>'
+        crumb = await run_in_threadpool(self._crumb, uid, kind)
         done = {"edited": "고쳤습니다.", "trashed": "항목을 휴지통으로 옮겼습니다. 지운 것이 아니라 운영자가 되살릴 수 있습니다."}.get(
             request.query_params.get("done") or "")  # 고치기·휴지통 뒤 한 줄(정해진 문장만)
         done = f'<p class="msg">{done}</p>' if done else ""
-        writable = kind.key == "ideas" or kind.category is not None
+        writable = kind.base == "ideas" or kind.category is not None
         error = request.query_params.get("error") == "empty"
         missing = (f'{crumb}<p class="msg err">없는 항목입니다(휴지통으로 옮겨졌을 수 있습니다). '
                    f'<a href="/shelf/{kind.key}">{html.escape(kind.name)} 목록</a></p>')
@@ -634,10 +655,17 @@ class ShelfPages:
         body = f"{crumb}{done}{summary}{search}{write}{found}{pager}{board}{pager}" + (SCROLL_SCRIPT if item else "")
         return self._shelf_page(kind.name, body, session)
 
+    def _crumb(self, uid: str, kind: Kind) -> str:
+        """'← 책장 · 1층' — 책장 전체와 그 카테고리가 꽂힌 층으로 돌아가는 길."""
+        floor = self.store.get_floor(uid, kind.floor)
+        where = f' · <a href="/shelf/floor/{html.escape(kind.floor)}">{floor.label}</a>' if floor else ""
+        return f'<p class="crumb"><a href="/shelf">← 책장</a>{where}</p>'
+
     def _has_any(self, uid: str, kind: Kind) -> bool:
         if kind.category is not None:
             return bool(self.store.list_category_items(uid, kind.category.id))
-        return bool({"ideas": self.store.list_ideas, "styles": self.store.list_styles, "refs": self.store.list_refs}[kind.key](uid))
+        return bool({"ideas": self.store.list_ideas, "styles": self.store.list_styles, "refs": self.store.list_refs}[kind.base](
+            uid, floors=[kind.floor]))
 
     def _summary(self, uid: str, kind: Kind, filters: dict[str, str]) -> str:
         """목록 위 한 줄: 개수와 거르기 링크(기존 화면과 같은 거르기), 그리고 이름·색 바꾸기."""
@@ -653,27 +681,33 @@ class ShelfPages:
                     f' · <a href="/shelf/trash/{c.id}">휴지통으로</a></p>'
                     + (f'<p><a href="{base}">전체</a> · <a href="{base}?author=me">나</a> · <a href="{base}?author=ai">AI</a></p>'
                        if items else ""))
-        if kind.key == "ideas":
-            ideas = self.store.list_ideas(uid)
+        here = f"/shelf/{kind.key}"
+        if kind.base == "ideas":
+            ideas = self.store.list_ideas(uid, floors=[kind.floor])
             mine = sum(1 for i in ideas if i.author == "me")
             if not ideas:
                 return f"<p>생각 0개{edit}</p>"
             return (f"<p>생각 {len(ideas)}개(나 {mine} · AI {len(ideas) - mine}) · "
-                    '<a href="/shelf/ideas">전체</a> · <a href="/shelf/ideas?author=me">나</a> · '
-                    f'<a href="/shelf/ideas?author=ai">AI</a>{edit}</p>')
-        if kind.key == "styles":
+                    f'<a href="{here}">전체</a> · <a href="{here}?author=me">나</a> · '
+                    f'<a href="{here}?author=ai">AI</a>{edit}</p>')
+        if kind.base == "styles":
             tag = filters.get("tag", "")
-            only = f' · 태그 「{html.escape(tag)}」만 · <a href="/shelf/styles">전체</a>' if tag else ""
-            return f"<p>문장 {len(self.store.list_styles(uid))}개{only}{edit}</p>"
-        refs = self.store.list_refs(uid)
+            only = f' · 태그 「{html.escape(tag)}」만 · <a href="{here}">전체</a>' if tag else ""
+            return f"<p>문장 {len(self.store.list_styles(uid, floors=[kind.floor]))}개{only}{edit}</p>"
+        refs = self.store.list_refs(uid, floors=[kind.floor])
         verified = sum(1 for r in refs if r.status == "verified")
-        project = self.store.get_project(uid, filters.get("project") or None)
+        project = self._ref_project(uid, kind, filters)
         q = f"project={urllib.parse.quote(project.id)}&" if project else ""
         checklist = f' · 인용 현황은 <a href="/checklist?{q}">인용 체크리스트</a>' if project else ""
         return (f"<p>문헌 확인 {verified}편 · 전체 {len(refs)}편(미확인 {len(refs) - verified}편){checklist}{edit}</p>"
-                f'<p><a href="/shelf/refs?{q}">전체</a> · <a href="/shelf/refs?{q}status=verified">{LIGHTS["verified"][0]} '
-                f'{LIGHTS["verified"][1]}</a> · <a href="/shelf/refs?{q}status=unverified">{LIGHTS["unverified"][0]} '
+                f'<p><a href="{here}?{q}">전체</a> · <a href="{here}?{q}status=verified">{LIGHTS["verified"][0]} '
+                f'{LIGHTS["verified"][1]}</a> · <a href="{here}?{q}status=unverified">{LIGHTS["unverified"][0]} '
                 f'{LIGHTS["unverified"][1]}</a></p>')
+
+    def _ref_project(self, uid: str, kind: Kind, filters: dict[str, str]) -> Any:
+        """'인용된 장'을 셀 작업물: 주소의 project, 없으면 그 문헌이 꽂힌 작업물 층, 공용이면 최근 작업물."""
+        wanted = filters.get("project") or (kind.floor if kind.floor != COMMON else None)
+        return self.store.get_project(uid, wanted) or self.store.get_project(uid)
 
     def _rows(self, uid: str, kind: Kind, filters: dict[str, str] | None, q: str) -> list[Row]:
         """그 카테고리의 줄들. 검색어가 있으면 맞은 것만 검색 순서로, 없으면 기본 순서(문헌은 확인한 것부터, 나머지는 최근 것부터)."""
@@ -681,8 +715,8 @@ class ShelfPages:
         if kind.category is not None:
             pairs = self._category_rows(uid, kind.category, filters, q)
         else:
-            build = {"ideas": self._idea_rows, "styles": self._style_rows, "refs": self._ref_rows}[kind.key]
-            pairs = build(uid, filters, q)
+            build = {"ideas": self._idea_rows, "styles": self._style_rows, "refs": self._ref_rows}[kind.base]
+            pairs = build(uid, kind, filters, q)
         if not q:
             return [row for _, row in pairs]
         owners = find(self.store, uid, kind.lanes, q)
@@ -691,8 +725,8 @@ class ShelfPages:
         order = {owner: n for n, owner in enumerate(owners)}
         return [row for owner, row in sorted((p for p in pairs if p[0] in order), key=lambda p: order[p[0]])]
 
-    def _idea_rows(self, uid: str, filters: dict[str, str], q: str) -> list[tuple[str, Row]]:
-        ideas = list(reversed(self.store.list_ideas(uid)))
+    def _idea_rows(self, uid: str, kind: Kind, filters: dict[str, str], q: str) -> list[tuple[str, Row]]:
+        ideas = list(reversed(self.store.list_ideas(uid, floors=[kind.floor])))
         author = filters.get("author") if filters.get("author") in ("me", "ai") else None
         rows = []
         for i in ideas:
@@ -700,18 +734,18 @@ class ShelfPages:
                 continue
             who = "나" if i.author == "me" else '<span class="tag">AI</span>'
             back = (f'<p class="muted">AI의 답입니다. <a href="/shelf/ideas/{html.escape(i.parent_id)}">응답한 생각</a></p>'
-                    if i.parent_id else "")
+                    if i.parent_id else "")  # 예전 주소 모양: 응답한 생각이 어느 층에 있든 그 층으로 넘어간다
             origin = f'<p class="muted">출처: {html.escape(i.origin)}</p>' if i.origin else ""
             by = '<p class="muted">제목은 AI가 지었습니다.</p>' if i.title and i.title_by == "ai" else ""
-            rows.append((i.id, Row(i.id, f"/shelf/ideas/{i.id}", i.created_at, i.title, i.text, who,
+            rows.append((i.id, Row(i.id, f"/shelf/{kind.key}/{i.id}", i.created_at, i.title, i.text, who,
                                    paragraphs(i.text, q) + origin + back + by + edited_note(i), i.text,
                                    AI_TITLE if i.title and i.title_by == "ai" else "", True)))
         return rows
 
-    def _style_rows(self, uid: str, filters: dict[str, str], q: str) -> list[tuple[str, Row]]:
+    def _style_rows(self, uid: str, kind: Kind, filters: dict[str, str], q: str) -> list[tuple[str, Row]]:
         tag = (filters.get("tag") or "").strip()
         rows = []
-        for s in reversed(self.store.list_styles(uid)):
+        for s in reversed(self.store.list_styles(uid, floors=[kind.floor])):
             tags = style_tags(s)
             if tag and tag not in tags:
                 continue
@@ -720,23 +754,23 @@ class ShelfPages:
             aux = " ".join([*([html.escape(s.work)] if s.work else []),
                             *(f'<span class="tag">{html.escape(t)}</span>' for t in tags[:2]),
                             *([f"외 {len(tags) - 2}"] if len(tags) > 2 else [])])
-            pills = " ".join(f'<a class="tag" href="/shelf/styles?tag={urllib.parse.quote(t)}">{html.escape(t)}</a>' for t in tags)
+            pills = " ".join(f'<a class="tag" href="/shelf/{kind.key}?tag={urllib.parse.quote(t)}">{html.escape(t)}</a>' for t in tags)
             by = TAGS_BY.get(s.tags_by or "")  # 태그를 누가 정했나(#89). 기록 전 항목은 표시하지 않는다
             body = (f"<p>「{mark(s.passage, q).replace(chr(10), '<br>')}」</p>"
                     + (f'<p class="muted">출처: {mark(s.work, q)}</p>' if s.work else "")
                     + f"<p>이유: {mark(s.reason, q)}</p><p>{pills}</p>" + (f'<p class="muted">{by}</p>' if by else ""))
-            rows.append((s.id, Row(s.id, f"/shelf/styles/{s.id}", s.created_at, title, s.passage, aux, body,
+            rows.append((s.id, Row(s.id, f"/shelf/{kind.key}/{s.id}", s.created_at, title, s.passage, aux, body,
                                    f"{s.passage}\n{s.work or ''}\n{s.reason}")))
         return rows
 
-    def _ref_rows(self, uid: str, filters: dict[str, str], q: str) -> list[tuple[str, Row]]:
+    def _ref_rows(self, uid: str, kind: Kind, filters: dict[str, str], q: str) -> list[tuple[str, Row]]:
         status = filters.get("status") if filters.get("status") in ("verified", "unverified") else None
-        project = self.store.get_project(uid, filters.get("project") or None)
+        project = self._ref_project(uid, kind, filters)
         cited: dict[str, list[str]] = {}
         if project is not None:
             report = build_cite_report(self.store, uid, project.id)
             cited = {key: list(dict.fromkeys(d.chapters)) for key, d in report.docs.items()}
-        refs = sorted((r for r in self.store.list_refs(uid) if status is None or r.status == status),
+        refs = sorted((r for r in self.store.list_refs(uid, floors=[kind.floor]) if status is None or r.status == status),
                       key=lambda r: (r.status != "verified", r.key))
         rows = []
         for r in refs:
@@ -754,7 +788,7 @@ class ShelfPages:
                 *([f'<p class="muted">한글 표기: {html.escape(", ".join(r.aliases))}</p>'] if r.aliases else []),
             ])
             text = "\n".join([str(r.bib.get("authors") or ""), str(r.bib.get("container") or ""), *(p.text for p in passages)])
-            rows.append((r.key, Row(r.key, f"/shelf/refs/{urllib.parse.quote(r.key)}", r.created_at, cite_label(r, r.key),
+            rows.append((r.key, Row(r.key, f"/shelf/{kind.key}/{urllib.parse.quote(r.key)}", r.created_at, cite_label(r, r.key),
                                     "", aux, body, text)))
         return rows
 
@@ -818,8 +852,8 @@ class ShelfPages:
             form = await self._form(request, session)
         except PermissionError:
             return self._shelf_page("책장", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-        kind = await run_in_threadpool(self._kind, uid, request.path_params["kind"])
-        if kind is None or not (kind.key == "ideas" or kind.category is not None):
+        kind = await run_in_threadpool(self._kind_any, uid, request.path_params["kind"])
+        if kind is None or not (kind.base == "ideas" or kind.category is not None):
             return self._shelf_page("책장", '<p class="msg err">여기에는 바로 적을 수 없습니다.</p>', session, 404)
         content = str(form.get("content") or "").strip()[:CONTENT_MAX]
         title = one_line(str(form.get("title") or ""))[:TITLE_MAX] or None
@@ -828,8 +862,8 @@ class ShelfPages:
             return RedirectResponse(f"/shelf/{kind.key}?error=empty", status_code=303)
         if kind.category is None:  # 생각(저자가 직접 적음)
             [idea] = await run_in_threadpool(self.store.add_ideas, uid, [
-                Idea(new_id(), content, "thought", "me", title=title, title_by="author" if title else None)])
-            return RedirectResponse(f"/shelf/ideas/{idea.id}", status_code=303)
+                Idea(new_id(), content, "thought", "me", title=title, title_by="author" if title else None, floor=kind.floor)])
+            return RedirectResponse(f"/shelf/{kind.key}/{idea.id}", status_code=303)
         item = await run_in_threadpool(self.store.put_category_item, uid, CategoryItem(
             new_id(), kind.category.id, content, "me", title, "author" if title else None, {k: v for k, v in values.items() if v}))
         return RedirectResponse(f"/shelf/{kind.category.id}/{item.id}", status_code=303)
@@ -845,6 +879,9 @@ class ShelfPages:
         default_color = PALETTE_BY_NAME[NEW_COLOR_ORDER[len(mine) % len(NEW_COLOR_ORDER)]]
         values = {"name": "", "template": "blank", "color": default_color}
         error = ""
+        # 꽂을 층(#93): 한 층 화면의 '카테고리 추가'에서 온 층, 없으면 공용
+        floor = await run_in_threadpool(self.store.get_floor, uid, request.query_params.get("floor") or COMMON)
+        floor = floor or await run_in_threadpool(self.store.get_floor, uid, COMMON)
         if request.method == "POST":
             try:
                 form = await self._form(request, session)
@@ -855,16 +892,16 @@ class ShelfPages:
             try:
                 if len(mine) >= MAX_CATEGORIES:
                     raise ValueError(f"카테고리는 {MAX_CATEGORIES}개까지 만들 수 있습니다.")
-                name = check_name(values["name"], {name_key(c.name): c.name for c in mine})
+                name = check_name(values["name"], {name_key(c.name): c.name for c in mine if c.floor == floor.id})
                 template = TEMPLATE_BY_KEY.get(values["template"])
                 if template is None:
                     raise ValueError("템플릿을 골라 주세요.")
                 color = chosen_color(form)
                 values["color"] = color
                 made = await run_in_threadpool(self.store.create_category, uid, name, template.key, color,
-                                               tuple(f for f, _ in template.fields))
+                                               tuple(f for f, _ in template.fields), floor.id)
                 note = await run_in_threadpool(self._keep_color, uid, form, color)
-                return RedirectResponse(f"/shelf?done=made&c={made.id}" + note, status_code=303)
+                return RedirectResponse(f"/shelf/floor/{floor.id}?done=made&c={made.id}" + note, status_code=303)
             except ValueError as e:
                 error = f'<p class="msg err">{html.escape(str(e))}</p>'
         templates = "".join(
@@ -874,15 +911,18 @@ class ShelfPages:
             for t in TEMPLATES
         )
         preview = shelf_html([book_html(Book("preview", values["name"] or "새 카테고리", "일반", 0, values["color"], None))])
+        where = floor.label if floor.common else f"{floor.label} 「{floor.title}」"
         body = (
-            f'<p class="crumb"><a href="/shelf">← 책장</a></p>{error}'
-            f'<form method="post" action="/shelf/new" class="colors">{self._csrf_input(session)}'
+            f'<p class="crumb"><a href="/shelf">← 책장</a> · <a href="/shelf/floor/{html.escape(floor.id)}">{floor.label}</a></p>{error}'
+            f'<p>꽂을 층: <b>{html.escape(where)}</b></p>'
+            f'<form method="post" action="/shelf/new?floor={urllib.parse.quote(floor.id)}" class="colors">{self._csrf_input(session)}'
             f'<label class="block">이름(12자까지) <input name="name" value="{html.escape(values["name"])}" maxlength="12" required></label>'
             '<p class="muted">생각·문체·문헌·원고·전체·확인 요청처럼 정해진 이름과, 이미 있는 이름은 쓸 수 없습니다.</p>'
             f"<fieldset><legend>템플릿</legend>{templates}</fieldset>"
             + color_fieldset(values["color"], settings.my_colors)
             + f'<div class="preview"><p><b>미리보기</b></p>{preview}</div>'
-            '<p><button class="primary">책장에 꽂기</button> <a href="/shelf">그만두기</a></p></form>' + COLOR_SCRIPT
+            f'<p><button class="primary">책장에 꽂기</button> <a href="/shelf/floor/{html.escape(floor.id)}">그만두기</a></p></form>'
+            + COLOR_SCRIPT
         )
         return self._shelf_page("카테고리 추가", body, session, 400 if error else 200)
 
@@ -903,11 +943,11 @@ class ShelfPages:
         if not session:
             return self._need_login(request)
         uid = session[0]
-        kind = await run_in_threadpool(self._kind, uid, request.path_params["kind"])
+        kind = await run_in_threadpool(self._kind_any, uid, request.path_params["kind"])
         if kind is None:
             return self._shelf_page("책장", '<p class="msg err">없는 카테고리입니다. <a href="/shelf">책장</a>으로 돌아가세요.</p>', session, 404)
         settings = await run_in_threadpool(self.store.get_shelf_settings, uid)
-        current = kind.category.color if kind.category else settings.colors.get(kind.key, DEFAULT_COLORS[kind.key])
+        current = kind.category.color if kind.category else settings.colors.get(kind.base, DEFAULT_COLORS[kind.base])
         name, error = kind.name, ""
         if request.method == "POST":
             try:
@@ -919,15 +959,16 @@ class ShelfPages:
             try:
                 color = chosen_color(form)
                 current = color
-                if kind.category is None:  # 기본 카테고리: 색만
+                if kind.category is None:  # 기본 카테고리: 색만(색은 종류마다 하나라 모든 층의 같은 기본 카테고리가 바뀐다)
                     await run_in_threadpool(self.store.save_shelf_settings, uid, ShelfSettings(
-                        {**settings.colors, kind.key: color}, settings.my_colors, settings.title_default))
+                        {**settings.colors, kind.base: color}, settings.my_colors, settings.title_default))
                 else:
-                    taken = {name_key(c.name): c.name for c in self.store.list_categories(uid) if c.id != kind.category.id}
+                    taken = {name_key(c.name): c.name for c in self.store.list_categories(uid, floors=[kind.floor])
+                             if c.id != kind.category.id}
                     clean = check_name(name, taken) if name_key(name) != name_key(kind.category.name) else None
                     await run_in_threadpool(lambda: self.store.update_category(uid, kind.category.id, name=clean, color=color))
                 note = await run_in_threadpool(self._keep_color, uid, form, color)
-                return RedirectResponse(f"/shelf?done=edit&c={kind.key}" + note, status_code=303)
+                return RedirectResponse(f"/shelf/floor/{kind.floor}?done=edit&c={kind.key}" + note, status_code=303)
             except ValueError as e:
                 error = f'<p class="msg err">{html.escape(str(e))}</p>'
             settings = await run_in_threadpool(self.store.get_shelf_settings, uid)
@@ -945,13 +986,14 @@ class ShelfPages:
             for c in settings.my_colors
         )
         trash = (f'<h2>휴지통</h2><p><a href="/shelf/trash/{kind.key}">이 카테고리를 휴지통으로 옮기기</a></p>' if kind.category else "")
+        place = await run_in_threadpool(self.location_form, uid, session, kind)  # 위치(#93, webfloors)
         body = (
             f'<p class="crumb"><a href="/shelf/{kind.key}">← {html.escape(kind.name)}</a></p>{error}'
             f'<form method="post" action="/shelf/edit/{kind.key}" class="colors">{self._csrf_input(session)}{name_field}'
             + color_fieldset(current, settings.my_colors)
             + f'<div class="preview"><p><b>미리보기</b></p>{preview}</div>'
             f'<p><button class="primary">저장</button> <a href="/shelf/{kind.key}">그만두기</a></p></form>'
-            + (f'<h2>내 색</h2><ul class="mycolors">{mine}</ul>' if mine else "") + trash + COLOR_SCRIPT
+            + (f'<h2>내 색</h2><ul class="mycolors">{mine}</ul>' if mine else "") + place + trash + COLOR_SCRIPT
         )
         title = f"{kind.name} — {'이름·색 바꾸기' if kind.category else '책 색 바꾸기'}"
         return self._shelf_page(title, body, session, 400 if error else 200)
@@ -959,7 +1001,8 @@ class ShelfPages:
     def _count_rows(self, uid: str, kind: Kind) -> list[Any]:
         if kind.category is not None:
             return self.store.list_category_items(uid, kind.category.id)
-        return {"ideas": self.store.list_ideas, "styles": self.store.list_styles, "refs": self.store.list_refs}[kind.key](uid)
+        return {"ideas": self.store.list_ideas, "styles": self.store.list_styles, "refs": self.store.list_refs}[kind.base](
+            uid, floors=[kind.floor])
 
     async def shelf_colors(self, request: Request) -> Response:
         """내 색 빼기."""
@@ -984,7 +1027,7 @@ class ShelfPages:
             return self._need_login(request)
         uid = session[0]
         key = request.path_params["kind"]
-        if key in BUILTINS:
+        if key.partition(".")[0] in BUILTINS:
             return self._shelf_page("책장", '<p class="msg err">기본 카테고리(생각·문체·문헌)는 휴지통으로 옮길 수 없습니다.</p>', session, 400)
         kind = await run_in_threadpool(self._kind, uid, key)
         if kind is None or kind.category is None:
@@ -996,7 +1039,7 @@ class ShelfPages:
             except PermissionError:
                 return self._shelf_page("휴지통으로", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
             await run_in_threadpool(self.store.trash_category, uid, category.id, "웹 책장에서 옮김")
-            return RedirectResponse("/shelf?done=trash", status_code=303)
+            return RedirectResponse(f"/shelf/floor/{category.floor}?done=trash", status_code=303)
         body = (
             f'<p class="crumb"><a href="/shelf/{category.id}">← {html.escape(category.name)}</a></p>'
             f'<div class="card"><p>「{html.escape(category.name)}」 카테고리를 휴지통으로 옮길까요?</p>'
@@ -1008,14 +1051,15 @@ class ShelfPages:
 
     # --- 항목 고치기·휴지통(생각과 저자의 카테고리 항목. 자기 책장 안에서만, CSRF, 휴지통은 확인 한 번) ---
     def _editable(self, uid: str, kind_key: str, item_id: str) -> tuple[Kind, Any] | None:
-        kind = self._kind(uid, kind_key)
-        if kind is None or not (kind.key == "ideas" or kind.category is not None):
+        kind = self._kind_any(uid, kind_key, item_id)
+        if kind is None or not (kind.base == "ideas" or kind.category is not None):
             return None
         try:
             if kind.category is not None:
                 item = self.store.get_category_item(uid, kind.category.id, item_id)
             else:
                 item = self.store.get_ideas(uid, [item_id]).get(item_id)
+                item = item if item is not None and item.floor == kind.floor else None
         except ValueError:
             return None
         return (kind, item) if item is not None else None
