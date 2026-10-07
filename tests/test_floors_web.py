@@ -43,6 +43,9 @@ def test_overview_floor_page_move_and_undo(server_proc):  # noqa: F811
         assert f'data-book="{ids["person"]}" data-from="city"' in shelf and 'aria-label="인물, 항목 1개"' in shelf
         assert 'data-drop-floor="river"' in shelf and 'id="move-form"' in shelf and "MagusShelf" in shelf
         assert "prefers-reduced-motion" in shelf  # 움직임 줄이기면 바로 넘어간다
+        # 하나의 장: 바깥 틀은 한 번, 층은 그 안의 칸(뒤판 등), 책은 상자(옆면·윗면), 장 안에도 책 추가 자리
+        assert shelf.count('class="pl cab-side"') == 1 and shelf.count('class="pl c-back"') == 3
+        assert 'class="pl mb-side"' in shelf and '<a class="madd" href="/shelf/add?floor=city"' in shelf
         # 한 층 화면: 전체 책장 버튼, 층 이름 띠(끌어 놓을 자리), 큰 책(끌 수 있음), 그 층의 카테고리 추가
         floor = c.get("/shelf/floor/city").text
         assert '<h1>1층 · 도시는 어떻게 태어났나</h1>' in floor and '<a class="all-shelf" href="/shelf">전체 책장</a>' in floor
@@ -98,6 +101,16 @@ def test_overview_floor_page_move_and_undo(server_proc):  # noqa: F811
         store.close()
         refs = c.get("/shelf/refs.common").text
         assert "공용으로 옮김(" in refs and "1층 「도시는 어떻게 태어났나」·2층 「강과 사람」 원고가 함께 쓰는 문헌이라 공용으로 옮김" in refs
+
+
+def test_cabinet_rows_break_where_books_no_longer_fit():
+    from magus.webfloors import row_breaks, with_shelves  # noqa: PLC0415
+
+    assert row_breaks([38] * 5, 258) == set()  # 5권 + 사이 4칸 = 206px
+    widths = [54] * 6  # 4권이면 228px, 5권째는 286px라 모바일 칸(258px)에서 줄을 바꾼다. 데스크톱 칸(548px)에는 다 들어간다
+    assert row_breaks(widths, 258) == {4} and row_breaks(widths, 548) == set()
+    rows = with_shelves([f"<li>{i}</li>" for i in range(6)], widths)
+    assert rows.count('<li class="brk m" aria-hidden="true">') == 1 and rows.index('class="brk m"') < rows.index("<li>4</li>")
 
 
 def test_floor_pages_are_per_user(server_proc, fake_issuer):  # noqa: F811

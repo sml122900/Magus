@@ -455,8 +455,9 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
     원고 책 `/shelf/book/<작업물>?tab=chapters|issues|cites|editions`(인용 상태 안에 `view=questions`, 수정본 이력 안에 `POST …/edition`과 리포트 `report=N`).
     문서 책 `/shelf/doc/<id>`(`?v=N` 이력, `POST …/redo` 다시 만들기, `…/docx`, 인쇄 CSS로 PDF). 책 설정 `/shelf/edit/ms.<id>`·`doc.<id>`(이름·색·위치), 휴지통 `/shelf/trash/ms.…`·`doc.…`.
     원고 책은 옮기지 않는다(그 층 자체). 원고 책 휴지통은 원고만 옮기고 같은 id의 빈 층을 남긴다. 문헌 등록 `POST /shelf/refs/register`(문헌 목록 안 접힌 칸).
-  - **층·3D 책장**(#93, `magus/webfloors.py`): `/shelf`는 정면·오른쪽 옆면·윗면이 보이는 3D 책장(공용 맨 위, 층마다 이름·작업물 제목·최근 수정, 작은 책).
-    층을 누르면 다가가며(0.65초, 움직임 줄이기면 바로) `/shelf/floor/<id>`(한 층 화면: 전체 책장 버튼, 층 이름 띠, 아래의 큰 책장)로.
+  - **층·3D 책장**(#93, `magus/webfloors.py`, 2026-10-07 밤 다시 만듦): `/shelf`는 하나의 장을 위쪽에서 비스듬히 본 모습(정면·오른쪽 옆면·윗면, rotateX -16°·rotateY -30°, 원근 1500px).
+    층은 장 안의 칸(뒤판·바닥판·안벽·천장), 책은 상자(앞면 = 책등), 이름표는 선반 앞판이고 장과 함께 기운다(**원근을 펴지 않는다**, 값은 web-style.md "책장 3D").
+    층을 누르면 회전이 풀리며 그 층 정면으로 다가가(0.76초, 움직임 줄이기면 바로) `/shelf/floor/<id>`(한 층 화면: 전체 책장 버튼, 층 이름 띠, 아래의 큰 책장)로.
     끌어 옮기기(마우스 6px·손가락 길게 누르기) → `POST /shelf/move`, 카테고리 설정의 '위치', 되돌리기 `POST /shelf/undo`, 층 만들기 `POST /shelf/floors`.
     기본 카테고리 주소는 `<종류>.<층 id>`(ideas.book), 예전 주소(/shelf/ideas…)는 그 층으로 넘긴다. 검색은 층 → 카테고리로 묶는다.
   - **책장**(메뉴 "책장", `magus/webshelf.py`, #92): 한 층 화면은 양장본 책장(기본 셋 + 저자의 카테고리 + 점선 "카테고리 추가", 책등 세로쓰기·위 띠·아래 항목 수·두께는 항목 수 단계). 책을 누르면 게시판형 목록 `/shelf/{ideas|styles|refs|카테고리 id}`(한 줄 = 제목·작성 시각·보조 정보, 누르면 펼침, 100개씩, 기존 거르기 유지), 항목 고유 주소 `/shelf/<…>/<항목 id>`(펼친 채 열림). 검색 `?q=`(두 글자 이상 FTS, 한 글자는 그대로 포함, `<mark>`), `/shelf?q=`는 카테고리별로 묶는다. 예전 `/ideas`·`/refs`·`/styles`는 넘긴다.

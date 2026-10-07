@@ -103,22 +103,31 @@ class Book:
     stale: bool = False  # 문서 책: 기준 원고에 새 수정본이 왔다
 
 
-def book_style(book: Book) -> str:
-    color = safe_color(book.color, "#3b4652")
+def color_style(color: str) -> str:
+    """책등 색과 그 위 글자색 변수(큰 책·책장 전체의 작은 책이 함께 쓴다)."""
+    color = safe_color(color, "#3b4652")
     fg = text_color(color)
     light_text = fg == LIGHT_TEXT or fg == "#ffffff"
+    return (f"--c:{color};--fg:{fg};--fgrgb:{' '.join(str(int(fg[i:i + 2], 16)) for i in (1, 3, 5))};"
+            f"--away:{'0 0 0' if light_text else '255 255 255'};--glow:{0 if light_text else .14};")
+
+
+def key_jitter(key: str, spread: int) -> int:
+    """책마다 조금 다른 높이(주소 이름의 해시라 같은 책은 언제나 같다)."""
+    return int(hashlib.sha256(key.encode()).hexdigest()[:4], 16) % spread
+
+
+def book_style(book: Book) -> str:
     n = len(book.name)
     size = 26 if n <= 2 else 24 if n <= 4 else 22 if n <= 6 else 20 if n <= 9 else 18
-    # 높이: 카테고리마다 조금 다르게(주소 이름의 해시라 같은 카테고리는 언제나 같다), 이름이 길면 이름이 다 들어가게 키운다.
-    height = max(252 + int(hashlib.sha256(book.key.encode()).hexdigest()[:4], 16) % 41, 108 + round(n * size * 1.12))
+    # 높이: 카테고리마다 조금 다르게, 이름이 길면 이름이 다 들어가게 키운다.
+    height = max(252 + key_jitter(book.key, 41), 108 + round(n * size * 1.12))
     width = 56 if book.count < 10 else 64 if book.count < 50 else 74 if book.count < 200 else 86  # 많을수록 두껍게
-    return (f"--c:{color};--fg:{fg};--fgrgb:{' '.join(str(int(fg[i:i + 2], 16)) for i in (1, 3, 5))};"
-            f"--away:{'0 0 0' if light_text else '255 255 255'};"
-            f"--glow:{0 if light_text else .14};--fs:{size}px;height:{height}px;width:{width}px")
+    return f"{color_style(book.color)}--fs:{size}px;height:{height}px;width:{width}px"
 
 
-def book_html(book: Book, floor: str | None = None) -> str:
-    """floor를 주면 끌어 옮길 수 있는 책(data-book·data-from, #93)."""
+def spine_parts(book: Book) -> tuple[str, str]:
+    """(책등 아래 띠 HTML, 낭독기 이름(이스케이프됨)). 큰 책과 책장 전체의 작은 책이 같은 규칙을 쓴다."""
     count = f"{book.count}개" if book.count < 10000 else f"{book.count / 10000:.1f}만개"
     label = html.escape(f"{book.name}, 항목 {book.count}개")
     if book.verified is not None:
@@ -128,6 +137,12 @@ def book_html(book: Book, floor: str | None = None) -> str:
         count = "".join(f'<span class="line">{html.escape(line)}</span>' for line in book.note.split("\n"))
     if book.label is not None:
         label = html.escape(book.label)
+    return count, label
+
+
+def book_html(book: Book, floor: str | None = None) -> str:
+    """floor를 주면 끌어 옮길 수 있는 책(data-book·data-from, #93)."""
+    count, label = spine_parts(book)
     inner = (f'<span class="band top" aria-hidden="true">{html.escape(book.band)}</span>'
              f'<span class="spine-title" aria-hidden="true">{html.escape(book.name)}</span>'
              f'<span class="band bottom{" stale" if book.stale else ""}" aria-hidden="true">{count}</span>')

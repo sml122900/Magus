@@ -1,8 +1,10 @@
 """웹 책장 전체(3D)·한 층 화면·옮기기·되돌리기·층 만들기(사용자 결정 #93, 2026-10-07). Web에 섞어 쓰는 FloorPages.
 
-- 책장 전체(/shelf): 정면·오른쪽 옆면·윗면이 보이는 비스듬한 장(CSS 3D: perspective·rotateX/Y·preserve-3d).
-  맨 위가 공용 층, 그 아래로 작업물 층. 층 앞 선반 가장자리에 층 이름·작업물 제목·최근 수정, 층 안에는 카테고리 책이 작게 꽂힌다.
-  층을 누르거나(키보드는 선반 가장자리 링크) 고르면 그 층으로 다가가며 회전이 풀리고(0.65초) 한 층 화면으로 넘어간다.
+- 책장 전체(/shelf): 하나의 장을 위쪽에서 비스듬히 본다(정면·오른쪽 옆면·윗면, CSS 3D: perspective 1500px·rotateX(-16°)·rotateY(-30°)).
+  바깥 틀(양옆 기둥·윗판·옆판·윗면)은 한 번만 그리고, 층은 그 안의 칸이다. 칸마다 뒤판·바닥판·안벽·천장이 있어 깊이가 있고,
+  책은 앞면(책등: 종류 띠·이름·아래 숫자)·오른쪽 면·윗면이 있는 상자로 칸 안에 선다. 층 이름표는 선반 앞판에 붙어 장과 함께 기운다
+  (기울어 보이는 것은 의도다. 원근을 펴지 않는다, 2026-10-07 사용자 판단). 맨 위가 공용 층, 그 아래로 작업물 층.
+  층을 누르거나(키보드는 이름표 링크) 고르면 회전이 0으로 풀리며 그 층 정면으로 다가가고(0.76초) 한 층 화면으로 넘어간다.
   움직임 줄이기(prefers-reduced-motion)면 바로 넘어간다. 주소가 바뀌므로 뒤로 가기로 돌아온다.
 - 한 층 화면(/shelf/floor/<층 id>): 지금의 책장(책등이 큰 화면)에 위쪽 층 이름 띠(공용·1층·2층…)와 '전체 책장' 버튼.
 - 옮기기: 책을 다른 층으로 끌어 놓는다(전체 보기: 층 위에, 한 층 화면: 위쪽 층 이름 띠 위에). 마우스는 6px 움직이면,
@@ -33,8 +35,8 @@ from magus.store.floors import KINDS as BUILTIN_KINDS
 from magus.store.floors import MoveError
 from magus.store.formats import one_line
 from magus.webshelf import (
-    GROUP_SIZE, KINDS, Book, Kind, add_book, book_html, builtin_kind, category_kind, clean_query, find, one_char, row_html,
-    safe_color, shelf_html, text_color,
+    GROUP_SIZE, KINDS, Book, Kind, add_book, book_html, builtin_kind, category_kind, clean_query, color_style, find, key_jitter,
+    one_char, row_html, shelf_html, spine_parts,
 )
 
 FLOOR_TITLE_MAX = 120
@@ -42,40 +44,77 @@ WHEN = "%m-%d %H:%M"
 _NEXT = re.compile(r"/shelf(/[A-Za-z0-9_.\-/]*)?")
 
 FLOOR_STYLE = """
-.bc-wrap{overflow-x:clip;margin:8px -16px 8px;padding:0 16px}
-.bc-scene{perspective:5200px;perspective-origin:60% 45%;padding:30px 48px 24px 8px;max-width:1040px}
-.bc{--depth:120px;position:relative;transform-style:preserve-3d;transform-origin:100% 0;
-transform:translate3d(0,0,0) scale(1) rotateY(-18deg) rotateX(-6deg);transition:transform .65s cubic-bezier(.25,.75,.25,1)}
-.bc-front{position:relative;background:var(--wood);background-image:repeating-linear-gradient(90deg,rgb(0 0 0/.05) 0 2px,transparent 2px 9px);
-border-radius:4px;padding:12px 12px 2px;box-shadow:inset 0 0 0 2px var(--wood2)}
-.bc-side{position:absolute;top:0;left:100%;width:var(--depth);height:100%;transform-origin:0 50%;transform:rotateY(90deg);
-background:linear-gradient(90deg,#6a4122,#55331a);border-radius:0 4px 4px 0;transition:opacity .4s}
-.bc-top{position:absolute;left:0;bottom:100%;width:100%;height:var(--depth);transform-origin:50% 100%;transform:rotateX(90deg);
-background:linear-gradient(#b38559,#986741);border-radius:4px 4px 0 0;transition:opacity .4s}
-.bc,.bc-front,.bc-side,.bc-top{--wood:#8a5a32;--wood2:#6f4524;--back:#f2ebdd;--board:#e7dcc3;--board-edge:#cbbb98}
-.fl{position:relative;margin:0 0 12px;background:var(--back);border-radius:2px;cursor:pointer;transition:filter .15s ease,opacity .4s}
-.fl:hover,.fl:focus-within{filter:brightness(1.1) saturate(1.08);box-shadow:0 0 0 3px rgb(255 255 255/.75)}
 .site{position:relative;z-index:5}
-.fl .mini{list-style:none;margin:0;padding:16px 14px 0;display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 3px;min-height:132px;
-box-shadow:inset 0 10px 14px -10px rgb(0 0 0/.35)}
-.fl .mini>li{display:flex}
-.mini-empty{align-self:center;color:var(--ink2);font-size:16px;padding:0 4px 40px}
-.mbook{display:flex;align-items:center;justify-content:center;border-radius:3px 3px 1px 1px;background-color:var(--c);color:var(--fg);
-background-image:linear-gradient(90deg,rgb(0 0 0/.3),rgb(0 0 0/0) 18%,rgb(0 0 0/0) 82%,rgb(0 0 0/.28));
-box-shadow:inset 0 1px 0 rgb(255 255 255/.25),1px 0 2px rgb(0 0 0/.25);cursor:grab;touch-action:pan-y;
+.cab-wrap{overflow-x:clip;margin:0 -16px;padding:0 16px}
+.cab-stage{--persp:1500px;position:relative;display:flex;justify-content:center;padding:64px 0 24px;
+perspective:calc(var(--persp) + var(--persp-add,0px));perspective-origin:50% 35%;transition:perspective-origin .76s cubic-bezier(.4,0,.2,1)}
+.cab{--T:16px;--TOP:18px;--R:34px;--D:150px;--BD:104px;--pad:10px;--rx:-16deg;--ry:-30deg;--cx:-36px;
+--wood:#8a5a32;--wood-top:#a9764a;--wood-side:#6a4325;--ledge:#7f5130;--in-back:#3a2617;--in-wall:#5a3b22;--in-ceil:#2c1d12;
+--in-floor:#9b6a3f;--paper:#efe4cc;
+position:relative;flex:none;width:600px;box-sizing:border-box;padding:var(--TOP) var(--T) 0;transform-style:preserve-3d;
+transform:translate3d(var(--cx),0,0) scale(1) rotateX(calc(var(--rx) * var(--rk,1))) rotateY(var(--ry));
+transition:transform .76s cubic-bezier(.4,0,.2,1)}
+/* 면이 아닌 틀 상자(장·층·칸·목록)는 앞면(z=0)에 투명하게 놓여 안쪽 책을 가린다: 누름은 보이는 면·책·이름표만 받는다 */
+.cab,.fl,.cell,.fl .mini,.fl .mini>li{pointer-events:none}
+.cab .pl,.mbook,a.madd,.mini-empty,.fl-ledge{pointer-events:auto}
+.cab .pl{position:absolute;display:block;box-sizing:border-box;backface-visibility:hidden;-webkit-backface-visibility:hidden}
+.cab-top{left:0;top:calc(-1 * var(--D));width:100%;height:var(--D);transform-origin:0 100%;transform:rotateX(90deg);
+background:var(--wood-top) repeating-linear-gradient(0deg,rgb(0 0 0/.04) 0 2px,transparent 2px 10px)}
+.cab-side{left:100%;top:0;width:var(--D);height:100%;transform-origin:0 0;transform:rotateY(90deg);
+background:var(--wood-side) repeating-linear-gradient(90deg,rgb(0 0 0/.05) 0 2px,transparent 2px 10px)}
+.cab-crown,.cab-post{background:var(--wood) repeating-linear-gradient(90deg,rgb(0 0 0/.05) 0 2px,transparent 2px 9px)}
+.cab-crown{left:0;top:0;width:100%;height:var(--TOP)}
+.cab-post{top:0;width:var(--T);height:100%}.cab-post.l{left:0}.cab-post.r{right:0}
+.fl{position:relative;transform-style:preserve-3d;cursor:pointer}
+.cell{position:relative;transform-style:preserve-3d;display:flex;flex-direction:column;justify-content:flex-end;
+min-height:150px;box-sizing:border-box;padding:24px var(--pad) 0}
+.c-back{inset:0;transform:translateZ(calc(-1 * var(--D)));background:var(--in-back) linear-gradient(rgb(0 0 0/.35),rgb(0 0 0/0) 45%)}
+.c-floor{left:0;top:calc(100% - var(--D));width:100%;height:var(--D);transform-origin:0 100%;transform:rotateX(90deg);
+background:var(--in-floor) linear-gradient(rgb(0 0 0/.28),rgb(0 0 0/0))}
+.c-ceil{left:0;top:0;width:100%;height:var(--D);transform-origin:0 0;transform:rotateX(-90deg);background:var(--in-ceil)}
+.c-left,.c-right{top:0;width:var(--D);height:100%;background:var(--in-wall) linear-gradient(90deg,rgb(0 0 0/.3),rgb(0 0 0/0))}
+.c-left{left:0;transform-origin:0 0;transform:rotateY(90deg)}
+.c-right{left:calc(100% - var(--D));transform-origin:100% 0;transform:rotateY(-90deg)}
+.fl .mini{position:relative;list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;align-items:flex-end;align-content:flex-end;
+gap:0 4px;transform-style:preserve-3d}
+.fl .mini>li{display:flex;transform-style:preserve-3d}
+.fl .mini>li.brk{display:none;position:relative;flex:0 0 calc(100% + 2 * var(--pad));height:8px;margin:0 calc(-1 * var(--pad)) 18px;
+background:var(--ledge)}
+.brk .pl{left:0;top:calc(-1 * var(--D));width:100%;height:var(--D);transform-origin:0 100%;transform:rotateX(90deg);
+background:var(--in-floor) linear-gradient(rgb(0 0 0/.28),rgb(0 0 0/0))}
+.fl .mini>li.brk.d{display:flex}
+.mini-empty{align-self:center;color:#f3e6cc;font-size:14px;padding:0 6px 40px;transform:translateZ(-14px)}
+.mbook{position:relative;display:block;transform-style:preserve-3d;transform:translateZ(-14px);cursor:grab;touch-action:pan-y;
 user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
-.mb-name{writing-mode:vertical-rl;font-size:15px;font-weight:600;line-height:1.1;letter-spacing:.04em;white-space:nowrap;
-overflow:hidden;text-overflow:ellipsis;max-height:calc(100% - 14px)}
-.fl-ledge{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 14px;padding:7px 14px 9px;color:#1a1a1a;text-decoration:none;
-background:linear-gradient(var(--board) 0 72%,var(--board-edge));border-top:1px solid #fbf7ee;box-shadow:0 3px 4px rgb(0 0 0/.25)}
-.fl-ledge:hover{color:#1a1a1a}.fl-ledge:focus-visible{outline:3px solid var(--primary);outline-offset:2px}
-.fl-name{font-weight:600;font-size:19px}
-.fl-title{font-size:17px;font-weight:600;flex:1 1 10em;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.fl-when{font-size:15px;color:#3d3326;margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}
-.fl.drop-on{outline:4px solid var(--primary);outline-offset:-2px;filter:brightness(1.1)}
-.bc.zoom .fl:not(.zoom-target),.bc.zoom .bc-side,.bc.zoom .bc-top{opacity:0}
-.bc.zoom .zoom-target{filter:none}
-.dragging{opacity:.35}
+.mb-front{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:space-between;overflow:hidden;
+border-radius:2px 2px 1px 1px;background-color:var(--c);color:var(--fg);backface-visibility:hidden;-webkit-backface-visibility:hidden;
+background-image:linear-gradient(90deg,rgb(0 0 0/.28),rgb(0 0 0/0) 16%,rgb(0 0 0/0) 84%,rgb(0 0 0/.22)),
+ linear-gradient(90deg,transparent 30%,rgb(255 255 255/var(--glow)) 50%,transparent 70%)}
+.mb-side{left:100%;top:0;width:var(--BD);height:100%;transform-origin:0 0;transform:rotateY(90deg);
+background-color:var(--c);background-image:linear-gradient(rgb(0 0 0/.36),rgb(0 0 0/.36))}
+.mb-top{left:0;top:calc(-1 * var(--BD));width:100%;height:var(--BD);transform-origin:0 100%;transform:rotateX(90deg);
+background:var(--paper) repeating-linear-gradient(90deg,rgb(0 0 0/.07) 0 1px,transparent 1px 3px)}
+.mb-band{display:block;width:100%;box-sizing:border-box;text-align:center;font-size:11px;font-weight:600;line-height:1.2;padding:3px 1px;
+background:rgb(var(--away)/.22);border-top:1px solid rgb(var(--fgrgb)/.45);border-bottom:1px solid rgb(var(--fgrgb)/.45);
+font-variant-numeric:tabular-nums;word-break:keep-all;overflow-wrap:anywhere}
+.mb-band.top{margin-top:8px}.mb-band.bottom{margin-bottom:7px}.mb-band .line{display:block}
+.mb-band.stale{background:#fff0a8;color:#1a1a1a;border-color:#1a1a1a}
+.mb-name{writing-mode:vertical-rl;text-orientation:mixed;font-size:14px;font-weight:600;line-height:1.1;letter-spacing:.04em;
+white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:0;flex:0 1 auto;margin:auto 0;padding:4px 0}
+a.madd{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:36px;height:124px;box-sizing:border-box;
+border:2px dashed #e9dcc0;border-radius:3px;color:#f6ecd8;text-decoration:none;font-weight:600;transform:translateZ(-14px)}
+a.madd .plus{font-size:18px;line-height:1}a.madd .t{writing-mode:vertical-rl;font-size:12px;letter-spacing:.04em}
+a.madd:hover,a.madd:focus-visible{background:rgb(255 255 255/.12);color:#fff}a.madd:focus-visible{outline:3px solid #fff;outline-offset:2px}
+.fl-ledge{display:flex;align-items:center;gap:6px;height:var(--R);box-sizing:border-box;padding:0 12px;white-space:nowrap;
+background:var(--ledge) linear-gradient(rgb(255 255 255/.12),rgb(255 255 255/0) 35%);color:#fbf3e3;text-decoration:none;
+font-size:15px;line-height:1.2}
+.fl-ledge:hover{color:#fbf3e3}.fl-ledge:focus-visible{outline:none;box-shadow:inset 0 0 0 3px #fff,inset 0 0 0 5px var(--primary)}
+.fl-name,.fl-sep{font-weight:600;flex:none}
+.fl-title{font-weight:600;min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis}
+.fl-when{margin-left:auto;padding-left:10px;flex:none;color:#f3e6cc;font-size:14px;font-variant-numeric:tabular-nums}
+.fl:hover .c-back{background-color:#55391f}.fl:hover .fl-ledge{box-shadow:inset 0 0 0 2px #f6ecd8}
+.fl.drop-on .c-back{background-color:#3b2d72}.fl.drop-on .fl-ledge{box-shadow:inset 0 0 0 3px #fff,inset 0 0 0 6px var(--primary)}
+.book.dragging,.mbook.dragging>span,.dragging.madd{opacity:.35}
 .drag-ghost{position:fixed;left:0;top:0;z-index:50;pointer-events:none;margin:0;opacity:.95;
 box-shadow:0 14px 24px rgb(0 0 0/.35);rotate:-4deg}
 body.is-dragging{cursor:grabbing;user-select:none;-webkit-user-select:none}
@@ -94,13 +133,19 @@ form.inline{display:inline}
 .fgroup{background:var(--canvas);border:1px solid var(--line);border-radius:12px;padding:4px 16px 8px;margin:16px 0;box-shadow:var(--shadow)}
 .fgroup>h2{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}.fgroup>h2 small,.fgroup h3 small{font-weight:400;font-size:15px}
 .fgroup h3{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;margin:16px 0 8px}
-@media (max-width:767px){
-.bc-scene{perspective:3200px;perspective-origin:60% 45%;padding:22px 26px 20px 0}
-.bc{--depth:52px;transform:translate3d(0,0,0) scale(1) rotateY(-11deg) rotateX(-5deg)}
-.fl .mini{padding:12px 8px 0;min-height:104px;gap:8px 2px}.fl-ledge{padding:6px 10px 8px}
-.fl-name{font-size:18px}.fl-title{font-size:16px;flex-basis:100%}.fl-when{margin-left:0}}
-@media (prefers-reduced-motion:reduce){.bc,.fl,.bc-side,.bc-top{transition:none}}
+@media (max-width:700px){
+.cab-stage{--persp:1000px;padding:44px 0 16px}
+.cab{--T:10px;--TOP:12px;--D:80px;--BD:54px;--pad:8px;--rx:-12deg;--ry:-20deg;--cx:-12px;width:300px}
+.cell{min-height:132px;padding-top:18px}
+.fl .mini>li.brk.d{display:none}.fl .mini>li.brk.m{display:flex}
+.cab{--R:30px}.fl-ledge{padding:0 8px;gap:4px;font-size:13px}.fl-when{font-size:12px;padding-left:6px}}
+@media (prefers-reduced-motion:reduce){.cab,.cab-stage{transition:none}}
 """
+
+# 칸 안 너비(책 줄 바꿈 계산용). 장 600 - 기둥 16×2 - 안쪽 여백 10×2 / 모바일 장 300 - 기둥 10×2 - 안쪽 여백 8×2(여유 6)
+CAB_ROW = {"d": 548, "m": 258}
+MINI_GAP = 4
+MINI_ADD_WIDTH = 36
 
 # 끌어 옮기기(마우스·펜: pointer, 손가락: 길게 누르기) + 층으로 다가가기. 서버는 이것과 상관없이 POST를 다시 검사한다.
 FLOOR_SCRIPT = """<script>
@@ -109,11 +154,14 @@ FLOOR_SCRIPT = """<script>
   var form = document.getElementById("move-form"), drag = null, suppress = false;
   function targetAt(x, y) { var el = document.elementFromPoint(x, y); return el && el.closest ? el.closest("[data-drop-floor]") : null; }
   function start(book, x, y) {
-    var r = book.getBoundingClientRect(), ghost = book.cloneNode(true);
+    var r = book.getBoundingClientRect(), ghost = book.cloneNode(true), box = book.classList.contains("mbook");
+    // 장 안의 작은 책은 상자라 화면에 보이는 크기가 기울어 있다: 앞면(책등)만 제 크기로 들고 다닌다
+    var w = box ? book.offsetWidth : r.width, h = box ? book.offsetHeight : r.height;
+    ghost.querySelectorAll(".pl").forEach(function (n) { n.remove(); });
     ghost.classList.add("drag-ghost"); ghost.removeAttribute("href"); ghost.setAttribute("aria-hidden", "true");
-    ghost.style.width = r.width + "px"; ghost.style.height = r.height + "px";
+    ghost.style.width = w + "px"; ghost.style.height = h + "px";
     document.body.appendChild(ghost);
-    drag = { book: book, ghost: ghost, dx: x - r.left, dy: y - r.top, over: null };
+    drag = { book: book, ghost: ghost, dx: box ? w / 2 : x - r.left, dy: box ? h / 3 : y - r.top, over: null };
     book.classList.add("dragging"); document.body.classList.add("is-dragging"); move(x, y);
   }
   function move(x, y) {
@@ -169,29 +217,34 @@ FLOOR_SCRIPT = """<script>
   }
   document.addEventListener("click", function (e) { if (suppress) { suppress = false; e.preventDefault(); e.stopPropagation(); } }, true);
 
-  // 층으로 다가가기: 그 층이 화면 왼쪽 위로 오며 커지고 회전이 풀린다. 그다음 한 층 화면(또는 검색 결과의 자리)으로 간다.
-  var bc = document.querySelector(".bc");
+  // 층으로 다가가기: 회전이 0으로 풀리며 그 층이 본문 너비로 커져 화면 위쪽에 정면으로 온다. 그다음 한 층 화면(또는 검색 결과의 자리)으로 간다.
+  // 변환 함수 목록(translate3d·scale·rotateX·rotateY)을 전체 보기와 같게 두어 함수마다 이어서 움직인다(중간 장면이 비지 않게).
+  var cab = document.querySelector(".cab");
   function zoom(floorId, href, replace) {
-    var fl = bc && bc.querySelector('.fl[data-floor="' + floorId + '"]');
+    var fl = cab && cab.querySelector('.fl[data-floor="' + floorId + '"]');
     var go = function () { if (!href) return; if (replace) location.replace(href); else location.assign(href); };
     if (!fl || reduce) { go(); return; }
-    // 회전이 풀린 뒤의 평면 배치로 계산한다: 원점(오른쪽 위) 기준으로 커진 층의 왼쪽 위가 본문 왼쪽·화면 위(64px)에 오게
-    var scene = bc.parentElement, s = scene.getBoundingClientRect(), cs = getComputedStyle(scene), mini = fl.querySelector(".mbook");
-    var scale = Math.max(1.6, Math.min(3, 270 / (mini ? mini.offsetHeight : 120)));
-    var by = s.top + parseFloat(cs.paddingTop), w = bc.offsetWidth;
-    var tx = (scale - 1) * w - scale * fl.offsetLeft, ty = 64 - by - scale * fl.offsetTop;
-    fl.classList.add("zoom-target"); bc.classList.add("zoom");
-    bc.style.transform = "translate3d(" + tx + "px," + ty + "px,0) scale(" + scale + ") rotateY(0deg) rotateX(0deg)";
-    setTimeout(go, 650);
+    var stage = cab.parentElement, sr = stage.getBoundingClientRect(), main = document.querySelector("main") || stage;
+    var mr = main.getBoundingClientRect(), mcs = getComputedStyle(main);
+    var left = mr.left + parseFloat(mcs.paddingLeft), width = mr.width - parseFloat(mcs.paddingLeft) - parseFloat(mcs.paddingRight);
+    var W = cab.offsetWidth, H = cab.offsetHeight, s = Math.max(1, Math.min(2.4, width / W));
+    var top = Math.max(16, Math.min(140, window.innerHeight * 0.16));
+    // 회전이 풀린 평면에서: 변환 원점(장 가운데) 기준으로 커진 층의 왼쪽 위가 본문 왼쪽·화면 위쪽에 오게
+    var bx = sr.left + cab.offsetLeft, by = sr.top + cab.offsetTop, ox = W / 2, oy = H / 2;
+    var tx = left - bx - ox + s * ox, ty = top - by - oy - s * (fl.offsetTop - oy);
+    stage.style.perspectiveOrigin = (left + s * W / 2 - sr.left) + "px " + (top + s * fl.offsetHeight / 2 - sr.top) + "px";
+    fl.classList.add("zoom-target"); cab.classList.add("zoom");
+    cab.style.transform = "translate3d(" + tx + "px," + ty + "px,0) scale(" + s + ") rotateX(0deg) rotateY(0deg)";
+    setTimeout(go, 780);
   }
   window.MagusShelf = { zoom: zoom };
   window.addEventListener("pageshow", function (e) {  // 뒤로 가기로 돌아오면(bfcache) 원래 모습으로
-    if (!bc) return; bc.classList.remove("zoom"); bc.style.transform = "";
-    var t = bc.querySelector(".zoom-target"); if (t) t.classList.remove("zoom-target");
+    if (!cab || !e.persisted) return; cab.classList.remove("zoom"); cab.style.transform = ""; cab.parentElement.style.perspectiveOrigin = "";
+    var t = cab.querySelector(".zoom-target"); if (t) t.classList.remove("zoom-target");
   });
-  if (bc) {
-    bc.addEventListener("click", function (e) {
-      var fl = e.target.closest(".fl"); if (!fl || e.defaultPrevented) return;
+  if (cab) {
+    cab.addEventListener("click", function (e) {
+      var fl = e.target.closest(".fl"); if (!fl || e.defaultPrevented || e.target.closest("a.madd")) return;  // 책 추가는 그 화면으로
       var link = fl.querySelector(".fl-ledge"); e.preventDefault(); zoom(fl.getAttribute("data-floor"), link.getAttribute("href"));
     });
     var auto = document.querySelector("[data-zoom-floor]");
@@ -230,19 +283,52 @@ def floor_name(floor: Floor) -> str:
     return floor.label if floor.common else f"{floor.label} · {floor.title}"
 
 
+def mini_size(book: Book) -> tuple[int, int]:
+    """(폭, 높이). 한 층 화면의 큰 책과 같은 규칙을 줄인 것: 항목이 많을수록 두껍고, 높이는 책마다 조금 다르고 이름이 길면 높다."""
+    width = 38 if book.count < 10 else 42 if book.count < 50 else 48 if book.count < 200 else 54
+    return width, 124 + min(24, len(book.name) * 3) + key_jitter(book.key, 11)
+
+
 def mini_book_html(book: Book, floor: str) -> str:
-    """책장 전체에 꽂히는 작은 책(지금 책등을 줄인 모습). 끌어 옮길 수 있다."""
-    color = safe_color(book.color, "#3b4652")
-    n = len(book.name)
-    height = 104 + min(26, n * 2) + (int(book.key.encode().hex()[-2:], 16) % 9)
-    width = 26 if book.count < 10 else 30 if book.count < 50 else 34 if book.count < 200 else 38
-    label = (f"{book.name}, 확인 {book.verified}편, 전체 {book.count}편" if book.verified is not None
-             else f"{book.name}, 항목 {book.count}개")
+    """책장 전체에 꽂히는 작은 책: 앞면(책등: 종류 띠·이름·아래 숫자)·오른쪽 면·윗면이 있는 상자. 끌어 옮길 수 있다."""
+    width, height = mini_size(book)
+    count, label = spine_parts(book)
     drag = f' data-book="{html.escape(book.key)}" data-from="{html.escape(floor)}"' if book.movable else ""
-    return (f'<li><span class="mbook"{drag} role="img" '
-            f'aria-label="{html.escape(label)}" title="{html.escape(label)}" '
-            f'style="--c:{color};--fg:{text_color(color)};height:{height}px;width:{width}px">'
-            f'<span class="mb-name" aria-hidden="true">{html.escape(book.name)}</span></span></li>')
+    return (f'<li><span class="mbook"{drag} role="img" aria-label="{label}" title="{label}" '
+            f'style="{color_style(book.color)}width:{width}px;height:{height}px">'
+            f'<span class="mb-front" aria-hidden="true"><span class="mb-band top">{html.escape(book.band)}</span>'
+            f'<span class="mb-name">{html.escape(book.name)}</span>'
+            f'<span class="mb-band bottom{" stale" if book.stale else ""}">{count}</span></span>'
+            '<span class="pl mb-side" aria-hidden="true"></span><span class="pl mb-top" aria-hidden="true"></span></span></li>')
+
+
+def mini_add_html(floor: str) -> str:
+    """장 안의 '책 추가' 점선 자리(누르면 그 층의 책 추가 화면)."""
+    return (f'<li><a class="madd" href="/shelf/add?floor={urllib.parse.quote(floor)}" aria-label="책 추가">'
+            '<span class="plus" aria-hidden="true">+</span><span class="t" aria-hidden="true">책 추가</span></a></li>')
+
+
+def row_breaks(widths: list[int], room: int) -> set[int]:
+    """칸 안 너비(room)에 책을 차례로 세울 때 새 줄이 시작되는 자리(그 앞에 보조 선반을 둔다)."""
+    out, used = set(), 0
+    for i, w in enumerate(widths):
+        if used and used + MINI_GAP + w > room:
+            out.add(i)
+            used = w
+        else:
+            used = used + MINI_GAP + w if used else w
+    return out
+
+
+def with_shelves(items: list[str], widths: list[int]) -> str:
+    """책 사이에 줄 바꿈(보조 선반)을 데스크톱(d)·모바일(m)용으로 넣는다. 화면 너비에 맞는 것만 CSS가 보인다."""
+    breaks = {k: row_breaks(widths, room) for k, room in CAB_ROW.items()}
+    out = []
+    for i, item in enumerate(items):
+        if kinds := [k for k in CAB_ROW if i in breaks[k]]:
+            out.append(f'<li class="brk {" ".join(kinds)}" aria-hidden="true"><span class="pl"></span></li>')
+        out.append(item)
+    return "".join(out)
 
 
 class FloorPages:
@@ -320,22 +406,30 @@ class FloorPages:
 
     # ---- 책장 전체 ----------------------------------------------------------------------------
     def _case_html(self, uid: str, floors: list[Floor], zoom: tuple[str, str] | None) -> str:
+        """하나의 장: 바깥 틀(윗면·옆판·윗판·기둥)은 한 번, 층은 그 안의 칸(뒤판·바닥판·안벽·천장 + 책 + 앞판 이름표)."""
+        faces = "".join(f'<span class="pl {c}" aria-hidden="true"></span>' for c in ("c-back", "c-ceil", "c-left", "c-right", "c-floor"))
         rows = []
         for f in floors:
             books = self.books(uid, f.id)
-            minis = "".join(mini_book_html(b, f.id) for b in books) or '<li class="mini-empty">비어 있음</li>'
-            title = "" if f.common else f'<span class="fl-title" title="{html.escape(f.title)}">{html.escape(f.title)}</span>'
+            items = [mini_book_html(b, f.id) for b in books] or ['<li class="mini-empty">비어 있음</li>']
+            widths = [mini_size(b)[0] for b in books] or [80]
+            minis = with_shelves([*items, mini_add_html(f.id)], [*widths, MINI_ADD_WIDTH])
+            title = ("" if f.common else '<span class="fl-sep" aria-hidden="true">·</span>'
+                     f'<span class="fl-title" title="{html.escape(f.title)}">{html.escape(f.title)}</span>')
             ledge_label = f"{floor_name(f)}, {when_text(f.updated_at)}, 책 {len(books)}권"
             rows.append(
                 f'<section class="fl" data-floor="{html.escape(f.id)}" data-drop-floor="{html.escape(f.id)}">'
-                f'<ul class="mini" aria-label="{html.escape(f.label)}에 꽂힌 카테고리">{minis}</ul>'
+                f'<div class="cell">{faces}<ul class="mini" aria-label="{html.escape(f.label)}에 꽂힌 책">{minis}</ul></div>'
                 f'<a class="fl-ledge" href="/shelf/floor/{html.escape(f.id)}" aria-label="{html.escape(ledge_label)}">'
                 f'<span class="fl-name">{f.label}</span>{title}<span class="fl-when">{when_text(f.updated_at)}</span></a></section>'
             )
         auto = (f' data-zoom-floor="{html.escape(zoom[0])}" data-zoom-next="{html.escape(zoom[1])}"' if zoom else "")
-        return (f'<div class="bc-wrap"><div class="bc-scene"{auto}><div class="bc">'
-                '<div class="bc-top" aria-hidden="true"></div><div class="bc-side" aria-hidden="true"></div>'
-                f'<div class="bc-front">{"".join(rows)}</div></div></div></div>')
+        # 층이 많아 장이 길면 위아래 원근 차이가 커진다: 기울기를 줄이고 원근 거리를 늘린다(층 다섯까지는 그대로)
+        n = len(floors)
+        tilt = "" if n <= 5 else f' style="--rk:{max(.4, round(5 / n, 3))};--persp-add:{(n - 5) * 160}px"'
+        frame = "".join(f'<span class="pl {c}" aria-hidden="true"></span>'
+                        for c in ("cab-top", "cab-side", "cab-crown", "cab-post l", "cab-post r"))
+        return (f'<div class="cab-wrap"><div class="cab-stage"{auto}{tilt}><div class="cab">{frame}{"".join(rows)}</div></div></div>')
 
     async def overview(self, request: Request) -> Response:
         session = self.user_of(request)
