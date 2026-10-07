@@ -18,6 +18,7 @@
 ## 0-18. 층 → 프로젝트·마인드맵(2026-10-08, 사용자 결정 #95, 확인 대기, 로컬만)
 
 - **서버 배포 없음**(서버 접속도 없음). 서버는 여전히 `p1-profile-email`(ec6c40b). 배포는 #93·#94·#95 묶음 한 번(`docs/deploy.md` 2-2절, 승인 대기).
+- 커밋 `eee8209`(master). 태그·push는 하지 않았다(origin보다 3개 앞섬: 0-16·0-17절 두 커밋 포함).
 - 결정 문서 `docs/decisions/project-map.md`, 새 문구·도구·instructions 전문 `docs/decisions/project-map-texts.md`, 화면 값 `docs/decisions/web-style.md` "지도". 검토 대기 표 4절 #95.
 - 구조: 프로젝트(옛 층) → 지도(노드·선) → 노드 → 책장(정면 2D) → 책 → 게시판. 옛 공용 층 = 프로젝트 「내 서재」(내부 id `common` 그대로, 이름 검토 대기).
   항목 파일의 `"floor"` = 그 항목의 프로젝트 id(키 이름 그대로). 지도는 `shelf/maps/<프로젝트>.json`(노드·선·책 배치). 가운데 노드에만 원고 책.
