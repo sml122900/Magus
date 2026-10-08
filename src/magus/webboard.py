@@ -26,7 +26,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from magus.attachments import ACCEPT, MAX_FILES, kind_of, media_type, size_text
+from magus.attachments import ACCEPT, MAX_FILES, kind_of, mb, media_type, size_text
 from magus.book_migrate import legacy_book_id
 from magus.category.rules import BUILTINS, CONTENT_MAX, TITLE_MAX
 from magus.ids import local_time, new_id, utcnow
@@ -111,9 +111,13 @@ color:var(--primary);background:var(--canvas);cursor:pointer;margin:0;position:r
 .dropzone input[type=file]{position:absolute;inset:0;opacity:0;width:1px;height:1px}
 .dropzone .drop-word{color:var(--ink2)}
 @media (pointer:fine){.dropzone label.camera{display:none}}
-ul.chosen{list-style:none;padding:0;margin:8px 0;display:flex;flex-wrap:wrap;gap:8px}
-ul.chosen li{display:flex;gap:6px;align-items:center;background:var(--canvas);border:1px solid var(--line);border-radius:8px;padding:4px 8px}
-ul.chosen img{width:40px;height:40px;object-fit:cover;border-radius:4px}
+ul.chosen{list-style:none;padding:0;margin:8px 0;display:flex;flex-direction:column;gap:6px}
+ul.chosen li{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;background:var(--canvas);border:1px solid var(--line);border-radius:8px;
+padding:4px 6px 4px 8px}
+ul.chosen img{width:40px;height:40px;object-fit:cover;border-radius:4px}ul.chosen small{color:var(--ink2)}
+ul.chosen button.unpick{margin-left:auto;min-width:44px;min-height:44px;border-radius:9999px;border:1px solid var(--mute);background:var(--canvas);
+font-size:16px;font-weight:600;cursor:pointer;padding:0 12px}ul.chosen button.unpick:hover{background:var(--soft)}
+.pick-note{margin:4px 0;color:var(--ink)}.pick-note:empty{display:none}
 @media (max-width:767px){a.post{grid-template-columns:minmax(0,1fr) auto;padding:10px 12px}.pd{grid-column:1/-1;text-align:left;font-size:14px}
 .trail>a,.trail>span[aria-current]{max-width:11em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
@@ -179,34 +183,70 @@ document.addEventListener("keydown", function (e) {
 });
 </script>"""
 
-# 글쓰기: 끌어다 놓은 파일을 '파일 고르기' 칸에 더하고, 고른 파일(그림은 작은 미리보기)을 보인다. 스크립트가 꺼져 있어도 고르기·사진 찍기는 된다
+# 글쓰기·고치기의 첨부: 담은 파일 목록을 스크립트가 들고 있다(2026-10-09). 고르기·끌어다 놓기는 목록에 더하고, 파일마다 ✕로 빼고,
+# 10개 초과·한 개 한도 초과·받지 않는 형식은 담는 순간 그 파일만 빼고 알린다. 보낼 때 목록으로 FormData를 만든다.
+# 스크립트가 꺼져 있으면 고르기·사진 찍기는 브라우저 기본대로 된다(다시 고르면 앞의 것이 바뀐다)
 WRITE_SCRIPT = """<script>
 (function () {
-  var zone = document.querySelector("[data-dropzone]");
-  if (!zone) return;
-  var pick = zone.querySelector("input[name=files][multiple]"), inputs = zone.querySelectorAll("input[type=file]");
-  var list = document.querySelector("ul.chosen");
-  function show() {
-    list.textContent = "";
-    inputs.forEach(function (input) {
-      Array.prototype.forEach.call(input.files || [], function (f) {
-        var li = document.createElement("li");
-        if (/^image\\//.test(f.type) && window.URL) { var img = document.createElement("img"); img.alt = ""; img.src = URL.createObjectURL(f); li.appendChild(img); }
-        li.appendChild(document.createTextNode(f.name));
-        list.appendChild(li);
-      });
+  var zone = document.querySelector("[data-dropzone]"), form = zone && zone.closest("form");
+  if (!form || !window.FormData || !window.fetch) return;  // 스크립트가 없으면 고르기·사진 찍기는 브라우저 기본대로 된다
+  var inputs = zone.querySelectorAll("input[type=file]"), list = form.querySelector("ul.chosen"), note = form.querySelector(".pick-note");
+  var MAX = +zone.getAttribute("data-max"), LIMIT = +zone.getAttribute("data-limit");
+  var LIMIT_TEXT = zone.getAttribute("data-limit-text"), TYPES = zone.getAttribute("data-types").split(",");
+  var chosen = [];  // 담은 파일(고를 때마다 더한다. input.files에 두지 않으므로 다시 골라도 앞의 것이 남는다)
+  function ext(name) { var i = name.lastIndexOf("."); return i < 0 ? "" : name.slice(i).toLowerCase(); }
+  function size(n) { return n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1000)) + " KB"; }  // size_text와 같다
+  function attached(f) {  // 고치기: 이미 붙어 있고 빼지 않은 첨부와 같은 파일
+    return Array.prototype.some.call(form.querySelectorAll("ul.current li"), function (li) {
+      var box = li.querySelector("input[name=drop]");
+      return li.getAttribute("data-name") === f.name && +li.getAttribute("data-size") === f.size && !(box && box.checked);
     });
   }
-  inputs.forEach(function (input) { input.addEventListener("change", show); });
+  function add(files) {
+    var said = [];
+    Array.prototype.forEach.call(files || [], function (f) {
+      var same = chosen.some(function (c) { return c.name === f.name && c.size === f.size; });
+      if (same || attached(f)) return;  // 같은 파일(이름·크기)은 한 번만
+      if (TYPES.indexOf(ext(f.name)) < 0) said.push("「" + f.name + "」은 받지 않는 형식이라 뺐어요.");
+      else if (f.size > LIMIT) said.push("「" + f.name + "」은 " + LIMIT_TEXT + "를 넘어 뺐어요.");
+      else if (chosen.length >= MAX) said.push("첨부는 한 번에 " + MAX + "개까지라 「" + f.name + "」은 뺐어요.");
+      else chosen.push(f);
+    });
+    note.textContent = said.join(" ");
+    show();
+  }
+  function show() {
+    list.textContent = "";
+    chosen.forEach(function (f, i) {
+      var li = document.createElement("li");
+      if (/^image\\//.test(f.type) && window.URL) { var img = document.createElement("img"); img.alt = ""; img.src = URL.createObjectURL(f); li.appendChild(img); }
+      var name = document.createElement("span"); name.className = "fname"; name.textContent = f.name; li.appendChild(name);
+      var small = document.createElement("small"); small.textContent = size(f.size); li.appendChild(small);
+      var x = document.createElement("button"); x.type = "button"; x.className = "unpick"; x.textContent = "✕";
+      x.setAttribute("aria-label", f.name + " 빼기"); x.title = "빼기";
+      x.addEventListener("click", function () {
+        chosen.splice(i, 1); note.textContent = "「" + f.name + "」을 뺐어요."; show();
+        var next = list.querySelectorAll("button.unpick")[Math.min(i, chosen.length - 1)];
+        (next || zone.querySelector("input[type=file]")).focus();
+      });
+      li.appendChild(x);
+      list.appendChild(li);
+    });
+  }
+  inputs.forEach(function (input) { input.addEventListener("change", function () { add(input.files); input.value = ""; }); });
   ["dragenter", "dragover"].forEach(function (t) { zone.addEventListener(t, function (e) { e.preventDefault(); zone.classList.add("over"); }); });
   ["dragleave", "drop"].forEach(function (t) { zone.addEventListener(t, function () { zone.classList.remove("over"); }); });
-  zone.addEventListener("drop", function (e) {
+  zone.addEventListener("drop", function (e) { e.preventDefault(); if (e.dataTransfer) add(e.dataTransfer.files); });
+  form.addEventListener("submit", function (e) {
     e.preventDefault();
-    if (!e.dataTransfer || !e.dataTransfer.files.length || !window.DataTransfer) return;
-    var dt = new DataTransfer();
-    Array.prototype.forEach.call(pick.files || [], function (f) { dt.items.add(f); });
-    Array.prototype.forEach.call(e.dataTransfer.files, function (f) { dt.items.add(f); });
-    pick.files = dt.files; show();
+    var data = new FormData(form), button = form.querySelector("button.primary");
+    data.delete("files");
+    chosen.forEach(function (f) { data.append("files", f, f.name); });
+    button.disabled = true; note.textContent = "저장하는 중…";
+    fetch(form.action, { method: "POST", body: data, credentials: "same-origin" }).then(function (r) {
+      if (r.redirected) { location.href = r.url; return; }
+      return r.text().then(function (page) { document.open(); document.write(page); document.close(); });
+    }).catch(function () { button.disabled = false; note.textContent = "저장하지 못했어요. 다시 눌러 주세요."; });
   });
 })();
 </script>"""
@@ -531,8 +571,9 @@ class BoardPages:
     def _write_form(self, session: tuple[str, str], action: str, cancel: str, *, title: str = "", content: str = "",
                     heading: str = "", current: list[Attachment] | tuple[Attachment, ...] = ()) -> str:
         """글쓰기·고치기가 함께 쓰는 폼: 제목(문헌 글이면 서지 제목을 머리로)·본문·첨부(고치기면 기존 첨부마다 ✕ 빼기)."""
+        limit = int(self.settings.max_attach_bytes)
         rows = "".join(
-            f'<li><span class="fname">{html.escape(a.name)}</span> <small>{html.escape(kind_of(a.name))} · {size_text(a.size)}</small>'
+            f'<li data-name="{html.escape(a.name)}" data-size="{a.size}"><span class="fname">{html.escape(a.name)}</span> <small>{html.escape(kind_of(a.name))} · {size_text(a.size)}</small>'
             f'<label class="drop" title="첨부 빼기"><input type="checkbox" name="drop" value="{html.escape(a.id)}" '
             f'aria-label="{html.escape(a.name)} 빼기"><span class="x" aria-hidden="true">✕ 빼기</span>'
             '<span class="undo" aria-hidden="true">빼지 않기</span></label></li>' for a in current)
@@ -544,11 +585,12 @@ class BoardPages:
             f'<label class="block">본문 <textarea name="content" rows="10" maxlength="{CONTENT_MAX}">{html.escape(content)}</textarea></label>'
             '<fieldset><legend>첨부</legend>'
             + (f'<ul class="current" aria-label="지금 첨부">{rows}</ul>' if rows else "")
-            + '<div class="dropzone" data-dropzone>'
+            + f'<div class="dropzone" data-dropzone data-max="{MAX_FILES}" data-limit="{limit}" data-limit-text="{mb(limit)}" '
+            f'data-types="{ACCEPT}">'
             f'<label class="pick">파일 고르기<input type="file" name="files" multiple accept="{ACCEPT}"></label>'
             '<label class="pick camera">사진 찍기<input type="file" name="files" accept="image/*" capture="environment"></label>'
             f'<span class="drop-word">끌어다 놓기 · {MAX_FILES}개까지</span></div>'
-            '<ul class="chosen" aria-live="polite"></ul></fieldset>'
+            '<ul class="chosen" aria-label="담은 파일"></ul><p class="pick-note" role="status" aria-live="polite"></p></fieldset>'
             f'<p><button class="primary">저장</button> <a href="{html.escape(cancel)}">취소</a></p></form>{WRITE_SCRIPT}'
         )
 
