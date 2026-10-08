@@ -15,7 +15,7 @@ from test_http import FIXTURES  # noqa: F401
 from test_web import _csrf, _login, fake_issuer, server_proc  # noqa: F401 - 픽스처
 
 from magus.floors import COMMON
-from magus.store import CategoryItem, Idea, LocalStore
+from magus.store import CategoryItem, Context, LocalStore
 
 pytestmark = pytest.mark.anyio
 
@@ -28,10 +28,14 @@ def _seed(data_dir, user: str = "alice") -> dict[str, str]:
     person = store.create_category(user, "인물", "person", "#7a4e2d", ("시기",), "city")
     store.put_category_item(user, CategoryItem("20261007000000000-aaaaaa", person.id, "제인 제이콥스", "me", "제이콥스", "author"))
     case = store.create_category(user, "사례", "case", "#b8923a", (), COMMON)
-    store.add_ideas(user, [Idea("20261007000000001-bbbbbb", "도시는 서로를 찾는 곳", "thought", "me", floor="city")])
+    styles = store.create_category(user, "문체", "blank", "#6e1f2f", (), COMMON, contexts=(Context("문체", "문학적 부분이 마음에 드는 구절"),))
+    ideas = store.create_category(user, "생각", "blank", "#1f2f5c", (), "city", contexts=(Context("생각 메모", "떠오른 생각을 적어 둔 메모다."),))
+    store.put_category_item(user, CategoryItem("20261007000000001-bbbbbb", ideas.id, "도시는 서로를 찾는 곳", "me"))
+    store.add_link_node(user, "city", COMMON, store.node_of_book(user, styles.id)[1])  # 「내 서재」의 문체로 가는 연결 노드
     person_node = store.node_of_book(user, person.id)[1]
+    ideas_node = store.node_of_book(user, ideas.id)[1]
     store.close()
-    return {"person": person.id, "case": case.id, "person_node": person_node}
+    return {"person": person.id, "case": case.id, "person_node": person_node, "ideas": ideas.id, "ideas_node": ideas_node}
 
 
 def _query(response) -> dict[str, str]:
@@ -46,7 +50,7 @@ def test_project_list_and_new_project(server_proc):  # noqa: F811
         csrf = _csrf(listed)
         names = re.findall(r'<span class="pname">([^<]+)</span>', listed)
         assert names[-1] == "내 서재" and set(names[:-1]) == {"도시는 어떻게 태어났나", "강과 사람"}  # 「내 서재」는 끝에
-        assert listed.count("최근 수정 ") >= 3 and "노드 5 · 원고 책 1장" in listed and "노드 4 · 원고 없음" in listed
+        assert listed.count("최근 수정 ") >= 3 and "노드 4 · 올린 원고 1장" in listed and "노드 1 · 원고 없음" in listed
         assert '<h2>+ 프로젝트</h2>' in listed and 'name="project" value="new"' in listed and 'action="/shelf/projects"' in listed
         assert c.post("/shelf/projects", data={"csrf": "틀림", "title": "x"}).status_code == 403
         assert "projecterr=empty" in str(c.post("/shelf/projects", data={"csrf": csrf, "title": "  "}).url)
@@ -69,21 +73,25 @@ def test_project_page_map_panel_and_board(server_proc):  # noqa: F811
         assert '<a class="node center" href="/shelf/p/city?node=center" data-node="center"' in page
         assert f'data-node="{ids["person_node"]}"' in page and '<span class="nname">인물</span><span class="nsub">1개</span>' in page
         assert '<a class="node link"' in page and "연결 · 내 서재" in page  # 「내 서재」의 문체로 가는 연결 노드
-        assert page.count('<g class="edge"') == 4 and '<svg class="edges" aria-hidden="true"' in page
+        assert page.count('<g class="edge"') == 3 and '<svg class="edges" aria-hidden="true"' in page
         assert '<section class="map-list" aria-label="노드 목록">' in page and 'id="map-data"' in page
         assert '<details class="pm-new" id="new-node"><summary class="btn primary-ish">+ 노드</summary>' in page
         assert '<optgroup label="내 서재">' in page and '<optgroup label="강과 사람">' in page  # 연결 노드로 고를 다른 프로젝트의 노드
         assert '<h2 class="pp-title" id="pp-title" tabindex="-1">노드를 골라 주세요</h2>' in page and 'id="book-panel"' in page
         # 노드를 열면 패널에 그 노드의 정면 책장, 책을 열면 그 아래 게시판(iframe)
         node = c.get("/shelf/p/city", params={"node": ids["person_node"]}).text
-        assert 'aria-current="true"' in node and 'aria-label="인물, 항목 1개"' in node
+        assert 'aria-current="true"' in node and 'aria-label="인물, 글 1개"' in node
         assert f'data-key="{ids["person"]}"' in node and f'href="/shelf/add?project=city&amp;node={ids["person_node"]}"' in node
-        assert "<summary>노드 설정</summary>" in node and "<h3>선</h3>" in node
+        assert "<summary>노드 설정(이름·색·컨텍스트·선)</summary>" in node and "<h3>선</h3>" in node and "<h3>컨텍스트</h3>" in node
+        assert '<span class="none">없음 — 컨텍스트가 없는 책은 AI가 일반 메모로 읽습니다.</span>' in node  # 노드 머리의 컨텍스트(#96)
+        thoughts = c.get("/shelf/p/city", params={"node": ids["ideas_node"]}).text
+        assert 'aria-label="생각, 컨텍스트 생각 메모, 글 1개"' in thoughts
+        assert '<span class="band top" aria-hidden="true">생각 메모</span>' in thoughts  # 책등 위 띠 = 컨텍스트 이름
         book = c.get("/shelf/p/city", params={"node": ids["person_node"], "book": ids["person"]}).text
         assert f'<iframe class="bp-frame" title="인물" src="/shelf/{ids["person"]}"></iframe>' in book
         assert f'data-node="{ids["person_node"]}" data-book="{ids["person"]}"' in book
         by_at = c.get("/shelf/p/city", params={"at": f"/shelf/{ids['person']}/20261007000000000-aaaaaa"}).text  # 게시판 자리 주소만으로
-        assert f'src="/shelf/{ids["person"]}/20261007000000000-aaaaaa"' in by_at and 'aria-label="인물, 항목 1개"' in by_at
+        assert f'src="/shelf/{ids["person"]}/20261007000000000-aaaaaa"' in by_at and 'aria-label="인물, 글 1개"' in by_at
         fragment = c.get("/shelf/p/city/panel", params={"node": "center"}).text  # 스크립트가 노드를 열 때 받는 패널
         assert fragment.startswith('<div class="pp-node" id="pp-node" data-node="center">') and 'data-key="ms.city"' in fragment
         # 연결 노드: 원본의 책이 보이고, 책 추가는 원본 노드로
@@ -141,9 +149,19 @@ def test_map_edits_with_forms_and_script(server_proc):  # noqa: F811
         colored = c.post(post, data={"csrf": csrf, "action": "color", "node": node, "color": "#2f6db5"})
         assert "노드 색을 바꿨습니다." in colored.text and "--nc:#2f6db5;--nfg:#ffffff" in colored.text
         joined = c.post(post, data={"csrf": csrf, "action": "connect", "node": node, "other": ids["person_node"]})
-        assert "선을 이었습니다." in joined.text and joined.text.count('<g class="edge"') == 6
+        assert "선을 이었습니다." in joined.text and joined.text.count('<g class="edge"') == 5
         cut = c.post(post, data={"csrf": csrf, "action": "disconnect", "node": node, "other": "center"})
-        assert "선을 끊었습니다." in cut.text and cut.text.count('<g class="edge"') == 5
+        assert "선을 끊었습니다." in cut.text and cut.text.count('<g class="edge"') == 4
+        # 노드 만들 때 컨텍스트 단추·직접 적기, 노드 설정의 컨텍스트(#96)
+        with_ctx = c.post(post, data={"csrf": csrf, "action": "add_node", "name": "현장", "ctx_pick": "ctx-note", "ctx_new": "현장 메모다."})
+        assert "노드 「현장」을 만들었습니다." in with_ctx.text and '<details class="ctx"><summary>생각 메모</summary>' in with_ctx.text
+        field = _query(with_ctx)["node"]
+        changed = c.post(post, data={"csrf": csrf, "action": "contexts", "node": field, "ctx_name": "", "ctx_text": "고친 현장 메모",
+                                     "ctx_from": ""})
+        assert "노드의 컨텍스트를 바꿨습니다." in changed.text and "<p>고친 현장 메모</p>" in changed.text
+        too_long = c.post(post, data={"csrf": csrf, "action": "contexts", "node": field, "ctx_new": "가" * 501})
+        assert "컨텍스트를 저장하지 못했습니다." in too_long.text
+        c.post(post, data={"csrf": csrf, "action": "trash", "node": field})
         busy = c.post(post, data={"csrf": csrf, "action": "trash", "node": ids["person_node"]})
         assert "책이 꽂힌 노드는 휴지통으로 옮길 수 없습니다." in busy.text
         linked = c.post(post, data={"csrf": csrf, "action": "add_link", "target": "river:center"})
@@ -160,7 +178,7 @@ def test_map_edits_with_forms_and_script(server_proc):  # noqa: F811
     store = LocalStore(data_dir)
     center = store.get_map("alice", "city").nodes[0]
     assert (center.x, center.y) == (12.5, -8.0)
-    assert [t.id for t in store.list_trash("alice") if t.kind == "node"] == [f"city/{node}"]
+    assert sorted(t.id for t in store.list_trash("alice") if t.kind == "node") == sorted([f"city/{node}", f"city/{field}"])
     store.close()
 
 
@@ -172,7 +190,7 @@ def test_move_books_between_nodes_and_undo(server_proc):  # noqa: F811
         here = f"/shelf/p/city?node={ids['person_node']}"
         assert c.post("/shelf/move", data={"csrf": "틀림", "book": ids["person"], "to": "city:center"}).status_code == 403
         # 패널의 책을 지도의 다른 노드로 끌어 놓기 = POST /shelf/move(to=프로젝트:노드)
-        moved = c.post("/shelf/move", data={"csrf": csrf, "book": ids["person"], "to": "city:b-ideas", "next": here})
+        moved = c.post("/shelf/move", data={"csrf": csrf, "book": ids["person"], "to": f"city:{ids['ideas_node']}", "next": here})
         assert "moved=" in str(moved.url) and "「인물」을 노드 「생각」으로 옮겼습니다." in moved.text and 'action="/shelf/undo"' in moved.text
         move_id = _query(moved)["moved"]
         undone = c.post("/shelf/undo", data={"csrf": csrf, "move": move_id, "next": here})
@@ -202,7 +220,8 @@ def test_move_books_between_nodes_and_undo(server_proc):  # noqa: F811
     store.close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         c.get("/login?next=/shelf")
-        refs = c.get("/shelf/refs.common").text
+        library = LocalStore(data_dir).source_book("alice", COMMON)
+        refs = c.get(f"/shelf/{library}").text  # 「내 서재」의 문헌 책(없어서 만든 「참고문헌」)
         assert "「도시는 어떻게 태어났나」·「강과 사람」 원고가 함께 쓰는 문헌이라 「내 서재」로 옮김" in refs
 
 
@@ -218,6 +237,7 @@ def test_export_zip(server_proc):  # noqa: F811
         assert "README.md" in names and "도시는 어떻게 태어났나/지도.json" in names
         assert "도시는 어떻게 태어났나/가운데 노드/원고/장/001 장날.md" in names
         assert any(n.startswith("도시는 어떻게 태어났나/인물/인물/") and n.endswith(" 제이콥스.md") for n in names)
+        assert "도시는 어떻게 태어났나/생각/생각/컨텍스트.md" in names  # 책의 컨텍스트(#96)
         assert "도시는 어떻게 태어났나/연결 · 문체/연결.md" in names
         z = zipfile.ZipFile(io.BytesIO(got.content))
         item = z.read(next(n for n in names if n.endswith(" 제이콥스.md"))).decode("utf-8")

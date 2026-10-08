@@ -31,9 +31,10 @@ def main(argv: list[str] | None = None) -> None:
     imp.add_argument("--new-edition", action="store_true", help="같은 책의 새 판으로 올린다(바뀐 장만, 결정·미해결 유지)")
     imp.add_argument("--force", action="store_true", help="--new-edition: 장 제목 겹침이 30%% 미만이어도 올린다")
     imp.add_argument("--synthetic", action="store_true", help="리포트에 '합성 fixture'라고 표시")
-    convo = sub.add_parser("conversation", help="대화 기록 md를 영감 책장(Casper)에 넣고 리포트를 출력")
+    convo = sub.add_parser("conversation", help="대화 기록 md를 책(--book, 이름 또는 id)의 글로 넣고 리포트를 출력")
     convo.add_argument("path", type=Path)
     convo.add_argument("--origin")
+    convo.add_argument("--book", required=True, help="넣을 책 이름 또는 id")
     cite = sub.add_parser("cite-report", help="책 전체 인용 집계(미확인 문헌 순위, 참고문헌 누락·미인용)")
     cite.add_argument("--project-id", required=True)
     cite.add_argument("--top", type=int, default=20)
@@ -51,11 +52,11 @@ def main(argv: list[str] | None = None) -> None:
     terms.add_argument("--project-id", required=True)
     terms.add_argument("--add", nargs="*", default=[])
     terms.add_argument("--remove", nargs="*", default=[])
-    trash = sub.add_parser("trash", help="책장 휴지통(운영자용, USER_ID 사용자): list | put idea|style|category <id> --note … | "
-                                         "restore idea|style|category|category-item <id> [--name 새 이름]")
+    trash = sub.add_parser("trash", help="책장 휴지통(운영자용, USER_ID 사용자): list | put category|category-item <id> --note … | "
+                                         "restore category|category-item|node <id> [--name 새 이름]")
     trash.add_argument("action", choices=["list", "put", "restore"])
-    trash.add_argument("kind", nargs="?", choices=["idea", "style", "category", "category-item"])
-    trash.add_argument("id", nargs="?", help="category-item은 <카테고리 id>/<항목 id>")
+    trash.add_argument("kind", nargs="?", choices=["category", "category-item", "node"])
+    trash.add_argument("id", nargs="?", help="category-item은 <책 id>/<글 id>, node는 <프로젝트 id>/<노드 id>")
     trash.add_argument("--note", default="", help="put: 휴지통으로 옮기는 이유")
     trash.add_argument("--name", default=None, help="restore category: 같은 이름이 이미 있으면 이 이름으로 되살린다")
     for name, about in (("maps", "프로젝트·지도 이전(#95, 운영자용): plan(미리보기) | apply --backup 폴더 | revert(옛 코드로 되돌리기 전)"),
@@ -121,6 +122,13 @@ def main(argv: list[str] | None = None) -> None:
             # 인증 없는 HTTP를 바깥에 열지 않는다. 원격 공개는 인증(AUTH_ISSUER 등)이 켜졌을 때만.
             parser.exit(2, f"인증 없이 {args.host}에 열 수 없습니다. 루프백(127.0.0.1)으로 실행하거나 AUTH_ISSUER를 설정하세요.\n")
         verifier = JwtVerifier(settings.auth) if settings.auth else None
+        from magus import book_migrate
+
+        # 옛 형식(#96 전: 기본 카테고리·생각·문체 파일)이 남은 사용자가 있으면 띄우지 않는다. 새 코드는 그 형식을 읽지 않는다
+        serving = sorted(set(settings.auth.allowed.values())) if settings.auth else [settings.user_id]
+        if stale := [u for u in serving if (store.root / "users" / u).exists() and book_migrate.needs(store, u)]:
+            parser.exit(2, f"옛 형식(#96 전) 책장이 있는 사용자 {len(stale)}명: {', '.join(stale)}. 먼저 "
+                           "`magus maps apply --backup <폴더> --user <id>`로 이전합니다(docs/deploy.md 2-2절).\n")
         if args.transport == "stdio":
             transports.run_stdio(build_server(settings, store, get_embedder(settings), local_files=True))
         else:
@@ -210,16 +218,16 @@ def main(argv: list[str] | None = None) -> None:
     elif args.cmd == "trash":  # 지우지 않고 옮긴다. 되살리기는 이 CLI로만 한다(#88)
         user = settings.user_id
         if args.action != "list" and not (args.kind and args.id):
-            parser.exit(2, "put·restore에는 idea|style과 id가 필요합니다\n")
+            parser.exit(2, "put·restore에는 category|category-item|node와 id가 필요합니다\n")
         try:
             if args.action == "put":
-                if args.kind == "category-item":  # 항목 하나는 웹 책장이나 대화(category_trash)로 옮긴다
-                    parser.exit(2, "put은 idea|style|category만 받습니다\n")
-                if args.kind == "category":  # 카테고리 통째(항목 포함)
+                if args.kind == "node":
+                    parser.exit(2, "노드는 지도(웹·대화)에서 휴지통으로 옮깁니다\n")
+                if args.kind == "category":  # 책 통째(글 포함)
                     moved = [c.id for c in [store.trash_category(user, args.id, args.note)] if c]
-                else:
-                    moved = ([i.id for i in store.trash_idea(user, args.id, args.note)] if args.kind == "idea"
-                             else [e.id for e in [store.trash_style(user, args.id, args.note)] if e])
+                else:  # 글 하나(응답한 글도 함께, #96: 옛 생각·문체도 글)
+                    book_id, _, item_id = args.id.partition("/")
+                    moved = [f"{book_id}/{i.id}" for i in store.trash_item_with_replies(user, book_id, item_id, args.note)]
                 if not moved:
                     parser.exit(2, f"없음: {args.kind} {args.id}\n")
                 print(f"휴지통으로 옮김({user}): {args.kind} {', '.join(moved)}")
@@ -236,7 +244,7 @@ def main(argv: list[str] | None = None) -> None:
         items = store.list_trash(user)
         print(f"휴지통({user}) {len(items)}개")
         for t in items:
-            print(f"- {t.kind} {t.id} · {t.trashed_at} · {t.note or '-'}" + (f" · 함께 옮긴 생각 {t.with_id}" if t.with_id else "")
+            print(f"- {t.kind} {t.id} · {t.trashed_at} · {t.note or '-'}" + (f" · 함께 옮긴 글 {t.with_id}" if t.with_id else "")
                   + f" · “{t.preview[:40]}”")
     elif args.cmd in ("maps", "floors"):  # 프로젝트·지도 이전(#95, 층 이전 #93을 포함). 실행은 백업 뒤에, 전후 비교를 보인다
         from magus import map_migrate as floor_migrate
@@ -259,11 +267,17 @@ def main(argv: list[str] | None = None) -> None:
             parser.exit(1, "전후가 다른 사용자가 있습니다. 위 보고를 확인하세요(백업에서 되살릴 수 있습니다).\n")
     elif args.cmd == "conversation":
         from magus.casper.tools import add_conversation
+        from magus.category.books import writable_book
+        from mcp.server.mcpserver.exceptions import ToolError
 
+        try:
+            book = writable_book(store, settings.user_id, args.book)
+        except ToolError as e:
+            parser.exit(2, f"{e}\n")
         report, ideas = add_conversation(
-            store, settings.user_id, args.path.read_text(encoding="utf-8"), args.origin or args.path.stem
+            store, settings.user_id, args.path.read_text(encoding="utf-8"), args.origin or args.path.stem, book.key
         )
-        print(f"{args.path.name}: {report}\n저장 {len(ideas)}건")
+        print(f"{args.path.name}: {report}\n「{book.name}」에 저장 {len(ideas)}건")
     elif args.cmd == "seed-demo":
         from magus.book.demo import seed_demo, seed_demo_shelf
         from magus.book.outline import build_outline

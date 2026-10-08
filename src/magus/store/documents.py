@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import sqlite3
 import threading
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from magus.category.rules import HEX
+from magus.contexts import from_record, to_record
 from magus.floors import COMMON
 from magus.ids import new_id, safe_id, utcnow
 from magus.store.base import DocVersion, Document
@@ -159,10 +161,10 @@ class DocumentMixin:
     def _index_document(self, user_id: str, doc: Document, content: str) -> None:
         current = doc.versions[-1]
         self._db.execute(
-            "INSERT OR REPLACE INTO documents (id, user_id, floor, title, doc_type, project_id, color, edition, versions, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO documents (id, user_id, floor, title, doc_type, project_id, color, edition, versions, created_at, updated_at,"
+            " contexts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (doc.id, user_id, doc.floor, doc.title, doc.doc_type, doc.project_id, doc.color, current.edition, len(doc.versions),
-             doc.created_at, doc.updated_at),
+             doc.created_at, doc.updated_at, json.dumps(to_record(doc.contexts), ensure_ascii=False)),
         )
         self._replace_chunks(user_id, "document", doc.id, "document", chunk_text(f"{doc.title}\n{content}"))
 
@@ -180,7 +182,8 @@ class DocumentMixin:
 def _record(doc: Document) -> dict[str, Any]:
     return {"schema_version": DOCUMENT_SCHEMA, "id": doc.id, "title": doc.title, "title_by": doc.title_by, "doc_type": doc.doc_type,
             "floor": doc.floor, "project_id": doc.project_id, "color": doc.color, "created_at": doc.created_at,
-            "updated_at": doc.updated_at, "versions": [asdict(v) | {"stats": dict(v.stats)} for v in doc.versions]}
+            "updated_at": doc.updated_at, "versions": [asdict(v) | {"stats": dict(v.stats)} for v in doc.versions],
+            "contexts": to_record(doc.contexts)}
 
 
 def _document(r: dict[str, Any], folder: str) -> Document:
@@ -196,5 +199,6 @@ def _document(r: dict[str, Any], folder: str) -> Document:
         doc_type=str(r.get("doc_type") or "source_check"), floor=str(r.get("floor") or ""), project_id=str(r.get("project_id") or ""),
         color=color.lower() if HEX.fullmatch(color) else "#5b5f66", created_at=str(r.get("created_at") or ""),
         updated_at=str(r.get("updated_at") or r.get("created_at") or ""), versions=versions,
+        contexts=from_record(r.get("contexts")),
     )
 

@@ -40,6 +40,7 @@ from magus.inbox import INBOX_TYPES, LimitError, mb, save_upload, size_text
 from magus.signing import sign, unsign
 from magus.store import Profile, Store
 from magus.webbooks import BookPages
+from magus.webcontexts import ContextPages
 from magus.webmap import MapPages
 from magus.webshelf import EMBED, ShelfPages, is_panel_request, safe_at, state_url
 
@@ -226,7 +227,7 @@ def _pkce() -> tuple[str, str]:
 
 
 @dataclass
-class Web(ShelfPages, MapPages, BookPages):
+class Web(ShelfPages, MapPages, BookPages, ContextPages):
     store: Store
     settings: Settings
     base_url: str  # 바깥에서 보이는 주소(원격: PUBLIC_URL, 로컬: http://127.0.0.1:포트)
@@ -288,6 +289,7 @@ class Web(ShelfPages, MapPages, BookPages):
             ("/issues", ["GET"], self._old_page("issues", ("status", "kind"))),
             ("/checklist", ["GET"], self._old_page("cites", ("status",))),
             ("/questions", ["GET"], self._old_page("cites", ("status", "type"), {"view": "questions"})),
+            *self.context_routes(),  # 내 정보 → 자주 쓰는 컨텍스트(#96)
             *self.shelf_routes(),
         ]
         for path, methods, handler in routes:
@@ -345,7 +347,7 @@ class Web(ShelfPages, MapPages, BookPages):
         return f'<input type="hidden" name="csrf" value="{self.csrf(session[1])}">'
 
     async def _form(self, request: Request, session: tuple[str, str]) -> Any:
-        form = await request.form(max_files=20, max_fields=20)
+        form = await request.form(max_files=20, max_fields=200)  # 컨텍스트 칸(#96)은 줄마다 몇 개씩이라 넉넉히
         if not hmac.compare_digest(str(form.get("csrf", "")).encode(), self.csrf(session[1]).encode()):
             raise PermissionError("CSRF")
         return form
@@ -490,7 +492,9 @@ class Web(ShelfPages, MapPages, BookPages):
             "<p>위쪽 막대에 보이는 이름입니다. 비우고 저장하면 메일이 보입니다.</p>"
             f'{email}<p class="muted">메일은 로그인한 계정의 것이라 여기서 바꾸지 않습니다.</p>'
             '<p><button class="primary">저장</button></p></form>'
-            '<h2>올린 파일</h2><p><a href="/me/files">올린 파일 보기·올리기·지우기</a> — 원고 책·문헌 책에서 올린 것 말고, '
+            '<h2>자주 쓰는 컨텍스트</h2><p><a href="/me/contexts">자주 쓰는 컨텍스트 보기·고치기·더하기</a> — '
+            "노드·책을 만들 때 단추로 붙이는, AI가 글을 읽는 방법입니다.</p>"
+            '<h2>올린 파일</h2><p><a href="/me/files">올린 파일 보기·올리기·지우기</a> — 책장에서 바로 올린 것 말고, '
             "Claude에게 파일 이름으로 건넬 파일을 둡니다.</p>"
         )
         return self._page("내 정보", body, session, 400 if message.startswith('<p class="msg err">') else 200)
@@ -527,8 +531,8 @@ class Web(ShelfPages, MapPages, BookPages):
 <input type="file" name="files" multiple accept=".docx,.pdf,.md,.txt"> <button class="primary">올리기</button></form>
 <table><tr><th>이름</th><th class="num">크기</th><th class="num">올린 시각</th><th>쓰임</th><th></th></tr>{rows}</table>
 <p><a href="/me">← 내 정보</a></p>
-<p>원고는 책장의 원고 책에서, 논문은 문헌 책에서 올리면 바로 쓰입니다. 여기서 올린 파일은 Claude에게 파일 이름으로 말씀하세요.
-예: "올린 파일 kremer1993.pdf를 문헌으로 등록해 줘. 쓸 부분은 「…」, 이유는 …"</p>
+<p>원고는 책장의 가운데 노드에서, 논문은 그 논문을 둘 책에서 올리면 바로 쓰입니다. 여기서 올린 파일은 Claude에게 파일 이름으로 말씀하세요.
+예: "올린 파일 kremer1993.pdf를 「읽은 논문」 책에 원문 확인으로 넣어 줘. 쓸 부분은 「…」, 이유는 …"</p>
 {UPLOAD_SCRIPT}"""
         return self._page("올린 파일", body, session, current="")
 
@@ -606,10 +610,10 @@ class Web(ShelfPages, MapPages, BookPages):
         try:
             form = await self._form(request, session)
         except PermissionError:
-            return self._page("원고 책", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            return self._page("원고", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         project = self.store.get_project(session[0], str(form.get("project_id", "")))
         if project is None or not self.store.list_chapters(session[0], project.id):  # 원고 없는 프로젝트에는 원고 책이 없다
-            return self._page("원고 책", '<p class="msg err">없는 원고 책입니다. <a href="/shelf">책장</a>으로 돌아가세요.</p>', session, 404)
+            return self._page("원고", '<p class="msg err">올린 원고가 없습니다. <a href="/shelf">프로젝트</a>로 돌아가세요.</p>', session, 404)
         location = await run_in_threadpool(export_docx, self.store, session[0], project)
         return RedirectResponse(self.export_link(session[0], location).removeprefix(self.base_url), status_code=303)
 

@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from magus.ids import local_time, utcnow
+from magus.contexts import book_contexts
 from magus.maps import BOOK_NAMES, LIBRARY_NAME, local_key
 from magus.store import MapNode, Store
 
@@ -89,43 +90,33 @@ def _who(author: str) -> str:
     return "저자" if author == "me" else "Claude(AI)"
 
 
+def _contexts_md(contexts: tuple) -> str:
+    return "# 컨텍스트\n\nAI가 이 책의 글을 읽는 방법(저자가 적어 둔 것)입니다.\n\n" + "\n\n".join(
+        (f"## {c.name}\n\n" if c.name else "") + c.text.strip() for c in contexts) + "\n"
+
+
+def _ref_file(store: Store, user: str, z: _Zip, where: str, ref: Any) -> None:
+    bib = ref.bib
+    name = safe_name(f"{ref.key} {bib.get('first_author') or ''} {bib.get('year') or ''}", 50) + ".md"
+    passages = store.get_passages(user, ref.key)
+    body = [f"# {bib.get('title') or bib.get('raw') or ref.key}", ""]
+    body += [f"{bib['memo']}\n"] if bib.get("memo") else []
+    body += [f"> {p.text.strip()}\n\n이유: {p.reason}" + (f" ({p.locator})" if p.locator else "") + "\n" for p in passages]
+    z.text(where, name, _front([
+        ("key", ref.key), ("상태", "원문 확인(저자가 원문을 읽고 확인)" if ref.status == "verified" else "원문 확인 전(참고문헌 목록 등)"),
+        ("저자", bib.get("authors") or bib.get("author")), ("연도", bib.get("year")), ("제목", bib.get("title")),
+        ("원문 줄", bib.get("raw")), ("다른 표기", list(ref.aliases)), ("파일", ref.file_path),
+        ("옮긴 기록", (ref.moved or {}).get("reason") if ref.moved else ""),
+        ("등록한 때", local_time(ref.created_at, "%Y-%m-%d %H:%M") if ref.created_at else "")]) + "\n".join(body) + "\n")
+
+
 def _book_folder(store: Store, user: str, z: _Zip, folder: str, key: str) -> str | None:
-    """책 하나를 zip에 넣고 그 책의 폴더(또는 파일) 이름을 돌려준다."""
+    """책 하나를 zip에 넣고 그 책의 폴더(또는 파일) 이름을 돌려준다(#96: 책의 글 + 문헌 글 + 컨텍스트.md)."""
     floor, local = local_key(key)
-    if local == "ideas" and floor:
-        where = f"{folder}/생각"
-        for idea in sorted(store.list_ideas(user, floors=[floor]), key=lambda i: i.created_at):
-            z.text(where, _item_file(idea.created_at, idea.title, idea.text), _front([
-                ("날짜", local_time(idea.created_at, "%Y-%m-%d %H:%M")), ("제목", idea.title), ("작성자", _who(idea.author)),
-                ("제목을 지은 이", {"ai": "Claude(AI)", "author": "저자"}.get(idea.title_by or "")), ("종류", idea.kind),
-                ("출처", idea.origin), ("응답한 생각", idea.parent_id), ("고친 때", local_time(idea.edited_at, "%Y-%m-%d %H:%M") if idea.edited_at else ""),
-                ("id", idea.id)]) + idea.text.strip() + "\n")
-        return "생각/"
-    if local == "styles" and floor:
-        where = f"{folder}/문체"
-        for entry in sorted(store.list_styles(user, floors=[floor]), key=lambda e: e.created_at):
-            tags = [f"{k}: {', '.join(v) if isinstance(v, list) else v}" for k, v in entry.tags.items() if v]
-            z.text(where, _item_file(entry.created_at, None, entry.passage), _front([
-                ("날짜", local_time(entry.created_at, "%Y-%m-%d %H:%M")), ("작성자", "저자"), ("출전", entry.work),
-                ("태그", tags), ("태그를 정한 이", {"ai": "Claude(AI)", "author": "저자"}.get(entry.tags_by or "")), ("id", entry.id)])
-                + f"> {entry.passage.strip()}\n\n이유: {entry.reason.strip()}\n")
-        return "문체/"
-    if local == "refs" and floor:
-        where = f"{folder}/문헌"
-        for ref in sorted(store.list_refs(user, floors=[floor]), key=lambda r: r.key):
-            bib = ref.bib
-            name = safe_name(f"{ref.key} {bib.get('first_author') or ''} {bib.get('year') or ''}", 50) + ".md"
-            passages = store.get_passages(user, ref.key)
-            body = [f"# {bib.get('title') or bib.get('raw') or ref.key}", ""]
-            body += [f"> {p.text.strip()}\n\n이유: {p.reason}" + (f" ({p.locator})" if p.locator else "") + "\n" for p in passages]
-            z.text(where, name, _front([
-                ("key", ref.key), ("상태", "확인(원문을 읽고 등록)" if ref.status == "verified" else "미확인(원고 참고문헌에서 들여옴)"),
-                ("저자", bib.get("authors") or bib.get("author")), ("연도", bib.get("year")), ("제목", bib.get("title")),
-                ("원문 줄", bib.get("raw")), ("다른 표기", list(ref.aliases)), ("파일", ref.file_path),
-                ("옮긴 기록", (ref.moved or {}).get("reason") if ref.moved else ""),
-                ("등록한 때", local_time(ref.created_at, "%Y-%m-%d %H:%M") if ref.created_at else "")]) + "\n".join(body) + "\n")
-        return "문헌/"
     if local == "ms" and floor:
+        project = store.get_project(user, floor)
+        if project and project.contexts:
+            z.text(f"{folder}/원고", "컨텍스트.md", _contexts_md(project.contexts))
         return _manuscript(store, user, z, f"{folder}/원고", floor)
     if local.startswith("doc."):
         doc = store.get_document(user, local[4:])
@@ -134,7 +125,7 @@ def _book_folder(store: Store, user: str, z: _Zip, folder: str, key: str) -> str
         content = store.read_document(user, doc.id) or ""
         v = doc.versions[-1] if doc.versions else None
         where = z.text(folder, safe_name(doc.title) + ".md", _front([
-            ("제목", doc.title), ("종류", "출처 확인 문서" if doc.doc_type == "source_check" else doc.doc_type),
+            ("제목", doc.title), ("컨텍스트", [c.name or c.text[:30] for c in doc.contexts]),
             ("만든 때", local_time(v.at, "%Y-%m-%d %H:%M") if v else ""), ("기준 수정본", f"E{v.edition}" if v and v.edition else ""),
             ("판", v.number if v else "")]) + content)
         return where.rsplit("/", 1)[-1]
@@ -145,12 +136,21 @@ def _book_folder(store: Store, user: str, z: _Zip, folder: str, key: str) -> str
     if category is None:
         return None
     where = f"{folder}/{safe_name(category.name)}"
+    if category.contexts:
+        z.text(where, "컨텍스트.md", _contexts_md(category.contexts))
     for item in sorted(store.list_category_items(user, category.id), key=lambda i: i.created_at):
         fields = [f"{k}: {v}" for k, v in item.fields.items() if v]
+        parts = "".join(f"\n> {p.text.strip()}\n" + (f"\n이유: {p.reason}" if p.reason else "") + (f" ({p.locator})" if p.locator else "") + "\n"
+                        for p in item.passages)
         z.text(where, _item_file(item.created_at, item.title, item.content or " ".join(fields)), _front([
             ("날짜", local_time(item.created_at, "%Y-%m-%d %H:%M")), ("제목", item.title), ("작성자", _who(item.author)),
-            ("제목을 지은 이", {"ai": "Claude(AI)", "author": "저자"}.get(item.title_by or "")), ("칸", fields), ("태그", list(item.tags)),
-            ("연결된 장", [f"{p} {n}장" for p, n in item.chapters]), ("id", item.id)]) + (item.content or "").strip() + "\n")
+            ("제목을 지은 이", {"ai": "Claude(AI)", "author": "저자"}.get(item.title_by or "")), ("이유", item.reason), ("위치", item.where),
+            ("칸", fields), ("태그", list(item.tags)), ("태그를 정한 이", {"ai": "Claude(AI)", "author": "저자"}.get(item.tags_by or "")),
+            ("연결된 장", [f"{p} {n}장" for p, n in item.chapters]), ("출처", item.origin), ("응답한 글", item.parent_id),
+            ("고친 때", local_time(item.edited_at, "%Y-%m-%d %H:%M") if item.edited_at else ""), ("id", item.id)])
+            + (item.content or "").strip() + "\n" + parts)
+    for ref in store.list_refs(user, book=category.id):
+        _ref_file(store, user, z, f"{where}/문헌 글", ref)
     return f"{safe_name(category.name)}/"
 
 
@@ -209,7 +209,7 @@ def build_zip(store: Store, user: str, floors: list[str]) -> bytes:
                 for key in node.books:
                     shown = _book_folder(store, user, z, folder, key)
                     if shown:
-                        books.append({"책": _book_title(store, user, key), "종류": _book_kind(key), "자리": shown})
+                        books.append({"책": _book_title(store, user, key), "컨텍스트": _book_contexts(store, user, key), "자리": shown})
                 if not node.books:
                     z.text(folder, "빈 노드.md", f"# {node.name}\n\n책이 없는 노드입니다.\n")
             nodes.append({"id": node.id, "이름": names[node.id], "x": node.x, "y": node.y, "색": node.color, "가운데": node.center,
@@ -241,9 +241,9 @@ def _book_title(store: Store, user: str, key: str) -> str:
     return category.name if category else ""
 
 
-def _book_kind(key: str) -> str:
-    _, local = local_key(key)
-    return "원고 책" if local == "ms" else "문서 책" if local.startswith("doc.") else "모음 책"
+def _book_contexts(store: Store, user: str, key: str) -> list[str]:
+    contexts, _ = book_contexts(store, user, key)
+    return [c.name or c.text[:30] for c in contexts]
 
 
 README = """# Magus에서 내려받은 자료
@@ -260,10 +260,10 @@ Magus 서버 없이도 읽을 수 있는 마크다운 파일입니다. 아무 �
 
 - 프로젝트 하나 = 폴더 하나. 그 안의 `지도.json`에 노드(이름·위치·색·꽂힌 책·연결)와 선이 있습니다.
 - 노드 하나 = 폴더 하나(가운데 노드는 `가운데 노드`).
-- 모음 책(생각·문체·카테고리) = 노드 폴더 안의 폴더. 게시판의 항목 하나가 마크다운 파일 하나이고, 파일 머리에 날짜·제목·작성자가 있습니다.
-- 문헌 = `문헌` 폴더. 문헌 하나가 파일 하나(서지·확인 상태·발췌).
-- 원고 책 = `원고` 폴더. 올린 원고 파일(docx·pdf) 원본, 장마다 마크다운, 확인 요청·결정 목록.
-- 문서 책 = 마크다운 파일 하나(지금 판).
+- 책 = 노드 폴더 안의 폴더. 게시판의 글 하나가 마크다운 파일 하나이고, 파일 머리에 날짜·제목·작성자가 있습니다.
+  책에 컨텍스트(AI가 그 책을 읽는 방법)가 있으면 `컨텍스트.md`에, 서지가 있는 문헌 글은 `문헌 글` 폴더에 파일 하나씩(서지·원문 확인·쓸 부분) 있습니다.
+- 올린 원고 = `원고` 폴더. 올린 원고 파일(docx·pdf) 원본, 장마다 마크다운, 확인 요청·결정 목록.
+- 원고에서 만든 문서 = 마크다운 파일 하나(지금 판).
 - 연결 노드 = `연결.md`(원본을 가리키는 메모). 내용은 원본 프로젝트 폴더에 한 번만 들어 있습니다.
 
 시각은 한국 시간입니다.

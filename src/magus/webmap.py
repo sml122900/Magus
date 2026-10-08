@@ -3,7 +3,7 @@
 - 첫 화면(/shelf): 프로젝트 목록(이름·최근 수정·노드 수)과 '+ 프로젝트'(원고 올리기 또는 제목만). 검색은 모든 프로젝트에서.
 - 프로젝트 화면(/shelf/p/<프로젝트>)에서 끝낸다: 지도(마인드맵) + 패널. 상태는 주소에 둔다(?node=…&book=…&at=…, pushState).
   노드를 누르면 패널에 그 노드의 정면 2D 책장, 책을 누르면 같은 패널 아래(게시판 자리, iframe)에 그 책 화면
-  (모음 책은 게시판, 원고 책은 탭, 문서 책은 본문)이 뜬다. 데스크톱(1200px 이상)은 패널이 지도 오른쪽, 좁으면 아래.
+  (책은 게시판, 올린 원고는 탭, 원고에서 만든 문서는 본문)이 뜬다. #96: 노드 머리에 노드의 컨텍스트, '+ 노드'와 노드 설정에서 컨텍스트를 붙인다. 데스크톱(1200px 이상)은 패널이 지도 오른쪽, 좁으면 아래.
 - 지도 조작(스크립트, magus.webmap_assets): 노드 끌어 옮기기(위치 저장), 빈 곳 두 번 누르기·'+ 노드'로 만들기, 노드 가장자리의 ＋를
   다른 노드로 끌거나 '선 잇기'로 선 잇기, 선을 눌러 끊기, 휠·핀치·끌기로 확대·축소·이동, '가운데로'.
   패널의 책을 지도의 노드로 끌어 놓으면 그 노드로 옮긴다(키보드는 책 설정의 '위치').
@@ -36,8 +36,10 @@ from magus.store.floors import MoveError
 from magus.store.formats import one_line
 from magus.store.maps import MapError
 from magus.webmap_assets import MAP_SCRIPT, MAP_STYLE, PROJECTS_STYLE
+from magus.contexts import View
+from magus.webcontexts import CONTEXT_SCRIPT, CONTEXT_STYLE, context_fieldset, contexts_from_form, contexts_view_html, register_row
 from magus.webshelf import (
-    EMBED, GROUP_SIZE, KINDS, Book, Kind, add_book, book_html, builtin_kind, category_kind, clean_query, find, one_char, row_html,
+    EMBED, GROUP_SIZE, Book, Kind, add_book, book_html, category_kind, clean_query, find, one_char, row_html,
     safe_at, shelf_html, state_url, text_color,
 )
 
@@ -45,7 +47,7 @@ PROJECT_TITLE_MAX = 120
 WHEN = "%m-%d %H:%M"
 _NEXT = re.compile(r"/shelf(/[A-Za-z0-9_.\-/%]*)?")
 _ID = re.compile(r"[A-Za-z0-9_.\-]{1,80}")
-MAP_DONE = ("node", "link", "rename", "color", "connect", "disconnect", "node_trash", "project")  # 지도 바꾸기 뒤 한 줄의 종류
+MAP_DONE = ("node", "link", "rename", "color", "connect", "disconnect", "node_trash", "project", "contexts", "ctx_saved")  # 지도 바꾸기 뒤 한 줄의 종류
 
 
 def done_text(done: str, name: str) -> str:
@@ -57,7 +59,9 @@ def done_text(done: str, name: str) -> str:
         "rename": f"노드 이름을 {josa(name, '으로/로')} 바꿨습니다." if name else "노드 이름을 바꿨습니다.",
         "color": "노드 색을 바꿨습니다.", "connect": "선을 이었습니다.", "disconnect": "선을 끊었습니다.",
         "node_trash": "노드를 휴지통으로 옮겼습니다. 지운 것이 아니라 운영자가 되살릴 수 있습니다.",
-        "project": "새 프로젝트를 만들었습니다. 원고는 가운데 노드의 '책 추가'에서 원고 파일을 고르면 원고 책이 됩니다.",
+        "project": "새 프로젝트를 만들었습니다. 원고는 가운데 노드의 '책 추가 → 문서 올리기'로 올립니다.",
+        "contexts": "노드의 컨텍스트를 바꿨습니다.",
+        "ctx_saved": "자주 쓰는 컨텍스트에 등록했습니다(노드의 컨텍스트는 저장하지 않았습니다. 필요하면 다시 저장해 주세요).",
     }[done]
 
 
@@ -136,7 +140,7 @@ class MapPages:
         from magus.webbooks import BOOK_STYLE  # noqa: PLC0415  (올리기 진행 막대)
         from magus.webshelf import SHELF_STYLE  # noqa: PLC0415
 
-        return self._page(title, body, session, status, current="프로젝트", css=SHELF_STYLE + BOOK_STYLE + css)
+        return self._page(title, body, session, status, current="프로젝트", css=SHELF_STYLE + BOOK_STYLE + CONTEXT_STYLE + css)
 
     def _break_out(self, request: Request) -> Response:
         """패널(iframe) 안에서 프로젝트 화면 주소가 열리면(저장·휴지통 뒤 넘어오기) 바깥 화면을 그 주소로 바꾼다."""
@@ -146,7 +150,7 @@ class MapPages:
 
     # ---- 프로젝트 목록 ------------------------------------------------------------------------
     def locate(self, uid: str, at: str) -> tuple[str | None, str | None]:
-        """게시판 자리의 주소(책 화면) → (프로젝트, 책). 책 추가·모음 책 만들기처럼 책이 없는 화면은 (프로젝트, None)."""
+        """게시판 자리의 주소(책 화면) → (프로젝트, 책). 책 추가·새 책처럼 책이 없는 화면은 (프로젝트, None)."""
         path, _, query = at.partition("?")
         parts = [urllib.parse.unquote(x) for x in path.split("/")[2:] if x]
         if not parts:
@@ -216,7 +220,7 @@ class MapPages:
         for f in [*works, *library]:
             found = self.store.get_map(uid, f.id)
             nodes = len(found.nodes) if found else 0
-            what = (f"원고 책 {len(self.store.list_chapters(uid, f.id))}장" if f.has_manuscript
+            what = (f"올린 원고 {len(self.store.list_chapters(uid, f.id))}장" if f.has_manuscript
                     else "여러 프로젝트가 함께 쓰는 자료" if f.common else "원고 없음")
             cards.append(f'<li class="pcard{" library" if f.common else ""}"><a href="{html.escape(state_url(f.id))}">'
                          f'<span class="pname">{html.escape(project_name(f))}</span>'
@@ -227,7 +231,7 @@ class MapPages:
         limit = f"파일 한 개 {self.settings.max_upload_bytes // 1_000_000}MB까지(docx 또는 pdf)."
         new = (
             '<li class="pcard new"><h2>+ 프로젝트</h2>'
-            "<p>원고 파일을 고르면 원고 책이 가운데 노드에 꽂힌 새 프로젝트가 됩니다.</p>"
+            "<p>원고 파일을 고르면 그 원고가 가운데 노드에 꽂힌 새 프로젝트가 됩니다.</p>"
             f'<form method="post" action="/shelf/manuscript" enctype="multipart/form-data" data-progress="{IMPORTING}">{csrf}'
             '<input type="hidden" name="project" value="new">'
             f'<label>원고 파일 <input type="file" name="file" accept=".docx,.pdf" required></label><p class="muted">{limit}</p>'
@@ -309,7 +313,7 @@ class MapPages:
             _, book_key = self.locate(uid, at)
         if book_key and node is None:
             node = found.node_of(book_key)
-        if node is None and at and not book_key:  # 책 추가·모음 책 만들기 화면: 주소의 노드
+        if node is None and at and not book_key:  # 책 추가·새 책 화면: 주소의 노드
             query = dict(urllib.parse.parse_qsl(at.partition("?")[2]))
             node = found.node(query.get("node") or "") or (found.nodes[0] if query.get("project") == found.floor else None)
         book = None
@@ -409,11 +413,23 @@ class MapPages:
                 f'<label class="block">다른 프로젝트의 노드 <select name="target" required>{"".join(groups)}</select></label>'
                 '<p class="muted">연결 노드는 원본을 가리킵니다. 연결 노드에서 보거나 넣으면 원본 노드에 들어갑니다.</p>'
                 '<p><button>연결 노드 만들기</button></p></form>' if groups else '<p class="muted">연결할 다른 프로젝트의 노드가 없습니다.</p>')
+        saved = self.store.list_saved_contexts(uid)
+        chips = "".join(
+            f'<label class="chip-toggle"><input type="checkbox" name="ctx_pick" value="{html.escape(c.id)}">{html.escape(c.name)}</label>'
+            for c in saved)
+        contexts = (
+            '<fieldset class="ctx ctx-mini"><legend>컨텍스트(선택)</legend><p class="muted">AI가 이 노드의 글을 읽는 방법입니다.</p>'
+            + (f'<div class="chips" role="group" aria-label="자주 쓰는 컨텍스트">{chips}</div>' if chips else "")
+            + '<details><summary>직접 적기</summary><label class="block">내용 <textarea name="ctx_new" maxlength="500" rows="2" '
+            'placeholder="예: 이 노드의 글은 현장 취재 메모다."></textarea></label></details>'
+            '<p class="muted">누르면 붙고 다시 누르면 떨어집니다. 붙인 뒤에는 노드 설정에서 고칩니다.</p></fieldset>'
+        )
         return (
             '<details class="pm-new" id="new-node"><summary class="btn primary-ish">+ 노드</summary><div class="pm-new-in">'
             f'<form method="post" action="{post}" class="pm-form">{csrf}<input type="hidden" name="action" value="add_node">'
             '<input type="hidden" name="x"><input type="hidden" name="y">'
             f'<label class="block">새 노드 이름({NODE_NAME_MAX}자까지) <input name="name" maxlength="{NODE_NAME_MAX}" required></label>'
+            f'{contexts}'
             '<p class="muted">새 노드는 가운데 노드와 선으로 이어집니다. 선은 나중에 끊고 다시 이을 수 있습니다.</p>'
             f'<p><button class="primary">노드 만들기</button></p></form>{link}</div></details>'
         )
@@ -507,12 +523,13 @@ class MapPages:
             intro = ""
             kind = "가운데 노드" if node.center else "노드"
         title = found.title if node.center else node.name
-        hint = ("" if not books else '<p class="pp-hint">책을 누르면 아래에 열립니다. 모음 책과 문서 책은 지도의 다른 노드로 끌어 놓으면 '
+        hint = ("" if not books else '<p class="pp-hint">책을 누르면 아래에 열립니다. 올린 원고 말고는 지도의 다른 노드로 끌어 놓으면 '
                 "그 노드로 옮겨집니다(책 설정의 '위치'로도 옮길 수 있습니다).</p>")
         settings = self._node_settings(uid, session, floor, found, node)
+        context = "" if node.missing else contexts_view_html(View(node.contexts, node=node.name))  # 노드의 컨텍스트(#96)
         return (f'<div class="pp-node" id="pp-node" data-node="{html.escape(node.id)}">'
                 f'<div class="pp-head"><h2 class="pp-title" id="pp-title" tabindex="-1">{html.escape(title)}</h2>'
-                f'<span class="pp-kind">{kind} · 책 {len(books)}권</span></div>{intro}{shelf}{hint}{settings}</div>')
+                f'<span class="pp-kind">{kind} · 책 {len(books)}권</span></div>{context}{intro}{shelf}{hint}{settings}</div>')
 
     def _node_settings(self, uid: str, session: tuple[str, str], floor: Floor, found: ProjectMap, node: MapNode) -> str:
         """노드 설정(스크립트 없이도): 이름·색·선 잇기·끊기·휴지통."""
@@ -550,9 +567,18 @@ class MapPages:
             trash = (f'<form method="post" action="{post}" class="pm-form">{hidden}<input type="hidden" name="action" value="trash">'
                      f'<p>{what}를 휴지통으로 옮깁니다' + ("(원본은 그대로입니다)" if node.link else "")
                      + '. 지우는 것이 아니라 옮기는 것이라 운영자가 되살릴 수 있습니다.</p><p><button>휴지통으로 옮기기</button></p></form>')
-        return (f'<details class="pp-set"><summary>노드 설정</summary>{rename}{color}'
+        if node.link:
+            contexts = '<p class="muted">연결 노드의 컨텍스트는 원본 노드의 것입니다(원본 지도에서 바꿉니다).</p>'
+        else:
+            saved = self.store.list_saved_contexts(uid)
+            contexts = (f'<form method="post" action="{post}" class="pm-form">{hidden}<input type="hidden" name="action" value="contexts">'
+                        + context_fieldset(saved, node.contexts, what="이 노드") +
+                        '<p class="muted">책에 컨텍스트가 없으면 그 책은 이 노드의 컨텍스트를 따릅니다.</p>'
+                        '<p><button>컨텍스트 저장</button></p></form>')
+        return (f'<details class="pp-set"><summary>노드 설정(이름·색·컨텍스트·선)</summary>{rename}{color}'
+                f'<h3>컨텍스트</h3>{contexts}'
                 f'<h3>선</h3><ul class="pp-lines">{lines or "<li>이어진 노드가 없습니다.</li>"}</ul>{connect}'
-                f'<h3>휴지통</h3>{trash}</details>')
+                f'<h3>휴지통</h3>{trash}</details>{CONTEXT_SCRIPT}')
 
     async def project_panel(self, request: Request) -> Response:
         """패널 위쪽(노드의 책장)만: 스크립트가 노드를 열 때 받아 바꾼다."""
@@ -599,8 +625,22 @@ class MapPages:
                 await run_in_threadpool(lambda: self.store.update_node(uid, floor_id, node, x=num("x"), y=num("y")))
                 done = ""
             elif action == "add_node":
-                made = await run_in_threadpool(lambda: self.store.add_node(uid, floor_id, str(form.get("name") or ""), x=num("x"), y=num("y")))
+                saved = await run_in_threadpool(self.store.list_saved_contexts, uid)
+                attached = contexts_from_form(form, saved)
+                made = await run_in_threadpool(lambda: self.store.add_node(uid, floor_id, str(form.get("name") or ""), x=num("x"), y=num("y"),
+                                                                           contexts=attached))
                 result["node"], done, back = made.id, "node", state_url(floor_id, node=made.id)
+            elif action == "contexts":  # 노드 설정의 컨텍스트(#96). '자주 쓰는 컨텍스트로 등록'이면 등록만 한다
+                if form.get("register") is not None:
+                    text = await run_in_threadpool(register_row, self.store, uid, form)
+                    if "msg err" in text:
+                        raise MapError("ctx_register", "등록하지 못했다")
+                    done = "ctx_saved"
+                else:
+                    saved = await run_in_threadpool(self.store.list_saved_contexts, uid)
+                    attached = contexts_from_form(form, saved)
+                    await run_in_threadpool(self.store.set_node_contexts, uid, floor_id, node, attached)
+                    done = "contexts"
             elif action == "add_link":
                 target_floor, _, target_node = str(form.get("target") or "").partition(":")
                 made = await run_in_threadpool(lambda: add_link(self.store, uid, floor_id, target_floor, target_node, x=num("x"), y=num("y")))
@@ -629,10 +669,11 @@ class MapPages:
             if wants_json:
                 return JSONResponse({"ok": False, "error": text}, status_code=400)
             return RedirectResponse(with_query(back, maperr=e.code, name=str(e.info.get("name") or "")), status_code=303)
-        except ValueError as e:  # 색 이름 등
+        except ValueError as e:  # 색 이름·컨텍스트 길이 등
             if wants_json:
                 return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-            return RedirectResponse(with_query(back, maperr="bad_color"), status_code=303)
+            return RedirectResponse(with_query(back, maperr="bad_context" if action in ("add_node", "contexts") else "bad_color"),
+                                    status_code=303)
         if wants_json:
             return JSONResponse(result)
         target = result.get("node") or node
@@ -646,7 +687,7 @@ class MapPages:
                 f'<input type="hidden" name="next" value="{html.escape(here)}"></form>')
 
     def location_form(self, uid: str, session: tuple[str, str], kind: Kind) -> str:
-        """책 설정의 '위치': 프로젝트 · 노드를 고른다(키보드로 옮기는 길). 문서 책은 원고가 있는 프로젝트에만."""
+        """책 설정의 '위치': 프로젝트 · 노드를 고른다(키보드로 옮기는 길). 원고에서 만든 문서는 원고가 있는 프로젝트에만."""
         here = self.store.node_of_book(uid, kind.key)
         groups = []
         for f in self.store.list_floors(uid):
@@ -658,14 +699,14 @@ class MapPages:
                 f'{html.escape(project_name(f))} · {html.escape("가운데 노드" if n.center else n.name)}</option>'
                 for n in (found.nodes if found else ()) if not n.link)
             groups.append(f'<optgroup label="{html.escape(project_name(f))}">{options}</optgroup>')
-        rule = ("문서 책은 원고가 있는 프로젝트에만 둘 수 있습니다." if kind.base == "doc"
-                else "다른 프로젝트로 옮기면 받는 프로젝트에 같은 기본 카테고리가 있을 때 하나로 합쳐집니다." if kind.category is None
-                else "다른 프로젝트로 옮길 때 그 프로젝트에 같은 이름의 카테고리가 있으면 옮기지 않습니다.")
-        refs = " 원고의 인용 점검은 그 프로젝트의 문헌과 연결 노드가 가리키는 문헌만 봅니다." if kind.base == "refs" else ""
+        rule = ("원고에서 만든 문서는 원고가 있는 프로젝트에만 둘 수 있습니다." if kind.base == "doc"
+                else "다른 프로젝트로 옮길 때 그 프로젝트에 같은 이름의 책이 있으면 옮기지 않습니다.")
+        refs = (" 원고의 인용 점검은 그 프로젝트의 문헌 글과 연결 노드가 가리키는 문헌 글만 봅니다."
+                if kind.category is not None and kind.category.sources else "")
         return (f'<h2>위치</h2><form method="post" action="/shelf/move" class="card">{self._csrf_input(session)}'
                 f'<input type="hidden" name="book" value="{html.escape(kind.key)}"><input type="hidden" name="next" value="dest">'
                 f'<label class="block">꽂힌 곳(프로젝트 · 노드) <select name="to">{"".join(groups)}</select></label>'
-                f'<p class="muted">{"" if kind.base == "doc" else "항목은 모두 함께 옮겨집니다. "}{rule}{refs}</p>'
+                f'<p class="muted">{"" if kind.base == "doc" else "글은 모두 함께 옮겨집니다. "}{rule}{refs}</p>'
                 "<p><button>옮기기</button></p></form>")
 
     async def shelf_move(self, request: Request) -> Response:
@@ -682,15 +723,11 @@ class MapPages:
         nxt = str(form.get("next") or "/shelf")
         back = safe_next(nxt) if nxt != "dest" else "/shelf"
         try:
-            key = book
-            if "." not in book and book in KINDS:  # 옛 폼(종류만): 그 종류가 있는 첫 프로젝트
-                key = next((f"{book}.{f.id}" for f in self.store.list_floors(uid) if book in f.builtins), book)
-            move, lost = await run_in_threadpool(move_book, self.store, uid, key, to_floor, to_node or None)
+            move, lost = await run_in_threadpool(move_book, self.store, uid, book, to_floor, to_node or None)
         except (MoveError, MapError) as e:
             return RedirectResponse(with_query(back, moveerr=e.code, b=book, t=to), status_code=303)
         if nxt == "dest":
-            new_key = f"{move.book}.{move.to_floor}" if move.book in KINDS else move.book
-            target = state_url(move.to_floor, new_key, node=move.to_node)
+            target = state_url(move.to_floor, move.book, node=move.to_node)
         else:
             target = back
         return RedirectResponse(with_query(target, moved=move.id, lost=",".join(lost)), status_code=303)
@@ -740,15 +777,14 @@ class MapPages:
                 more = (f' <small><a href="{html.escape(state_url(floor.id, b.key, f"/shelf/{b.key}?q={urllib.parse.quote(q)}", n.id))}">'
                         f"{len(rows)}개 모두 보기</a></small>" if len(rows) > GROUP_SIZE else "")
                 items = "".join(_retarget(row_html(r, q), floor.id, b.key, n.id) for r in rows[:GROUP_SIZE])
+                band = f"{html.escape(b.band)} · " if b.band else ""
                 parts.append(f'<section class="group"><h3>{where}<a href="{html.escape(state_url(floor.id, b.key, node=n.id))}">'
-                             f'{html.escape(b.name)}</a> <small>{html.escape(b.band)} 책 · {len(rows)}개</small>{more}</h3>'
+                             f'{html.escape(b.name)}</a> <small>{band}{len(rows)}개</small>{more}</h3>'
                              + (f'<ol class="board">{items}</ol>' if items else "") + "</section>")
         return "".join(parts)
 
     def _kind_of(self, uid: str, key: str) -> Kind | None:
         base, _, rest = key.partition(".")
-        if base in KINDS and rest:
-            return builtin_kind(base, rest)
         if base in ("ms", "doc"):
             return None
         try:

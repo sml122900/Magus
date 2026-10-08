@@ -28,7 +28,9 @@ from magus.store.fileio import write_json as _write_json
 from magus.store.fileio import write_text as _write_text
 from magus.floors import COMMON, MAX_FLOORS
 from magus.category.rules import HEX
+from magus.contexts import from_record, to_record
 from magus.store.categories import CategoryMixin
+from magus.store.contexts import ContextMixin
 from magus.store.documents import DocumentMixin
 from magus.store.floors import FloorMixin
 from magus.store.maps import MapMixin
@@ -67,7 +69,7 @@ ANSWERS_HEADER = ("# 저자 답\n\n질문은 매번 원고와 문헌에서 계�
 _CHAPTER_FILE = re.compile(r"ch-(\d+)\.md")
 _VERSION_FILE = re.compile(r"ch-(\d+)\.v(\d+)\.md")
 
-class LocalStore(ShelfMixin, CategoryMixin, FloorMixin, MapMixin, DocumentMixin):
+class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, DocumentMixin):
     def __init__(self, data_dir: Path):
         self.root = Path(data_dir)
         self.root.mkdir(parents=True, exist_ok=True)
@@ -125,8 +127,8 @@ class LocalStore(ShelfMixin, CategoryMixin, FloorMixin, MapMixin, DocumentMixin)
         _write_json(pdir / "project.json", {"title": title, **extra, "created_at": now, "parts": []})
         with self._db:
             self._index_project(user_id, project_id, title, now, extra)
-        self._register_floor(user_id, project_id, layout)  # 새 프로젝트에는 생각·문헌(#93)
-        self.ensure_maps(user_id)  # 새 프로젝트의 지도: 가운데·생각·문헌 + 「내 서재」 문체·문헌 연결(#95)
+        self._register_floor(user_id, project_id, layout)  # 프로젝트 순서에 더한다(#96부터 기본 책은 없다)
+        self.ensure_maps(user_id)  # 새 프로젝트의 지도: 가운데 노드(#95)
         return Project(project_id, user_id, title, now, now, **extra)
 
     @_locked
@@ -187,6 +189,8 @@ class LocalStore(ShelfMixin, CategoryMixin, FloorMixin, MapMixin, DocumentMixin)
         _write_json(self.root / moved / "trash-note.json", {"at": utcnow(), "note": note})
         self.create_project(user_id, project.title, project_id, titles=BookTitles(project.title, project.subtitle,
                                                                                     project.title_en, project.subtitle_en))
+        if project.contexts:  # 컨텍스트는 그 자리(가운데 노드의 책)에 남긴다(#96): 다시 올리면 그대로 읽힌다
+            self.set_book_contexts(user_id, f"ms.{project_id}", project.contexts)
         return moved
 
     @_locked
@@ -705,10 +709,10 @@ class LocalStore(ShelfMixin, CategoryMixin, FloorMixin, MapMixin, DocumentMixin)
         color = extra.get("color") if isinstance(extra.get("color"), str) and HEX.fullmatch(extra["color"]) else None
         self._db.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (user_id,))
         self._db.execute(
-            "INSERT INTO projects (id, user_id, title, subtitle, title_en, subtitle_en, created_at, updated_at, color)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO projects (id, user_id, title, subtitle, title_en, subtitle_en, created_at, updated_at, color, contexts)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (project_id, user_id, title, extra.get("subtitle"), extra.get("title_en"), extra.get("subtitle_en"),
-             created_at, created_at, color),
+             created_at, created_at, color, json.dumps(to_record(from_record(extra.get("contexts"))), ensure_ascii=False)),
         )
 
     def _index_parts(self, user_id: str, project_id: str, parts: list[Part]) -> None:
@@ -790,7 +794,7 @@ def _inbox_entry(path: Path) -> InboxFile:
 def _project(r: sqlite3.Row) -> Project:
     return Project(
         r["id"], r["user_id"], r["title"], r["created_at"], r["updated_at"], r["subtitle"], r["title_en"], r["subtitle_en"],
-        r["color"],
+        r["color"], from_record(json.loads(r["contexts"] or "[]")),
     )
 
 

@@ -24,8 +24,8 @@ pytestmark = pytest.mark.anyio
 FIXTURES = Path(__file__).parent / "fixtures" / "synthetic"
 TOOLS = {
     "files_list", "book_outline", "book_issues", "book_read_chapter", "book_write_chapter", "book_decide", "book_issue_add",
-    "book_issue_close", "book_import", "book_export", "ref_import_bibliography", "ref_add", "ref_search", "ref_check",
-    "idea_add", "idea_add_conversation", "idea_search", "style_add", "style_search", "book_document",
+    "book_issue_close", "book_import", "book_export", "ref_import_bibliography", "ref_check",
+    "idea_add_conversation", "book_document",
     "category_list", "category_create", "category_edit", "category_put", "category_search", "category_trash", "category_title_default",
     "book_questions", "book_answer",
 }
@@ -81,7 +81,6 @@ async def test_all_tools_over_http_and_log_has_no_content(http_server, data_dir:
     inbox = data_dir / "users" / "alice" / "inbox"  # 원격에서는 웹 업로드가 넣는다. 여기서는 파일로 바로 둔다
     inbox.mkdir(parents=True)
     shutil.copy(FIXTURES / "닿으려는_종_합성.docx", inbox / "원고.docx")
-    tags = {"호흡": "짧음", "시점": "1인칭", "열기": "장면", "장치": ["반복"], "어미": "-다", "톤": "건조"}
     async with Client(url) as client:
         assert client.server_info.name == "Magus"
         assert {t.name for t in (await client.list_tools()).tools} == TOOLS
@@ -98,32 +97,28 @@ async def test_all_tools_over_http_and_log_has_no_content(http_server, data_dir:
             ("book_export", {}),
             ("ref_import_bibliography", {"text": "Zimmer, C. (1998). At the water's edge. Free Press."}),
             ("ref_check", {"chapter_number": 1}),
-            ("ref_add", {"bib": {"key": "clack2012"}, "passages": [{"text": SECRET[1], "reason": "1장"}]}),
-            ("ref_search", {"query": "라마바"}),
-            ("idea_add", {"text": SECRET[2], "kind": "thought", "title": SECRET[2], "title_by": "author"}),
-            ("idea_add_conversation", {"markdown": "**사용자:** 고래는 돌아갔다\n**Claude:** 맞습니다"}),
-            ("idea_search", {"query": "사아자"}),
-            ("style_add", {"passage": SECRET[3], "reason": "짧은 리듬", "tags": tags}),
-            ("style_search", {"query": "짧은 리듬"}),
-            ("category_create", {"name": "사례", "template": "사례"}),
+            ("category_create", {"name": "사례", "template": "사례", "context": [SECRET[3]]}),  # 직접 적은 컨텍스트도 로그에 없다
             ("category_list", {}),
-            ("category_edit", {"category": "사례", "color": "빨강"}),
-            ("category_put", {"category": "사례", "author": "me", "content": SECRET[4], "title": SECRET[4], "title_by": "author"}),
+            ("category_edit", {"book": "사례", "color": "빨강"}),
+            ("category_put", {"book": "사례", "author": "me", "content": SECRET[4], "title": SECRET[4], "title_by": "author"}),
+            ("idea_add_conversation", {"markdown": f"**사용자:** {SECRET[2]}\n**Claude:** 맞습니다", "book": "사례"}),
             ("category_search", {"query": "파하거"}),
             ("category_title_default", {"mode": "none"}),
             ("book_questions", {"status": "all"}),
             ("book_answer", {"question_id": "bibonly:zimmer1998", "choice": "keep", "note": SECRET[4]}),
         ]
         out = {name: _text(await client.call_tool(name, args)) for name, args in calls}
-        deletes = [("category_trash", {"category": "생각", "item_id": out["idea_add"].split()[2], "note": "시험"}),  # 옮긴 내용도 로그에 없다
-                   ("category_trash", {"category": "문체", "item_id": out["style_add"].split()[2], "note": "시험"}),
-                   ("category_trash", {"category": "사례", "note": "시험"}),
-                   ("book_document", {"title": SECRET[0], "title_by": "author", "preface": SECRET[1]})]  # 문서 책(#94)
+        put = ("category_put", {"book": "참고문헌", "author": "me", "source": {"key": "clack2012"}, "checked": True,
+                                "parts": [{"text": SECRET[1], "reason": "1장"}]})  # 문헌 글(#96, 옛 ref_add)
+        item = out["category_put"].split("「사례」 ")[1].split()[0]
+        deletes = [put, ("category_trash", {"book": "사례", "item_id": item, "note": "시험"}),  # 옮긴 내용도 로그에 없다
+                   ("category_trash", {"book": "사례", "note": "시험"}),
+                   ("book_document", {"title": SECRET[0], "title_by": "author", "preface": SECRET[1]})]  # 원고에서 만든 문서(#94)
         for name, args in deletes:
             _text(await client.call_tool(name, args))
         calls += deletes
         assert {name for name, _ in calls} == TOOLS
-        assert "clack2012 (verified)" in _text(await client.call_tool("ref_search", {"query": "라마바"}))
+        assert "clack2012 · 문헌 글 · 원문 확인" in _text(await client.call_tool("category_search", {"query": "라마바"}))
         assert (await client.call_tool("book_read_chapter", {"number": 99})).is_error
         # 원격에서는 서버의 파일 경로를 받지 않는다(받은함 이름만)
         escaped = await client.call_tool("book_import", {"path": str(FIXTURES / "닿으려는_종_합성.docx"), "project_id": "x"})
@@ -152,7 +147,7 @@ def test_request_size_limit(http_server):
     # 연결 리셋을 받아 간헐적으로 실패했다(status.md 7절). 서버는 Content-Length만 보고 거절하므로 본문 없이도 같은 것을 본다.
     url, _ = http_server
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                       "params": {"name": "idea_add", "arguments": {"text": "가" * 1_100_000, "kind": "thought"}}}).encode()
+                       "params": {"name": "category_put", "arguments": {"book": "x", "author": "me", "content": "가" * 1_100_000}}}).encode()
     parts = urllib.parse.urlsplit(url)
     conn = http.client.HTTPConnection(parts.hostname, parts.port, timeout=20)
     try:

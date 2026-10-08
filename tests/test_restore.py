@@ -27,7 +27,7 @@ def test_restore_from_files_gives_same_outline(tmp_path: Path, monkeypatch, caps
     store.write_chapter("alice", "synth", 2, "고친 본문. Clack(2012)를 다시 인용한다.", "2장 고침")
     store.add_decision("alice", "synth", "문장은 짧게")
     store.add_issue("alice", "synth", "3장 연결 문단", chapter_number=3, origin="agent")
-    add_ref(store, "alice", {"key": "clack2012"}, [Passage("네발동물의 기원", "1장")])
+    add_ref(store, "alice", {"key": "clack2012"}, [Passage("네발동물의 기원", "1장")], book=store.get_ref("alice", "clack2012").book)
     after_refs_changed(store, "alice")  # 도구 ref_add와 같이 파생값을 맞춘다
     store.put_inbox("alice", "논문.txt", b"abc")
     before = build_outline(store, "alice", "synth")

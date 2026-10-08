@@ -12,20 +12,23 @@ floors.json이 없는 사용자(층 이전 전)는 이전 규칙과 같은 배�
 "floor"가 없는 항목은 위에서부터(공용 먼저) 그 종류가 꽂힌 첫 층에, 저자의 카테고리는 공용에 있는 것으로 본다(fallback).
 층 배치를 바꾸는 쓰기(층 만들기·옮기기·기본 카테고리 다시 꽂기) 전에는 그 배치를 파일로 적는다(ensure_layout).
 이것은 이전 스크립트(magus floors apply)가 하는 일과 같다. 그래서 이전 전후로 화면·도구·인용 점검이 달라지지 않는다.
+
+#96(컨텍스트): 기본 카테고리가 없어졌다. 이전(magus maps apply)이 옛 기본 카테고리를 여느 책(카테고리)으로 바꾸고 floors.json을
+schema_version 2(BOOKS_SCHEMA)로 적는다. 2부터는 "builtins"를 읽지 않는다(모두 비어 있다). 옛 형식을 읽는 코드(legacy_layout·
+ensure_layout·floor_plan·revert_floors)는 이전과 되돌리기 때문에 남겨 둔다. 옛 파일이 없는 새 사용자는 처음부터 2다.
 """
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import threading
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from magus.floors import BUILTIN_ORDER, COMMON, COMMON_BUILTINS, COMMON_NAME, FLOORS_SCHEMA, NEW_FLOOR_BUILTINS
+from magus.floors import BOOKS_SCHEMA, BUILTIN_ORDER, COMMON, COMMON_BUILTINS, COMMON_NAME, FLOORS_SCHEMA, NEW_FLOOR_BUILTINS
 from magus.ids import new_id, utcnow
 from magus.store.base import Floor, FloorMove
 from magus.store.fileio import locked, read_json, write_json
@@ -51,6 +54,7 @@ class Layout:
     last_move: dict[str, Any] | None = None
     last_undone: dict[str, Any] | None = None  # 마지막으로 되돌린 옮기기(웹 안내 한 줄용)
     stored: bool = False  # floors.json이 있나(이전을 마쳤나)
+    books: bool = False  # 기본 카테고리가 없는 형식인가(#96, floors.json schema_version 2)
 
     def kinds(self, floor: str) -> list[str]:
         return [k for k in BUILTIN_ORDER if k in self.builtins.get(floor, [])]
@@ -65,6 +69,9 @@ class Layout:
         return COMMON
 
     def record(self) -> dict[str, Any]:
+        if self.books:  # #96: 기본 카테고리 없음
+            return {"schema_version": BOOKS_SCHEMA, "order": self.order, "changed_at": self.changed_at,
+                    "last_move": self.last_move, "last_undone": self.last_undone}
         return {"schema_version": FLOORS_SCHEMA, "order": self.order,
                 "builtins": {f: self.kinds(f) for f in (COMMON, *self.order)},  # 빈 목록도 적는다(옮겨 비운 층)
                 "changed_at": self.changed_at, "last_move": self.last_move, "last_undone": self.last_undone}
@@ -121,22 +128,32 @@ class FloorMixin:
         return [r[0] for r in self._db.execute(
             "SELECT id FROM projects WHERE user_id = ? ORDER BY created_at, id", (user_id,))]
 
+    def has_legacy_shelf(self, user_id: str) -> bool:
+        """#96 전 형식의 책장 파일이 있나: 생각(shelf/casper)·문체(shelf/balthasar) 파일, 또는 책("book")이 적히지 않은 문헌."""
+        shelf = self._user_dir(user_id) / "shelf"
+        if next((shelf / "casper").glob("*.json"), None) or next((shelf / "balthasar").glob("*.json"), None):
+            return True
+        return any("book" not in read_json(p) for p in (shelf / "melchior").glob("*/bib.json"))
+
     def _layout(self, user_id: str) -> Layout:
         path = self._floors_path(user_id)
         projects = self._project_ids(user_id)
         if not path.exists():
-            return legacy_layout(projects)
+            if self.has_legacy_shelf(user_id):  # 층 이전 전(#93 전) 데이터: 이전 규칙의 배치로 보인다(이전만 쓴다)
+                return legacy_layout(projects)
+            return Layout(projects, {}, books=True)  # 새 사용자(#96): 기본 카테고리 없음
         data = read_json(path)
+        books = int(data.get("schema_version") or 1) >= BOOKS_SCHEMA
         order = [str(p) for p in data.get("order") or [] if isinstance(p, str)]
         order += [p for p in projects if p not in order]  # 옛 코드가 만든 작업물 등 순서에 없는 것은 끝에(기본 카테고리는 없음)
-        builtins = {str(f): [k for k in BUILTIN_ORDER if k in (v or [])] for f, v in (data.get("builtins") or {}).items()}
+        builtins = {} if books else {str(f): [k for k in BUILTIN_ORDER if k in (v or [])] for f, v in (data.get("builtins") or {}).items()}
         for p in projects:
-            if p not in (data.get("order") or []) and p not in builtins:
+            if not books and p not in (data.get("order") or []) and p not in builtins:
                 builtins[p] = list(NEW_FLOOR_BUILTINS)
         last = data.get("last_move") if isinstance(data.get("last_move"), dict) else None
         undone = data.get("last_undone") if isinstance(data.get("last_undone"), dict) else None
         changed = {str(k): str(v) for k, v in (data.get("changed_at") or {}).items()}
-        return Layout(order, builtins, changed, last, undone, True)
+        return Layout(order, builtins, changed, last, undone, True, books)
 
     def _write_layout(self, user_id: str, layout: Layout) -> None:
         write_json(self._floors_path(user_id), layout.record())
@@ -238,8 +255,6 @@ class FloorMixin:
                 UNION ALL SELECT updated_at FROM categories WHERE user_id = ?1 AND floor = ?2
                 UNION ALL SELECT i.updated_at FROM category_items i JOIN categories c ON c.user_id = i.user_id AND c.id = i.category_id
                           WHERE i.user_id = ?1 AND c.floor = ?2
-                UNION ALL SELECT COALESCE(edited_at, created_at) FROM ideas WHERE user_id = ?1 AND floor = ?2
-                UNION ALL SELECT created_at FROM style_entries WHERE user_id = ?1 AND floor = ?2
                 UNION ALL SELECT COALESCE(updated_at, created_at) FROM refs WHERE user_id = ?1 AND floor = ?2
                 UNION ALL SELECT updated_at FROM documents WHERE user_id = ?1 AND floor = ?2
             )
@@ -266,78 +281,12 @@ class FloorMixin:
         return next((f for f in self.list_floors(user_id) if f.id == floor_id), None)
 
     def _register_floor(self, user_id: str, project_id: str, layout: Layout) -> None:
-        """create_project가 부른다(ensure_layout 뒤). 새 층에는 생각·문헌. 휴지통에서 같은 id로 다시 만들면 자리·배치 그대로.
-        첫 작업물 층이면 공용에 비어 있는 생각·문헌을 그 층으로 옮긴다(작업물이 없을 때 공용에 두었던 자리)."""
-        now = utcnow()
-        if project_id in layout.order:
-            layout.builtins.setdefault(project_id, list(NEW_FLOOR_BUILTINS))  # 휴지통에서 같은 id로: 배치는 그대로
-        else:
-            first = not self._existing(user_id, layout)
+        """create_project가 부른다(ensure_layout 뒤). 프로젝트 순서 끝에 더한다(휴지통에서 같은 id로 다시 만들면 그 자리).
+        #96부터 새 프로젝트에 기본 책은 없다(옛 형식 사용자는 이전을 마친 뒤에만 서버가 뜬다)."""
+        if project_id not in layout.order:
             layout.order.append(project_id)
-            layout.builtins[project_id] = list(NEW_FLOOR_BUILTINS)
-            if first:
-                for kind in NEW_FLOOR_BUILTINS:
-                    if kind in layout.builtins.get(COMMON, []) and not self._count_on(user_id, kind, COMMON):
-                        layout.builtins[COMMON].remove(kind)
-        layout.changed_at[project_id] = now
+        layout.changed_at[project_id] = utcnow()
         self._write_layout(user_id, layout)
-
-    def _count_on(self, user_id: str, kind: str, floor: str) -> int:
-        table = {"ideas": "ideas", "styles": "style_entries", "refs": "refs"}[kind]
-        return self._db.execute(f"SELECT COUNT(*) FROM {table} WHERE user_id = ? AND floor = ?", (user_id, floor)).fetchone()[0]
-
-    # ---- 새 항목이 들어갈 층 ---------------------------------------------------------------------
-
-    @locked
-    def book_targets(self, user_id: str, kind: str, floor: str) -> list[str]:
-        """그 프로젝트에서 기본 책(kind)에 넣으면 들어갈 프로젝트 후보(#95): 자기 책이 있으면 그것 하나,
-        없으면 지도의 연결 노드가 가리키는 노드에 꽂힌 그 책들(여럿일 수 있다). 둘 다 없으면 빈 목록."""
-        layout = self._layout(user_id)
-        if kind in layout.builtins.get(floor, []):
-            return [floor]
-        found = self.get_map(user_id, floor)  # type: ignore[attr-defined]
-        out: list[str] = []
-        for node in found.nodes if found else ():
-            if node.link and not node.missing and f"{kind}.{node.link[0]}" in node.books and node.link[0] not in out:
-                out.append(node.link[0])
-        return out
-
-    @locked
-    def place(self, user_id: str, kind: str, floor: str | None) -> str:
-        """새 항목이 들어갈 프로젝트. 그 프로젝트의 책 → 연결 노드로 이어진 책(하나일 때) → 없으면 그 프로젝트에 새로 꽂는다
-        (지도에는 이름이 같은 노드로 보인다). 묻는 것은 도구 쪽에서 먼저 한다(project_args.resolve_put)."""
-        layout = self._layout(user_id)
-        if floor is None:
-            return layout.fallback(kind)
-        floor = self._check_floor(user_id, layout, floor)
-        targets = self.book_targets(user_id, kind, floor)
-        if len(targets) == 1:
-            return targets[0]
-        layout = self.ensure_layout(user_id)  # 그 프로젝트에 기본 책을 다시 꽂는다
-        layout.builtins.setdefault(floor, []).append(kind)
-        layout.changed_at[floor] = utcnow()
-        self._write_layout(user_id, layout)
-        return floor
-
-    @locked
-    def add_builtin(self, user_id: str, kind: str, floor: str, node: str | None = None) -> bool:
-        """그 프로젝트에 기본 책(kind)을 다시 꽂는다(#95, 저자가 이 프로젝트에 새로 두자고 할 때). 이미 있으면 False.
-        node: 꽂을 노드(없으면 이름이 같은 노드, 그것도 없으면 새 노드)."""
-        layout = self.ensure_layout(user_id)
-        floor = self._check_floor(user_id, layout, floor)
-        if kind in layout.builtins.get(floor, []):
-            return False
-        self.ensure_maps(user_id)  # type: ignore[attr-defined]
-        self._ensure_builtin(user_id, kind, floor)
-        self._persist_map(user_id, floor, {f"{kind}.{floor}": node} if node else None)  # type: ignore[attr-defined]
-        return True
-
-    def _ensure_builtin(self, user_id: str, kind: str, floor: str) -> None:
-        layout = self.ensure_layout(user_id)
-        if kind not in layout.builtins.get(floor, []):
-            layout.builtins.setdefault(floor, []).append(kind)
-            layout.changed_at[floor] = utcnow()
-            self._write_layout(user_id, layout)
 
     # ---- 옮기기 ------------------------------------------------------------------------------
 
@@ -360,6 +309,17 @@ class FloorMixin:
             "WHERE a.user_id = ? AND a.id = ? AND b.floor = ?", (user_id, category_id, floor)).fetchone()
         return row[0] if row else None
 
+    def _set_book_refs_floor(self, user_id: str, book: str, floor: str) -> None:
+        """책을 다른 프로젝트로 옮기면 그 책의 문헌도 그 프로젝트의 것이 된다(#96: 문헌은 책의 글)."""
+        shelf = self._user_dir(user_id) / "shelf" / "melchior"
+        keys = [r[0] for r in self._db.execute("SELECT key FROM refs WHERE user_id = ? AND book = ?", (user_id, book))]
+        for key in keys:
+            path = shelf / key / "bib.json"
+            if path.exists():
+                write_json(path, {**read_json(path), "floor": floor})
+        with self._db:
+            self._db.executemany("UPDATE refs SET floor = ? WHERE user_id = ? AND key = ?", [(floor, user_id, k) for k in keys])
+
     @locked
     def move_category(self, user_id: str, category_id: str, to_floor: str, to_node: str | None = None) -> FloorMove:
         layout = self.ensure_layout(user_id)
@@ -376,6 +336,7 @@ class FloorMixin:
                             floor=self._label(user_id, layout, to_floor))
         at = utcnow()
         self._set_category_floor(user_id, category_id, to_floor, at)
+        self._set_book_refs_floor(user_id, category_id, to_floor)
         move = FloorMove(new_id(), at, category_id, name, from_floor, to_floor)
         layout.last_move = asdict(move)
         layout.changed_at.update({from_floor: at, to_floor: at})
@@ -387,53 +348,6 @@ class FloorMixin:
         """책이 다른 프로젝트로 간 뒤 두 지도를 맞춰 적는다(받는 쪽은 hint의 노드에)."""
         self._persist_map(user_id, from_floor)  # type: ignore[attr-defined]
         self._persist_map(user_id, to_floor, hint)  # type: ignore[attr-defined]
-
-    def _builtin_items(self, user_id: str, kind: str, floor: str) -> list[str]:
-        if kind == "refs":
-            return [r[0] for r in self._db.execute("SELECT key FROM refs WHERE user_id = ? AND floor = ? ORDER BY key", (user_id, floor))]
-        table = "ideas" if kind == "ideas" else "style_entries"
-        return [r[0] for r in self._db.execute(f"SELECT id FROM {table} WHERE user_id = ? AND floor = ? ORDER BY id", (user_id, floor))]
-
-    def _set_items_floor(self, user_id: str, kind: str, ids: Iterable[str], floor: str) -> None:
-        """기본 카테고리 항목들의 층만 바꾼다(파일 먼저, 인덱스 나중)."""
-        shelf = self._user_dir(user_id) / "shelf"
-        ids = list(ids)
-        for item in ids:
-            path = (shelf / "melchior" / item / "bib.json" if kind == "refs"
-                    else shelf / ("casper" if kind == "ideas" else "balthasar") / f"{item}.json")
-            if path.exists():
-                write_json(path, {**read_json(path), "floor": floor})
-        table, column = {"ideas": ("ideas", "id"), "styles": ("style_entries", "id"), "refs": ("refs", "key")}[kind]
-        with self._db:
-            self._db.executemany(f"UPDATE {table} SET floor = ? WHERE user_id = ? AND {column} = ?",
-                                 [(floor, user_id, i) for i in ids])
-
-    @locked
-    def move_builtin(self, user_id: str, kind: str, from_floor: str, to_floor: str, to_node: str | None = None) -> FloorMove:
-        if kind not in KINDS:
-            raise MoveError("no_builtin", f"기본 카테고리 종류가 아니다: {kind!r}")
-        layout = self.ensure_layout(user_id)
-        self.ensure_maps(user_id)  # type: ignore[attr-defined]
-        from_floor = self._check_floor(user_id, layout, from_floor)
-        to_floor = self._check_floor(user_id, layout, to_floor)
-        name = {"ideas": "생각", "styles": "문체", "refs": "문헌"}[kind]
-        if kind not in layout.builtins.get(from_floor, []):
-            raise MoveError("no_builtin", f"{self._label(user_id, layout, from_floor)}에 「{name}」이 없다", name=name)
-        if from_floor == to_floor:
-            raise MoveError("same", f"「{name}」은 이미 {self._label(user_id, layout, to_floor)}에 있다", name=name)
-        merged = kind in layout.builtins.get(to_floor, [])
-        items = self._builtin_items(user_id, kind, from_floor)
-        self._set_items_floor(user_id, kind, items, to_floor)
-        at = utcnow()
-        layout.builtins[from_floor].remove(kind)
-        if not merged:
-            layout.builtins.setdefault(to_floor, []).append(kind)
-        move = FloorMove(new_id(), at, kind, name, from_floor, to_floor, merged, tuple(items))
-        layout.last_move = asdict(move)
-        layout.changed_at.update({from_floor: at, to_floor: at})
-        self._write_layout(user_id, layout)
-        self._moved_maps(user_id, from_floor, to_floor, {f"{kind}.{to_floor}": to_node} if to_node and not merged else None)
-        return move
 
     @locked
     def move_document(self, user_id: str, doc_id: str, to_floor: str, to_node: str | None = None) -> FloorMove:
@@ -475,7 +389,7 @@ class FloorMixin:
             raise MoveError("unknown_floor", f"층 {move.from_floor!r}가 없다", floor=move.from_floor)
         at = utcnow()
         self.ensure_maps(user_id)  # type: ignore[attr-defined]
-        key = f"{move.book}.{move.from_floor}" if move.book in KINDS else move.book
+        key = move.book
         if move.from_floor == move.to_floor:  # 같은 프로젝트 안에서 노드만 옮긴 것(#95)
             if move.from_node:
                 try:
@@ -487,15 +401,6 @@ class FloorMixin:
             if self._db.execute("SELECT 1 FROM documents WHERE user_id = ? AND id = ?", (user_id, doc_id)).fetchone() is None:
                 raise MoveError("unknown_category", f"문서 {doc_id}가 없다")
             self._set_document_floor(user_id, doc_id, move.from_floor, at)  # type: ignore[attr-defined]
-        elif move.book in KINDS:
-            kind = move.book
-            here = set(self._builtin_items(user_id, kind, move.to_floor))
-            back = [i for i in move.items if i in here]  # 그사이 다른 곳으로 간 항목은 그대로 둔다
-            self._set_items_floor(user_id, kind, back, move.from_floor)
-            if kind not in layout.builtins.get(move.from_floor, []):
-                layout.builtins.setdefault(move.from_floor, []).append(kind)
-            if not move.merged and kind in layout.builtins.get(move.to_floor, []) and not self._builtin_items(user_id, kind, move.to_floor):
-                layout.builtins[move.to_floor].remove(kind)  # 옮기며 새로 꽂은 자리. 그사이 새 항목이 들어왔으면 남긴다
         else:
             row = self._db.execute("SELECT floor FROM categories WHERE user_id = ? AND id = ?", (user_id, move.book)).fetchone()
             if row is None:
@@ -504,6 +409,7 @@ class FloorMixin:
                 raise MoveError("undo_clash", f"{self._label(user_id, layout, move.from_floor)}에 같은 이름 「{clash}」이 생겼다",
                                 name=clash, floor=self._label(user_id, layout, move.from_floor))
             self._set_category_floor(user_id, move.book, move.from_floor, at)
+            self._set_book_refs_floor(user_id, move.book, move.from_floor)
         layout.last_move = None
         layout.last_undone = asdict(move)
         layout.changed_at.update({move.from_floor: at, move.to_floor: at})
@@ -528,35 +434,13 @@ class FloorMixin:
         last = self._layout(user_id).last_undone
         return FloorMove(**{**last, "items": tuple(last.get("items") or ())}) if last else None
 
-    @locked
-    def set_ref_floor(self, user_id: str, key: str, floor: str, reason: str | None = None) -> Any:
-        layout = self.ensure_layout(user_id)
-        floor = self._check_floor(user_id, layout, floor)
-        self._ensure_builtin(user_id, "refs", floor)
-        path = self._user_dir(user_id) / "shelf" / "melchior" / key / "bib.json"
-        before = read_json(path).get("floor") if path.exists() else None
-        self._set_items_floor(user_id, "refs", [key], floor)
-        if reason and path.exists():  # 저자가 알 수 있게 옮긴 시각·원래 층·이유를 남긴다(#93-a 더함)
-            moved = {"at": utcnow(), "from": str(before or ""), "to": floor, "reason": reason}
-            write_json(path, {**read_json(path), "moved": moved})
-            with self._db:
-                self._db.execute("UPDATE refs SET moved = ? WHERE user_id = ? AND key = ?",
-                                 (json.dumps(moved, ensure_ascii=False), user_id, key))
-        return self.get_ref(user_id, key)  # type: ignore[attr-defined]
-
     # ---- 최근 수정 -----------------------------------------------------------------------------
 
     @locked
     def category_updated(self, user_id: str, category_id: str) -> str:
         row = self._db.execute(
             "SELECT MAX(t) FROM (SELECT updated_at AS t FROM categories WHERE user_id = ?1 AND id = ?2 "
-            "UNION ALL SELECT updated_at FROM category_items WHERE user_id = ?1 AND category_id = ?2)", (user_id, category_id),
+            "UNION ALL SELECT updated_at FROM category_items WHERE user_id = ?1 AND category_id = ?2 "
+            "UNION ALL SELECT COALESCE(updated_at, created_at) FROM refs WHERE user_id = ?1 AND book = ?2)", (user_id, category_id),
         ).fetchone()
         return str(row[0] or "")
-
-    @locked
-    def builtin_updated(self, user_id: str, kind: str, floor: str) -> str:
-        sql = {"ideas": "SELECT MAX(COALESCE(edited_at, created_at)) FROM ideas",
-               "styles": "SELECT MAX(created_at) FROM style_entries",
-               "refs": "SELECT MAX(COALESCE(updated_at, created_at)) FROM refs"}[kind]
-        return str(self._db.execute(sql + " WHERE user_id = ? AND floor = ?", (user_id, floor)).fetchone()[0] or "")

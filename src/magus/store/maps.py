@@ -6,7 +6,8 @@
              {"id": "b-ideas", "name": "생각", "x": 0, "y": -240, "books": ["ideas"], "color": "#rrggbb"?},
              {"id": "l-…", "x": …, "y": …, "link": {"project": "common", "node": "b-styles"}}],
    "edges": [["b-ideas", "center"], …]}
-책 이름(지도 파일): ms(원고 책) · ideas|styles|refs(기본 책) · <카테고리 id> · doc.<문서 id>.
+책 이름(지도 파일): ms(원고 책) · ideas|styles|refs(기본 책, #96 전에만) · <카테고리 id> · doc.<문서 id>.
+노드의 "contexts"(#96): [{"name", "text"}] — 그 노드의 컨텍스트(책에 컨텍스트가 없으면 이것을 따른다). 연결 노드는 원본의 것.
 
 지도 파일이 없는 프로젝트는 지금 배치에서 계산한 지도로 보인다(_reconcile): 가운데 노드에 원고 책·문서 책,
 기본 책·카테고리는 이름이 같은 노드 하나씩(가운데와 이음), 「내 서재」의 문헌(과, 자기 문체가 없으면 문체)으로 가는 연결 노드.
@@ -26,12 +27,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from magus.contexts import clean_contexts, from_record, to_record
 from magus.ids import new_id, utcnow
 from magus.maps import (
     BOOK_NAMES, CENTER, LIBRARY, LIBRARY_NAME, MAP_SCHEMA, MAX_BOOKS_PER_NODE, MAX_NODES, NODE_GAP, RING, clean_node_name,
     global_key, local_key, name_key, valid_node_id,
 )
-from magus.store.base import MapNode, ProjectMap
+from magus.store.base import Context, MapNode, ProjectMap
 from magus.store.fileio import locked, read_json, write_json
 
 _HEX = re.compile(r"#[0-9a-fA-F]{6}")
@@ -162,6 +164,8 @@ class MapMixin:
                 node["books"] = [str(b) for b in item.get("books") or [] if isinstance(b, str)]
             if isinstance(item.get("color"), str) and _HEX.fullmatch(item["color"]):
                 node["color"] = item["color"].lower()
+            if "link" not in node and (contexts := from_record(item.get("contexts"))):
+                node["contexts"] = to_record(contexts)
             nodes.append(node)
         center = next((n for n in nodes if n["id"] == CENTER), None)
         if center is None:
@@ -294,10 +298,12 @@ class MapMixin:
                     continue
                 name = source_title if source["id"] == CENTER else source["name"]
                 nodes.append(MapNode(n["id"], name, n["x"], n["y"], n.get("color") or source.get("color"),
-                                     tuple(global_key(target, b) for b in source["books"]), False, (target, node_id), source_title))
+                                     tuple(global_key(target, b) for b in source["books"]), False, (target, node_id), source_title,
+                                     contexts=from_record(source.get("contexts"))))
                 continue
             nodes.append(MapNode(n["id"], title if n["id"] == CENTER else n["name"], n["x"], n["y"], n.get("color"),
-                                 tuple(global_key(floor, b) for b in n["books"]), n["id"] == CENTER))
+                                 tuple(global_key(floor, b) for b in n["books"]), n["id"] == CENTER,
+                                 contexts=from_record(n.get("contexts"))))
         return ProjectMap(floor, title, tuple(nodes), tuple(data["edges"]), stored, data["updated_at"])
 
     @locked
@@ -342,9 +348,13 @@ class MapMixin:
                 continue
             target, _ = self._reconcile(user_id, link["project"], layout)
             source = next((m for m in target["nodes"] if m["id"] == link["node"]), None)
-            if source is not None and "refs" in source.get("books", []):
+            if source is not None and any(b == "refs" or self._holds_refs(user_id, b) for b in source.get("books", [])):
                 out.append(link["project"])
         return tuple(out)
+
+    def _holds_refs(self, user_id: str, book: str) -> bool:
+        """그 책(카테고리 id)에 문헌·참고문헌 항목이 있나(#96: 문헌은 어느 책에든 든다)."""
+        return self._db.execute("SELECT 1 FROM refs WHERE user_id = ? AND book = ? LIMIT 1", (user_id, book)).fetchone() is not None
 
     # ---- 노드·선 바꾸기 ---------------------------------------------------------------------------
 
@@ -372,8 +382,9 @@ class MapMixin:
 
     @locked
     def add_node(self, user_id: str, floor: str, name: str, *, x: float | None = None, y: float | None = None,
-                 color: str | None = None) -> MapNode:
-        """새 노드(가운데 노드와 잇는다)."""
+                 color: str | None = None, contexts: tuple[Context, ...] = ()) -> MapNode:
+        """새 노드(가운데 노드와 잇는다). contexts: 노드의 컨텍스트(#96)."""
+        contexts = clean_contexts(contexts)
         _, data = self._editable(user_id, floor)
         self._room(data)
         clean = self._check_name(data, name)
@@ -381,6 +392,8 @@ class MapMixin:
         node: dict[str, Any] = {"id": "n-" + new_id(), "name": clean, "x": nx, "y": ny, "books": []}
         if color and _HEX.fullmatch(color):
             node["color"] = color.lower()
+        if contexts:
+            node["contexts"] = to_record(contexts)
         data["nodes"].append(node)
         data["edges"] = sorted({*map(tuple, data["edges"]), _edge(CENTER, node["id"])})
         self._write_map(user_id, floor, data)
@@ -419,14 +432,14 @@ class MapMixin:
         return result.node(nid)  # type: ignore[return-value]
 
     @locked
-    def ensure_link(self, user_id: str, floor: str, target_floor: str, kind: str) -> MapNode | None:
-        """floor의 지도에 target_floor의 그 기본 책(kind)이 꽂힌 노드로 가는 연결 노드가 없으면 붙인다(문헌을 「내 서재」로 옮길 때).
-        이미 있으면 None. 같은 프로젝트거나 그 책이 없으면 None."""
+    def ensure_link(self, user_id: str, floor: str, target_floor: str, book: str) -> MapNode | None:
+        """floor의 지도에 target_floor의 그 책(지도 파일의 책 이름: 카테고리 id, 옛 기본 책이면 refs 등)이 꽂힌 노드로 가는
+        연결 노드가 없으면 붙인다(문헌을 「내 서재」로 옮길 때). 이미 있으면 None. 같은 프로젝트거나 그 책이 없으면 None."""
         layout = self._layout(user_id)
         if floor == target_floor or floor not in self._known_floors(user_id, layout):
             return None
         target, _ = self._reconcile(user_id, target_floor, layout)
-        source = next((n for n in target["nodes"] if kind in n.get("books", [])), None)
+        source = next((n for n in target["nodes"] if book in n.get("books", [])), None)
         data, _ = self._reconcile(user_id, floor, layout)
         if source is None or any(n.get("link") == {"project": target_floor, "node": source["id"]} for n in data["nodes"]):
             return None
@@ -454,6 +467,22 @@ class MapMixin:
                 node["color"] = color.lower()
         if x is not None and y is not None:
             node["x"], node["y"] = _num(x), _num(y)
+        self._write_map(user_id, floor, data)
+        result = self.get_map(user_id, floor)
+        assert result is not None
+        return result.node(node_id)  # type: ignore[return-value]
+
+    @locked
+    def set_node_contexts(self, user_id: str, floor: str, node_id: str, contexts: tuple[Context, ...]) -> MapNode:
+        """노드의 컨텍스트를 바꾼다(빈 것이면 뗀다, #96). 연결 노드에는 붙이지 않는다(원본 노드의 것을 따른다)."""
+        contexts = clean_contexts(contexts)
+        _, data = self._editable(user_id, floor)
+        node = self._node(data, node_id)
+        if "link" in node:
+            raise MapError("link_node", "연결 노드의 컨텍스트는 원본 노드에서 바꾼다")
+        node.pop("contexts", None)
+        if contexts:
+            node["contexts"] = to_record(contexts)
         self._write_map(user_id, floor, data)
         result = self.get_map(user_id, floor)
         assert result is not None

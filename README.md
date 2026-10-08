@@ -104,18 +104,18 @@ Microsoft Store판은 `%LOCALAPPDATA%\Packages\Claude_…\LocalCache\Roaming\Cla
 
 도구가 불리지 않거나 오류가 나면 로그 끝부분을 보세요.
 
-### 3. 문헌 등록 시연 (`ref_add`)
+### 3. 문헌 등록 시연 (`category_put`, 원문 확인 글)
 
 **논문 PDF는 `C:\project_2026\Magus\fixtures\papers\`에 둡니다.** 이 폴더는 git에 올라가지 않습니다(`fixtures/`는 .gitignore).
 
 1. 논문 PDF를 `fixtures\papers\`에 둡니다. 예: `kremer1993.pdf`.
 2. Desktop 새 대화에서 이 문장을 그대로 씁니다(`<파일명>`, `「…」`, `…`만 바꿉니다).
-   > fixtures/papers/<파일명>.pdf를 문헌으로 등록해 줘. 쓸 부분은 「…」, 이유는 …
+   > fixtures/papers/<파일명>.pdf를 「참고문헌」 책에 원문 확인으로 넣어 줘. 쓸 부분은 「…」, 이유는 …
 
    기대 결과: 해당 key가 verified로 바뀌고, 그 문헌이 나오는 장 목록이 나옵니다(아래 4번).
-3. Claude가 다음과 같이 `ref_add`를 부릅니다.
+3. Claude가 다음과 같이 `category_put`을 부릅니다(#96: 문헌 글 = 서지가 있는 글, 원문 확인 = checked).
    ```
-   ref_add(bib={}, passages=[{text: "쓸 부분", reason: "이유"}], file_path="fixtures/papers/kremer1993.pdf")
+   category_put(book="참고문헌", author="me", source={}, checked=true, parts=[{text: "쓸 부분", reason: "이유"}], file="fixtures/papers/kremer1993.pdf")
    ```
    - **경로**: 상대 경로는 Desktop이 서버를 띄운 작업 폴더가 아니라 **프로젝트 폴더** 기준으로 풉니다.
      프로젝트 폴더는 `DATA_DIR`의 부모이고, `FILES_DIR`로 바꿀 수 있습니다. 절대 경로도 됩니다.
@@ -134,7 +134,7 @@ Microsoft Store판은 `%LOCALAPPDATA%\Packages\Claude_…\LocalCache\Roaming\Cla
    파일이 없다: C:\project_2026\Magus\fixtures\papers\… (상대 경로는 C:\project_2026\Magus 기준으로 푼다)
    ```
 
-쓸 부분은 논문의 문장을 그대로 붙이는 것이 좋습니다. `ref_search`가 이 발췌를 먼저 돌려주고, 글에는 이것만 인용됩니다.
+쓸 부분은 논문의 문장을 그대로 붙이는 것이 좋습니다. `category_search`가 이 쓸 부분을 먼저 돌려주고, 글에는 이것만 인용됩니다.
 PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버가 파일을 직접 읽어 전문을 저장합니다.
 
 서버 쪽 흐름은 `tests/test_stdio.py::test_relative_file_path_from_other_cwd`가 확인합니다.
@@ -144,38 +144,34 @@ PDF를 대화창에 첨부하지 말고 경로로 말하세요. 그래야 서버
 
 1. **원고 가져오기**: "`C:\…\원고.docx`를 book_import로 가져와 줘"
    - 리포트로 장 매핑과 코멘트 분류를 확인합니다.
-2. **대화 기록 넣기**: "`C:\…\대화_전체_기록.md`를 idea_add_conversation(path)로 넣어 줘"
+2. **대화 기록 넣기**: "`C:\…\대화_전체_기록.md`를 「생각」 책에 넣어 줘"(idea_add_conversation(book, path))
 3. **작업 시작**: 매번 `book_outline`으로 시작하고, 필요한 장만 `book_read_chapter`로 읽습니다.
-4. **문헌 검증**: 읽은 문헌은 `ref_add`로 발췌와 함께 넣습니다. 그러면 그 문헌을 인용한 곳이 verified가 됩니다.
+4. **문헌 검증**: 읽은 문헌은 `category_put(source, checked=true, parts)`로 쓸 부분과 함께 넣습니다(원문 확인 글). 그러면 그 문헌을 인용한 곳이 verified가 됩니다.
    - 장을 고치면 `book_write_chapter`가 미확인 인용을 알려 줍니다.
    - 원고 본문의 원본은 저자의 Word 파일입니다(결정 #68, `docs/decisions/author-file-is-source.md`). 수정안은 대화에서 받아 Word에 반영하고, `book_write_chapter`는 Magus 안에 저장하라고 할 때만 씁니다.
    - 원고가 바뀌면 수정본으로 올립니다(`book_import new_edition=true`, 웹 "수정본으로 올리기", `docs/decisions/reupload-design.md`). `replace`는 결정과 확인 요청까지 휴지통으로 보내니 수정본에 쓰지 않습니다.
-5. **문체**: 좋아하는 문장은 `style_add`로 넣고, 문체 작업 전에 `style_search`로 꺼냅니다.
+5. **책과 컨텍스트**(#96): 좋아하는 문장·생각·메모는 모두 책의 글이고(`category_put`·`category_search`), AI가 그 책을 읽는 법은 저자가 붙인 컨텍스트(예: 「문체」)가 정합니다.
 
 같은 일을 명령줄로도 할 수 있습니다(아래 "명령").
 
-## 도구 (21개)
+## 도구 (23개, #96)
 
 | 도구 | 하는 일 |
 |---|---|
-| `book_outline(project_id?)` | 책 전체 현황(저자에게는 "전체"). 3,000토큰 이하이고 본문은 없습니다. 장별 상태·글자수·확인 요청·미확인 인용 집계, 직접 남긴 확인 요청, 최근 결정과 변경을 줍니다. |
-| `book_read_chapter(number)` | 장 하나. 본문(content)과 메타를 별도 필드로 줍니다. 미확인 인용과 그 장의 확인 요청도 함께 줍니다. |
-| `book_write_chapter(number, content, note, title?, status?)` | 장 하나를 저장합니다. 이전본은 versions/에 남고, 쓴 뒤 인용 게이트 결과를 돌려줍니다. |
-| `book_issues(status, chapter_number?, origin?, kind?, limit)` | 확인 요청 목록(조회 전용). |
-| `book_decide(text)` · `book_issue_add(text, chapter_number?, origin)` · `book_issue_close(id, note?)` | 결정과 열린 문제를 기록합니다. 번호는 다시 쓰지 않습니다. |
-| `files_list()` | 받은함(올린 파일) 목록과 사용량. 파일 인자에는 여기 나온 이름만 줍니다. |
-| `book_import(path, project_id?, title?, subtitle?, replace?, new_edition?, force?)` | 받은함의 docx(또는 pdf) 원고를 장 단위로 나눕니다. 코멘트는 확인 요청, 참고문헌은 문헌(unverified)이 됩니다. Word에서 고친 같은 책은 `new_edition=true`로 수정본으로 올립니다(바뀐 장만 바뀌고 결정·확인 요청·생각·문체·문헌은 그대로). |
-| `book_export(path?)` | 장을 합쳐 docx로 만듭니다. |
-| `ref_import_bibliography(text)` | 참고문헌 목록을 refs(unverified)로 넣습니다. |
-| `ref_add(bib, passages, file_path?/full_text?, aliases?)` | 읽은 문헌을 발췌와 함께 verified로 넣습니다. 저자·연도 없이 파일만 주면 첫머리의 제목으로 참고문헌에서 찾습니다. |
-| `ref_search(query, scope, k)` | verified 문헌의 발췌(먼저)와 전문에서 찾습니다. |
-| `ref_check(chapter_number)` | 장의 인용을 verified / unverified / unknown으로 나눕니다. |
-| `idea_add(text, kind, origin?)` | 내 생각 하나를 기록합니다(author=me). |
-| `idea_add_conversation(markdown? / path?)` | 대화 기록을 me·ai 발화로 나눠 저장합니다. |
-| `idea_search(query, author, k)` | 생각을 찾습니다. 기본은 내 생각만입니다. |
-| `idea_delete(id, note)` · `style_delete(id, note)` | 생각·문체 하나를 휴지통으로 옮깁니다(지우지 않음). 저자가 지우라고 분명히 말했을 때만 씁니다. 되살리기는 운영자 CLI `magus trash restore`. |
-| `style_add(passage, reason, tags, work?, tags_by?)` | 좋아하는 구절을 문체에 기록합니다. tags는 `{호흡, 시점, 열기, 장치: [], 어미, 톤}`이고, 누가 정했는지(`tags_by`: ai·author)를 남깁니다. |
-| `style_search(query, k)` | 문체로 찾습니다(이유와 태그 기준). |
+| `book_outline(project_id?)` | 책 전체 현황(저자에게는 "전체"). 3,000토큰 이하이고 본문은 없습니다. 장별 상태·글자수·확인 요청·미확인 인용 집계, 지도 두 줄, 직접 남긴 확인 요청, 최근 결정과 변경을 줍니다. |
+| `book_read_chapter(number)` | 장 하나. 본문(content)과 메타, 그 원고의 컨텍스트를 별도 필드로 줍니다. 미확인 인용과 그 장의 확인 요청도 함께 줍니다. |
+| `book_write_chapter(number, content, note, title?, status?)` | 장 하나를 저장합니다(저자가 Magus 원고에 저장하라고 했을 때만). 이전본은 versions/에 남고, 쓴 뒤 인용 게이트 결과를 돌려줍니다. |
+| `book_issues(…)` · `book_decide(text)` · `book_issue_add(…)` · `book_issue_close(id, note?)` | 확인 요청 목록(조회 전용)과 결정·열린 문제 기록. 번호는 다시 쓰지 않습니다. |
+| `book_questions(…)` · `book_answer(question_id, choice, note?)` | 저자만 답할 수 있는 인용 질문과 그 답(#84). |
+| `files_list()` | 올린 파일 목록과 사용량. 파일 인자에는 여기 나온 이름만 줍니다. |
+| `book_import(path, project_id?, title?, subtitle?, replace?, new_edition?, force?)` | 올린 docx(또는 pdf) 원고를 장 단위로 나눕니다. 코멘트는 확인 요청, 참고문헌은 문헌 글(원문 확인 전)이 됩니다. 같은 책은 `new_edition=true`로 수정본. |
+| `book_export(path?)` · `book_document(…)` | 장을 합친 docx, 원고에서 만든 문서(출처 확인 문서, 내용은 서버가). |
+| `ref_import_bibliography(text, project?, book?)` · `ref_check(chapter_number)` | 참고문헌 목록을 문헌 글로 넣기, 장의 인용을 verified / unverified / unknown으로 나누기. |
+| `idea_add_conversation(book, markdown? / path?)` | 대화 기록을 me·ai 발화로 나눠 그 책의 글로 넣습니다. |
+| `category_list()` | 프로젝트마다 지도·노드·책(글 수·컨텍스트 이름), 자주 쓰는 컨텍스트, 제목 기본값. |
+| `category_create(name, template, color?, project?, node?, context?)` · `category_edit(book?/node?, …, context?)` | 책·노드 만들기와 이름·색·컨텍스트·위치·선 바꾸기. |
+| `category_put(book, author, content?, title?, …, reason?, where?, parts?, source?, checked?, file?)` | 글 넣기(고치기). 서지(source)가 있으면 문헌 글, checked면 원문 확인. |
+| `category_search(query, book?, project?, author?, full?)` · `category_trash(note, book?, item_id?, node?)` · `category_title_default(mode)` | 글 찾기(책마다 컨텍스트), 휴지통(지우지 않음), 제목 기본값. |
 
 서버 instructions(Claude에게 주는 규칙)는 등록된 도구에 맞춰 자동으로 조립됩니다.
 

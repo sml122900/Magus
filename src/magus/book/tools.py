@@ -18,6 +18,7 @@ from magus.book.export import export_docx
 from magus.book.importer import import_manuscript
 from magus.book.outline import build_outline
 from magus.book.reupload import reupload_manuscript
+from magus.contexts import attach_manuscript_context, view_for_book
 from magus.melchior.check import CheckResult, Resolver, check_chapter, check_text, terms_of
 from magus.inbox import FileResolver, ResolveFile
 from magus.store import BookTitles, Issue, Project, Store
@@ -88,6 +89,7 @@ def build_tools(
         open_issues = store.list_issues(user, project.id, "open", chapter_number=number)
         return _json(
             {
+                "context": view_for_book(store, user, f"ms.{project.id}").header(),  # 컨텍스트를 머리에(#96)
                 "project_id": project.id,
                 "number": m.number,
                 "label": m.display,
@@ -129,6 +131,7 @@ def build_tools(
         gate = check_chapter(store, current_user(), project.id, number)
         return _json(
             {
+                "context": view_for_book(store, current_user(), f"ms.{project.id}").header(),
                 "project_id": project.id,
                 "number": meta.number,
                 "title": meta.title,
@@ -171,7 +174,8 @@ def build_tools(
         if len(issues) > limit:
             head += f" — 앞 {limit}건만 표시. 조건을 좁히거나 limit을 늘리세요(최대 {ISSUE_LIST_MAX})."
         labels = {c.number: c.label for c in store.list_chapters(current_user(), project.id) if c.label}
-        return "\n".join([head, *(_issue_line(i, labels) for i in issues[:limit])])
+        context = view_for_book(store, current_user(), f"ms.{project.id}").header()
+        return "\n".join([context, head, *(_issue_line(i, labels) for i in issues[:limit])])
 
     def book_decide(text: str, project_id: str | None = None) -> str:
         project = resolve_project(project_id)
@@ -236,8 +240,8 @@ def build_tools(
                                             titles=BookTitles(subtitle=subtitle) if subtitle else None)
             except ValueError as e:
                 raise ToolError(str(e)) from e
-            return (f"원고 없는 프로젝트를 만듦: 「{made.title}」({made.id}). 지도에 가운데 노드와 생각·문헌 노드가 있다. "
-                    f"원고는 저자가 가운데 노드의 '+ 책 → 원고'로 올리거나, book_import(path=올린 파일 이름, project_id={made.id})로 가져온다.")
+            return (f"원고 없는 프로젝트를 만듦: 「{made.title}」({made.id}). 지도에 가운데 노드가 있다. "
+                    f"원고는 저자가 가운데 노드의 '책 추가 → 문서 올리기'로 올리거나, book_import(path=올린 파일 이름, project_id={made.id})로 가져온다.")
         if new_edition:
             if not project_id:
                 raise ToolError("수정본으로 올릴 책의 project_id를 주세요(book_outline 첫 줄의 괄호 안).")
@@ -248,7 +252,8 @@ def build_tools(
             except (ValueError, FileNotFoundError) as e:
                 raise ToolError(str(e)) from e
             return "\n\n".join(
-                [again.summary(), "### 바뀐 장", again.change_table(), f"이 리포트는 {again.files['report']}에 있다."]
+                [view_for_book(store, user, f"ms.{project_id}").header(),
+                 again.summary(), "### 바뀐 장", again.change_table(), f"이 리포트는 {again.files['report']}에 있다."]
             )
         try:
             report = import_manuscript(
@@ -257,8 +262,10 @@ def build_tools(
             )
         except (ValueError, FileNotFoundError) as e:
             raise ToolError(str(e)) from e
+        attach_manuscript_context(store, user, report.project_id)
         return "\n\n".join(
             [
+                view_for_book(store, user, f"ms.{report.project_id}").header(),
                 report.summary(),
                 "### ch-NN.md ↔ 장 제목",
                 report.mapping_table(),
@@ -301,15 +308,15 @@ def build_tools(
             book_import,
             name="book_import",
             description=(
-                "올린 원고 파일(docx, 없으면 pdf)로 원고 책을 만든다(새 프로젝트, 또는 project_id가 원고 없는 프로젝트면 그 가운데 노드). "
+                "올린 원고 파일(docx, 없으면 pdf)을 가운데 노드의 책으로 가져온다(새 프로젝트, 또는 project_id가 원고 없는 프로젝트면 그 가운데 노드). "
                 "path에는 올린 파일 이름을 준다(files_list로 확인). "
                 "저자가 원고 없이 새 프로젝트를 만들자고 하면 path 없이 title만 준다(원고는 나중에 같은 project_id로 가져온다). "
                 "'제N부'·'제N장' 제목으로 장을 나누고, "
-                "Word 코멘트는 확인 요청(import_comment, kind=citation|fact|general)으로, 참고문헌은 문헌(unverified)으로 넣는다. "
+                "Word 코멘트는 확인 요청(import_comment, kind=citation|fact|general)으로, 참고문헌은 원문 확인 전의 문헌 글로 넣는다. "
                 "표는 칸의 글까지 markdown 표로 싣고, 그림·수식은 [그림 N]·[수식] 자리표시자로 남기며 원본은 original/에 복사한다. "
                 "원고를 Word에서 고친 수정본을 올릴 때는 new_edition=true와 그 책의 project_id를 준다: "
                 "본문이 바뀐 장만 바꾸고(수정본 번호 E2, E3… 기록), 같은 코멘트는 다시 넣지 않으며, 원고에서 사라진 코멘트는 "
-                "'해결됐을 수 있음'으로 표시만 한다. 결정·직접 남긴 확인 요청·생각·문체·문헌은 그대로다. 장 제목이 30% 미만으로 겹치면 "
+                "'해결됐을 수 있음'으로 표시만 한다. 결정·직접 남긴 확인 요청·다른 책의 글은 그대로다. 장 제목이 30% 미만으로 겹치면 "
                 "다른 책으로 보고 멈춘다(맞으면 force=true). "
                 "replace=true는 기존 프로젝트(결정·확인 요청 포함)를 휴지통으로 옮기고 새로 만드니 수정본에 쓰지 않는다. "
                 "title·subtitle을 비우면 원고(파일 속성·표지)에서 제목·부제·영문 제목을 읽는다. "

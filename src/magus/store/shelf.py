@@ -1,7 +1,9 @@
-"""세 책장(사람 소유) 저장. LocalStore에 섞어 쓰는 믹스인이다.
+"""문헌(사람마다 key 하나) 저장과 검색 청크. LocalStore에 섞어 쓰는 믹스인이다.
 
-원본: data/users/<user_id>/shelf/{melchior,casper,balthasar}/…
-인덱스: refs·ref_passages·ideas·style_entries 행과, 검색용 chunks·chunks_fts.
+원본: data/users/<user_id>/shelf/melchior/<key>/{bib.json, passages.json, full.txt}
+  bib.json의 "book"은 그 문헌이 글로 보이는 책(카테고리 id, #96), "floor"는 그 책의 프로젝트다.
+#96 전의 생각(shelf/casper)·문체(shelf/balthasar)는 이전(magus maps apply)으로 책의 글이 됐다. 그 옛 파일은 magus.book_migrate만 읽는다.
+인덱스: refs·ref_passages 행과, 검색용 chunks·chunks_fts.
 청크는 원본에서 언제든 다시 만들 수 있다. 임베딩(BLOB)은 파생값이라 재생성 뒤에는 비어 있고,
 임베딩 제공자가 설정돼 있으면 magus.search.embed_missing이 다시 채운다.
 """
@@ -13,25 +15,22 @@ import re
 import sqlite3
 import threading
 from collections.abc import Callable, Iterable
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from magus.balthasar.style import search_text as style_search_text
+from magus.category.rules import DEFAULT_COLORS
+from magus.contexts import DEFAULTS, LEGACY_CONTEXT, find_saved
 from magus.floors import COMMON
-from magus.ids import safe_id, utcnow
-from magus.store.base import (
-    WEB_ONLY_LANES, Author, Chunk, Idea, Lane, Passage, Ref, RefStatus, StyleEntry, TrashItem, TrashKind,
-)
+from magus.ids import utcnow
+from magus.store.base import WEB_ONLY_LANES, Chunk, Context, Lane, Passage, Ref, RefStatus, TrashItem, TrashKind
 from magus.store.fileio import locked, read_json, read_text, write_json, write_text
 from magus.store.floors import Layout
 from magus.textindex import chunk_text, index_text
 
-# 생각 파일에서 값이 없으면 쓰지 않는 키(#92 전 코드로 되돌려도 그 파일을 그대로 읽도록).
-# "floor"(#93)는 언제나 적는다. 층 전 코드로 되돌릴 때는 magus floors revert로 먼저 뗀다.
-OPTIONAL_IDEA_KEYS = ("title", "title_by", "edited_at", "edited_by")
+SOURCE_BOOK_NAME = "참고문헌"  # 문헌이 든 책이 없는 프로젝트에 참고문헌을 가져올 때 만드는 책(컨텍스트 「논문」, #96)
 
 
 def _in(floors: Iterable[str] | None, column: str = "floor") -> tuple[str, list[str]]:
@@ -58,7 +57,6 @@ class ShelfMixin:
     # FloorMixin이 구현한다
     _layout: Callable[[str], Layout]
     _known: Callable[[str, Layout], set[str]]
-    place: Callable[[str, str, str | None], str]
     # CategoryMixin이 구현한다(메서드 껍데기를 두면 MRO에서 진짜를 가리므로 주석만 둔다)
     _trashed_categories: Callable[[str], list[tuple[str, str, dict[str, Any], str]]]
     _restore_category: Callable[[str, str, str | None], list[str]]
@@ -88,11 +86,14 @@ class ShelfMixin:
         return _ref(row) if row else None
 
     @locked
-    def list_refs(self, user_id: str, status: RefStatus | None = None, *, floors: Iterable[str] | None = None) -> list[Ref]:
+    def list_refs(self, user_id: str, status: RefStatus | None = None, *, floors: Iterable[str] | None = None,
+                  book: str | None = None) -> list[Ref]:
         where, values = _in(floors)
         sql, args = f"SELECT * FROM refs WHERE user_id = ?{where}", [user_id, *values]
         if status:
             sql, args = sql + " AND status = ?", [*args, status]
+        if book is not None:
+            sql, args = sql + " AND book = ?", [*args, book]
         return [_ref(r) for r in self._db.execute(sql + " ORDER BY key", args)]
 
     @locked
@@ -111,10 +112,15 @@ class ShelfMixin:
         key = safe_ref_key(ref.key)
         rdir = self._melchior_dir(user_id) / key
         old = read_json(rdir / "bib.json") if (rdir / "bib.json").exists() else {}
-        known = self._known(user_id, self._layout(user_id))
-        # 층: 준 것(호출자가 place로 정한 층), 없으면 지금 꽂힌 층, 새 문헌이면 위에서부터 문헌이 꽂힌 첫 층(#93)
-        floor = (next((f for f in (ref.floor, old.get("floor")) if isinstance(f, str) and f in known), None)
-                 or self.place(user_id, "refs", None))
+        # 책(#96): 준 책 → 지금 책 → 준 프로젝트(없으면 「내 서재」)의 문헌 책(없으면 「참고문헌」을 만든다). 프로젝트는 그 책의 것
+        book = next((b for b in (ref.book, old.get("book")) if isinstance(b, str) and self._book_floor_of(user_id, b)), None)
+        if book is None:
+            known = self._known(user_id, self._layout(user_id))
+            target = (ref.floor if ref.floor in known else old.get("floor") if old.get("floor") in known
+                      else self.default_project(user_id))
+            book = self.source_book(user_id, target, create=True)
+            assert book is not None
+        floor = self._book_floor_of(user_id, book)
         if full_text is not None:
             write_text(rdir / "full.txt", full_text)
         if passages is not None:
@@ -130,6 +136,7 @@ class ShelfMixin:
                 "created_at": ref.created_at or old.get("created_at") or utcnow(),
                 "updated_at": utcnow(),
                 "floor": floor,
+                "book": book,
                 **({"moved": old["moved"]} if isinstance(old.get("moved"), dict) else {}),  # 공용으로 옮긴 기록은 그대로(#93-a)
             },
         )
@@ -139,19 +146,69 @@ class ShelfMixin:
         assert stored is not None
         return stored
 
+    @locked
+    def default_project(self, user_id: str) -> str:
+        """프로젝트를 말하지 않았을 때 문헌이 갈 프로젝트: 프로젝트가 하나면 그것, 아니면 「내 서재」(옛 규칙과 같다, #93)."""
+        works = sorted(self._known(user_id, self._layout(user_id)) - {COMMON})
+        return works[0] if len(works) == 1 else COMMON
+
+    def _book_floor_of(self, user_id: str, book: str) -> str | None:
+        """책(카테고리 id)의 프로젝트. 없는 책이면 None."""
+        row = self._db.execute("SELECT floor FROM categories WHERE user_id = ? AND id = ?", (user_id, book)).fetchone()
+        return str(row[0]) if row else None
+
+    @locked
+    def source_book(self, user_id: str, floor: str, *, create: bool = False) -> str | None:
+        """그 프로젝트에서 문헌·참고문헌 항목이 든 책(가장 많이 든 책, 같으면 먼저 만든 책).
+        없고 create면 「참고문헌」 책(컨텍스트 「논문」)을 만든다(지도에는 이름이 같은 새 노드, 가운데와 이음)."""
+        row = self._db.execute(
+            "SELECT c.id FROM categories c JOIN refs r ON r.user_id = c.user_id AND r.book = c.id "
+            "WHERE c.user_id = ? AND c.floor = ? GROUP BY c.id ORDER BY COUNT(*) DESC, c.created_at, c.id LIMIT 1",
+            (user_id, floor)).fetchone()
+        if row or not create:
+            return str(row[0]) if row else None
+        taken = {r[0] for r in self._db.execute("SELECT name_key FROM categories WHERE user_id = ? AND floor = ?", (user_id, floor))}
+        name, n = SOURCE_BOOK_NAME, 2
+        while name.replace(" ", "").lower() in taken:
+            name, n = f"{SOURCE_BOOK_NAME} {n}", n + 1
+        saved = find_saved(self.list_saved_contexts(user_id), "논문")  # type: ignore[attr-defined]
+        paper = saved or next(c for c in DEFAULTS if c.id == LEGACY_CONTEXT["refs"])
+        made = self.create_category(user_id, name, "blank", DEFAULT_COLORS["refs"], (), floor,  # type: ignore[attr-defined]
+                                    contexts=(Context(paper.name, paper.text),))
+        return str(made.id)
+
+    @locked
+    def set_ref_book(self, user_id: str, key: str, book: str, reason: str | None = None) -> Ref:
+        """문헌 한 편을 다른 책으로(프로젝트도 그 책의 것). reason을 주면 옮긴 시각·원래 프로젝트·이유를 남긴다(#93-a)."""
+        floor = self._book_floor_of(user_id, book)
+        path = self._melchior_dir(user_id) / safe_ref_key(key) / "bib.json"
+        if floor is None or not path.exists():
+            raise ValueError(f"책 {book!r} 또는 문헌 {key!r}가 없다")
+        data = read_json(path)
+        before = data.get("floor")
+        data.update({"book": book, "floor": floor, "updated_at": utcnow()})
+        if reason:  # 저자가 알 수 있게 옮긴 시각·원래 프로젝트·이유를 남긴다(#93-a 더함)
+            data["moved"] = {"at": utcnow(), "from": str(before or ""), "to": floor, "reason": reason}
+        write_json(path, data)
+        with self._db:
+            self._index_ref(user_id, path.parent)
+        found = self.get_ref(user_id, key)
+        assert found is not None
+        return found
+
     def _index_ref(self, user_id: str, rdir: Path, floor: str | None = None) -> None:
-        """floor: reindex가 배치에서 정해 준 층(파일에 층이 없거나 모르는 층일 때). None이면 파일의 층."""
+        """floor: reindex가 배치에서 정해 준 프로젝트(파일에 없거나 모르는 프로젝트일 때). None이면 파일의 것."""
         record = read_json(rdir / "bib.json")
         full = read_text(rdir / "full.txt")
         passages = read_json(rdir / "passages.json") if (rdir / "passages.json").exists() else []
         ref_id = self._db.execute(
             """
-            INSERT INTO refs (user_id, key, aliases, bib, status, has_fulltext, file_path, created_at, updated_at, floor, moved)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO refs (user_id, key, aliases, bib, status, has_fulltext, file_path, created_at, updated_at, floor, moved, book)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (user_id, key) DO UPDATE SET
                 aliases = excluded.aliases, bib = excluded.bib, status = excluded.status,
                 has_fulltext = excluded.has_fulltext, file_path = excluded.file_path, updated_at = excluded.updated_at,
-                floor = excluded.floor, moved = excluded.moved
+                floor = excluded.floor, moved = excluded.moved, book = excluded.book
             RETURNING id
             """,
             (
@@ -166,6 +223,7 @@ class ShelfMixin:
                 record.get("updated_at"),
                 floor or str(record.get("floor") or COMMON),
                 json.dumps(record["moved"], ensure_ascii=False) if isinstance(record.get("moved"), dict) else None,
+                str(record["book"]) if record.get("book") else None,
             ),
         ).fetchone()[0]
         self._db.execute("DELETE FROM ref_passages WHERE ref_id = ?", (ref_id,))
@@ -177,152 +235,14 @@ class ShelfMixin:
         self._replace_chunks(user_id, "ref", record["key"], "ref_full", chunk_text(full) if full.strip() else [])
         self._replace_chunks(user_id, "ref", record["key"], "ref_bib", [bib_text(record)])  # 웹 책장 검색 전용
 
-    # ---- Casper: 영감 ----------------------------------------------------------------
-
-    def _casper_dir(self, user_id: str) -> Path:
-        return self._user_dir(user_id) / "shelf" / "casper"
-
-    @locked
-    def add_ideas(self, user_id: str, ideas: list[Idea]) -> list[Idea]:
-        stored = []
-        default = self.place(user_id, "ideas", None) if any(i.floor is None for i in ideas) else None
-        for idea in ideas:
-            safe_id(idea.id, "idea id")
-            idea = replace(idea, created_at=idea.created_at or utcnow(), floor=idea.floor or default)
-            # 제목이 없으면 title·title_by 키를 쓰지 않는다: 제목 전(#92 전) 코드로 되돌려도 파일을 그대로 읽는다
-            record = {k: v for k, v in asdict(idea).items() if not (k in OPTIONAL_IDEA_KEYS and v is None)}
-            write_json(self._casper_dir(user_id) / f"{idea.id}.json", record)
-            stored.append(idea)
-        with self._db:
-            for idea in stored:
-                self._index_idea(user_id, idea)
-        return stored
-
-    def _index_idea(self, user_id: str, idea: Idea) -> None:
-        self._db.execute(
-            "INSERT OR REPLACE INTO ideas (id, user_id, text, kind, origin, author, parent_id, created_at, title, title_by, "
-            "edited_at, edited_by, floor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (idea.id, user_id, idea.text, idea.kind, idea.origin, idea.author, idea.parent_id, idea.created_at, idea.title,
-             idea.title_by, idea.edited_at, idea.edited_by, idea.floor or COMMON),
-        )
-        lane: Lane = "idea_me" if idea.author == "me" else "idea_ai"
-        text = f"{idea.title}\n{idea.text}" if idea.title else idea.text  # 제목(#92)도 찾는다
-        self._replace_chunks(user_id, "idea", idea.id, lane, chunk_text(text))
-
-    @locked
-    def get_ideas(self, user_id: str, ids: list[str]) -> dict[str, Idea]:
-        if not ids:
-            return {}
-        marks = ",".join("?" * len(ids))
-        rows = self._db.execute(f"SELECT * FROM ideas WHERE user_id = ? AND id IN ({marks})", (user_id, *ids))
-        return {r["id"]: _idea(r) for r in rows}
-
-    @locked
-    def list_ideas(self, user_id: str, author: Author | None = None, *, floors: Iterable[str] | None = None) -> list[Idea]:
-        where, values = _in(floors)
-        sql, args = f"SELECT * FROM ideas WHERE user_id = ?{where}", [user_id, *values]
-        if author:
-            sql, args = sql + " AND author = ?", [*args, author]
-        return [_idea(r) for r in self._db.execute(sql + " ORDER BY id", args)]
-
-    # ---- Balthasar: 문체 -------------------------------------------------------------
-
-    def _balthasar_dir(self, user_id: str) -> Path:
-        return self._user_dir(user_id) / "shelf" / "balthasar"
-
-    @locked
-    def add_style(self, user_id: str, entry: StyleEntry) -> StyleEntry:
-        safe_id(entry.id, "style id")
-        entry = replace(entry, created_at=entry.created_at or utcnow(), floor=entry.floor or self.place(user_id, "styles", None))
-        write_json(self._balthasar_dir(user_id) / f"{entry.id}.json", asdict(entry))
-        with self._db:
-            self._index_style(user_id, entry)
-        return entry
-
-    def _index_style(self, user_id: str, entry: StyleEntry) -> None:
-        self._db.execute(
-            "INSERT OR REPLACE INTO style_entries (id, user_id, passage, reason, work, tags, created_at, tags_by, floor) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (entry.id, user_id, entry.passage, entry.reason, entry.work, json.dumps(entry.tags, ensure_ascii=False),
-             entry.created_at, entry.tags_by, entry.floor or COMMON),
-        )
-        # 문체 검색의 대상은 reason + tags다. passage를 색인하면 문체가 아니라 주제가 검색된다.
-        # work(출전)는 키워드 색인에만 더한다: "유홍준 그 문장"처럼 출전으로 찾는 경우가 있다(사용자 결정 #24).
-        self._replace_chunks(
-            user_id, "style", entry.id, "style", [style_search_text(entry.reason, entry.tags)], fts_extra=entry.work or ""
-        )
-        # 웹 책장 검색 전용 레인(구절·출전). style_search는 이 레인을 보지 않으므로 위의 원칙은 그대로다.
-        self._replace_chunks(user_id, "style", entry.id, "style_passage", [f"{entry.passage}\n{entry.work or ''}".strip()])
-
-    @locked
-    def get_styles(self, user_id: str, ids: list[str]) -> dict[str, StyleEntry]:
-        if not ids:
-            return {}
-        marks = ",".join("?" * len(ids))
-        rows = self._db.execute(f"SELECT * FROM style_entries WHERE user_id = ? AND id IN ({marks})", (user_id, *ids))
-        return {r["id"]: _style(r) for r in rows}
-
-    @locked
-    def list_styles(self, user_id: str, *, floors: Iterable[str] | None = None) -> list[StyleEntry]:
-        where, values = _in(floors)
-        return [_style(r) for r in self._db.execute(f"SELECT * FROM style_entries WHERE user_id = ?{where} ORDER BY id",
-                                                    (user_id, *values))]
-
-    # ---- 휴지통(생각·문체, #88) -------------------------------------------------------
-    # 지우지 않고 trash/shelf/<casper|balthasar>/<id>.json으로 옮긴다. 파일에 "_trash"(시각·이유·함께 옮긴 생각)를 덧붙인다.
-    # shelf/ 밖이라 reindex·검색·목록·웹에서 빠진다. 되살리면 "_trash"를 떼고 제자리로 돌려 다시 색인한다.
-
-    def _trash_dir(self, user_id: str, kind: TrashKind) -> Path:  # 생각·문체만
-        return self._user_dir(user_id) / "trash" / "shelf" / ("casper" if kind == "idea" else "balthasar")
-
-    def _shelf_dir(self, user_id: str, kind: TrashKind) -> Path:
-        return self._casper_dir(user_id) if kind == "idea" else self._balthasar_dir(user_id)
-
-    def _move_to_trash(self, user_id: str, kind: TrashKind, item_id: str, mark: dict[str, Any]) -> dict[str, Any]:
-        src = self._shelf_dir(user_id, kind) / f"{item_id}.json"
-        data = read_json(src)
-        write_json(self._trash_dir(user_id, kind) / f"{item_id}.json", {**data, "_trash": mark})  # 먼저 쓰고 지운다
-        src.unlink()
-        table = "style_entries" if kind == "style" else "ideas"
-        self._db.execute(f"DELETE FROM {table} WHERE user_id = ? AND id = ?", (user_id, item_id))
-        self._drop_chunks(user_id, kind, item_id)
-        return data
-
-    @locked
-    def trash_idea(self, user_id: str, idea_id: str, note: str) -> list[Idea]:
-        safe_id(idea_id, "idea id")
-        if not (self._casper_dir(user_id) / f"{idea_id}.json").exists():
-            return []
-        replies = [i.id for i in self.list_ideas(user_id) if i.parent_id == idea_id]
-        at, moved = utcnow(), []
-        with self._db:
-            for item, with_id in [(idea_id, None), *((r, idea_id) for r in replies)]:
-                mark = {"at": at, "note": note, **({"with": with_id} if with_id else {})}
-                moved.append(Idea(**self._move_to_trash(user_id, "idea", item, mark)))
-        return moved
-
-    @locked
-    def trash_style(self, user_id: str, style_id: str, note: str) -> StyleEntry | None:
-        safe_id(style_id, "style id")
-        if not (self._balthasar_dir(user_id) / f"{style_id}.json").exists():
-            return None
-        with self._db:
-            return StyleEntry(**self._move_to_trash(user_id, "style", style_id, {"at": utcnow(), "note": note}))
-
     @locked
     def list_trash(self, user_id: str) -> list[TrashItem]:
         items = []
-        for kind in ("idea", "style"):
-            for path in sorted(self._trash_dir(user_id, kind).glob("*.json")):  # type: ignore[arg-type]
-                data = read_json(path)
-                mark = data.get("_trash") or {}
-                items.append(TrashItem(kind, path.stem, mark.get("at", ""), mark.get("note", ""),  # type: ignore[arg-type]
-                                       str(data.get("text") or data.get("passage") or "")[:80], mark.get("with")))
-        for kind, item_id, data, at in self._trashed_categories(user_id):  # 카테고리 통째·카테고리 항목(#92)
+        for kind, item_id, data, at in self._trashed_categories(user_id):  # 책 통째·글(#92, #96: 옛 생각·문체도 글)
             mark = data.get("_trash") or {}
-            preview = (f"카테고리 「{data.get('name', '')}」" if kind == "category"
+            preview = (f"책 「{data.get('name', '')}」" if kind == "category"
                        else str(data.get("title") or data.get("content") or "")[:80])
-            items.append(TrashItem(kind, item_id, at, mark.get("note", ""), preview))  # type: ignore[arg-type]
+            items.append(TrashItem(kind, item_id, at, mark.get("note", ""), preview, mark.get("with")))  # type: ignore[arg-type]
         for ref, data in self._trashed_nodes(user_id):  # type: ignore[attr-defined]  # 지도의 노드(#95)
             mark = data.get("_trash") or {}
             preview = "연결 노드" if data.get("link") else f"노드 「{data.get('name', '')}」"
@@ -337,43 +257,15 @@ class ShelfMixin:
             return self._restore_category_item(user_id, item_id)
         if kind == "node":
             return self._restore_node(user_id, item_id)  # type: ignore[attr-defined]
-        safe_id(item_id, f"{kind} id")
-        trash = self._trash_dir(user_id, kind)
-        if not (trash / f"{item_id}.json").exists():
-            raise ValueError(f"휴지통에 {kind} {item_id}가 없다")
-        names = [item_id] + ([p.stem for p in sorted(trash.glob("*.json")) if (read_json(p).get("_trash") or {}).get("with") == item_id]
-                             if kind == "idea" else [])
-        layout = self._layout(user_id)
-        known = self._known(user_id, layout)
-        with self._db:
-            for name in names:
-                data = {k: v for k, v in read_json(trash / f"{name}.json").items() if k != "_trash"}
-                if data.get("floor") not in known:  # 층이 없거나 그사이 사라진 층이면 그 종류가 꽂힌 첫 층으로
-                    data["floor"] = layout.fallback("ideas" if kind == "idea" else "styles")
-                write_json(self._shelf_dir(user_id, kind) / f"{name}.json", data)
-                (trash / f"{name}.json").unlink()
-                if kind == "idea":
-                    self._index_idea(user_id, Idea(**data))
-                else:
-                    self._index_style(user_id, StyleEntry(**data))
-        return names
+        raise ValueError(f"휴지통 종류를 모른다: {kind!r}")
 
     def _reindex_shelf(self, user_id: str) -> None:
-        """층이 없거나 모르는 층(휴지통으로 간 작업물)이면 배치에서 정한 층으로 색인한다(파일은 그대로, #93)."""
+        """문헌. 프로젝트가 없거나 모르는 프로젝트(휴지통으로 간 작업물)면 배치에서 정한 프로젝트로 색인한다(파일은 그대로, #93)."""
         layout = self._layout(user_id)
         known = self._known(user_id, layout)
-
-        def floor(data: dict[str, Any], kind: str) -> str:
-            return data["floor"] if data.get("floor") in known else layout.fallback(kind)
-
         for bib in sorted(self._melchior_dir(user_id).glob("*/bib.json")):
-            self._index_ref(user_id, bib.parent, floor(read_json(bib), "refs"))
-        for path in sorted(self._casper_dir(user_id).glob("*.json")):
-            data = read_json(path)
-            self._index_idea(user_id, Idea(**{**data, "floor": floor(data, "ideas")}))
-        for path in sorted(self._balthasar_dir(user_id).glob("*.json")):
-            data = read_json(path)
-            self._index_style(user_id, StyleEntry(**{**data, "floor": floor(data, "styles")}))
+            data = read_json(bib)
+            self._index_ref(user_id, bib.parent, data["floor"] if data.get("floor") in known else layout.fallback("refs"))
 
     # ---- 검색 청크 -------------------------------------------------------------------
 
@@ -481,21 +373,6 @@ def bib_text(record: dict[str, Any]) -> str:
     return "\n".join(p for p in dict.fromkeys(parts) if p)
 
 
-def _style(r: sqlite3.Row) -> StyleEntry:
-    return StyleEntry(
-        id=r["id"], passage=r["passage"], reason=r["reason"], tags=json.loads(r["tags"]), work=r["work"],
-        created_at=r["created_at"], tags_by=r["tags_by"], floor=r["floor"],
-    )
-
-
-def _idea(r: sqlite3.Row) -> Idea:
-    return Idea(
-        id=r["id"], text=r["text"], kind=r["kind"], author=r["author"], origin=r["origin"], parent_id=r["parent_id"],
-        created_at=r["created_at"], title=r["title"], title_by=r["title_by"], edited_at=r["edited_at"], edited_by=r["edited_by"],
-        floor=r["floor"],
-    )
-
-
 def _ref(r: sqlite3.Row) -> Ref:
     bib: dict[str, Any] = json.loads(r["bib"])
     return Ref(
@@ -509,4 +386,5 @@ def _ref(r: sqlite3.Row) -> Ref:
         floor=r["floor"],
         updated_at=r["updated_at"] or r["created_at"],
         moved=json.loads(r["moved"]) if r["moved"] else None,
+        book=r["book"],
     )

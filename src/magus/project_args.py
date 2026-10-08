@@ -2,9 +2,8 @@
 
 - 넣을 때: project를 주면 그 프로젝트(「내 서재」·프로젝트 id·제목). 주지 않았으면 프로젝트가 하나면 그것, 없으면 「내 서재」,
   둘 이상이면 넣지 않고 묻게 한다(서버는 대화를 모르므로 '지금 다루는 프로젝트'는 Claude가 project로 넘긴다).
-- 기본 책(생각·문체·문헌)은 그 프로젝트의 책 → 지도의 연결 노드가 가리키는 책(하나일 때)에 들어간다. 연결된 책이 여럿이거나
-  어디에도 없으면 넣지 않고 묻게 한다(저자가 이 프로젝트에 새로 두자고 하면 category_create로 다시 꽂는다).
-- 찾을 때: project가 없으면 모든 프로젝트에서 찾고, 같은 종류가 여러 프로젝트에 있으면 결과마다 프로젝트를 적는다.
+- 책(#96)은 이름으로 가리킨다. 같은 이름이 여러 프로젝트에 있으면 project(그 프로젝트, 그다음 연결 노드가 가리키는 책)로 가린다.
+- 찾을 때: project가 없으면 모든 프로젝트에서 찾는다(있으면 그 프로젝트와 연결 노드가 가리키는 프로젝트).
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ from __future__ import annotations
 from mcp.server.mcpserver.exceptions import ToolError
 
 from magus.floors import COMMON
-from magus.maps import BOOK_NAMES, LIBRARY, LIBRARY_NAME
+from magus.maps import LIBRARY, LIBRARY_NAME
 from magus.store import Floor, Ref, Store
 
 # 도구 설명에 붙이는 한 줄(자세한 규칙은 instructions)
@@ -70,40 +69,14 @@ def resolve_project(store: Store, user: str, project: str | None) -> str:
     )
 
 
-def resolve_put(store: Store, user: str, kind: str, project: str | None) -> str:
-    """기본 책(kind)에 넣을 프로젝트 id. 그 프로젝트의 책 → 연결 노드가 가리키는 책(하나일 때). 아니면 묻게 한다."""
-    floor = resolve_project(store, user, project)
-    targets = store.book_targets(user, kind, floor)
-    if len(targets) == 1:
-        return store.place(user, kind, targets[0])
-    name, here = BOOK_NAMES[kind], floor_name(store, user, floor)
-    if targets:
-        raise ToolError(f"{here} 지도에 연결된 {name} 책이 여럿이다({', '.join(floor_name(store, user, t) for t in targets)}). "
-                        "저자에게 어느 것인지 묻고 그 프로젝트를 project로 준다.")
-    where = [f for f in store.list_floors(user) if kind in f.builtins]
-    raise ToolError(f"{here}에는 {name} 책이 없다(연결 노드도 없다). {name} 책이 있는 프로젝트: "
-                    f"{', '.join(floor_name(store, user, f.id) for f in where) or '없음'}. 저자에게 어디에 넣을지 묻는다. "
-                    f"이 프로젝트에 새로 두자고 하면 category_create(name={name}, project)로 먼저 꽂는다.")
-
-
-def search_projects(store: Store, user: str, project: str | None, kind: str | None = None) -> list[str] | None:
-    """찾을 프로젝트: project가 없으면 None(모두). 있으면 그 프로젝트와, 지도의 연결 노드가 가리키는 노드에 그 기본 책(kind)이
-    꽂힌 프로젝트(kind가 없으면 연결 노드가 가리키는 모든 프로젝트)."""
+def search_projects(store: Store, user: str, project: str | None) -> list[str] | None:
+    """찾을 프로젝트: project가 없으면 None(모두). 있으면 그 프로젝트와, 지도의 연결 노드가 가리키는 프로젝트."""
     if not project or not project.strip():
         return None
     floor = find_project(store, user, project).id
     found = store.get_map(user, floor)
-    linked = [n.link[0] for n in (found.nodes if found else ())
-              if n.link and not n.missing and (kind is None or f"{kind}.{n.link[0]}" in n.books)]
+    linked = [n.link[0] for n in (found.nodes if found else ()) if n.link and not n.missing]
     return list(dict.fromkeys([floor, *linked]))
-
-
-def labels_for(store: Store, user: str, kind: str) -> dict[str, str]:
-    """같은 기본 책(kind)이 둘 이상의 프로젝트에 있을 때만 {프로젝트 id: 이름}. 하나면 빈 dict(결과에 프로젝트를 적지 않는다)."""
-    floors = store.list_floors(user)
-    if sum(1 for f in floors if kind in f.builtins) < 2:
-        return {}
-    return {f.id: LIBRARY_NAME if f.common else short(f.title, 16) for f in floors}
 
 
 def floor_name(store: Store, user: str, floor_id: str) -> str:
@@ -119,11 +92,13 @@ def shared_reason(store: Store, user: str, before: str | None, now: str) -> str:
 
 
 def share_ref(store: Store, user: str, key: str, before: str | None, now: str) -> Ref:
-    """두 프로젝트가 함께 쓰게 된 문헌을 「내 서재」의 문헌으로 옮기고, 두 프로젝트 지도에 그 노드로 가는 연결 노드를 붙인다
-    (없을 때만). 그래서 두 원고의 인용 점검 모두 그 문헌을 본다."""
-    ref = store.set_ref_floor(user, key, LIBRARY, shared_reason(store, user, before, now))
+    """두 프로젝트가 함께 쓰게 된 문헌을 「내 서재」의 문헌 책(없으면 「참고문헌」을 만든다)으로 옮기고, 두 프로젝트 지도에
+    그 책이 꽂힌 노드로 가는 연결 노드를 붙인다(없을 때만). 그래서 두 원고의 인용 점검 모두 그 문헌을 본다(#95, #96: 책 단위)."""
+    book = store.source_book(user, LIBRARY, create=True)
+    assert book is not None
+    ref = store.set_ref_book(user, key, book, shared_reason(store, user, before, now))
     for floor in dict.fromkeys(f for f in (before, now) if f):
-        store.ensure_link(user, floor, LIBRARY, "refs")
+        store.ensure_link(user, floor, LIBRARY, book)
     return ref
 
 

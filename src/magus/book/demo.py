@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from magus.balthasar.style import validate_tags
 from magus.book.comments import classify_comment
 from magus.ids import new_id
-from magus.store import Idea, Part, Project, Store, StyleEntry
+from magus.store import CategoryItem, Context, Part, Project, Store
 
 DEMO_PROJECT_ID = "demo"
 
@@ -43,29 +42,30 @@ def seed_demo(store: Store, user_id: str) -> tuple[Project, bool]:
 
 
 def seed_demo_shelf(store: Store, user_id: str) -> None:
-    """Desktop에서 idea_*·style_*를 바로 써 볼 수 있게 책장에도 몇 개 넣는다(CLI seed-demo 전용)."""
-    store.add_ideas(
-        user_id,
-        [
-            Idea(new_id(), "물고기가 뭍으로 올라온 건 용기가 아니라 궁지였다.", "thought", "me", "데모"),
-            Idea(new_id(), "이 책의 축은 닿으려는 몸짓이다.", "thought", "me", "데모"),
-        ],
-    )
-    question = Idea(new_id(), "고래는 왜 다시 물로 돌아갔을까?", "conversation", "me", "데모 대화")
-    answer = Idea(new_id(), "먹이와 경쟁의 조건이 바뀌면 이전 환경이 다시 유리해질 수 있습니다.", "conversation", "ai", "데모 대화", question.id)
-    store.add_ideas(user_id, [question, answer])
+    """Desktop에서 글 넣기·찾기를 바로 써 볼 수 있게 책 둘(컨텍스트 「생각 메모」·「문체」)에 글을 몇 개 넣는다(CLI seed-demo 전용, #96)."""
+    saved = {c.name: c for c in store.list_saved_contexts(user_id)}
+
+    def book(name: str, context: str, color: str) -> str:
+        found = next((c for c in store.list_categories(user_id, floors=[DEMO_PROJECT_ID]) if c.name == name), None)
+        if found:
+            return found.id
+        ctx = saved.get(context)
+        return store.create_category(user_id, name, "blank", color, (), DEMO_PROJECT_ID,
+                                     contexts=(Context(ctx.name, ctx.text),) if ctx else ()).id
+
+    ideas = book("생각", "생각 메모", "#1f2f5c")
+    for text in ("물고기가 뭍으로 올라온 건 용기가 아니라 궁지였다.", "이 책의 축은 닿으려는 몸짓이다."):
+        store.put_category_item(user_id, CategoryItem(new_id(), ideas, text, "me", origin="데모", kind="thought"))
+    question = store.put_category_item(user_id, CategoryItem(new_id(), ideas, "고래는 왜 다시 물로 돌아갔을까?", "me",
+                                                             origin="데모 대화", kind="conversation"))
+    store.put_category_item(user_id, CategoryItem(new_id(), ideas, "먹이와 경쟁의 조건이 바뀌면 이전 환경이 다시 유리해질 수 있습니다.",
+                                                  "ai", origin="데모 대화", kind="conversation", parent_id=question.id))
+    styles = book("문체", "문체", "#6e1f2f")
     for passage, reason, tags, work in [
-        (
-            "고래는 돌아갔다. 물이 고래를 불렀다. 고래는 대답했다.",
-            "짧은 문장과 같은 주어의 반복이 숨 가쁜 리듬을 만든다",
-            {"호흡": "짧고 끊김", "시점": "3인칭", "열기": "장면", "장치": ["반복"], "어미": "-다 체", "톤": "건조함"},
-            "데모 산문",
-        ),
-        (
-            "그 여름의 물가에는 아무도 없었고, 나는 오래도록 바람이 지나간 자리를 바라보았다.",
-            "길게 이어지는 회상이 느린 호흡과 여운을 만든다",
-            {"호흡": "길고 느림", "시점": "1인칭 회상", "열기": "풍경", "장치": ["열거"], "어미": "-었다", "톤": "서정적"},
-            "데모 산문",
-        ),
+        ("고래는 돌아갔다. 물이 고래를 불렀다. 고래는 대답했다.", "짧은 문장과 같은 주어의 반복이 숨 가쁜 리듬을 만든다",
+         ["호흡: 짧고 끊김", "장치: 반복", "톤: 건조함"], "데모 산문"),
+        ("그 여름의 물가에는 아무도 없었고, 나는 오래도록 바람이 지나간 자리를 바라보았다.", "길게 이어지는 회상이 느린 호흡과 여운을 만든다",
+         ["호흡: 길고 느림", "장치: 열거", "톤: 서정적"], "데모 산문"),
     ]:
-        store.add_style(user_id, StyleEntry(new_id(), passage, reason, validate_tags(tags), work))
+        store.put_category_item(user_id, CategoryItem(new_id(), styles, passage, "me", tags=tuple(tags), reason=reason, where=work,
+                                                      tags_by="ai"))

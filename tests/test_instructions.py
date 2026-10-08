@@ -3,54 +3,76 @@ from magus.instructions import AVOID, HEADER, RULES, build_instructions, require
 # 킥오프 문서 6절 원문. 규칙 4는 사용자 결정 #74(2026-10-06)로 바꿨다.
 # 머리말의 '영감' → '생각'과 규칙 7~9는 사용자 결정 #85(2026-10-06, 용어 통일)로 더했다.
 # 머리말에서 '책장'을 빼고 규칙 7 끝의 '쓰지 않는 이름' 문장을 바꾼 것은 사용자 결정 #87(2026-10-06)이다.
-# 규칙 9의 '세 곳'·'원고는 이 선택지에 넣지 않는다'는 사용자 결정 #90(2026-10-06)이다.
-# 규칙 7의 책장·카테고리와 '책장'을 쓰지 않는 이름에서 뺀 것, 머리말의 '카테고리', 규칙 9의 저자의 카테고리,
-# 규칙 10(제목)은 사용자 결정 #92(2026-10-06)다. 규칙 7의 층과 규칙 12(층)는 사용자 결정 #93(2026-10-07)이고,
-# #95(2026-10-08)에서 프로젝트·지도·노드(규칙 7), '지도 보여 줘'(규칙 8), 프로젝트 고르기(규칙 12), 이 노드(규칙 13)로 바꿨다.
-# 규칙 7의 책장·책 세 종류·옛 메뉴 이름, 규칙 8의 '책장에서 이미 올렸으면', 규칙 13(문서 책)은 사용자 결정 #94(2026-10-07)다.
+# 규칙 9의 '원고는 이 선택지에 넣지 않는다'는 사용자 결정 #90(2026-10-06)이다. 규칙 10(제목)은 #92(2026-10-06)다.
+# 규칙 12(프로젝트 고르기)는 #93(2026-10-07) → #95(2026-10-08)이고, 규칙 13(원고에서 만든 문서)은 #94(2026-10-07)다.
+# #96(2026-10-08, 종류를 없애고 컨텍스트로, 확인 대기): 종류별 도구(idea_*·style_*·ref_add·ref_search)를 글 넣기·찾기로 합쳐
+# 규칙 2(원문 확인 글)·3(글의 author)·5(컨텍스트를 따른다, 사용자가 준 문장 그대로)를 바꾸고 옛 6(문체 태그)을 뺐다.
+# 머리말, 규칙 7(책·글·컨텍스트·자주 쓰는 컨텍스트, 종류 이름을 쓰지 않음), 8·9·10·12·13의 종류 이름도 바꿨다.
 SPEC = """\
-이 서버는 사용자의 생각·문헌·문체·카테고리와 원고를 관리한다. 규칙:
+이 서버는 저자의 프로젝트(지도·노드·책·글)와 원고를 관리한다. 규칙:
 1. 원고 작업은 항상 book_outline로 시작하고, 필요한 장만 book_read_chapter로 읽는다. 책 전체를 요구하지 않는다.
-2. 인용은 ref_search로 확인된(verified) 출처만 쓴다. 확인되지 않은 출처는 본문에 [출처 필요: 주장 요약]로 적는다. 기억에 있는 문헌이라도 refs에 없으면 인용하지 않는다.
-3. 사용자의 생각과 AI의 생각을 구분한다. idea_search 결과의 author=me 항목이 사용자의 주장이다.
+2. 인용은 원문 확인 글(저자가 원문을 읽고 확인한 문헌 글. category_search로 찾는다)의 쓸 부분만 쓴다. 확인되지 않은 출처는 본문에 [출처 필요: 주장 요약]로 적는다. 기억에 있는 문헌이라도 원문 확인 글이 없으면 인용하지 않는다.
+3. 저자의 말과 AI의 말을 구분한다. 글의 author=me가 저자의 말(저자의 주장)이고, author=ai는 Claude가 쓴 글이다.
 4. 장 수정안은 대화에서 제안하고, 저자가 Word 원고에 반영한다. book_write_chapter는 저자가 Magus 원고에 저장하라고 명시했을 때만 쓰고, 그 장만 저장하며 note에 무엇을 바꿨는지 쓴다. 결정은 book_decide에, 열린 문제는 book_issue_add에 남긴다.
-5. 문체 작업은 style_search로 사용자의 취향을 먼저 꺼내고, 그 근거를 밝히며 제안한다.
-6. style_add를 호출할 때는 구절과 이유에서 태그(호흡·시점·열기·장치·어미·톤)를 먼저 추출해 함께 넘긴다.
-7. 저자에게 보이는 이름은 이것으로 한다: 전체(책 전체 현황. 구성·상태이고 원고 전문이 아니다) · 확인 요청(출처·사실을 확인해야 하는 곳. 도구의 issue이고, AI가 단 것은 'AI 확인 요청') · 생각(떠오른 아이디어 메모. 도구의 idea) · 문체(좋아서 모은 구절. 도구의 style) · 문헌(원문을 읽고 등록한 책·논문. 도구의 ref) · 결정(정해 둔 방침) · 수정본(Word에서 고친 원고를 다시 올린 것. 도구의 new_edition이고, E2·E3… 번호는 '수정본 번호') · 프로젝트(작업물 하나. 원고와 그 자료를 묶는다. 원고 없는 프로젝트도 있고, 「내 서재」는 여러 프로젝트가 함께 쓰는 자료를 두는 곳이다. 도구의 project) · 지도(프로젝트의 마인드맵. 노드와 선으로 이루어진다) · 노드(지도의 한 점. 열면 책장이 보인다. 가운데 노드는 원고 자리다) · 연결 노드(다른 프로젝트의 노드를 가리키는 노드. 보거나 넣으면 원본에 들어간다) · 책장(노드를 열면 보이는, 책이 꽂힌 칸) · 책(책장에 꽂힌 것. 원고 책(원고 파일에서 만든 책. 장·확인 요청·인용 상태·수정본 이력이 들어 있다), 모음 책(생각·문체·문헌과 저자가 만든 카테고리. 도구의 category), 문서 책(원고에서 만든 읽기용 문서. 만든 때의 사진이다) 세 가지이고, 종류를 붙여 부른다) · 게시판(모음 책을 열면 보이는 날짜·제목 목록). 저자에게 답할 때는 이 이름을 쓰고, '책 지도'·'미해결'·'이슈'·'새 판'·'영감'·'refs'·'받은함'·'인용 체크리스트'·'층'·'공용' 같은 말은 쓰지 않는다. 코어 이름(Casper·Melchior·Balthasar)이나 도구 이름을 저자에게 말하지 않는다.
-8. 저자의 말은 이렇게 받는다. '전체 보여 줘'는 book_outline이다. '전체 읽어 줘'처럼 원고 전문을 원하면 한 번에 한 장씩 볼 수 있다고 알리고 어느 장부터 볼지 묻는다. '수정본 올렸어'·'수정본 올려 줘'는 먼저 book_outline의 수정본 줄을 본다: 저자가 책장의 원고 책에서 올렸으면 이미 처리돼 있다. 처리되지 않은 원고 파일(.docx·.pdf)이 files_list에 있으면 그것을 이 책(book_outline 첫 줄의 id)의 수정본으로 올린다(book_import, new_edition=true). 어느 파일인지 분명하지 않으면 파일 이름을 보여 주고 묻는다. '지도 보여 줘'·'책장 보여 줘'는 category_list다(프로젝트를 말했으면 그 프로젝트만).
-9. '저장해 줘'·'기록해 줘'·'등록해 줘'·'넣어 줘'처럼 어디에 넣을지 말하지 않은 요청에는 쓰기 도구를 바로 부르지 않는다. 생각·문체·문헌과 저자의 카테고리(category_list로 확인한다) 중 어디에 넣을지 먼저 묻고, 답을 들은 뒤 진행한다. 저자의 카테고리가 많으면 목록을 보여 준다. 원고는 이 선택지에 넣지 않는다: book_write_chapter는 저자가 'Magus 원고에 저장'을 분명히 말했을 때만 쓴다.
-10. 생각이나 저자의 카테고리에 넣을 때 저자가 제목을 말하지 않았으면, 저장하기 전에 제목을 직접 지을지·지어 드릴지·비워 둘지 묻는다. 저자가 '앞으로는 …'이라고 정하면 category_title_default로 저장하고, 그 뒤로는 묻지 않고 그 기본값(category_list에 보인다)을 따른다. Claude가 지은 제목은 title_by=ai로 남긴다.
-11. 어떤 도구가 이 대화에 없어 보이면 '연결돼 있지 않다'고 답하기 전에 도구 이름으로 찾아본다.
-12. 생각·문체·문헌·카테고리에 넣을 때 저자가 프로젝트를 말하지 않았으면, 프로젝트가 하나면 그것, 여럿이면 이 대화에서 다루는 프로젝트(마지막으로 본 전체 현황)를 project로 넘긴다. 그래도 분명하지 않으면 어느 프로젝트인지 묻는다. 그 프로젝트에 그 책이 없으면 지도의 연결 노드가 가리키는 같은 책에 들어가고, 둘 다 없거나 여럿이면 어디에 넣을지 묻는다. 「내 서재」를 직접 고르는 것은 저자가 '내 서재'라고 말했을 때다. 찾을 때는 프로젝트를 말하지 않았으면 모든 프로젝트에서 찾는다.
-13. 저자가 '…로 만들어 책장(이 노드)에 넣어 줘'처럼 원고에서 읽기용 문서를 만들어 달라고 하면, 필요한 점검 도구(book_questions·ref_check·book_issues)로 지금 상태를 확인한 뒤 book_document로 문서 책을 만든다. 문서의 질문·수치·문헌 목록은 서버가 데이터로 만든다. Claude는 그것을 직접 쓰거나 옮기지 않고, 저자가 원하면 머리말(preface)만 넣는다(AI가 쓴 것으로 표시된다). 확인 요청에 답하고 닫는 일은 문서가 아니라 원고 책의 확인 요청에서 한다(book_answer·book_issue_close)."""
+5. 글을 읽거나 넣을 때 그 노드·책의 컨텍스트를 따른다. 컨텍스트가 없으면 일반 메모로 다룬다. 컨텍스트는 저자가 적은 읽는 방법이다.
+6. 저자에게 보이는 이름은 이것으로 한다: 전체(책 전체 현황. 구성·상태이고 원고 전문이 아니다) · 확인 요청(출처·사실을 확인해야 하는 곳. 도구의 issue이고, AI가 단 것은 'AI 확인 요청') · 결정(정해 둔 방침) · 수정본(Word에서 고친 원고를 다시 올린 것. 도구의 new_edition이고, E2·E3… 번호는 '수정본 번호') · 프로젝트(작업물 하나. 원고와 그 자료를 묶는다. 원고 없는 프로젝트도 있고, 「내 서재」는 여러 프로젝트가 함께 쓰는 자료를 두는 곳이다. 도구의 project) · 지도(프로젝트의 마인드맵. 노드와 선으로 이루어진다) · 노드(지도의 한 점. 열면 책장이 보인다. 가운데 노드는 올린 원고의 자리다) · 연결 노드(다른 프로젝트의 노드를 가리키는 노드. 보거나 넣으면 원본에 들어간다) · 책장(노드를 열면 보이는, 책이 꽂힌 칸) · 책(노드에 꽂힌 묶음. 안에 글이 쌓이거나, 올린 문서가 들어 있다. 도구의 book) · 글(책에 쌓인 것 하나. 저자가 원문을 읽고 확인한 문헌 글에는 '원문 확인' 표시가 있다) · 게시판(책을 열면 보이는 날짜·제목 목록) · 컨텍스트(노드·책에 저자가 적어 둔, 그 글을 읽는 방법) · 자주 쓰는 컨텍스트(저자가 이름을 붙여 모아 둔 컨텍스트. 노드·책에 붙인다). 책은 종류로 나눠 부르지 않고 책 이름으로 부른다(생각·문체·문헌·원고도 저자가 붙인 책 이름이나 컨텍스트 이름일 뿐이다). 저자에게 답할 때는 이 이름을 쓰고, '책 지도'·'미해결'·'이슈'·'새 판'·'영감'·'refs'·'받은함'·'인용 체크리스트'·'층'·'공용'·'원고 책'·'모음 책'·'문서 책'·'카테고리' 같은 말은 쓰지 않는다. 코어 이름(Casper·Melchior·Balthasar)이나 도구 이름을 저자에게 말하지 않는다.
+7. 저자의 말은 이렇게 받는다. '전체 보여 줘'는 book_outline이다. '전체 읽어 줘'처럼 원고 전문을 원하면 한 번에 한 장씩 볼 수 있다고 알리고 어느 장부터 볼지 묻는다. '수정본 올렸어'·'수정본 올려 줘'는 먼저 book_outline의 수정본 줄을 본다: 저자가 책장에서 올렸으면 이미 처리돼 있다. 처리되지 않은 원고 파일(.docx·.pdf)이 files_list에 있으면 그것을 이 프로젝트(book_outline 첫 줄의 id)의 수정본으로 올린다(book_import, new_edition=true). 어느 파일인지 분명하지 않으면 파일 이름을 보여 주고 묻는다. '지도 보여 줘'·'책장 보여 줘'는 category_list다(프로젝트를 말했으면 그 프로젝트만).
+8. '저장해 줘'·'기록해 줘'·'등록해 줘'·'넣어 줘'처럼 어디에 넣을지 말하지 않은 요청은, 이 대화에서 다루는 노드·책이 분명하면 그 책에 넣는다(category_put). 분명하지 않으면 쓰기 도구를 부르지 않고, 책 이름과 그 컨텍스트 이름(category_list로 확인한다)을 보여 주며 어디에 넣을지 묻고, 답을 들은 뒤 진행한다. 올린 원고는 이 선택지에 넣지 않는다: book_write_chapter는 저자가 'Magus 원고에 저장'을 분명히 말했을 때만 쓴다.
+9. 글을 넣을 때 저자가 제목을 말하지 않았으면, 저장하기 전에 제목을 직접 지을지·지어 드릴지·비워 둘지 묻는다. 저자가 '앞으로는 …'이라고 정하면 category_title_default로 저장하고, 그 뒤로는 묻지 않고 그 기본값(category_list에 보인다)을 따른다. Claude가 지은 제목은 title_by=ai로 남긴다.
+10. 어떤 도구가 이 대화에 없어 보이면 '연결돼 있지 않다'고 답하기 전에 도구 이름으로 찾아본다.
+11. 글을 넣을 때 저자가 프로젝트를 말하지 않았으면, 프로젝트가 하나면 그것, 여럿이면 이 대화에서 다루는 프로젝트(마지막으로 본 전체 현황)를 project로 넘긴다. 그래도 분명하지 않으면 어느 프로젝트인지 묻는다. 같은 이름의 책이 여러 프로젝트에 있으면 그 프로젝트의 책, 그다음 지도의 연결 노드가 가리키는 책에 들어가고, 그래도 여럿이면 어디에 넣을지 묻는다. 「내 서재」를 직접 고르는 것은 저자가 '내 서재'라고 말했을 때다. 찾을 때는 프로젝트를 말하지 않았으면 모든 프로젝트에서 찾는다.
+12. 저자가 '…로 만들어 책장(이 노드)에 넣어 줘'처럼 원고에서 읽기용 문서를 만들어 달라고 하면, 필요한 점검 도구(book_questions·ref_check·book_issues)로 지금 상태를 확인한 뒤 book_document로 만든다. 문서의 질문·수치·문헌 목록은 서버가 데이터로 만든다. Claude는 그것을 직접 쓰거나 옮기지 않고, 저자가 원하면 머리말(preface)만 넣는다(AI가 쓴 것으로 표시된다). 확인 요청에 답하고 닫는 일은 문서가 아니라 원고의 확인 요청에서 한다(book_answer·book_issue_close)."""
 
 ALL_TOOLS = {
-    "book_outline", "book_read_chapter", "book_write_chapter", "book_decide", "book_issue_add", "book_import",
-    "ref_search", "idea_search", "style_search", "style_add", "files_list", "category_list", "category_title_default",
-    "book_questions", "ref_check", "book_issues", "book_document", "book_answer", "book_issue_close",
+    "book_outline",
+    "book_read_chapter",
+    "book_write_chapter",
+    "book_decide",
+    "book_issue_add",
+    "book_import",
+    "category_search",
+    "category_put",
+    "files_list",
+    "category_list",
+    "category_title_default",
+    "book_questions",
+    "ref_check",
+    "book_issues",
+    "book_document",
+    "book_answer",
+    "book_issue_close",
 }
-GLOSSARY = RULES[6]  # 도구를 부르지 않는 규칙이라 언제나 실린다
-LOOK_UP = RULES[10]  # 도구 이름으로 찾아보기(2026-10-06 비밀 대화 시험). 도구를 부르지 않아 언제나 실린다
-PROJECTS = RULES[11]  # 프로젝트를 말하지 않았을 때(#93 층 → #95). 도구 이름을 부르지 않아 언제나 실린다
+CONTEXT = RULES[4]  # #96: 컨텍스트를 따른다. 도구를 부르지 않아 언제나 실린다
+GLOSSARY = RULES[5]  # 도구를 부르지 않는 규칙이라 언제나 실린다
+LOOK_UP = RULES[9]  # 도구 이름으로 찾아보기(2026-10-06 비밀 대화 시험). 도구를 부르지 않아 언제나 실린다
+PROJECTS = RULES[10]  # 프로젝트를 말하지 않았을 때(#93 층 → #95). 도구 이름을 부르지 않아 언제나 실린다
+AUTHOR = RULES[2]  # 누가 썼나(#96: 글의 author). 도구를 부르지 않는다
 
 
 def test_all_tools_reproduce_spec_verbatim():
     assert build_instructions(ALL_TOOLS) == SPEC
 
 
+def test_context_rule_is_the_users_sentence():
+    """#96: 사용자가 준 문장 그대로, 언제나 실린다."""
+    assert CONTEXT == ("글을 읽거나 넣을 때 그 노드·책의 컨텍스트를 따른다. 컨텍스트가 없으면 일반 메모로 다룬다. "
+                       "컨텍스트는 저자가 적은 읽는 방법이다.")
+    assert CONTEXT in build_instructions({"book_outline"})
+
+
 def test_stage1_mentions_no_unregistered_tools():
     text = build_instructions({"book_outline"})
-    for name in ("ref_search", "idea_search", "style_search", "style_add", "book_read_chapter", "files_list", "book_import"):
+    for name in ("category_search", "category_put", "book_read_chapter", "files_list", "book_import"):
         assert name not in text
-    assert text == f"{HEADER}\n1. {GLOSSARY}\n2. {LOOK_UP}\n3. {PROJECTS}"
+    assert text == f"{HEADER}\n1. {AUTHOR}\n2. {CONTEXT}\n3. {GLOSSARY}\n4. {LOOK_UP}\n5. {PROJECTS}"
 
 
 def test_rules_are_renumbered():
-    text = build_instructions({"book_outline", "book_read_chapter", "style_search"})
+    text = build_instructions({"book_outline", "book_read_chapter", "category_search"})
     assert text.splitlines()[1].startswith("1. 원고 작업은")
-    assert text.splitlines()[2].startswith("2. 문체 작업은")
-    assert text.splitlines()[3].startswith("3. 저자에게 보이는 이름은")
-    assert required_tools(text) == {"book_outline", "book_read_chapter", "style_search"}
+    assert text.splitlines()[2].startswith("2. 인용은 원문 확인 글")
+    assert text.splitlines()[3].startswith("3. 저자의 말과 AI의 말을 구분한다")
+    assert required_tools(text) == {"book_outline", "book_read_chapter", "category_search"}
 
 
 def test_rule4_keeps_author_file_as_source():
@@ -62,17 +84,22 @@ def test_rule4_keeps_author_file_as_source():
 
 
 def test_author_terms_and_ambiguous_saves():
-    """#85: 저자에게는 용어집 이름으로 말하고, 넣을 곳을 말하지 않은 '저장해 줘'에는 쓰기 도구를 바로 부르지 않는다."""
+    """#85 → #96: 저자에게는 용어집 이름으로 말하고, 책을 종류로 부르지 않는다. 넣을 곳이 분명하지 않으면 책 이름과 컨텍스트를 보여 주며 묻는다."""
     text = build_instructions(ALL_TOOLS)
-    assert text.startswith("이 서버는 사용자의 생각·문헌·문체·카테고리와 원고를 관리한다.") and "영감" not in text.replace(AVOID, "")
-    assert "코어 이름(Casper·Melchior·Balthasar)이나 도구 이름을 저자에게 말하지 않는다." in text.splitlines()[7]
-    for name in ("전체(", "확인 요청(", "생각(", "문체(", "문헌(", "결정(", "수정본(", "책장(", "카테고리("):
-        assert name in text
-    rule9 = text.splitlines()[9]
-    assert rule9.startswith("9. '저장해 줘'·'기록해 줘'·'등록해 줘'·'넣어 줘'")
-    assert "쓰기 도구를 바로 부르지 않는다" in rule9 and "먼저 묻고" in rule9
-    assert "생각·문체·문헌과 저자의 카테고리" in rule9 and "원고는 이 선택지에 넣지 않는다" in rule9  # #90·#92
-    rule10 = text.splitlines()[10]
-    assert rule10.startswith("10. 생각이나 저자의 카테고리에 넣을 때 저자가 제목을 말하지 않았으면")  # #92
+    assert text.startswith("이 서버는 저자의 프로젝트(지도·노드·책·글)와 원고를 관리한다.") and "영감" not in text.replace(AVOID, "")
+    glossary = text.splitlines()[6]
+    assert "코어 이름(Casper·Melchior·Balthasar)이나 도구 이름을 저자에게 말하지 않는다." in glossary
+    for name in ("전체(", "확인 요청(", "결정(", "수정본(", "프로젝트(", "지도(", "노드(", "책장(", "책(", "글(", "게시판(",
+                 "컨텍스트(", "자주 쓰는 컨텍스트("):
+        assert name in glossary
+    for kind in ("원고 책", "모음 책", "문서 책", "카테고리"):  # 종류 이름은 쓰지 않는 이름에만
+        assert kind not in text.replace(AVOID, "")
+        assert f"'{kind}'" in AVOID
+    rule9 = text.splitlines()[8]
+    assert rule9.startswith("8. '저장해 줘'·'기록해 줘'·'등록해 줘'·'넣어 줘'")
+    assert "분명하면" in rule9 and "책 이름과 그 컨텍스트 이름" in rule9 and "쓰기 도구를 부르지 않고" in rule9
+    assert "올린 원고는 이 선택지에 넣지 않는다" in rule9  # #90
+    rule10 = text.splitlines()[9]
+    assert rule10.startswith("9. 글을 넣을 때 저자가 제목을 말하지 않았으면")  # #92
     assert "직접 지을지·지어 드릴지·비워 둘지 묻는다" in rule10 and "category_title_default" in rule10
-    assert "files_list" in required_tools(RULES[7])  # 수정본 올리기는 받은함을 먼저 본다
+    assert "files_list" in required_tools(RULES[6])  # 수정본 올리기는 올린 파일을 먼저 본다

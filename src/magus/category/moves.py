@@ -1,8 +1,8 @@
 """책 옮기기·되돌리기와 지도 바꾸기(#93 → #95). 도구(category_*)와 웹 지도가 함께 쓴다.
 
-- 책은 노드에 꽂힌다. 같은 프로젝트 안에서는 노드만 바꾸고, 다른 프로젝트로 옮기면 항목이 모두 함께 간다
-  (받는 프로젝트에 같은 기본 책이 있으면 합친다, 같은 이름의 저자 카테고리가 있으면 옮기지 않는다). 마지막 옮기기 하나는 되돌린다.
-- 연결 노드로 옮기면 그 원본 노드로 간다. 원고 책은 가운데 노드 자체라 옮기지 않는다.
+- 책은 노드에 꽂힌다. 같은 프로젝트 안에서는 노드만 바꾸고, 다른 프로젝트로 옮기면 글이 모두 함께 간다
+  (받는 프로젝트에 같은 이름의 책이 있으면 옮기지 않는다). 마지막 옮기기 하나는 되돌린다.
+- 연결 노드로 옮기면 그 원본 노드로 간다. 올린 문서가 든 책은 가운데 노드 자체라 옮기지 않는다.
 - 문헌이 움직이거나 연결 노드가 생기고 사라지면 인용 점검이 보는 문헌(자기 + 연결 노드가 가리키는 문헌)이 바뀌므로
   그 자리에서 장별 집계를 다시 계산하고, 그 문헌을 더는 보지 않게 된 원고가 있으면 알린다.
 문장은 둘: 도구 응답(Claude에게, '-다')과 웹 안내(저자에게, '-습니다'). 둘 다 용어집 이름만 쓴다.
@@ -19,14 +19,12 @@ from magus.maps import BOOK_NAMES, CENTER, MAX_BOOKS_PER_NODE, MAX_NODES, NODE_N
 from magus.melchior.check import after_refs_changed
 from magus.project_args import floor_name
 from magus.store import FloorMove, MapNode, Store
-from magus.store.floors import KINDS, MoveError
+from magus.store.floors import MoveError
 from magus.store.maps import MapError
-
-BUILTIN_NAMES = BOOK_NAMES
 
 
 def book_name(store: Store, user: str, key: str) -> str:
-    """책 주소 이름 → 책 이름(원고 책은 원고 제목)."""
+    """책 주소 이름 → 책 이름(올린 문서가 든 책은 프로젝트 제목)."""
     floor, local = local_key(key)
     if local in BOOK_NAMES:
         return BOOK_NAMES[local]
@@ -73,10 +71,10 @@ def resolve_target(store: Store, user: str, floor: str, node: str | None) -> tup
 
 
 def move_book(store: Store, user: str, book: str, to_floor: str, to_node: str | None = None) -> tuple[FloorMove, list[str]]:
-    """book: 책 주소 이름(ideas.<프로젝트>·<카테고리 id>·doc.<id>·ms.<프로젝트>). to_node가 없으면 받는 프로젝트에서
+    """book: 책 주소 이름(<카테고리 id>·doc.<id>·ms.<프로젝트>). to_node가 없으면 받는 프로젝트에서
     이름이 같은 노드(없으면 새 노드)에 꽂힌다. (옮기기, 이 문헌을 더는 보지 않게 된 원고의 프로젝트 id)."""
     if book.startswith("ms."):
-        raise MoveError("fixed", "원고 책은 가운데 노드 자체라 옮기지 않는다")
+        raise MoveError("fixed", "올린 문서가 든 책은 가운데 노드 자체라 옮기지 않는다")
     from_floor = store.book_floor(user, book)
     if from_floor is None:
         raise MoveError("unknown_category", f"책 {book}가 없다")
@@ -84,9 +82,10 @@ def move_book(store: Store, user: str, book: str, to_floor: str, to_node: str | 
     where = store.node_of_book(user, book)
     from_node = where[1] if where else None
     _, local = local_key(book)
-    kind = local if local in KINDS else None
     name = book_name(store, user, book)
-    before = _scopes(store, user) if kind == "refs" else {}
+    category = None if book.startswith("doc.") else store.get_category(user, book)
+    holds_refs = bool(category and category.sources)  # 문헌이 든 책이면 인용 점검 범위가 바뀔 수 있다(#96)
+    before = _scopes(store, user) if holds_refs else {}
     if to_floor == from_floor:
         if not to_node or to_node == from_node:
             raise MoveError("same", "이미 그 노드에 있다", name=name)
@@ -94,21 +93,19 @@ def move_book(store: Store, user: str, book: str, to_floor: str, to_node: str | 
             store.place_book(user, from_floor, book, to_node)
         except MapError as e:
             raise MoveError(e.code, str(e), **e.info) from e
-        move = store.record_move(user, FloorMove(new_id(), utcnow(), kind or local, name, from_floor, to_floor,
+        move = store.record_move(user, FloorMove(new_id(), utcnow(), local, name, from_floor, to_floor,
                                                  from_node=from_node, to_node=to_node))
     else:
         target_map = store.get_map(user, to_floor)
         known = {n.id for n in target_map.nodes} if target_map else set()
         if book.startswith("doc."):
             move = store.move_document(user, book[4:], to_floor, to_node)
-        elif kind:
-            move = store.move_builtin(user, kind, from_floor, to_floor, to_node)
         else:
             move = store.move_category(user, book, to_floor, to_node)
-        placed = store.node_of_book(user, f"{kind}.{to_floor}" if kind else book)
+        placed = store.node_of_book(user, book)
         move = store.record_move(user, replace(move, from_node=from_node, to_node=placed[1] if placed else None,
                                                made_node=bool(placed) and placed[1] not in known))
-    if kind != "refs":
+    if not holds_refs:
         return move, []
     after_refs_changed(store, user)
     return move, _lost(before, _scopes(store, user), from_floor, to_floor)
@@ -116,10 +113,8 @@ def move_book(store: Store, user: str, book: str, to_floor: str, to_node: str | 
 
 def undo_move(store: Store, user: str, move_id: str) -> FloorMove:
     """마지막 옮기기 되돌리기(저장소가 원래 프로젝트·원래 노드로 돌려 놓는다)."""
-    last = store.last_move(user)
-    refs = bool(last and last.book == "refs")
     move = store.undo_move(user, move_id)
-    if refs:
+    if move.from_floor != move.to_floor:  # 문헌이 든 책이었을 수 있다: 장별 집계를 다시 맞춘다
         after_refs_changed(store, user)
     return move
 
@@ -172,8 +167,7 @@ def tool_message(store: Store, user: str, move: FloorMove, undone: bool = False,
     if move.from_floor == move.to_floor:
         out = f"옮김: 「{move.name}」 {src} → {_node_name(store, user, move.to_floor, move.to_node).lstrip(' ·') or '가운데 노드'}."
     else:
-        merged = f"({floor_name(store, user, move.to_floor)}의 {move.name}과 합침, 항목 {len(move.items)}개)" if move.merged else (
-            f"(항목 {len(move.items)}개 함께)" if move.book in KINDS else "" if move.book.startswith("doc.") else "(항목 모두 함께)")
+        merged = "" if move.book.startswith("doc.") else "(글 모두 함께)"
         out = f"옮김: 「{move.name}」 {src} → {_where(store, user, move.to_floor, move.to_node)}{merged}."
     out += " 되돌리려면 저자에게 확인하고 같은 책으로 category_edit(undo_move=true)."
     if lost:
@@ -186,9 +180,7 @@ def web_message(store: Store, user: str, move: FloorMove, undone: bool = False, 
     name = f"「{move.name}」"
     if undone:
         return f"{josa(name, '을/를')} 원래 자리({_where(store, user, move.from_floor, move.from_node)})로 되돌렸습니다."
-    if move.merged:
-        out = f"{josa(name, '을/를')} {floor_name(store, user, move.to_floor)}의 {josa(move.name, '과/와')} 합쳤습니다(항목 {len(move.items)}개)."
-    elif move.from_floor == move.to_floor:
+    if move.from_floor == move.to_floor:
         target = _node_name(store, user, move.to_floor, move.to_node).lstrip(" ·") or "가운데 노드"
         out = f"{josa(name, '을/를')} {josa(target, '으로/로')} 옮겼습니다."
     else:
@@ -212,9 +204,9 @@ def error_message(e: MoveError | MapError, polite: bool) -> str:
         "unknown_floor": ("없는 프로젝트입니다.", "없는 프로젝트다."),
         "no_builtin": ("그 프로젝트에 그 책이 없습니다.", "그 프로젝트에 그 책이 없다."),
         "unknown_category": ("없는 책입니다.", "없는 책이다."),
-        "common_only": ("문서 책은 원고가 있는 프로젝트에만 둘 수 있습니다.", "문서 책은 원고가 있는 프로젝트에만 둔다."),
-        "fixed": ("원고 책은 가운데 노드 자체라 옮길 수 없습니다. 다른 원고면 새 프로젝트를 만들어 올려 주세요.",
-                  "원고 책은 가운데 노드 자체라 옮기지 않는다."),
+        "common_only": ("원고에서 만든 문서는 원고가 있는 프로젝트에만 둘 수 있습니다.", "원고에서 만든 문서는 원고가 있는 프로젝트에만 둔다."),
+        "fixed": ("올린 문서가 든 책은 가운데 노드 자체라 옮길 수 없습니다. 다른 원고면 새 프로젝트를 만들어 올려 주세요.",
+                  "올린 문서가 든 책은 가운데 노드 자체라 옮기지 않는다."),
         "unknown_node": ("없는 노드입니다.", "없는 노드다."),
         "center": ("가운데 노드는 휴지통으로 옮길 수 없습니다.", "가운데 노드는 휴지통으로 옮기지 않는다."),
         "center_name": ("가운데 노드 이름은 프로젝트 제목입니다.", "가운데 노드 이름은 프로젝트 제목이라 바꾸지 않는다."),
@@ -232,8 +224,12 @@ def error_message(e: MoveError | MapError, polite: bool) -> str:
         "link_exists": ("이미 이 지도에 연결돼 있습니다.", "이미 이 지도에 연결돼 있다."),
         "link_missing": ("연결 노드의 원본이 없습니다.", "연결 노드의 원본이 없다."),
         "link_node": ("연결 노드에는 책을 놓지 않습니다. 원본 노드에 놓입니다.", "연결 노드에는 책을 놓지 않는다."),
-        "ms_center": ("원고 책은 가운데 노드에만 둡니다.", "원고 책은 가운데 노드에만 둔다."),
+        "ms_center": ("올린 문서가 든 책은 가운데 노드에만 둡니다.", "올린 문서가 든 책은 가운데 노드에만 둔다."),
         "unknown_book": ("그 책이 이 프로젝트에 없습니다.", "그 책이 이 프로젝트에 없다."),
+        "bad_context": ("컨텍스트를 저장하지 못했습니다. 하나에 500자까지, 노드·책마다 4개까지입니다.",
+                        "컨텍스트는 하나에 500자까지, 노드·책마다 4개까지다."),
+        "ctx_register": ("자주 쓰는 컨텍스트로 등록하지 못했습니다. 이름을 적었는지, 같은 이름이 이미 있는지 확인해 주세요.",
+                         "자주 쓰는 컨텍스트로 등록하지 못했다."),
     }
     polite_text, plain = texts.get(e.code, (str(e), str(e)))
     return polite_text if polite else plain

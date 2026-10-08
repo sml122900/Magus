@@ -200,8 +200,8 @@ def test_web_marks_ai_comments(server_proc, tmp_path: Path):  # noqa: F811 - tes
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         csrf = re.search(r'name="csrf" value="([0-9a-f]+)"', c.get("/login?next=/shelf").text).group(1)
         made = c.post("/shelf/manuscript", data={"csrf": csrf, "floor": "new"}, files={"file": ("원고.docx", docx_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")})
-        page = made.text  # 원고 책(#94)
-        assert "1장 + " not in page and "원고 책 · 1장 ·" in page  # outline과 같은 장 수 표기
+        page = made.text  # 올린 원고(#94 → #96)
+        assert "1장 + " not in page and "올린 원고 · 1장 ·" in page  # outline과 같은 장 수 표기
         assert "열린 확인 요청 2건" in page
         issues = c.get(str(made.url).split("?")[0] + "?tab=issues").text
     assert "그중 🤖 AI 확인 요청 1건(AI가 원고에 단 코멘트입니다)" in issues

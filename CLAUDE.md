@@ -21,13 +21,17 @@
 - **야간 자율 작업(2026-10-06 밤, #92, 서버 배포 없음)**: 책장 화면(`/shelf`, 양장본 책장 + 게시판형 목록 + 검색, 태그 `shelf-web`), 저자의 카테고리·책 색·항목 제목(도구 21 → 28, 인덱스 v15, 태그 `shelf-categories`). #92는 사용자 확인(e만 바꿈). 아침 보완과 함께 2026-10-06 14:51 `p1-shelf`로 서버에 배포했다(status.md 0-10절).
 - **층·3D 책장(2026-10-07, 사용자 결정 #93 승인, 로컬만, 태그 `floors-local`)**: 작업물마다 책장의 한 층, 맨 위 공용 층. 카테고리(기본 포함)는 층에 꽂히고 옮긴다(#92-a 대체, `docs/decisions/floors.md`).
   인용 점검은 그 작업물 층 + 공용 문헌. 두 작업물이 쓰게 되어 공용으로 옮긴 문헌은 리포트 한 줄과 문헌 항목의 기록(시각·이유)으로 알린다(#93-a 더함). 이전은 `magus floors plan|apply|revert`.
-  **서버 배포 안 함: #94·#95와 묶어 한 번에 배포한다**(서버 이전 한 번, 커넥터 재연결 한 번, `docs/deploy.md` 2-2절). 3D 책장 화면은 #95로 걷어 냈다.
+  **서버 배포 안 함: #94·#95·#96과 묶어 한 번에 배포한다**(서버 이전 한 번, 커넥터 재연결 한 번, `docs/deploy.md` 2-2절). 3D 책장 화면은 #95로 걷어 냈다.
 - **모든 동작을 책장에서(2026-10-07 밤, 사용자 결정 #94, 확인 대기, 로컬만, 태그 `shelf-books-local`)**: 책 종류 원고 책·모음 책·문서 책, 층의 '책 추가', 원고 책 화면(탭 넷),
   출처 확인 문서(book_document, 내용은 서버가, Claude는 머리말만), 메뉴는 책장 하나·받은함은 내 정보의 '올린 파일'. 도구 30 → 29(10,904토큰), 인덱스 v19(`docs/decisions/bookshelf-all.md`, status.md 0-15절).
 - **층 → 프로젝트·마인드맵(2026-10-08, 사용자 결정 #95, 확인 대기, 로컬만)**: 프로젝트(옛 층) → 지도(노드·선) → 노드 → 책장(정면 2D) → 책 → 게시판.
   옛 공용 층은 프로젝트 「내 서재」(내부 id `common`), 공유는 연결 노드로. 지도 `shelf/maps/<프로젝트>.json`. 인용 점검은 자기 문헌 + 연결 노드가 가리키는 문헌.
   도구 29개 그대로(floor → project(+ node), 노드 일은 category_*에 합침, 10,900토큰), instructions 규칙 7·8·12·13. 웹은 프로젝트 목록 + 프로젝트 화면(지도 + 패널).
-  3D 책장 걷어 냄. 이전 `magus maps plan|apply|revert`(`docs/decisions/project-map.md`, 문구 전문 `project-map-texts.md`, status.md 0-18절). 서버 배포 안 함(#93·#94와 묶음).
+  3D 책장 걷어 냄. 이전 `magus maps plan|apply|revert`(`docs/decisions/project-map.md`, 문구 전문 `project-map-texts.md`, status.md 0-18절). 서버 배포 안 함(#93·#94·#96과 묶음).
+- **종류를 없애고 '컨텍스트'로(2026-10-08, 사용자 요청 #96, 확인 대기, 로컬만)**: 책에는 글이 쌓이거나 올린 문서가 들어 있다. 종류 이름(원고 책·모음 책·문서 책, 생각·문체·문헌)은
+  저자에게 보이지 않고, AI가 읽는 법은 노드·책의 **컨텍스트**(저자가 적은 글, 사본)다. 자주 쓰는 컨텍스트(`shelf/contexts.json`, 처음 제공 「문체」·「원고」·「논문」·「생각 메모」).
+  생각·문체는 책의 글(항목 파일)로, 문헌은 제자리 + 그 문헌이 든 책. 도구 29 → 23(글 넣기 category_put·찾기 category_search, 8,416토큰), instructions 머리말·규칙 2·3·5~9·11·12.
+  응답 머리에 컨텍스트 전문. 이전은 `magus maps apply`에 합침(`docs/decisions/contexts.md`, 문구 전후 `contexts-texts.md`, status.md 0-19절). 서버 배포 안 함(묶음).
 - 서버(2026-10-06 18:28부터): master `p1-profile-email`(`ec6c40b`: 책장·카테고리 #92·질문지 #84·시험 수정·문헌 책등·상단 바 이름 + 메일 받기 수정). 되돌리기 기준은 `e08bb79`(이미지 `magus:rollback-e08bb79`, 그 앞 `magus:rollback-ebb98fc`). `74bbbf4`까지 갈 때는 이미지가 없어 코드로 빌드하고 **생각 파일의 제목 키를 먼저 정리한다**(status.md 0-10절, 서버 ROLLBACK.txt).
   - 다음 배포도 docs/deploy.md "업데이트" 절차(`git fetch … master && git checkout -B master FETCH_HEAD`)로 한다.
 - (고침 2026-10-06 밤) `tests/test_http.py::test_request_size_limit`의 Windows 간헐 실패: 머리만 보내고 응답을 먼저 읽게 고쳤다(status.md 7절).
@@ -73,9 +77,7 @@
 |---|---|---|---|
 | 전체 | 책 전체 현황(구성·상태). 원고 전문이 아니다 | 책 지도 | book_outline |
 | 확인 요청 | 출처·사실을 확인해야 하는 곳. AI가 단 것은 "AI 확인 요청" | 미해결, 이슈 | issues |
-| 생각 | 떠오른 아이디어 메모 | 영감 | Casper, idea_* |
-| 문체 | 좋아서 모은 구절 | 문체 취향, 문체 책장 | Balthasar, style_* |
-| 문헌 | 원문을 읽고 등록한 책·논문 | refs | Melchior, ref_* |
+| 생각 · 문체 · 문헌 | #96부터 종류가 아니라 **저자가 붙인 책 이름이나 컨텍스트 이름**이다(이전으로 생긴 책 「생각」·「문체」·「문헌」, 컨텍스트 「생각 메모」·「문체」·「논문」) | 영감, refs | Casper·Balthasar·Melchior(코드) |
 | 결정 | 정해 둔 방침 | | book_decide |
 | 수정본 | Word에서 고친 원고를 다시 올린 것. 번호 E2, E3…는 "수정본 번호". 첫 업로드 E1은 "처음 올린 원고" | 새 판, 다시 올리기 | book_import new_edition |
 | 프로젝트 | 작업물 하나(원고와 그 자료). 원고 없는 프로젝트도 있다. 웹 첫 화면은 프로젝트 목록(#95) | 층(#93), 작업물 | projects + floor id, `project` 인자, `/shelf/p/<id>` |
@@ -84,15 +86,16 @@
 | 노드 | 지도의 한 점. 열면 책장이 보인다. 가운데 노드는 원고 자리(이름 = 프로젝트 제목)(#95) | | node 인자, MapNode |
 | 연결 노드 | 다른 프로젝트의 노드를 가리키는 노드. 보거나 넣으면 원본에 들어간다. 원본이 없어지면 '원본 없음'(#95) | 공용(#93) | MapNode.link |
 | 책장 | 노드를 열면 보이는, 책이 꽂힌 칸(정면 2D)(#92·#94·#95) | 세 책장(옛 메뉴), 층(#93) | webshelf.py, webmap.py, webbooks.py |
-| 카테고리 | 모음 책 하나(아래). 생각·문체·문헌은 기본 카테고리다. 저자에게는 "모음 책"으로 부르고, 도구 쪽 이름은 카테고리 그대로 | 서랍(설계안 #91) | category_* |
-| 책 | 책장에 꽂힌 것. 원고 책·모음 책·문서 책 세 가지이고 종류를 붙여 부른다(#94). 책등 위 띠에 종류 | | |
-| 원고 책 | 원고 파일에서 만든 책. 프로젝트 하나에 하나이고 가운데 노드에만(옮기지 않음). 장 목록·확인 요청·인용 상태·수정본 이력 | 원고 화면 | projects, `/shelf/book/<id>` |
-| 모음 책 | 생각·문체·문헌과 저자가 만든 카테고리. 「내 서재」에는 모음 책만 | 카테고리 | category_*, idea_*, style_*, ref_* |
-| 게시판 | 모음 책을 열면 보이는 날짜·제목 목록(제목이 없으면 내용 앞부분을 흐리게)(#92·#95) | 목록 | `/shelf/<책>` |
-| 문서 책 | 원고에서 만든 읽기용 문서. 만든 때의 사진(새 수정본이 오면 "옛 판 기준"). 첫 종류는 출처 확인 문서 | 저자 보고서 | book_document, documents |
+| 책 | 노드에 꽂힌 묶음. 안에 글이 쌓이거나, 올린 문서가 들어 있다. **종류로 나눠 부르지 않고 책 이름으로 부른다**(#96). 책등 위 띠에 컨텍스트 이름 | 원고 책·모음 책·문서 책(#94), 카테고리 | categories(글 책), `ms.<프로젝트>`, `doc.<id>`, 도구의 `book` |
+| 글 | 책에 쌓인 것 하나(제목·내용·누가·이유·위치·칸·태그). 서지가 있으면 문헌 글, 원문을 읽고 확인했으면 '원문 확인'(쓸 부분 하나 이상)(#96) | 항목, 생각·문장·문헌 | category_items, refs(문헌 글) |
+| 컨텍스트 | 노드·책에 저자가 적어 둔, AI가 그 글을 읽는 방법(이름 20자·내용 500자, 한 곳에 4개). 책에 없으면 노드의 것. 없으면 일반 메모(#96) | | `contexts`, `magus/contexts.py` |
+| 자주 쓰는 컨텍스트 | 저자가 이름을 붙여 모아 둔 컨텍스트(20개). 노드·책을 만들거나 고칠 때 단추로 붙인다(붙인 것은 사본). 내 정보 아래 `/me/contexts`(#96) | | `shelf/contexts.json` |
+| 올린 원고 | 가운데 노드에 든 원고(장 목록·확인 요청·인용 상태·수정본 이력). 프로젝트 하나에 하나, 옮기지 않음. 컨텍스트 「원고」 | 원고 책(#94) | projects, `/shelf/book/<id>` |
+| 원고에서 만든 문서 | 원고에서 만든 읽기용 문서. 만든 때의 사진(새 수정본이 오면 "옛 판 기준"). 첫 종류는 출처 확인 문서(컨텍스트 「출처 확인 문서」) | 문서 책(#94), 저자 보고서 | book_document, documents |
+| 게시판 | 책을 열면 보이는 날짜·제목 목록(글 뒤에 문헌 글, 제목이 없으면 내용 앞부분을 흐리게)(#92·#95·#96) | 목록 | `/shelf/<책>` |
 | 올린 파일 | Claude에게 파일 이름으로 건넬 파일(내 정보 아래 `/me/files`). 원고·논문은 책장에서 올리면 바로 쓰인다 | 받은함 | inbox/, files_list |
 
-- Claude에게는 서버 instructions 규칙 7~9로 전한다: 이 이름으로 답하기, "전체 보여 줘"·"수정본 올렸어" 같은 말을 도구로 옮기기, 넣을 곳을 말하지 않은 "저장해 줘"에는 먼저 묻기(아래 "서버 instructions").
+- Claude에게는 서버 instructions 규칙 5~8로 전한다(#96 번호): 컨텍스트를 따르기, 이 이름으로 답하기, "전체 보여 줘"·"수정본 올렸어" 같은 말을 도구로 옮기기, 넣을 곳을 말하지 않은 "저장해 줘"에는 먼저 묻기(아래 "서버 instructions").
 
 ## 절대 원칙
 
@@ -102,7 +105,8 @@
   - 서버 instructions 규칙 4도 이에 맞게 바꿨다(사용자 결정 #74). book_write_chapter는 저자가 Magus 원고에 저장하라고 명시했을 때만 쓴다.
 - **에이전트는 책 전체를 들고 있지 않는다.** 한 작업의 컨텍스트는 목차·결정·미해결(book_outline) + 장 1개 + 검색 top-k로 이루어진다. 책 전체를 반환하는 도구는 만들지 않는다.
 - **인용 게이트**: refs에 `status=verified`로 있는 출처만 인용할 수 있다. 원고는 **그 프로젝트의 문헌 + 지도의 연결 노드가 가리키는 노드에 꽂힌 문헌**과 대조한다(#95, `store.cite_scope`, `melchior.check.cite_floors`). 없는 출처는 본문에 `[출처 필요: 주장 요약]`으로 남긴다. 쓰기를 막지는 않는다. 표시하고 집계만 하며, 판단은 사용자가 한다.
-- **누가 말했는지 보존한다.** Casper는 사용자 발화(`author=me`)와 AI 발화(`author=ai`)를 구분해 저장하고, 검색에서는 me를 먼저 보여 준다.
+  저자에게는 '원문 확인' 글로 보인다. **인용 점검은 원문 확인 표시와 참고문헌 항목만 보고, 컨텍스트 글을 읽어 판단하지 않는다**(#96).
+- **누가 말했는지 보존한다.** 글은 저자(`author=me`)와 AI(`author=ai`)를 구분해 저장하고(AI 답은 응답한 글 parent_id), 찾기에서는 me를 먼저 보여 준다.
 - **Magus 안의 원본은 사람이 읽을 수 있는 파일(markdown/json)이다. SQLite는 인덱스일 뿐이다.** (원고 본문의 ch-NN.md는 그 자체가 저자 파일의 사본이다.) 인덱스는 언제든 파일에서 다시 만들 수 있어야 한다(`magus reindex`). 파일에 없는 정보를 SQLite에만 두지 않는다. 예외는 계산으로 얻는 값(char_count, unverified_cite_count, chunks)이다.
 - **프로젝트 폴더 밖의 파일·폴더는 만들지도 지우지도 않는다. 경로가 프로젝트 밖으로 풀리면 그 자리에서 멈추고 보고한다. 프로젝트 안이라도 내가 이 세션에서 만들지 않은 폴더를 통째로 지우지 않는다.**(2026-10-06 사용자 지시. 그 전날 밤 캡처 스크립트가 경로를 `C:\c\…`로 잘못 풀어 파일을 만들었고, 정리하며 `C:\c`를 통째로 지웠다.) 임시 파일은 프로젝트 안 `private/tmp/`(gitignore)에 둔다.
 - **프로젝트 폴더 밖의 파일은 사용자가 경로를 명시해 지시했을 때만 읽는다.** 필요한 파일이 없으면 status.md에 "대기: 무엇을, 누가"로 기록하고 멈춘다. 다른 폴더를 뒤져 찾아오지 않는다.
@@ -193,13 +197,17 @@
   - chapters.unverified_cite_keys / uncertain_cite_keys(JSON): 같은 때 함께 계산하는 그 장의 미확인 문헌 key와 미연결 한글 표기 key다. outline은 장 사이 합집합으로 책 전체 고유 수를 낸다(SCHEMA_VERSION 8에서 도입).
   - 이 캐시는 refs가 바뀌면(ref_add, ref_import_bibliography, `magus alias`, `magus terms`) 그 자리에서 사용자의 모든 장을 다시 계산한다(실원고 40장 0.3초). ref_add 직후 outline 수가 줄어드는지 테스트로 고정했다(사용자 결정 #43).
   - **한 번 준 번호는 절대 재사용하거나 다시 매기지 않는다.** 마지막 번호는 project.json의 `last_decision_id`/`last_issue_id`에 둔다.
-- refs(id, user_id, key, aliases json, bib json, status: unverified|verified, has_fulltext, file_path?, created_at)
+- refs(id, user_id, key, aliases json, bib json, status: unverified|verified, has_fulltext, file_path?, created_at, book?) — book(bib.json `"book"`)은 그 문헌 글이 든 책(카테고리 id, #96)
   - key는 첫 저자 성(소문자 영문) + 연도다. 예: `daeschler2006`, `galor2022`. 한글 표기(갤러, 다이아몬드 등)는 aliases에 넣는다.
 - ref_passages(id, user_id, ref_id, text, reason, locator?)
-- ideas(id, user_id, text, kind: thought|ai|article|conversation|tv|other, origin?, author: me|ai, parent_id?, created_at, title?, title_by?: ai|author, edited_at?, edited_by?: author|ai) — 제목은 선택(#92). 제목도 검색한다. edited_*는 처음 쓴 뒤 고친 사람·시각(웹에서 저자가 고치면 author. 처음 쓴 사람 author는 그대로). 값이 없으면 파일에 키를 쓰지 않는다(옛 코드로 되돌려도 읽힘). SCHEMA_VERSION 16
-- style_entries(id, user_id, passage, reason, work?, tags json, created_at, tags_by?: ai|author) — tags_by는 태그를 누가 정했나(#89. Claude가 뽑음 ai / 저자가 말함 author, 기록 전 항목은 비어 있음). SCHEMA_VERSION 13
-- categories(id, user_id, name, name_key, template, color, fields json, schema_version, created_at, updated_at) — 저자의 카테고리(#92). (user_id, name_key) 유일
-- category_items(id, user_id, category_id, title?, title_by?, content, fields json, author: me|ai, tags json, chapters json, schema_version, created_at, updated_at, edited_at?, edited_by?)
+- (#96 전, 이전 전용) ideas(id, user_id, text, kind: thought|ai|article|conversation|tv|other, origin?, author: me|ai, parent_id?, created_at, title?, title_by?: ai|author, edited_at?, edited_by?: author|ai) — 색인 테이블은 v20에서 뺐다. 파일(`shelf/casper`)은 이전 때 책의 글이 된다. 제목은 선택(#92). 제목도 검색한다. edited_*는 처음 쓴 뒤 고친 사람·시각(웹에서 저자가 고치면 author. 처음 쓴 사람 author는 그대로). 값이 없으면 파일에 키를 쓰지 않는다(옛 코드로 되돌려도 읽힘). SCHEMA_VERSION 16
+- (#96 전, 이전 전용) style_entries(id, user_id, passage, reason, work?, tags json, created_at, tags_by?: ai|author) — 이전 때 글(passage → 내용, work → 위치, tags → "키: 값")이 된다. tags_by는 태그를 누가 정했나(#89. Claude가 뽑음 ai / 저자가 말함 author, 기록 전 항목은 비어 있음). SCHEMA_VERSION 13
+- categories(id, user_id, name, name_key, template, color, fields json, schema_version, created_at, updated_at, contexts json) — 글이 쌓이는 책(#92 카테고리 → #96 책). (user_id, floor, name_key) 유일, 60권까지.
+  이전으로 생긴 책은 id `ideas-<프로젝트>`·`styles-<프로젝트>`·`refs-<프로젝트>`와 `"legacy": 옛 종류`(revert용).
+- category_items(id, user_id, category_id, title?, title_by?, content, fields json, author: me|ai, tags json, chapters json, schema_version, created_at, updated_at, edited_at?, edited_by?,
+  reason?, location?(파일 "where"), passages json(쓸 부분), parent_id?, origin?, kind?, tags_by?) — 글(#96). 덧붙은 칸이 있으면 schema_version 2
+- **컨텍스트(#96)**: 붙인 곳의 파일에 사본 `"contexts": [{name, text}]`(category.json·project.json·document.json·지도 노드). 자주 쓰는 컨텍스트 `shelf/contexts.json`
+  = {schema_version 1, contexts: [{id, name, text, created_at, updated_at}]}. 파일이 없으면 처음 제공하는 넷(`contexts.DEFAULTS`, 읽기만으로는 쓰지 않음). 색인 v20.
 - 책장 설정(shelf/settings.json, 인덱스 없음): 기본 카테고리 책 색, 내 색(12개까지), 제목 기본값 ask|ai|none
 - **프로젝트·지도(#95, 옛 층 #93)**: 「내 서재」(id `common`, 옛 공용 층) + 작업물(프로젝트)마다 하나. ideas·style_entries·refs·categories·documents의 `floor`
   (파일의 "floor"가 원본) = 그 항목이 속한 프로젝트 id(키 이름은 층 이전 그대로). `shelf/floors.json` = {order, builtins(프로젝트마다 기본 카테고리), changed_at, last_move, last_undone}.
@@ -216,15 +224,16 @@
   ({id, title, title_by, doc_type: source_check, project_id, floor, color, versions: [{number, at, edition, method, preface_by, stats}], schema_version 1}) + `v1.md, v2.md…`(만든 때의 본문).
   「내 서재」에는 두지 않는다(원고가 있는 프로젝트에만). 기준 원고의 마지막 수정본 > 문서의 edition이면 "옛 판 기준". 휴지통은 `trash/shelf/documents/<id>/`. 책장 검색 레인 `document`(웹 전용).
   projects.color(project.json `color`, 원고 책 색). 인덱스 v19.
-- chunks(id, user_id, owner_type, owner_id, lane: ref_picked|ref_full|idea_me|idea_ai|style|style_passage|ref_bib|category, text, embedding blob?) + chunks_fts
+- chunks(id, user_id, owner_type, owner_id, lane: ref_picked|ref_full|style_passage|ref_bib|category, text, embedding blob?) + chunks_fts(#96: 글은 모두 category 레인, idea_*·style 레인은 쓰지 않음)
   - style_passage(문체 구절·출전)·ref_bib(문헌 서지)는 **웹 책장 검색 전용**이다. 도구 검색(style_search·ref_search)은 보지 않고 임베딩도 하지 않는다(#92). category는 owner_id `<카테고리 id>/<항목 id>`. SCHEMA_VERSION 15
 
 ### 디스크 구조 (원본)
 
 ```
-data/users/<user_id>/shelf/casper/<id>.json                       # ideas
+data/users/<user_id>/shelf/casper/<id>.json                       # (#96 전) 생각. 이전 때 책의 글로 옮긴다
 data/users/<user_id>/shelf/melchior/<key>/{bib.json, passages.json, full.txt}
-data/users/<user_id>/shelf/balthasar/<id>.json                    # style
+data/users/<user_id>/shelf/balthasar/<id>.json                    # (#96 전) 문체. 이전 때 책의 글로 옮긴다
+data/users/<user_id>/shelf/contexts.json                          # 자주 쓰는 컨텍스트(#96). 없으면 처음 제공하는 넷
 data/users/<user_id>/projects/<project_id>/project.json           # title, subtitle?, title_en?, subtitle_en?, created_at, parts, last_*_id
 data/users/<user_id>/projects/<project_id>/book/ch-01.md … ch-35.md
 data/users/<user_id>/projects/<project_id>/{decisions.md, issues.md, versions/}
@@ -233,8 +242,8 @@ data/users/<user_id>/projects/<project_id>/original/{원고 사본, unsplit.md, 
 data/users/<user_id>/projects/<project_id>/removed/ch-NN-E<판>/   # 새 판에 없는 장(본문 + 이전본). 지우지 않는다
 data/users/<user_id>/projects/<project_id>/exports/*.docx       # book_export
 data/users/<user_id>/trash/<project_id>-<시각>/                   # book_import replace=True로 밀려난 프로젝트
-data/users/<user_id>/trash/shelf/{casper,balthasar}/<id>.json    # 휴지통의 생각·문체(#88). 원래 파일 + "_trash": {at, note, with?}
-data/users/<user_id>/shelf/categories/<id>/{category.json, items/<항목 id>.json}   # 저자의 카테고리(#92, schema_version 1)
+data/users/<user_id>/trash/shelf/{casper,balthasar}/<id>.json    # (#96 전) 휴지통의 생각·문체(#88). 이전 때 trash/shelf/category-items/<책>/로
+data/users/<user_id>/shelf/categories/<id>/{category.json, items/<글 id>.json}   # 글이 쌓이는 책(#92 → #96). category.json에 contexts
 data/users/<user_id>/shelf/settings.json                          # 책 색·내 색·제목 기본값(#92)
 data/users/<user_id>/shelf/floors.json                            # 프로젝트 순서·프로젝트마다 기본 카테고리·마지막 옮기기(#93·#95)
 data/users/<user_id>/shelf/maps/<프로젝트 id>.json                 # 지도: 노드(위치·색·책·연결)와 선(#95). 「내 서재」는 common.json
@@ -277,15 +286,15 @@ data/index.sqlite
 ## MCP 도구 (이름 고정)
 
 ### 받은함 (`magus/inbox.py`) — P1
-- `files_list()` → 올린 파일(옛 받은함) 목록(이름·크기·올린 시각·쓰임)과 사용량/한도. *(P1에서 추가된 도구. 휴지통 도구 둘(#88), 카테고리 도구 일곱(#92), 저자 확인 질문지 둘(#84)까지 30개였고, #94에서 idea_delete·style_delete를 category_trash에 합치고 book_document를 더해 **29개**)*
+- `files_list()` → 올린 파일(옛 받은함) 목록(이름·크기·올린 시각·쓰임)과 사용량/한도. *(P1에서 추가된 도구. 휴지통 도구 둘(#88), 카테고리 도구 일곱(#92), 저자 확인 질문지 둘(#84)까지 30개였고, #94에서 idea_delete·style_delete를 category_trash에 합치고 book_document를 더해 29개, #96에서 idea_add·style_add·ref_add를 category_put에, idea_search·style_search·ref_search를 category_search에 합쳐 **23개**(8,416토큰))*
   - 도구 문장에서는 '받은함' 대신 '올린 파일'이라고 쓴다(#94). 코드·폴더 이름(inbox)은 그대로.
-- 파일 인자(book_import의 path, ref_add의 file_path, idea_add_conversation의 path)는 **받은함 파일 이름**을 받는다.
+- 파일 인자(book_import의 path, category_put의 file, idea_add_conversation의 path)는 **받은함 파일 이름**을 받는다.
   - 원격(HTTP)에서는 이름만 받는다. 경로를 주면 "받은함에 없다" 오류다(서버 파일을 읽지 못하게).
   - 로컬(stdio) 개발용으로는 받은함에 없으면 로컬 경로(절대 또는 FILES_DIR 기준)도 받는다.
   - 이 차이는 `FileResolver` 한 곳에만 있다(`build_server(local_files=)`, CLI가 stdio일 때만 True).
 - 파일 이름: 폴더 구분자·`..`·숨김·제어 문자·예약 이름을 거부하고, 200바이트 이하. 형식은 .docx .pdf .md .txt만 받는다.
 - 업로드(`save_upload`)는 한도를 지킨다: 한 개 `MAX_UPLOAD_MB`, 사용자 폴더 전체 `MAX_USER_MB`. 넘으면 무엇이 얼마인지 밝힌 오류를 낸다.
-- ref_add가 받은함 파일을 쓰면 refs의 file_path에는 `inbox/<이름>`을 남긴다.
+- category_put(file)이 받은함 파일을 쓰면 refs의 file_path에는 `inbox/<이름>`을 남긴다.
 - 로컬 개발: `magus inbox [--add 파일…] [--remove 이름…]`. 원격에서는 웹 업로드(4단계)로만 들어온다.
 
 ### 책 (`magus/book/`)
@@ -334,18 +343,18 @@ data/index.sqlite
   - 응답은 한 줄(제목·프로젝트·노드·기준 수정본·질문·열린 확인 요청·미확인 문헌 수) + "저자에게 책장에서 볼 수 있다고 알린다(수치는 대화에 옮겨 쓰지 않는다)".
 
 ### 문헌 — Melchior (`magus/melchior/`)
-- `ref_import_bibliography(text)` → 줄 단위로 저자·연도·제목을 파싱하고 key를 만든다(`magus/melchior/bibliography.py`). status는 unverified다.
+- `ref_import_bibliography(text, project?, book?)` → (#96) 넣을 책은 book, 없으면 그 프로젝트에서 문헌 글이 가장 많은 책, 없으면 「참고문헌」 책을 만들고 「논문」 컨텍스트. 줄 단위로 저자·연도·제목을 파싱하고 key를 만든다(`magus/melchior/bibliography.py`). status는 unverified다.
   - 지원: APA, 국문 『』, 연도 후치형(근사), 연도 접미사 2012a.
   - `[국역: 이름 성, …, 연도]` 꼬리가 있으면 한글 성 + 원서·번역서 연도를 aliases에 넣는다.
   - 파싱하지 못한 줄은 key `raw-<해시>`, bib.raw로 보관한다. 같은 목록 안 key 충돌은 `-2`를 붙인다.
   - 같은 문헌(첫 저자·연도·제목, 또는 같은 원문 줄)이 목록에 두 번이면 "중복 서지"로 따로 리포트한다. 원고 오류일 수 있다(사용자 결정 #5).
   - 이미 있는 key는 건드리지 않는다. 새 목록의 제목·연도가 기존과 다르면 "기존 서지와 다름"으로 리포트만 한다(갱신하지 않음, 사용자 결정 #6).
-- `ref_add(bib, passages: [{text, reason, locator?}], file_path? | full_text?, aliases?)` → status=verified로 넣는다.
+- (#96에서 뺌) `ref_add` → `category_put(book, author, source=서지, checked=true, parts=[{text, reason, where}], file?, aliases?)`(`melchior/refs.py: add_ref`). 아래 규칙은 그대로다. status=verified로 넣는다.
   - **발췌가 하나 이상 있어야 받는다.**
   - bib은 `{key}` 또는 `{authors|author, year, title…}`이다. 같은 key나 alias가 unverified로 있으면 verified로 올리고 bib·aliases·발췌를 합친다.
   - key도 저자·연도도 없으면 bib 제목이나 전문 첫머리 5,000자에 참고문헌 제목이 그대로 있는 문헌 하나를 고른다(둘 이상이면 오류). "fixtures/papers/<파일>.pdf를 문헌으로 등록해 줘"처럼 파일만 받는 경우다.
   - 전문은 txt/md/pdf/docx 파일이나 full_text로 받는다. 상대 경로는 `FILES_DIR` 기준이다(book_import, idea_add_conversation도 같다). 발췌는 ref_picked 레인, 전문은 ref_full 레인으로 청킹한다.
-- `ref_search(query, scope=picked|full|both(기본), k=8)` → 하이브리드 검색. picked 결과를 먼저 보여 주고, full 결과에는 "발췌되지 않은 부분 → ref_add로 발췌 추가"라고 표시한다.
+- (#96에서 뺌) `ref_search` → `category_search(query, book?, full=true)`. 쓸 부분(ref_picked)을 먼저, 전문(ref_full)은 full=true일 때만.
 - `ref_check(chapter_number, project_id?)` → JSON: verified / unverified / unknown(refs에 없음) / uncertain(한글 표기인데 refs와 못 이음: 인명이면 aliases 필요, 지명·사건이면 무시) 목록과 `unique_unchecked`, `needs_source`.
   - 문헌마다 `count`(출현), `cited_as`, `paragraphs`(장 본문의 문단 번호), `matched_by`(alias·음역 추정·연도 a/b 모호)를 담는다.
   - **연도 a/b가 모호하면 잇지 않는다**(사용자 결정 #31). `Keynes(1930)`·`케인스(1930)`인데 참고문헌에 1930a·1930b만 있으면, key `keynes1930a/b`·상태 unverified·`candidates`(후보 key와 제목)로 보이고 한 문헌으로 센다. 이슈의 ref_id도 비워 둔다.
@@ -363,27 +372,35 @@ data/index.sqlite
   - 7개 절: 한 줄 요약 / 바로 확인할 것(연도 불일치, 참고문헌에만 있는 것) / 답해 주실 질문(음역 추정, 동명 판별) / 확인 순서 상위 20 / 사실·수치 요청(fact) / 장별 미확인 수 / 앞으로의 방식.
 
 ### 영감 — Casper (`magus/casper/`)
-- `idea_add(text, kind, origin?, title?, title_by?: author|ai, untitled?)` → author=me로 저장한다. **제목을 주면 title_by가 반드시 있어야 한다**(기본값 없음, #92-e: 저자가 지은 제목이 AI 것으로 기록되지 않게). 제목을 주지 않고 untitled도 아니면 저자의 제목 기본값을 따른다(#92: 매번 묻기면 저장하지 않고 먼저 묻게 하는 오류, AI가 짓기면 지어서 다시 부르게 하는 오류, 비워 두기면 제목 없이 저장).
-- `idea_add_conversation(markdown? | path?, origin?)` → 화자 마커로 발화를 나눈다(`magus/casper/conversation.py`). 로컬 .md path도 받는다(긴 기록용).
+- (#96에서 뺌) `idea_add` → `category_put(book, author, content, title?, title_by?, untitled?)`. 제목 규칙은 그대로: **제목을 주면 title_by가 반드시 있어야 한다**(기본값 없음, #92-e: 저자가 지은 제목이 AI 것으로 기록되지 않게). 제목을 주지 않고 untitled도 아니면 저자의 제목 기본값을 따른다(#92: 매번 묻기면 저장하지 않고 먼저 묻게 하는 오류, AI가 짓기면 지어서 다시 부르게 하는 오류, 비워 두기면 제목 없이 저장).
+- `idea_add_conversation(book, markdown? | path?, origin?, project?)` → (#96) 그 책의 글로 넣는다(AI 발화는 parent_id·kind=conversation). 화자 마커로 발화를 나눈다(`magus/casper/conversation.py`). 로컬 .md path도 받는다(긴 기록용).
   - 지원 마커(한 파일 안 혼용 가능): `**사용자:**`/`**Claude:**`(변형: `**사용자**:`, 나/User, ChatGPT/AI), `질문:`/`답변:`(괄호 설명 허용: `**답변(수정된 평가):**`), 제목형 `## 질문 N` / `### 답변`, `> 인용 블록` 뒤의 `**Claude 요지**`. 사용자 발화 전체가 인용 블록이면 `>`를 뗀다.
   - 사용자 발화 하나는 ideas(author=me, kind=conversation)가 되고, 바로 뒤의 AI 발화는 ideas(author=ai, parent_id=그 사용자 발화)가 된다. 대화 사이 구분 제목(`## 대화 N`, `---`)은 발화에서 떼어 낸다.
   - 리포트: me N건, ai N건, 분리 실패 구간(서문 본문, 빈 마커, 고아 AI 발화. 저장하지 않는다).
 - (#94에서 뺌) `idea_delete` → `category_trash(category=생각, item_id, note)`. 그 생각에 응답한 AI 발화도 함께 휴지통으로 옮긴다.
-- `idea_search(query, author=me|ai|all, k=10)` → 기본값은 me다. all이면 me를 먼저 정렬한다. ai 결과에는 응답한 사용자 발화를 함께 보여 준다.
+- (#96에서 뺌) `idea_search` → `category_search(query, author=me|ai|all)`. all이면 me를 먼저, ai 글에는 응답한 글을 함께 보인다.
 
 ### 프로젝트 인자(#95, 옛 층 인자 #93, `magus/project_args.py`)
-- 넣는 도구(idea_add·idea_add_conversation·style_add·ref_add·ref_import_bibliography·category_create·category_put)에 `project`(「내 서재」·프로젝트 id·제목, 앞부분이 하나만 맞아도).
+- 넣는 도구(category_put·idea_add_conversation·ref_import_bibliography·category_create)에 `project`(「내 서재」·프로젝트 id·제목, 앞부분이 하나만 맞아도).
   말하지 않았으면 프로젝트가 하나면 그것, 없으면 「내 서재」, 둘 이상이면 넣지 않고 묻게 하는 오류(프로젝트 목록).
-  기본 카테고리는 그 프로젝트의 것 → 지도의 연결 노드가 가리키는 같은 책(하나일 때) → 없거나 여럿이면 묻게(`resolve_put`. 이 프로젝트에 새로 두려면 `category_create(name=생각)`).
-- 찾는 도구(idea_search·style_search·ref_search·category_search·category_list)는 project가 없으면 모두, 있으면 그 프로젝트 + 연결 노드가 가리키는 같은 책. 같은 종류가 여러 프로젝트에 있으면 결과마다 프로젝트.
-- ref_add: 새 문헌만 프로젝트가 필요하다. 이미 있는 문헌은 제자리, project를 줬고 그 원고가 못 보는 곳에 있으면 「내 서재」로 옮기고 두 지도에 연결 노드. ref_import_bibliography·book_import의 참고문헌도 같다.
+  (#96) 넣을 책은 `book`(이름)으로 고른다: 이름이 같은 책이 여럿이면 그 프로젝트의 것 → 지도의 연결 노드가 가리키는 것 → 그래도 여럿이거나 없으면 책 이름과 컨텍스트 이름을 담은 오류(`category/books.py: find_book`).
+- 찾는 도구(category_search·category_list)는 project가 없으면 모두, 있으면 그 프로젝트 + 연결 노드가 가리키는 같은 책. 같은 종류가 여러 프로젝트에 있으면 결과마다 프로젝트.
+- 문헌 글(category_put source): 새 문헌만 프로젝트가 필요하다. 이미 있는 문헌은 제자리, project를 줬고 그 원고가 못 보는 곳에 있으면 「내 서재」로 옮기고 두 지도에 연결 노드. ref_import_bibliography·book_import의 참고문헌도 같다.
 - 지도 일(도구 수를 늘리지 않음): `category_create(template=노드|연결 노드, node)`(연결 노드는 name에 원본 '프로젝트 · 노드'), `category_edit(node, new_name, color, link, unlink)`,
-  책 옮기기 `category_edit(category, move_to=노드|'프로젝트 · 노드'|프로젝트)`·`undo_move`, `category_trash(node)`(가운데·책이 꽂힌 노드는 막음). 지도 보기는 `category_list`.
+  책 옮기기 `category_edit(book, move_to=노드|'프로젝트 · 노드'|프로젝트)`·`undo_move`, `category_trash(node)`(가운데·책이 꽂힌 노드는 막음). 지도 보기는 `category_list`.
 - book_import에 path 없이 title이면 원고 없는 프로젝트(원고는 나중에 같은 project_id로). book_outline 머리에 지도 두 줄(`지도(노드 N · 선 N): …`, `선: …`).
-- 도구 목록 9,566 → 10,957(#93) → 10,904(#94) → 10,900토큰(#95). 한도는 10,904.
+- 도구 목록 9,566 → 10,957(#93) → 10,904(#94) → 10,900(#95) → 8,416토큰(#96, 23개). 한도는 10,904.
 
-### 카테고리 (`magus/category/`, #92)
-- 기본 카테고리는 생각·문체·문헌이다(이름·삭제 불가, 책 색만 바꿈, 넣는 것은 각자의 도구). 그 옆에 저자가 만든 카테고리가 책장에 꽂힌다. 설계·고른 것: `docs/decisions/user-drawers.md`.
+### 책·글 (`magus/category/`, #92 카테고리 → #96 책·글·컨텍스트)
+- **#96부터 기본 카테고리는 없다.** 모든 책이 같다(이름·색·컨텍스트·위치를 바꾸고, 문헌 글이 든 책만 휴지통 막음). 아래 #92 줄의 '기본 셋'·'생각·문체·문헌' 규칙은 #96 전 기록이다.
+  - `category_list()` → 프로젝트마다 지도·노드·책(글 수, `[ ]`는 컨텍스트 이름), 자주 쓰는 컨텍스트 이름, 제목 기본값.
+  - `category_create(name, template=빈 책|인물|사례|수치|용어|노드|연결 노드, color?, project?, node?, context?: [자주 쓰는 컨텍스트 이름 | 글])`.
+  - `category_edit(book?|node?, new_name?, color?, context?([]이면 뗌), project?, move_to?, undo_move?, link?, unlink?)`.
+  - `category_put(book, author, content?, title?, title_by?, untitled?, reason?, where?, parts?: [{text, reason, where}], source?(서지), checked?, file?, aliases?, fields?, tags?, chapters?, item_id?, project?)`
+    = 글 넣기. source가 있으면 문헌 글(`melchior/refs.py: add_ref`, checked면 원문 확인 + 쓸 부분 하나 이상), 없으면 책의 글. 올린 문서가 든 책에는 넣지 않는다.
+  - `category_search(query, book?, project?, author=all|me|ai, full?, k=8)` → 책으로 묶고 책마다 컨텍스트 머리. `category_trash(note, book?, item_id?, project?, node?)`(AI 답 글도 함께).
+  - 응답 첫 줄은 그 책의 컨텍스트(`contexts.View.header`). 자주 쓰는 컨텍스트를 만들고 고치는 것은 웹(`/me/contexts`)만.
+- (#92 기록) 기본 카테고리는 생각·문체·문헌이다(이름·삭제 불가, 책 색만 바꿈, 넣는 것은 각자의 도구). 그 옆에 저자가 만든 카테고리가 책장에 꽂힌다. 설계·고른 것: `docs/decisions/user-drawers.md`.
 - `category_list()` → 기본 셋과 저자의 카테고리(이름·템플릿·칸·항목 수·책 색), 제목 기본값.
 - `category_create(name, template=빈 카테고리|인물|사례|수치|용어, color?)` → 이름 규칙(12자, 예약어·중복 금지, 30개까지), 색은 기본 색 이름(18개) 또는 #RRGGBB.
 - `category_edit(category, new_name?, color?)` → 기본 셋은 색만.
@@ -393,23 +410,24 @@ data/index.sqlite
 - `category_search(query, category?, k=8, project?)`, `category_trash(note, category?, item_id?, project?, node?)`(항목 또는 저자 카테고리 통째. 생각·문체 항목도 여기서(#94), 문헌 항목과 기본 셋 통째는 못 옮김), `category_title_default(mode: ask|ai|none)`.
 - 쓰기 도구 설명 첫 문장은 "저자가 …라고 분명히 말했을 때만 부른다"다. 되묻는 선택지는 생각·문체·문헌과 저자의 카테고리(원고 없음).
 
-### 문체 — Balthasar (`magus/balthasar/`)
-- `style_add(passage, reason, work?, tags)` → tags 스키마는 `{호흡, 시점, 열기, 장치: [], 어미, 톤}`이다. 여섯 키가 모두 필요하고(장치만 빈 목록 허용), 모르는 키는 거부한다. 태그는 호출자(Claude)가 추출해 넘기고, 서버는 검증만 한다. **임베딩 대상과 FTS 색인 대상 모두 reason + tags를 이은 문자열이지 passage가 아니다**(구절을 색인하면 문체가 아니라 주제가 검색된다. 테스트로 고정). 키워드 색인에는 work(출전)도 더한다("유홍준 그 문장", 사용자 결정 #24). 임베딩 대상에는 넣지 않는다.
+### 문체 — Balthasar (`magus/balthasar/`) — #96에서 도구를 뺐다(`balthasar/tools.py` 지움, `style.py`는 이전용)
+- (#96 전 기록) `style_add(passage, reason, work?, tags)` → tags 스키마는 `{호흡, 시점, 열기, 장치: [], 어미, 톤}`이다. 여섯 키가 모두 필요하고(장치만 빈 목록 허용), 모르는 키는 거부한다. 태그는 호출자(Claude)가 추출해 넘기고, 서버는 검증만 한다. **임베딩 대상과 FTS 색인 대상 모두 reason + tags를 이은 문자열이지 passage가 아니다**(구절을 색인하면 문체가 아니라 주제가 검색된다. 테스트로 고정). 키워드 색인에는 work(출전)도 더한다("유홍준 그 문장", 사용자 결정 #24). 임베딩 대상에는 넣지 않는다.
   - `tags_by=ai|author`(기본 ai): 태그를 Claude가 뽑았는지 저자가 정했는지 남긴다(#89). 응답·style_search에 `(태그는 AI가 뽑음)`, 웹 `/styles`에 "AI가 뽑은 태그"로 보인다.
   - reason은 저자가 말한 이유만 쓴다. 말하지 않았으면 지어내지 않고 `(저자가 이유를 밝히지 않음)`으로 남긴다(설명에 적었다).
-- `style_search(query, k=5)` → id, passage, reason, tags를 돌려준다.
+- (#96에서 뺌) `style_search` → `category_search`. 여섯 키 태그 강제도 없앴다(태그는 자유 목록, 무엇을 채울지는 컨텍스트가 말한다).
 - (#94에서 뺌) `style_delete` → `category_trash(category=문체, item_id, note)`.
-- 휴지통의 생각·문체는 검색·목록·웹 화면·reindex에서 빠진다. 되살리기는 운영자 CLI `magus trash restore idea|style <id>`만 한다(생각이면 함께 옮긴 AI 발화도). 카테고리는 `magus trash restore category <id> [--name 새 이름]`, 항목은 `category-item <카테고리 id>/<항목 id>`(#92).
+- 휴지통의 생각·문체는 검색·목록·웹 화면·reindex에서 빠진다. 되살리기는 운영자 CLI만 한다. #96부터 글은 `magus trash restore category-item <책 id>/<글 id>`(함께 옮긴 AI 답 글도), 노드는 `node <프로젝트>/<노드>`. 카테고리는 `magus trash restore category <id> [--name 새 이름]`, 항목은 `category-item <카테고리 id>/<항목 id>`(#92).
 
 ### 쓰기 도구 설명의 첫 문장(#87)
 
 Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로는 보장되지 않아 설명 첫 문장에도 적었다.
-- idea_add·style_add·ref_add: "저자가 '생각'('문체', '문헌')에 넣으라고 분명히 말했을 때만 부른다. '저장해 줘'처럼 넣을 곳이 정해지지 않았으면 부르지 말고 생각·문체·문헌과 저자의 카테고리(category_list) 중 어디인지 먼저 묻는다(원고는 선택지에 넣지 않는다)."(#90·#92)
+- (#96) category_put: "글 넣기. 저자가 그 책에 넣으라고 분명히 말했을 때만 부른다. 넣을 책이 대화에서 분명하지 않으면 부르지 말고 책 이름과 컨텍스트 이름을 보여 주며 묻는다." 아래 둘은 #96 전 기록.
+- (#96 전) idea_add·style_add·ref_add: "저자가 '생각'('문체', '문헌')에 넣으라고 분명히 말했을 때만 부른다. '저장해 줘'처럼 넣을 곳이 정해지지 않았으면 부르지 말고 생각·문체·문헌과 저자의 카테고리(category_list) 중 어디인지 먼저 묻는다(원고는 선택지에 넣지 않는다)."(#90·#92)
 - category_put: "저자가 그 카테고리에 넣으라고 분명히 말했을 때만 부른다." + 위와 같은 되묻기. category_create·category_edit·category_trash·category_title_default도 "분명히 말했을 때만"으로 시작한다(#92).
 - book_write_chapter: "저자가 'Magus 원고에 저장'하라고 분명히 말했을 때만 부른다."(규칙 4)
 - category_trash(#94에서 idea_delete·style_delete를 합침): "저자가 그 항목(또는 저자가 만든 카테고리)을 지우라고 분명히 말했을 때만 부른다. 여러 개면 목록을 보여 주고 확인받는다."
 - book_document: "저자가 원고에서 문서를 만들어 책장에 넣으라고 분명히 말했을 때만 부른다."
-- 도구 설명·도구 응답·instructions에는 코어 이름(Casper·Melchior·Balthasar)과 옛 이름(영감·책 지도·미해결·이슈·새 판)을 쓰지 않는다. '책장'은 #92로 용어집 이름이 됐다. 예외는 규칙 7의 "쓰지 않는다" 문장(`instructions.AVOID`) 하나다. `tests/test_author_terms.py`가 모든 도구를 한 번씩 불러 설명·입력 스키마·응답·instructions를 검사한다.
+- 도구 설명·도구 응답·instructions에는 코어 이름(Casper·Melchior·Balthasar)과 옛 이름(영감·책 지도·미해결·이슈·새 판), #96부터 책 종류 이름(원고 책·모음 책·문서 책·카테고리)을 쓰지 않는다. '책장'은 #92로 용어집 이름이 됐다. 예외는 용어집 규칙(#96부터 6)의 "쓰지 않는다" 문장(`instructions.AVOID`) 하나다. `tests/test_author_terms.py`가 모든 도구를 한 번씩 불러 설명·입력 스키마·응답·instructions를 검사한다.
 
 ## 서버 instructions
 
@@ -426,7 +444,11 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
 - 예외: **사용자 결정 #95(2026-10-08, 프로젝트·마인드맵, 확인 대기)로 규칙 7의 책장·층·책을 프로젝트·지도·노드·연결 노드·책장·책·게시판으로 바꾸고 쓰지 않는 말에 '층'·'공용'을 더했다.**
   규칙 8 끝에 "'지도 보여 줘'·'책장 보여 줘'는 category_list다", 규칙 12를 프로젝트 고르기(그 프로젝트의 책 → 연결 노드가 가리키는 책 → 묻기)로, 규칙 13의 '책장(이 층)'을 '책장(이 노드)'로.
   전후 전문은 `docs/decisions/project-map-texts.md` 2절.
-- **instructions는 등록된 도구만 언급한다.** `build_instructions(등록된 도구 이름)`은 규칙 문장에 나오는 도구(`book_|ref_|idea_|style_|files_|category_` 이름)가 모두 등록된 규칙만 넣고, 번호는 다시 매긴다. 도구를 부르지 않는 규칙 7은 언제나 실린다. 도구가 모두 등록되면 SPEC과 똑같아진다(`tests/test_instructions.py`).
+- 예외: **사용자 요청 #96(2026-10-08, 종류를 없애고 컨텍스트로, 확인 대기)로 머리말을 "이 서버는 저자의 프로젝트(지도·노드·책·글)와 원고를 관리한다."로 바꾸고**,
+  규칙 2(인용은 원문 확인 글의 쓸 부분만, category_search), 3(글의 author), 5(새, 사용자 문장 그대로: "글을 읽거나 넣을 때 그 노드·책의 컨텍스트를 따른다. 컨텍스트가 없으면 일반 메모로 다룬다. 컨텍스트는 저자가 적은 읽는 방법이다."),
+  6(용어집: 책·글·컨텍스트·자주 쓰는 컨텍스트, 종류로 부르지 않음, 쓰지 않는 말에 원고 책·모음 책·문서 책·카테고리), 7·9·11·12(종류 이름 뺌), 8(넣을 곳: 대화에서 분명하면 그 책, 아니면 책 이름·컨텍스트 이름을 보여 주며 묻기)를 바꾸고,
+  옛 5·6(style_search·style_add 태그)을 뺐다. 규칙은 12개. 전후 전문은 `docs/decisions/contexts-texts.md` 3절.
+- **instructions는 등록된 도구만 언급한다.** `build_instructions(등록된 도구 이름)`은 규칙 문장에 나오는 도구(`book_|ref_|idea_|style_|files_|category_` 이름)가 모두 등록된 규칙만 넣고, 번호는 다시 매긴다. 도구를 부르지 않는 규칙(#96 번호 5·6·10·11)은 언제나 실린다. 도구가 모두 등록되면 SPEC과 똑같아진다(`tests/test_instructions.py`).
 - 새 도구를 추가하면 그 도구가 필요한 규칙이 자동으로 instructions에 들어간다. 따로 손댈 것은 없다.
 
 ## 작업 순서 (단계마다 pytest 통과 + Claude Desktop 확인 방법을 보고한다)
@@ -485,6 +507,11 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
     원고 책 `/shelf/book/<작업물>?tab=chapters|issues|cites|editions`(인용 상태 안에 `view=questions`, 수정본 이력 안에 `POST …/edition`과 리포트 `report=N`).
     문서 책 `/shelf/doc/<id>`(`?v=N` 이력, `POST …/redo` 다시 만들기, `…/docx`, 인쇄 CSS로 PDF). 책 설정 `/shelf/edit/ms.<id>`·`doc.<id>`(이름·색·위치), 휴지통 `/shelf/trash/ms.…`·`doc.…`.
     원고 책은 옮기지 않는다(가운데 노드 자체). 원고 책 휴지통은 원고만 옮기고 같은 id의 원고 없는 프로젝트를 남긴다. 문헌 등록 `POST /shelf/refs/register`(문헌 목록 안 접힌 칸).
+  - **컨텍스트(#96, `magus/webcontexts.py`)**: '+ 노드'·노드 설정·새 책·책 설정(올린 원고·문서 포함)에 컨텍스트 칸(자주 쓰는 컨텍스트 단추: 누르면 붙고 다시 누르면 떨어짐,
+    붙인 사본은 그 자리에서 고침, 줄마다 '자주 쓰는 컨텍스트로 등록'·'떼기', 직접 적기). 노드 패널·게시판·올린 원고·문서 머리에 컨텍스트 이름(누르면 전문).
+    책등 위 띠 = 컨텍스트 이름(첫 이름 + 외 N). 내 정보 → 자주 쓰는 컨텍스트 `/me/contexts`(고치기·지우기·새로 더하기). 책 추가 = 새 책 / 문서 올리기 / 원고에서 만든 문서.
+    '원고 책' → '올린 원고', '문서 책' → '원고에서 만든 문서', '항목' → '글'. 게시판은 하나(글 뒤에 문헌 글, 거르기 나·AI·원문 확인), 바로 적기에 이유·위치. 문헌 넣기 `POST /shelf/refs/register`(폼의 book = 넣을 책).
+    옛 주소 `/shelf/ideas…`·`ideas.<프로젝트>`는 이전으로 생긴 책으로 넘긴다. 값은 web-style.md "컨텍스트".
   - (#95로 걷어 냄) 한 화면 3D 책장(`/shelf?floor=&book=&at=`)·층 확대·3D 장(#93, 2026-10-07~08). 기록은 web-style.md "책장 3D", status.md 0-16·0-17절.
   - **책장**(`magus/webshelf.py`, #92·#95): 노드를 열면 보이는 양장본 책장(정면 2D, 한 줄 여섯 권, 책등 세로쓰기·위 띠·아래 항목 수·두께는 항목 수 단계, 점선 "책 추가"). 책을 누르면 게시판형 목록 `/shelf/{ideas|styles|refs|카테고리 id}`(한 줄 = 제목·작성 시각·보조 정보, 누르면 펼침, 100개씩, 기존 거르기 유지), 항목 고유 주소 `/shelf/<…>/<항목 id>`(펼친 채 열림). 검색 `?q=`(두 글자 이상 FTS, 한 글자는 그대로 포함, `<mark>`), `/shelf?q=`는 카테고리별로 묶는다. 예전 `/ideas`·`/refs`·`/styles`는 넘긴다.
     - 문헌 책등 아래는 "확인 n · 전체 m" 두 줄(낭독기 "문헌, 확인 n편, 전체 m편"), 두께는 전체 수 기준. 문헌 목록 머리줄도 "문헌 확인 n편 · 전체 m편(미확인 k편)". 원고 참고문헌에서 들여온 미확인 항목까지 세어 '원문을 읽고 등록한 책'으로 오해하지 않게.
@@ -544,16 +571,16 @@ magus serve --transport http [--port 8000] # streamable-http(stateless) http://1
 npx -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8000/mcp --transport http --method tools/list   # MCP Inspector(CLI)
 magus import <docx|pdf> --project-id <id> [--title …] [--subtitle …] [--replace] [--synthetic]
 magus import <docx|pdf> --project-id <id> --new-edition [--force]   # 같은 책의 수정본(#76)
-magus conversation <md> [--origin …]      # 대화 기록 → Casper
+magus conversation <md> --book <책> [--origin …]   # 대화 기록 → 그 책의 글(#96)
 magus synth <폴더>                        # 합성 fixture 만들기
 magus seed-demo                           # 데모 프로젝트 + 책장 표본
 magus reindex                             # 파일 → index.sqlite 재생성 + 파생값 재계산
 magus cite-report --project-id book       # 책 전체 인용 집계(확인 순서)
 magus author-report --project-id book --out private/reports/<날짜>-인용-점검.md   # 저자용 보고서(md + docx)
 magus terms --project-id book [--add …] [--remove …]                         # 비인용 용어 보기·고치기
-magus trash list | put idea|style|category <id> --note … | restore idea|style|category|category-item <id> [--name …]   # 책장 휴지통(운영자, USER_ID 사용자, #88·#92)
+magus trash list | put category|category-item|node <id> --note … | restore category|category-item|node <id> [--name …]   # 휴지통(운영자, USER_ID 사용자, #88·#92·#96)
 magus alias <key> <표기>                                                      # 저자가 확정한 표기를 aliases에(예: keynes1930b "케인스(1930)")
-magus maps plan|apply|revert [--user …|--all-users] [--backup 폴더]            # 프로젝트·지도 이전(#95, 층 이전 포함, 옛 이름 floors): 미리보기 / 백업 뒤 실행·전후 비교 / 옛 코드용 되돌리기
+magus maps plan|apply|revert [--user …|--all-users] [--backup 폴더]            # 프로젝트·지도 + 책·컨텍스트 이전(#95·#96, 층 이전 포함, 옛 이름 floors): 미리보기 / 백업 뒤 실행·전후 비교 / 옛 코드용 되돌리기. 새 serve는 옛 형식 사용자가 있으면 시작하지 않는다
 magus inbox [--add 파일…] [--remove 이름…]                                    # 받은함(로컬 개발용, 원격은 웹 업로드)
 magus outline [--project-id …]                                               # book_outline과 같은 출력(USER_ID). 복구 확인용
 magus alert-test                                                             # 운영자 알림 채널 시험

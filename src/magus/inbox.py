@@ -1,6 +1,6 @@
 """받은함(inbox): 사용자가 올린 파일을 두는 곳. `data/users/<user_id>/inbox/`.
 
-- 원격 모드에서 파일은 웹 업로드로만 들어온다. 도구의 경로 인자(book_import·ref_add·idea_add_conversation)는
+- 원격 모드에서 파일은 웹 업로드로만 들어온다. 도구의 경로 인자(book_import·category_put의 file·idea_add_conversation)는
   받은함의 **파일 이름**을 받는다. 서버의 다른 파일을 읽게 하는 경로는 받지 않는다.
 - 로컬(stdio) 모드는 개발용이라, 받은함에 없으면 로컬 경로(절대 또는 FILES_DIR 기준)도 받는다.
   이 차이는 `FileResolver` 한 곳에만 있다.
@@ -19,8 +19,8 @@ from magus.paths import resolve_input
 from magus.store import Store
 from magus.store.base import InboxFile
 
-INBOX_TYPES = {".docx": "원고(book_import)", ".pdf": "원고·논문(book_import, ref_add)",
-               ".md": "대화 기록(idea_add_conversation)", ".txt": "논문 전문(ref_add)"}
+INBOX_TYPES = {".docx": "원고(book_import)", ".pdf": "원고·논문(book_import, category_put file)",
+               ".md": "대화 기록(idea_add_conversation)", ".txt": "논문 전문(category_put file)"}
 _BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 _RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)), *(f"LPT{n}" for n in range(1, 10))}
 
@@ -90,7 +90,7 @@ class FileResolver:
 def describe(files: list[InboxFile], used: int, limit: int) -> str:
     head = f"올린 파일 {len(files)}개 · 사용 {mb(used)} / 한도 {mb(limit)}"
     if not files:
-        return head + "\n올린 파일이 없다. 저자는 웹 책장(원고 책·문헌 책)이나 설정의 '올린 파일'에서 올린다(로컬 개발: magus inbox --add <파일>)."
+        return head + "\n올린 파일이 없다. 저자는 웹 책장(가운데 노드·그 책)이나 내 정보의 '올린 파일'에서 올린다(로컬 개발: magus inbox --add <파일>)."
     lines = [
         f"- {f.name} · {size_text(f.size)} · {local_time(f.modified)} · {INBOX_TYPES.get(Path(f.name).suffix.lower(), '')}"
         for f in files
@@ -114,7 +114,7 @@ def build_tools(store: Store, current_user: Callable[[], str], max_user_bytes: i
             name="files_list",
             description=(
                 "저자가 웹에서 올린 파일 목록: 이름, 크기, 올린 시각, 쓰임. "
-                "book_import·ref_add·idea_add_conversation의 파일 인자에는 여기 나온 **이름만** 준다."
+                "book_import·category_put(file)·idea_add_conversation의 파일 인자에는 여기 나온 **이름만** 준다."
             ),
             structured_output=False,
         )

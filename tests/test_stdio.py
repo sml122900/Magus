@@ -49,7 +49,7 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
         assert '"title": "물가의 망설임"' in ch1
         written = _text(await client.call_tool("book_write_chapter", {"number": 7, "content": "닿으려는 것.", "note": "고침", "project_id": "synth"}))
         assert '"version": 2' in written
-        assert _text(await client.call_tool("book_issues", {"project_id": "synth"})).startswith("확인 요청 13건")
+        assert _text(await client.call_tool("book_issues", {"project_id": "synth"})).split("\n", 1)[1].startswith("확인 요청 13건")
 
         # 3단계
         assert _text(await client.call_tool("book_decide", {"text": "결정", "project_id": "synth"})).startswith("D1")
@@ -61,24 +61,28 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
         # 4단계
         checked = _text(await client.call_tool("ref_check", {"chapter_number": 1, "project_id": "synth"}))
         assert '"daeschler2006"' in checked
-        added = _text(await client.call_tool("ref_add", {"bib": {"key": "clack2012"}, "passages": [{"text": "네발동물의 기원", "reason": "1장"}]}))
-        assert added.startswith("clack2012: unverified → verified")
-        assert "clack2012 (verified)" in _text(await client.call_tool("ref_search", {"query": "네발동물"}))
+        added = _text(await client.call_tool("category_put", {"book": "참고문헌", "project": "synth", "author": "me",
+                                                                "source": {"key": "clack2012"}, "checked": True,
+                                                                "parts": [{"text": "네발동물의 기원", "reason": "1장"}]}))
+        assert "clack2012: 원문 확인 전 → 원문 확인" in added
+        assert "clack2012 · 문헌 글 · 원문 확인" in _text(await client.call_tool("category_search", {"query": "네발동물"}))
 
-        # 5단계
+        # 5단계 → #96: 책 하나에 컨텍스트를 붙여 만들고, 대화 기록·글을 넣는다
+        made = _text(await client.call_tool("category_create", {"name": "생각", "context": ["생각 메모"], "project": "synth"}))
+        assert made.startswith("컨텍스트(책 「생각」): 「생각 메모」")
         convo = _text(await client.call_tool("idea_add_conversation", {"markdown": "**사용자:** 고래는 돌아갔다\n**Claude:** 맞습니다",
-                                                                        "project": "synth"}))  # 프로젝트가 둘이라 준다(#93·#95)
-        assert convo.startswith("me 1건, ai 1건")
-        assert _text(await client.call_tool("idea_add", {"text": "물가의 망설임", "kind": "thought", "untitled": True,
-                                                         "project": "synth"})).startswith("기록함 [me]")
-        assert "[me]" in _text(await client.call_tool("idea_search", {"query": "고래"}))
+                                                                        "book": "생각"}))
+        assert "me 1건, ai 1건" in convo
+        assert "넣음: 「생각」" in _text(await client.call_tool("category_put", {"book": "생각", "author": "me", "content": "물가의 망설임",
+                                                                                "untitled": True}))
+        assert "[me]" in _text(await client.call_tool("category_search", {"query": "고래"}))
 
-        # 6단계
-        tags = {"호흡": "짧음", "시점": "1인칭", "열기": "장면", "장치": ["반복"], "어미": "-다", "톤": "건조"}
-        styled = _text(await client.call_tool("style_add", {"passage": "고래는 돌아갔다.", "reason": "짧은 문장의 리듬", "tags": tags,
-                                                            "project": "내 서재"}))
-        assert styled.startswith("문체에 기록함 ")
-        assert "구절: “고래는 돌아갔다.”" in _text(await client.call_tool("style_search", {"query": "짧은 리듬"}))
+        # 6단계 → #96: 「내 서재」의 책(컨텍스트 「문체」)
+        _text(await client.call_tool("category_create", {"name": "문체", "context": ["문체"], "project": "내 서재"}))
+        styled = _text(await client.call_tool("category_put", {"book": "문체", "author": "me", "content": "고래는 돌아갔다.",
+                                                               "reason": "짧은 문장의 리듬", "tags": ["호흡: 짧음"], "untitled": True}))
+        assert styled.startswith("컨텍스트(책 「문체」): 「문체」 문학적 부분이 마음에 드는 구절을 모아놓은것.")
+        assert "이유: 짧은 문장의 리듬" in _text(await client.call_tool("category_search", {"query": "짧은 리듬", "book": "문체"}))
 
 
 
@@ -106,14 +110,13 @@ async def test_relative_file_path_from_other_cwd(data_dir: Path, tmp_path: Path)
     )
     bib_line = "Kremer, M. (1993). Population growth and technological change: One million B.C. to 1990. Quarterly Journal of Economics, 108(3), 681–716."
     async with Client(params) as client:
-        assert "새 refs 1건" in _text(await client.call_tool("ref_import_bibliography", {"text": bib_line}))
+        assert "새 문헌 글 1건" in _text(await client.call_tool("ref_import_bibliography", {"text": bib_line}))
         passage = {"text": "인구가 많을수록 기술 진보가 빠르다", "reason": "35장 크레머 문단의 근거"}
         # 저자·연도 없이 파일만: 전문 첫머리의 제목으로 참고문헌을 찾는다
-        added = _text(
-            await client.call_tool("ref_add", {"bib": {}, "passages": [passage], "file_path": "fixtures/papers/kremer.pdf"})
-        )
-        assert added.startswith("kremer1993: unverified → verified") and "전문 있음" in added
-        missing = await client.call_tool("ref_add", {"bib": {"key": "x2000"}, "passages": [passage], "file_path": "fixtures/papers/없음.pdf"})
+        put = {"book": "참고문헌", "author": "me", "checked": True, "parts": [passage]}
+        added = _text(await client.call_tool("category_put", {**put, "file": "fixtures/papers/kremer.pdf"}))
+        assert "kremer1993: 원문 확인 전 → 원문 확인" in added and "원문 파일 있음" in added
+        missing = await client.call_tool("category_put", {**put, "source": {"key": "x2000"}, "file": "fixtures/papers/없음.pdf"})
         assert missing.is_error and f"{tmp_path} 기준으로 푼다" in missing.content[0].text
     stored = LocalStore(data_dir)
     assert stored.get_ref("alice", "kremer1993").file_path == str((papers / "kremer.pdf").resolve())

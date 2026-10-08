@@ -1,9 +1,10 @@
-"""저자가 만든 카테고리·책 색·항목 제목(#92).
+"""책(#92 '저자가 만든 카테고리' → #96 모든 책)·책 색·글 제목·컨텍스트.
 
 - 규칙: 이름(예약어·중복·길이·글자·숫자만·개수), 색(기본 색 이름·#RRGGBB만, 그 밖은 거부), 제목 기본값.
 - 저장: 파일이 원본(schema_version), reindex로 다시 만든다. 휴지통은 옮기고 되살린다.
-- 도구: category_* 일곱 개, idea_add의 제목(기본값 '매번 묻기'면 먼저 묻게 한다).
-- 웹: 책장에 꽂힌 카테고리, 만들기·고치기·휴지통·내 색·바로 적기, 주입 시도, 사용자 격리.
+- 도구: category_* 일곱 개(글 넣기·찾기·지우기 포함), 제목(기본값 '매번 묻기'면 먼저 묻게 한다), 컨텍스트 머리.
+- 웹: 노드에 꽂힌 책, 만들기(컨텍스트 단추)·고치기(그 자리에서 고치기·자주 쓰는 컨텍스트로 등록)·휴지통·내 색·바로 적기,
+  주입 시도, 사용자 격리.
 """
 
 from __future__ import annotations
@@ -24,8 +25,9 @@ from magus.category.rules import (
 )
 from magus.config import Settings
 from magus.server import build_server
-from magus.store import CategoryItem, LocalStore, ShelfSettings
+from magus.store import CategoryItem, Context, LocalStore, SavedContext, ShelfSettings
 from magus.webshelf import contrast, text_color
+from tests.conftest import make_book
 
 pytestmark = pytest.mark.anyio
 
@@ -41,9 +43,11 @@ def test_name_rules():
     assert check_name("  인물  ", taken) == "인물"
     assert check_name("Ancient Rome", taken) == "Ancient Rome" and check_name("강의 준비 2026", taken) == "강의 준비 2026"
     assert check_name("인물 카테고리", taken) == "인물"  # 끝의 '카테고리'는 뗀다
+    for ok in ("생각", "문 체", "원고", "문헌"):  # #96: 옛 기본 책 이름도 여느 책 이름
+        assert check_name(ok, taken) == ok
     for bad, why in (
-        ("생각", "정해진 이름"), ("문 체", "정해진 이름"), ("확인요청", "정해진 이름"), ("책장 카테고리", "정해진 이름"),
-        ("카테고리", "정해진 이름"), ("Casper", "정해진 이름"), ("원고", "정해진 이름"), ("책", "정해진 이름"),
+        ("전체", "정해진 이름"), ("확인요청", "정해진 이름"), ("책장 카테고리", "정해진 이름"), ("컨텍스트", "정해진 이름"),
+        ("카테고리", "정해진 이름"), ("Casper", "정해진 이름"), ("책", "정해진 이름"),
         ("사례 카테고리", "이미 있습니다"), ("사 례", "이미 있습니다"), ("가" * (NAME_MAX + 1), f"{NAME_MAX}자까지"),
         ("<b>굵게</b>", "쓸 수 없는 글자"), ('따옴표"', "쓸 수 없는 글자"), ("2026", "숫자만"), ("   ", "비어 있습니다"),
     ):
@@ -121,11 +125,11 @@ def test_trash_and_restore_with_cli(store: LocalStore, data_dir: Path, monkeypat
     assert f"휴지통으로 옮김(default): category {other.id}" in capsys.readouterr().out
     cli.main(["trash", "list"])
     out = capsys.readouterr().out
-    assert f"- category {c.id}" in out and "카테고리 「사례」" in out and f"- category_item {c.id}/20261006000000001-aaaaab" in out
+    assert f"- category {c.id}" in out and "책 「사례」" in out and f"- category_item {c.id}/20261006000000001-aaaaab" in out
     with pytest.raises(SystemExit):  # 이름이 겹치면 되살리지 않는다
         cli.main(["trash", "restore", "category", c.id])
     with pytest.raises(SystemExit):  # 새 이름도 이름 규칙을 지킨다
-        cli.main(["trash", "restore", "category", c.id, "--name", "생각"])
+        cli.main(["trash", "restore", "category", c.id, "--name", "전체"])
     cli.main(["trash", "restore", "category", c.id, "--name", "옛 사례"])
     cli.main(["trash", "restore", "category-item", f"{c.id}/20261006000000001-aaaaab"])
     capsys.readouterr()
@@ -142,92 +146,119 @@ async def test_category_tools_round_trip(settings: Settings, store: LocalStore):
     store.write_chapter("alice", "book", 3, "항구 이야기.", "x", title="항구")
     async with Client(build_server(settings, store)) as c:
         listed = _text(await c.call_tool("category_list", {}))
-        assert "## 「책」(book) · 원고 있음 · 노드 4 · 선 3\n- 가운데 원고 책 1장\n- 「생각」 생각 0" in listed
-        assert "제목 기본값: 매번 묻기" in listed
-        assert "## 내 서재 · 노드 2 · 선 1\n- 가운데 책 없음\n- 「문체」 문체 0" in listed  # 문체는 「내 서재」, 생각·문헌은 프로젝트
-        made = _text(await c.call_tool("category_create", {"name": "사례 카테고리", "template": "사례", "color": "빨간색"}))
-        assert made.startswith("카테고리를 만듦: 「사례」 · 사례 템플릿(칸: 시기, 장소, 출처) · 색 빨강(#b3261e)")
-        for args, why in (({"name": "사례"}, "이미 있습니다"), ({"name": "문헌"}, "이미 문헌이 있다(기본 카테고리)"), ({"name": "원고"}, "정해진 이름"),
-                          ({"name": "새것", "color": "#fff;}"}, "기본 색 이름")):
-            result = await c.call_tool("category_create", args)
+        assert "## 「책」(book) · 올린 문서 있음 · 노드 1 · 선 0\n- 가운데: 「책」 올린 문서 1장" in listed  # #96: 기본 책 없음
+        assert "제목 기본값: 매번 묻기" in listed and "자주 쓰는 컨텍스트(context에 이름으로 붙인다): 「문체」" in listed
+        made = _text(await c.call_tool("category_create", {"name": "사례 카테고리", "template": "사례", "color": "빨간색", "project": "book",
+                                                            "context": ["사례는 출처가 있는 이야기만 모은다."]}))
+        assert made.splitlines()[0] == "컨텍스트(책 「사례」): 사례는 출처가 있는 이야기만 모은다."
+        assert made.splitlines()[1].startswith("책을 만듦: 「사례」 · 사례(칸: 시기, 장소, 출처) · 색 빨강(#b3261e) · 「책」 · 노드 「사례」")
+        for args, why in (({"name": "사례"}, "이미 있습니다"), ({"name": "전체"}, "정해진 이름"),
+                          ({"name": "새것", "color": "#fff;}"}, "기본 색 이름"), ({"name": "새것", "context": ["가" * 501]}, "500자까지")):
+            result = await c.call_tool("category_create", {"project": "book", **args})
             assert result.is_error and why in _text(result), args
         # 제목: 기본값 '매번 묻기'면 저장하지 않고 먼저 묻게 한다
-        asked = await c.call_tool("category_put", {"category": "사례", "author": "me", "content": "1850년대 항구의 장날"})
+        asked = await c.call_tool("category_put", {"book": "사례", "author": "me", "content": "1850년대 항구의 장날"})
         assert asked.is_error and "직접 지을지, 지어 드릴지, 비워 둘지" in _text(asked)
         assert store.list_category_items("alice") == []
         put = _text(await c.call_tool("category_put", {
-            "category": "사례", "author": "me", "content": "1850년대 항구의 장날", "title": "항구 장날", "title_by": "author",
-            "fields": {"시기": "1850년대", "출처": "예시 향토지"}, "tags": ["항구", "장날"], "chapters": [3]}))
-        assert put.startswith("넣음: 카테고리 「사례」 ") and "제목 「항구 장날」" in put and "누가: 저자의 말(me)" in put
+            "book": "사례", "author": "me", "content": "1850년대 항구의 장날", "title": "항구 장날", "title_by": "author",
+            "fields": {"시기": "1850년대", "출처": "예시 향토지"}, "tags": ["항구", "장날"], "chapters": [3], "reason": "도입부에 쓸 장면"}))
+        assert put.startswith("컨텍스트(책 「사례」): 사례는 출처가 있는 이야기만 모은다.\n넣음: 「사례」 ")
+        assert "제목 「항구 장날」" in put and "누가: 저자의 말(me)" in put
         item_id = re.search(r"\d{17}-[0-9a-f]{6}", put).group()
         for args, why in (({"fields": {"값": "3"}}, "'값' 칸이 없다"), ({"chapters": [9]}, "없는 장 번호"),
-                          ({"category": "문체"}, "style_add 도구를 찾아 쓴다"), ({"category": "문헌"}, "ref_add 도구를 찾아 쓴다"),
-                          ({"category": "없는것"}, "카테고리가 없다")):
-            result = await c.call_tool("category_put", {"category": "사례", "author": "me", "content": "x", "untitled": True, **args})
+                          ({"book": "책"}, "올린 문서가 들어 있어 글을 넣지 않는다"), ({"book": "없는것"}, "'없는것' 책이 없다")):
+            result = await c.call_tool("category_put", {"book": "사례", "author": "me", "content": "x", "untitled": True, **args})
             assert result.is_error and why in _text(result), args
-        edited = _text(await c.call_tool("category_put", {"category": "사례", "author": "me", "item_id": item_id, "fields": {"장소": "예시 강가"}}))
-        assert edited.startswith("고침:") and "제목 그대로" in edited
+        edited = _text(await c.call_tool("category_put", {"book": "사례", "author": "me", "item_id": item_id, "fields": {"장소": "예시 강가"}}))
+        assert "고침: 「사례」" in edited and "제목 그대로" in edited
         [item] = store.list_category_items("alice")
         assert item.title == "항구 장날" and item.fields == {"시기": "1850년대", "출처": "예시 향토지", "장소": "예시 강가"}
-        assert item.chapters == (("book", 3),) and item.content == "1850년대 항구의 장날"
-        found = _text(await c.call_tool("category_search", {"query": "장날", "category": "사례"}))
-        assert f"「사례」 {item_id} · [me]" in found and "제목 「항구 장날」" in found and "연결된 장: 제3장" in found
-        # 고치기: 이름·색. 기본 카테고리는 색만
-        assert "이름 「사례」 → 「옛 사례」 · 책 색 #b22222" in _text(await c.call_tool("category_edit", {"category": "사례", "new_name": "옛 사례", "color": "#B22222"}))
-        assert "「생각」 책 색을 하늘(#8db8de)으로 바꿈." == _text(await c.call_tool("category_edit", {"category": "생각", "color": "하늘"}))
-        assert store.get_shelf_settings("alice").colors == {"ideas": "#8db8de"}
-        renamed = await c.call_tool("category_edit", {"category": "문헌", "new_name": "논문"})
-        assert renamed.is_error and "이름을 바꿀 수 없다" in _text(renamed)
-        bad = await c.call_tool("category_edit", {"category": "옛 사례", "color": "red;background:url(//x)"})
+        assert item.chapters == (("book", 3),) and item.content == "1850년대 항구의 장날" and item.reason == "도입부에 쓸 장면"
+        found = _text(await c.call_tool("category_search", {"query": "장날", "book": "사례"}))
+        assert f"{item_id} · [me]" in found and "제목 「항구 장날」" in found and "연결된 장: 제3장" in found
+        assert "## 「사례」 — 컨텍스트(책 「사례」): 사례는 출처가 있는 이야기만 모은다." in found
+        # 고치기: 이름·색·컨텍스트(자주 쓰는 컨텍스트 이름은 그 사본, 그 밖은 직접 적은 글)
+        assert "이름 「사례」 → 「옛 사례」 · 책 색 #b22222" in _text(await c.call_tool("category_edit", {"book": "사례", "new_name": "옛 사례", "color": "#B22222"}))
+        changed = _text(await c.call_tool("category_edit", {"book": "옛 사례", "context": ["논문", "현장 사진은 따로 본다."]}))
+        assert changed.startswith("컨텍스트(책 「옛 사례」): 「논문」 원문을 읽고 모은 논문과 책이다.") and "/ 현장 사진은 따로 본다." in changed
+        assert [x.name for x in store.list_categories("alice")[0].contexts] == ["논문", ""]
+        assert "컨텍스트를 뗌" in _text(await c.call_tool("category_edit", {"book": "옛 사례", "context": []}))
+        bad = await c.call_tool("category_edit", {"book": "옛 사례", "color": "red;background:url(//x)"})
         assert bad.is_error and store.list_categories("alice")[0].color == "#b22222"
-        # 휴지통: 항목, 통째. 기본 카테고리는 못 옮긴다
-        assert (await c.call_tool("category_trash", {"category": "생각", "note": "x"})).is_error
-        gone = _text(await c.call_tool("category_trash", {"category": "옛 사례", "note": "시험"}))
-        assert "카테고리 「옛 사례」 통째(항목 1개)" in gone and store.list_categories("alice") == []
+        # 노드의 컨텍스트: 책에 없으면 노드의 것을 따른다
+        await c.call_tool("category_edit", {"node": "사례", "project": "book", "context": ["생각 메모"]})
+        follows = _text(await c.call_tool("category_put", {"book": "옛 사례", "author": "ai", "content": "요약", "untitled": True}))
+        assert follows.startswith("컨텍스트(책 「옛 사례」, 노드 「사례」의 것): 「생각 메모」")
+        # 휴지통: 글 하나, 책 통째
+        gone = _text(await c.call_tool("category_trash", {"book": "옛 사례", "note": "시험"}))
+        assert "책 「옛 사례」 통째(글 2개)" in gone and store.list_categories("alice") == []
 
 
 async def test_title_default_is_kept_on_server(settings: Settings, store: LocalStore):
     """제목 기본값은 서버에 남는다(대화 메모리에 기대지 않는다): ask → 먼저 묻기, ai → Claude가 지어 다시, none → 비워 둔다."""
+    book = make_book(store, "alice", "생각", "생각 메모")
     async with Client(build_server(settings, store)) as c:
-        ask = await c.call_tool("idea_add", {"text": "바다는 돌아가는 곳", "kind": "thought"})
-        assert ask.is_error and "매번 묻기" in _text(ask) and store.list_ideas("alice") == []
-        mine = _text(await c.call_tool("idea_add", {"text": "바다는 돌아가는 곳", "kind": "thought", "title": "바다", "title_by": "author"}))
-        assert mine.endswith("· 제목 「바다」")
-        unsure = await c.call_tool("idea_add", {"text": "숲은 기다리는 곳", "kind": "thought", "title": "숲의 기다림"})
+        def put(**args):
+            return c.call_tool("category_put", {"book": "생각", "author": "me", **args})
+
+        ask = await put(content="바다는 돌아가는 곳")
+        assert ask.is_error and "매번 묻기" in _text(ask) and store.list_category_items("alice") == []
+        mine = _text(await put(content="바다는 돌아가는 곳", title="바다", title_by="author"))
+        assert "제목 「바다」 · 누가" in mine
+        unsure = await put(content="숲은 기다리는 곳", title="숲의 기다림")
         assert unsure.is_error and "title_by를 함께 준다" in _text(unsure)  # 기본값이 없다(#92-e): 누가 지었는지 꼭 받는다
-        ai = _text(await c.call_tool("idea_add", {"text": "숲은 기다리는 곳", "kind": "thought", "title": "숲의 기다림", "title_by": "ai"}))
-        assert ai.endswith("제목 「숲의 기다림」 (AI가 지은 제목)")
-        empty = _text(await c.call_tool("idea_add", {"text": "제목 없는 생각", "kind": "thought", "untitled": True}))
-        assert empty.endswith("· 제목 없음")
-        assert "(AI가 지은 제목)" in _text(await c.call_tool("idea_search", {"query": "숲은 기다리는"}))
+        ai = _text(await put(content="숲은 기다리는 곳", title="숲의 기다림", title_by="ai"))
+        assert "제목 「숲의 기다림」 (AI가 지은 제목)" in ai
+        assert "제목 없음" in _text(await put(content="제목 없는 생각", untitled=True))
+        assert "(AI가 지은 제목)" in _text(await c.call_tool("category_search", {"query": "숲은 기다리는"}))
         assert "'AI가 짓기'로 저장함" in _text(await c.call_tool("category_title_default", {"mode": "ai"}))
-        make = await c.call_tool("idea_add", {"text": "강은 이어 주는 곳", "kind": "thought"})
+        make = await put(content="강은 이어 주는 곳")
         assert make.is_error and "title_by=ai로 다시 부른다" in _text(make)
         assert "제목 기본값: AI가 짓기" in _text(await c.call_tool("category_list", {}))
         await c.call_tool("category_title_default", {"mode": "none"})
-        assert "제목 없음(저자의 제목 기본값: 비워 두기)" in _text(await c.call_tool("idea_add", {"text": "강은 이어 주는 곳", "kind": "thought"}))
-    titles = {i.text: (i.title, i.title_by) for i in store.list_ideas("alice")}
+        assert "제목 없음(저자의 제목 기본값: 비워 두기)" in _text(await put(content="강은 이어 주는 곳"))
+    titles = {i.content: (i.title, i.title_by) for i in store.list_category_items("alice", book)}
     assert titles == {"바다는 돌아가는 곳": ("바다", "author"), "숲은 기다리는 곳": ("숲의 기다림", "ai"),
                       "제목 없는 생각": (None, None), "강은 이어 주는 곳": (None, None)}
     store.reindex()
-    assert {i.text: (i.title, i.title_by) for i in store.list_ideas("alice")} == titles  # 파일에서 다시 만들어도 같다
-    # 제목이 없는 생각 파일에는 title 키가 없다(제목 전 코드로 되돌려도 읽힌다)
-    files = [json.loads(p.read_text(encoding="utf-8")) for p in (store.root / "users" / "alice" / "shelf" / "casper").glob("*.json")]
-    assert sum("title" in f for f in files) == 2 and all("title_by" in f for f in files if "title" in f)
+    assert {i.content: (i.title, i.title_by) for i in store.list_category_items("alice", book)} == titles  # 파일에서 다시 만들어도 같다
 
 
 async def test_category_limit(settings: Settings, store: LocalStore):
     for n in range(MAX_CATEGORIES):
-        store.create_category("alice", f"카테고리아님{n}", "blank", "#000000", ())
+        store.create_category("alice", f"책아님{n}", "blank", "#000000", ())
     async with Client(build_server(settings, store)) as c:
         over = await c.call_tool("category_create", {"name": "하나 더"})
-    assert over.is_error and f"{MAX_CATEGORIES}개까지" in _text(over)
+    assert over.is_error and f"{MAX_CATEGORIES}권까지" in _text(over)
+
+
+async def test_saved_contexts_defaults_and_editing(store: LocalStore, data_dir: Path):
+    """자주 쓰는 컨텍스트(#96): 파일이 없으면 처음 제공하는 넷(읽기는 아무것도 쓰지 않는다), 고치면 넷과 함께 적는다.
+    붙인 컨텍스트는 사본이라 원본을 고치거나 지워도 그대로다."""
+    names = [c.name for c in store.list_saved_contexts("alice")]
+    assert names == ["문체", "원고", "논문", "생각 메모"] and not (data_dir / "users" / "alice" / "shelf" / "contexts.json").exists()
+    assert store.list_saved_contexts("alice")[0].text == "문학적 부분이 마음에 드는 구절을 모아놓은것. 내 문장 표현을 다듬을때 사용"
+    book = make_book(store, "alice", "문체", "문체")
+    added = store.save_saved_context("alice", SavedContext("", "신문", "신문 기사를 모은 것이다."))
+    assert [c.name for c in store.list_saved_contexts("alice")] == ["문체", "원고", "논문", "생각 메모", "신문"]
+    with pytest.raises(ValueError, match="이미 있다"):
+        store.save_saved_context("alice", SavedContext("", "신문", "x"))
+    store.save_saved_context("alice", SavedContext("ctx-style", "문체", "바꾼 원본"))
+    assert store.delete_saved_context("alice", added.id) and not store.delete_saved_context("alice", added.id)
+    assert store.get_category("alice", book).contexts[0].text.startswith("문학적 부분이")  # 사본은 그대로
+    saved = json.loads((data_dir / "users" / "alice" / "shelf" / "contexts.json").read_text(encoding="utf-8"))
+    assert saved["schema_version"] == 1 and [c["name"] for c in saved["items"]] == ["문체", "원고", "논문", "생각 메모"]
+    with pytest.raises(ValueError, match="500자까지"):
+        store.set_book_contexts("alice", book, (Context("", "가" * 501),))
+    store.reindex()
+    assert store.get_category("alice", book).contexts[0].name == "문체"
 
 
 # ---- 웹 ------------------------------------------------------------------------------------
 
 def test_web_categories_round_trip(server_proc):  # noqa: F811
-    """책장 화면에서 카테고리 만들기(점선 책) → 바로 적기 → 이름·색 바꾸기 → 내 색 → 휴지통. 모든 POST는 CSRF."""
+    """노드의 '책 추가' → 새 책(컨텍스트 단추) → 바로 적기 → 이름·색·컨텍스트 고치기(그 자리에서·등록) → 내 색 → 휴지통. POST는 CSRF."""
     base, data_dir, _ = server_proc({})
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         shelf = c.get("/login?next=/shelf").text
@@ -237,59 +268,100 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
             "/shelf/p/common?node=center").text
         form = c.get("/shelf/new").text
         assert 'name="template" value="case"' in form and form.count('name="color" value="#') == 18 and 'value="custom"' in form
+        assert 'name="ctx_pick" value="ctx-style"' in form and 'data-name="문체"' in form and 'name="ctx_new"' in form
         assert c.post("/shelf/new", data={"csrf": "틀림", "name": "사례", "template": "case", "color": "#b3261e"}).status_code == 403
-        for data, why in (({"name": "생각"}, "정해진 이름"), ({"name": "<b>x</b>"}, "쓸 수 없는 글자"),
+        for data, why in (({"name": "전체"}, "정해진 이름"), ({"name": "<b>x</b>"}, "쓸 수 없는 글자"),
                           ({"name": "새것", "color": "red;}"}, "책 색을 골라 주세요"),
-                          ({"name": "새것", "color": "custom", "hex": '"><script>', "r": "300", "g": "0", "b": "0"}, "직접 고른 색을 읽지 못했습니다")):
+                          ({"name": "새것", "color": "custom", "hex": '"><script>', "r": "300", "g": "0", "b": "0"}, "직접 고른 색을 읽지 못했습니다"),
+                          ({"name": "새것", "ctx_new": "가" * 501}, "500자까지")):
             page = c.post("/shelf/new", data={"csrf": csrf, "template": "blank", "color": "#b3261e", **data})
             assert page.status_code == 400 and why in page.text and '"><script>' not in page.text, data
         made = c.post("/shelf/new", data={"csrf": csrf, "name": "사례", "template": "case", "color": "custom", "hex": "",
-                                          "r": "74", "g": "103", "b": "65", "keep": "1"})
-        assert "「사례」 카테고리를 꽂았습니다." in made.text
-        assert 'aria-label="사례, 항목 0개"' in made.text and "--c:#4a6741;" in made.text  # 만든 책이 꽂힌 노드의 책장이 열린다
+                                          "r": "74", "g": "103", "b": "65", "keep": "1", "ctx_pick": "ctx-paper"})
+        assert "「사례」 책을 꽂았습니다." in made.text
+        assert 'aria-label="사례, 컨텍스트 논문, 글 0개"' in made.text and "--c:#4a6741;" in made.text  # 위 띠 = 컨텍스트 이름
+        assert '<span class="band top" aria-hidden="true">논문</span>' in made.text
         cid = re.search(r'data-key="(\d{17}-[0-9a-f]{6})"', made.text).group(1)
         store = LocalStore(data_dir)
         assert store.get_shelf_settings("alice").my_colors == ("#4a6741",)  # 내 색에 저장
+        [attached] = store.get_category("alice", cid).contexts
+        assert attached.name == "논문" and attached.text.startswith("원문을 읽고 모은 논문과 책이다.")
         store.close()
         empty = c.get(f"/shelf/{cid}").text
-        assert '<details class="card write" open>' in empty and 'name="f:시기"' in empty and "아직 적은 것이 없습니다." in empty
+        assert '<details class="card write" open>' in empty and 'name="f:시기"' in empty and "아직 적은 글이 없습니다." in empty
+        assert '<details class="ctx"><summary>논문</summary><p>원문을 읽고 모은 논문과 책이다.' in empty  # 머리에 컨텍스트(누르면 전문)
         # 바로 적기(누가 = 저자, CSRF)
         assert c.post(f"/shelf/write/{cid}", data={"csrf": "틀림", "content": "x"}).status_code == 403
         assert "error=empty" in str(c.post(f"/shelf/write/{cid}", data={"csrf": csrf, "content": "  "}).url)
         written = c.post(f"/shelf/write/{cid}", data={"csrf": csrf, "title": "", "content": "<script>alert(1)</script> 강가 장날",
-                                                       "f:시기": "1850년대", "f:없는칸": "무시"})
+                                                       "f:시기": "1850년대", "f:없는칸": "무시", "reason": "도입부", "where": "향토지 12쪽"})
         assert re.search(rf"/shelf/{cid}/\d{{17}}-[0-9a-f]{{6}}$", str(written.url)) and " open data-here>" in written.text
         assert "&lt;script&gt;alert(1)&lt;/script&gt; 강가 장날" in written.text and "<script>alert" not in written.text
         assert "<dt>시기</dt><dd>1850년대</dd>" in written.text and "누가: 저자의 말" in written.text
-        idea = c.post("/shelf/write/ideas", data={"csrf": csrf, "title": "물가의 제목", "content": "물가는 궁지다"})
-        assert '<span class="t">물가의 제목</span>' in idea.text and "/shelf/ideas.common/" in str(idea.url)  # 예전 주소로 적어도 그 프로젝트에
-        assert c.post("/shelf/write/styles", data={"csrf": csrf, "content": "x"}).status_code == 404  # 문체·문헌은 대화로
-        # 고치기: 이름과 색(기본 색 이름은 화면에서 격자로 고른다). 기본 카테고리는 색만
+        assert "<p>이유: 도입부</p>" in written.text and "위치: 향토지 12쪽" in written.text
+        assert c.post("/shelf/write/ideas", data={"csrf": csrf, "content": "x"}).status_code == 404  # 옛 기본 책 주소: 이전 전에는 없다
+        # 고치기: 이름·색·컨텍스트. 붙인 컨텍스트는 그 자리에서 고친다(원본은 그대로)
         edit = c.get(f"/shelf/edit/{cid}").text
         assert 'name="name" value="사례"' in edit and '<button aria-label="내 색 #4a6741 빼기">빼기</button>' in edit
-        assert "이 카테고리를 휴지통으로 옮기기" in edit
+        assert "이 책을 휴지통으로 옮기기" in edit and 'value="ctx-paper" data-name="논문"' in edit
+        assert re.search(r'name="ctx_pick" value="ctx-paper"[^>]*checked', edit) and 'name="ctx_from" value="ctx-paper"' in edit
         bad = c.post(f"/shelf/edit/{cid}", data={"csrf": csrf, "name": "사례", "color": "#b3261e;}</style>"})
         assert bad.status_code == 400 and "책 색을 골라 주세요" in bad.text
-        done = c.post(f"/shelf/edit/{cid}", data={"csrf": csrf, "name": "옛 사례", "color": "#2f6db5"}).text
-        assert "「옛 사례」 카테고리를 고쳤습니다." in done and 'aria-label="옛 사례, 항목 1개"' in done and "--c:#2f6db5;" in done
-        builtin = c.get("/shelf/edit/ideas").text
-        assert 'name="name"' not in builtin and "기본 카테고리라 이름은 바꿀 수 없습니다." in builtin
-        c.post("/shelf/edit/ideas", data={"csrf": csrf, "name": "엉뚱한 이름", "color": "#8db8de"})
-        shelf = c.get("/shelf/p/common", params={"node": "b-ideas"}).text
-        assert re.search(r'href="/shelf/ideas.common" style="--c:#8db8de;--fg:#1a1a1a;', shelf) and "엉뚱한 이름" not in shelf
+        # '자주 쓰는 컨텍스트로 등록': 그 줄을 목록에 더하고 이 화면을 다시 보인다(책은 저장하지 않는다)
+        registered = c.post(f"/shelf/edit/{cid}", data={"csrf": csrf, "name": "사례", "color": "#2f6db5", "ctx_pick": "ctx-paper",
+                                                        "ctx_name": "현장 사례", "ctx_text": "현장에서 들은 이야기다.", "ctx_from": "ctx-paper",
+                                                        "register": "0"})
+        assert registered.status_code == 200 and "「현장 사례」을(를) 자주 쓰는 컨텍스트에 등록했습니다." in registered.text
+        done = c.post(f"/shelf/edit/{cid}", data={"csrf": csrf, "name": "옛 사례", "color": "#2f6db5", "ctx_pick": "ctx-paper",
+                                                  "ctx_name": "논문", "ctx_text": "고친 컨텍스트", "ctx_from": "ctx-paper",
+                                                  "ctx_new": "직접 적은 둘째"}).text
+        assert "「옛 사례」 책을 고쳤습니다." in done and 'aria-label="옛 사례, 컨텍스트 논문 외 1, 글 1개"' in done and "--c:#2f6db5;" in done
+        store = LocalStore(data_dir)
+        assert [(x.name, x.text) for x in store.get_category("alice", cid).contexts] == [("논문", "고친 컨텍스트"), ("", "직접 적은 둘째")]
+        assert next(x for x in store.list_saved_contexts("alice") if x.id == "ctx-paper").text.startswith("원문을 읽고")  # 원본 그대로
+        assert any(x.name == "현장 사례" for x in store.list_saved_contexts("alice"))
+        store.close()
+        # 떼기(체크 상자): 저장하면 그 줄이 떨어진다
+        c.post(f"/shelf/edit/{cid}", data={"csrf": csrf, "name": "옛 사례", "color": "#2f6db5", "ctx_name": ["논문", ""],
+                                           "ctx_text": ["고친 컨텍스트", "직접 적은 둘째"], "ctx_from": ["", ""], "ctx_drop": "1"})
+        store = LocalStore(data_dir)
+        assert [x.text for x in store.get_category("alice", cid).contexts] == ["고친 컨텍스트"]
+        store.close()
         # 내 색 빼기
         c.post("/shelf/colors", data={"csrf": csrf, "remove": "#4a6741", "next": "https://evil.example/"})
         store = LocalStore(data_dir)
         assert store.get_shelf_settings("alice").my_colors == ()
         store.close()
-        # 휴지통: 확인 화면 → 옮김. 기본 카테고리는 못 옮긴다
+        # 휴지통: 확인 화면 → 옮김
         confirm = c.get(f"/shelf/trash/{cid}").text
-        assert "「옛 사례」 카테고리를 휴지통으로 옮길까요?" in confirm and "항목 1개가 함께 옮겨집니다." in confirm
-        assert c.get("/shelf/trash/ideas").status_code == 400
+        assert "「옛 사례」 책을 휴지통으로 옮길까요?" in confirm and "글 1개가 함께 옮겨집니다." in confirm
+        assert c.get("/shelf/trash/ideas").status_code == 404
         trashed = c.post(f"/shelf/trash/{cid}", data={"csrf": csrf}).text
-        assert "책을 휴지통으로 옮겼습니다." in trashed and "옛 사례" not in trashed  # 책 종류와 상관없이 같은 문장(#94)
+        assert "책을 휴지통으로 옮겼습니다." in trashed and "옛 사례" not in trashed
         assert c.get(f"/shelf/{cid}").status_code == 404
     assert (data_dir / "users" / "alice" / "trash" / "shelf" / "categories" / cid / "category.json").exists()
+
+
+def test_web_saved_contexts_page(server_proc):  # noqa: F811
+    """내 정보 → 자주 쓰는 컨텍스트(/me/contexts): 고치기·더하기·지우기. 붙여 둔 사본은 그대로."""
+    base, data_dir, _ = server_proc({})
+    with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
+        me = c.get("/login?next=/me").text
+        csrf = _csrf(me)
+        assert '<a href="/me/contexts">자주 쓰는 컨텍스트 보기·고치기·더하기</a>' in me
+        page = c.get("/me/contexts").text
+        assert page.count('class="saved-ctx"') == 4 and ">문학적 부분이 마음에 드는 구절을 모아놓은것. 내 문장 표현을 다듬을때 사용</textarea>" in page
+        assert c.post("/me/contexts", data={"csrf": "틀림", "action": "add", "name": "x", "text": "y"}).status_code == 403
+        added = c.post("/me/contexts", data={"csrf": csrf, "action": "add", "name": "<b>신문</b>", "text": "신문 기사 <script>"}).text
+        assert "더했습니다." in added and "&lt;b&gt;신문&lt;/b&gt;" in added and "<script>" not in added.split("<main>")[1]
+        dup = c.post("/me/contexts", data={"csrf": csrf, "action": "add", "name": "문체", "text": "x"})
+        assert dup.status_code == 400 and "이미 있다" in dup.text
+        saved = c.post("/me/contexts", data={"csrf": csrf, "action": "save", "id": "ctx-note", "name": "생각 메모", "text": "고친 생각 메모"}).text
+        assert "고쳤습니다." in saved and ">고친 생각 메모</textarea>" in saved
+        c.post("/me/contexts", data={"csrf": csrf, "action": "delete", "id": "ctx-manuscript"})
+    store = LocalStore(data_dir)
+    assert [x.name for x in store.list_saved_contexts("alice")] == ["문체", "논문", "생각 메모", "<b>신문</b>"]
+    store.close()
 
 
 def test_web_category_list_search_and_titles(server_proc):  # noqa: F811
@@ -297,26 +369,27 @@ def test_web_category_list_search_and_titles(server_proc):  # noqa: F811
     store = LocalStore(data_dir)
     c1 = store.create_category("alice", "사례", "case", "#b3261e", ("시기", "장소", "출처"))
     store.put_category_item("alice", CategoryItem("20261006000000000-aaaaaa", c1.id, "항구의 장날 이야기", "ai", "장날", "ai"))
-    store.put_category_item("alice", CategoryItem("20261006000000001-aaaaab", c1.id, "제목 없는 항목 물결", "me", tags=("물",)))
+    store.put_category_item("alice", CategoryItem("20261006000000001-aaaaab", c1.id, "제목 없는 글 물결", "me", tags=("물",)))
     store.close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         c.get("/login?next=/shelf")
         listed = c.get(f"/shelf/{c1.id}").text
         assert '<span class="t">장날<span class="tag">AI가 지은 제목</span></span>' in listed
-        assert '<span class="t none">제목 없는 항목 물결</span>' in listed and "제목은 AI가 지었습니다." in listed
+        assert '<span class="t none">제목 없는 글 물결</span>' in listed and "제목은 AI가 지었습니다." in listed
         assert '<span class="aux"><span class="tag">AI</span></span>' in listed  # 누가: Claude가 쓴 글
-        assert "사례 2개(나 1 · AI 1) · 사례 템플릿" in listed
+        assert "글 2개(나 1 · AI 1) · 칸: 시기, 장소, 출처 · 사례" in listed
+        assert "컨텍스트</span><span class=\"none\">없음 — AI는 일반 메모로 읽습니다.</span>" in listed
         assert "물결" not in c.get(f"/shelf/{c1.id}?author=ai").text
         found = c.get(f"/shelf/{c1.id}", params={"q": "장날"}).text
-        assert "찾은 항목 1개" in found and "<mark>장날</mark>" in found
+        assert "찾은 글 1개" in found and "<mark>장날</mark>" in found
         everywhere = c.get("/shelf", params={"q": "물결"}).text
-        assert re.search(rf'<a href="/shelf/p/common\?node=[^"]+&amp;book={c1.id}">사례</a> <small>모음 책 · 1개</small>', everywhere)
+        assert re.search(rf'<a href="/shelf/p/common\?node=[^"]+&amp;book={c1.id}">사례</a> <small>1개</small>', everywhere)
         assert "<mark>물결</mark>" in everywhere
         assert '<details id="i-20261006000000001-aaaaab" open data-here>' in c.get(f"/shelf/{c1.id}/20261006000000001-aaaaab").text
 
 
 def test_web_categories_are_per_user(server_proc, fake_issuer):  # noqa: F811
-    """같은 카테고리 이름·항목 id를 써도 섞이지 않는다. 남의 카테고리 주소로는 보지도, 적지도, 고치지도, 옮기지도 못한다."""
+    """같은 책 이름·글 id를 써도 섞이지 않는다. 남의 책 주소로는 보지도, 적지도, 고치지도, 옮기지도 못한다."""
     issuer, issuer_state, _ = fake_issuer
     base, data_dir, _ = server_proc({
         "PUBLIC_URL": "http://127.0.0.1:{port}", "AUTH_ISSUER": issuer, "ALLOWED_USERS": "sub-alice=alice,sub-bob=bob",
@@ -325,77 +398,81 @@ def test_web_categories_are_per_user(server_proc, fake_issuer):  # noqa: F811
     store = LocalStore(data_dir)
     ids = {}
     for user, word in (("alice", "앨리스"), ("bob", "밥")):
-        c = store.create_category(user, "사례", "case", "#b3261e", ())
+        c = store.create_category(user, "사례", "case", "#123456" if user == "alice" else "#654321", (),
+                                  contexts=(Context("", f"{word}의 컨텍스트"),))
         store.put_category_item(user, CategoryItem("20261006000000000-aaaaaa", c.id, f"{word}의 바다 사례", "me"))
-        store.save_shelf_settings(user, ShelfSettings({"ideas": "#123456" if user == "alice" else "#654321"}, (f"#00000{len(word)}",), "ai"))
+        store.save_shelf_settings(user, ShelfSettings({}, (f"#00000{len(word)}",), "ai"))
+        store.save_saved_context(user, SavedContext("", f"{word} 것", f"{word}의 자주 쓰는 컨텍스트"))
         ids[user] = c.id
     store.close()
     with httpx2.Client(base_url=base, timeout=120) as alice:
         assert _login(alice, issuer_state, "sub-alice").status_code == 303
         csrf = _csrf(alice.get("/shelf").text)
         mine = alice.get(f"/shelf/{ids['alice']}").text
-        assert "앨리스의 바다" in mine and "밥의" not in mine
-        shelf = alice.get("/shelf/p/common", params={"node": "b-ideas"}).text
+        assert "앨리스의 바다" in mine and "밥의" not in mine and "앨리스의 컨텍스트" in mine
+        shelf = alice.get("/shelf/p/common", params={"node": f"b-{ids['alice']}"}).text
         assert "--c:#123456;" in shelf and "#654321" not in shelf
         assert "밥의" not in alice.get("/shelf", params={"q": "바다"}).text
         edit = alice.get(f"/shelf/edit/{ids['alice']}").text
         assert "#000003" in edit and "#000001" not in edit  # 밥의 내 색은 안 보인다
+        assert "앨리스 것" in edit and "밥 것" not in edit  # 자주 쓰는 컨텍스트도 사람마다
+        assert "밥의" not in alice.get("/me/contexts").text
         assert alice.get(f"/shelf/{ids['bob']}").status_code == 404
         assert alice.get(f"/shelf/{ids['bob']}/20261006000000000-aaaaaa").status_code == 404
         assert alice.post(f"/shelf/write/{ids['bob']}", data={"csrf": csrf, "content": "침입"}).status_code == 404
         assert alice.post(f"/shelf/edit/{ids['bob']}", data={"csrf": csrf, "name": "뺏음", "color": "#000000"}).status_code == 404
         assert alice.post(f"/shelf/trash/{ids['bob']}", data={"csrf": csrf}).status_code == 404
+        bob_ctx = next(x.id for x in LocalStore(data_dir).list_saved_contexts("bob") if x.name == "밥 것")
+        alice.post("/me/contexts", data={"csrf": csrf, "action": "delete", "id": bob_ctx})  # 남의 것은 지우지 못한다
     store = LocalStore(data_dir)
     [bob] = store.list_categories("bob")
-    assert bob.name == "사례" and bob.items == 1 and bob.color == "#b3261e"
-    assert store.get_shelf_settings("bob") == ShelfSettings({"ideas": "#654321"}, ("#000001",), "ai")
+    assert bob.name == "사례" and bob.items == 1 and bob.color == "#654321" and bob.contexts[0].text == "밥의 컨텍스트"
+    assert store.get_shelf_settings("bob") == ShelfSettings({}, ("#000001",), "ai")
+    assert any(x.name == "밥 것" for x in store.list_saved_contexts("bob"))
     store.close()
 
 
-async def test_put_into_builtin_categories(settings: Settings, store: LocalStore):
-    """도구를 그때그때 찾아 불러오는 클라이언트에서 Claude가 idea_add 대신 category_put(category=생각)을 부르기도 한다.
-    생각은 idea_add와 같은 규칙(제목 기본값·title_by)으로 저장하고, 문체·문헌은 맞는 도구 이름을 담은 오류를 돌려준다."""
+async def test_put_routes_sources_and_shows_context(settings: Settings, store: LocalStore):
+    """#96: 서지·원문 확인이 있으면 문헌 글(인용 점검이 본다), 없으면 여느 글. 어느 쪽이든 응답 머리에 그 책의 컨텍스트."""
+    make_book(store, "alice", "읽은 논문", "논문")
     async with Client(build_server(settings, store)) as c:
-        listed = _text(await c.call_tool("category_list", {}))
-        assert "생각·문체·문헌은 기본 카테고리다. 생각은 이 도구로도 들어가지만, 문체는 style_add, 문헌은 ref_add로 넣는다." in listed
         desc = {t.name: t.description for t in (await c.list_tools()).tools}["category_put"]
-        assert desc.startswith("저자가 그 카테고리에 넣으라고 분명히 말했을 때만 부른다. 생각·문체·문헌은 기본 카테고리다.")
-        asked = await c.call_tool("category_put", {"category": "생각", "author": "me", "content": "시험2"})
-        assert asked.is_error and "매번 묻기" in _text(asked) and store.list_ideas("alice") == []  # 제목 기본값도 같다
-        await c.call_tool("category_title_default", {"mode": "none"})
-        saved = _text(await c.call_tool("category_put", {"category": "생각 카테고리", "author": "me", "content": "시험2", "chapters": [3]}))
-        assert saved.startswith("생각에 저장함 [me] ") and "제목 없음" in saved and "장 연결·태그가 없어 넣지 않았다" in saved
-        titled = await c.call_tool("category_put", {"category": "생각", "author": "me", "content": "시험3", "title": "셋"})
-        assert titled.is_error and "title_by를 함께 준다" in _text(titled)
-        for name, said in (("문체", "문체는 이 도구로 넣지 않는다. style_add 도구를 찾아 쓴다(구절과 저자가 말한 이유가 필요하다)."),
-                           ("문헌", "문헌은 이 도구로 넣지 않는다. ref_add 도구를 찾아 쓴다(서지와, 원문에서 고른 발췌와 그 이유가 필요하다).")):
-            result = await c.call_tool("category_put", {"category": name, "author": "me", "content": "x", "untitled": True})
-            assert result.is_error and said in _text(result)
-        found = await c.call_tool("category_search", {"query": "x", "category": "문헌"})
-        assert found.is_error and "ref_search 도구를 찾아 쓴다" in _text(found)
-    [idea] = store.list_ideas("alice")
-    assert (idea.text, idea.author, idea.kind, idea.title) == ("시험2", "me", "thought", None)
-    assert store.list_styles("alice") == [] and store.list_refs("alice") == []
+        assert desc.startswith("글 넣기. 저자가 그 책에 넣으라고 분명히 말했을 때만 부른다.")
+        note = _text(await c.call_tool("category_put", {"book": "읽은 논문", "author": "me", "content": "다음에 읽을 것", "untitled": True}))
+        assert note.startswith("컨텍스트(책 「읽은 논문」): 「논문」") and "넣음: 「읽은 논문」" in note
+        unchecked = await c.call_tool("category_put", {"book": "읽은 논문", "author": "me", "checked": True,
+                                                       "source": {"authors": "Galor, O.", "year": "2022", "title": "The journey"}})
+        assert unchecked.is_error and "쓸 부분(parts)이 하나 이상" in _text(unchecked)
+        source = _text(await c.call_tool("category_put", {"book": "읽은 논문", "author": "me", "checked": True, "reason": "서론",
+                                                           "source": {"authors": "Galor, O.", "year": "2022", "title": "The journey"},
+                                                           "parts": [{"text": "성장의 수수께끼", "where": "p.3"}]}))
+        assert "galor2022: 새 문헌 글 → 원문 확인 · 쓸 부분 1개 더함(모두 1개)" in source and "책 「읽은 논문」" in source
+        trash = await c.call_tool("category_trash", {"book": "읽은 논문", "item_id": "galor2022", "note": "x"})
+        assert trash.is_error and "문헌 글(서지·원문 확인)은 휴지통으로 옮기지 않는다" in _text(trash)
+        whole = await c.call_tool("category_trash", {"book": "읽은 논문", "note": "x"})
+        assert whole.is_error and "문헌·참고문헌 항목이 1편 있어" in _text(whole)
+    [book] = store.list_categories("alice")
+    ref = store.get_ref("alice", "galor2022")
+    assert (book.items, book.sources, book.verified) == (1, 1, 1) and ref.book == book.id and ref.status == "verified"
+    assert store.get_passages("alice", "galor2022")[0].reason == "서론"  # 글의 이유가 쓸 부분의 이유가 된다
 
 
 async def test_template_item_needs_only_one_of_content_title_fields(settings: Settings, store: LocalStore):
-    """사례 카테고리에 '엘알토, 볼리비아, 제16장'처럼 칸만 채운 항목도 넣는다. 모두 비었을 때만 거부(빈 카테고리는 제목이나 내용)."""
+    """사례 책에 '엘알토, 볼리비아, 제16장'처럼 칸만 채운 글도 넣는다. 모두 비었을 때만 거부."""
     store.create_project("alice", "책", project_id="book")
     store.write_chapter("alice", "book", 16, "고원 도시.", "x", title="고원")
     async with Client(build_server(settings, store)) as c:
         await c.call_tool("category_title_default", {"mode": "none"})
         await c.call_tool("category_create", {"name": "사례", "template": "사례"})
-        await c.call_tool("category_create", {"name": "메모", "template": "빈 카테고리"})
-        put = _text(await c.call_tool("category_put", {"category": "사례", "author": "me", "fields": {"장소": "엘알토, 볼리비아"},
+        await c.call_tool("category_create", {"name": "메모", "template": "빈 책"})
+        put = _text(await c.call_tool("category_put", {"book": "사례", "author": "me", "fields": {"장소": "엘알토, 볼리비아"},
                                                        "chapters": [16]}))
-        assert put.startswith("넣음: 카테고리 「사례」") and "칸 1" in put
+        assert "넣음: 「사례」" in put and "칸 1" in put
         assert "“장소: 엘알토, 볼리비아”" in _text(await c.call_tool("category_search", {"query": "엘알토"}))
-        empty = await c.call_tool("category_put", {"category": "사례", "author": "me"})
-        assert empty.is_error and "내용·제목·칸(시기, 장소, 출처) 중 하나는 있어야 한다." in _text(empty)
-        blank = await c.call_tool("category_put", {"category": "메모", "author": "me"})
-        assert blank.is_error and "제목이나 내용 중 하나는 있어야 한다." in _text(blank)
-        only_title = _text(await c.call_tool("category_put", {"category": "메모", "author": "me", "title": "제목만", "title_by": "author"}))
-        assert only_title.startswith("넣음: 카테고리 「메모」")
+        empty = await c.call_tool("category_put", {"book": "사례", "author": "me"})
+        assert empty.is_error and "내용·제목·칸·쓸 부분 중 하나는 있어야 한다." in _text(empty)
+        only_title = _text(await c.call_tool("category_put", {"book": "메모", "author": "me", "title": "제목만", "title_by": "author"}))
+        assert "넣음: 「메모」" in only_title
     [item] = [i for i in store.list_category_items("alice") if i.fields]
     assert (item.content, item.title, item.fields, item.chapters) == ("", None, {"장소": "엘알토, 볼리비아"}, (("book", 16),))
 
@@ -410,9 +487,8 @@ def test_web_list_shows_fields_when_no_title_or_content(server_proc):  # noqa: F
         page = w.get(f"/login?next=/shelf/{c.id}").text
         assert '<span class="t none">장소: 엘알토, 볼리비아</span>' in page
         csrf = _csrf(page)
-        assert 'name="content" rows="6" maxlength="20000"></textarea>' in page  # 카테고리 적기 폼은 내용이 꼭 필요하지 않다
+        assert 'name="content" rows="6" maxlength="20000"></textarea>' in page  # 내용이 꼭 필요하지 않다
         only_field = w.post(f"/shelf/write/{c.id}", data={"csrf": csrf, "title": "", "content": "", "f:시기": "1950년대"})
         assert "<dt>시기</dt><dd>1950년대</dd>" in only_field.text
         nothing = w.post(f"/shelf/write/{c.id}", data={"csrf": csrf, "title": "", "content": ""})
         assert "error=empty" in str(nothing.url) and "제목·내용·칸 중 하나는 적어 주세요." in nothing.text
-        assert "error=empty" in str(w.post("/shelf/write/ideas", data={"csrf": csrf, "title": "제목만", "content": ""}).url)

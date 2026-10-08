@@ -1,13 +1,11 @@
-"""ref_add: 사용자가 실제로 읽고 발췌한 문헌을 verified로 넣는다.
+"""문헌 글 넣기(#96: 글 넣기 category_put의 '서지·원문 확인' 칸, 옛 ref_add): 저자가 실제로 읽고 고른 대목이 있는 문헌을 verified로 넣는다.
 
-발췌(passages)가 하나 이상 있어야 verified가 된다. 기억이나 목록만으로는 verified가 되지 않는다.
+쓸 부분(발췌, passages)이 하나 이상 있어야 verified(원문 확인)가 된다. 기억이나 목록만으로는 verified가 되지 않는다.
 같은 key(또는 alias)가 unverified로 있으면 그 항목을 verified로 올리고, bib·aliases·발췌를 합친다.
 발췌는 ref_picked 레인, 전문은 ref_full 레인으로 청킹된다(저장소가 한다).
 """
 
 from __future__ import annotations
-
-from collections.abc import Callable
 
 import re
 import unicodedata
@@ -95,31 +93,38 @@ def add_ref(
     bib: dict[str, Any],
     passages: list[Passage],
     *,
+    book: str,
     file_path: str | None = None,
     full_text: str | None = None,
     aliases: list[str] | None = None,
     file_label: str | None = None,
-    floor: str | None = None,
-    default_floor: Callable[[], str] | None = None,
-) -> tuple[Ref, str | None, int]:
-    """(저장된 ref, 이전 상태 또는 None, 새로 추가된 발췌 수).
-    프로젝트(#95): 새 문헌은 floor(없으면 default_floor())의 문헌에 꽂는다. 이미 있는 문헌은 제자리에 두되,
-    floor를 줬고 그 프로젝트 원고의 인용 점검이 보지 못하는 곳에 있으면 「내 서재」로 옮기고 두 지도에 연결 노드를 붙인다."""
+    verified: bool = True,
+    memo: str | None = None,
+) -> tuple[Ref, str | None, int, str | None]:
+    """(저장된 ref, 이전 상태 또는 None, 새로 추가된 발췌 수, 옮긴 책 또는 None).
+    book(#96): 그 글을 넣을 책(카테고리 id). 새 문헌은 그 책에 든다. 이미 있는 문헌은 같은 프로젝트면 그 책으로 옮기고,
+    그 프로젝트 원고의 인용 점검이 보지 못하는 다른 프로젝트에 있으면 「내 서재」로 옮기고 두 지도에 연결 노드를 붙인다(#95).
+    verified=False면 '원문 확인' 없이 서지만 넣는다(발췌 없어도 된다, 이미 확인한 문헌이면 확인은 그대로). memo: 글의 내용(bib "memo")."""
     passages = [p for p in passages if p.text.strip()]
-    if not passages:
-        raise ValueError("passages가 비어 있다. 직접 읽고 고른 발췌(text, reason)가 있어야 verified가 된다.")
-    if any(not p.reason.strip() for p in passages):
-        raise ValueError("모든 발췌에 reason(왜 골랐는지)이 필요하다")
+    if verified and not passages:
+        raise ValueError("원문 확인에는 쓸 부분(parts)이 하나 이상 있어야 한다. 직접 읽고 고른 대목(text)과 이유(reason)를 준다.")
+    if verified and any(not p.reason.strip() for p in passages):
+        raise ValueError("원문 확인에는 쓸 부분마다 이유(reason: 왜 골랐는지)가 필요하다")
     if file_path and full_text:
         raise ValueError("file_path와 full_text 중 하나만 준다")
     if file_path:
         full_text = read_fulltext(Path(file_path).expanduser())
 
     clean_bib = {k: v for k, v in bib.items() if v not in (None, "", []) and k != "key"}
+    if memo and memo.strip():
+        clean_bib["memo"] = memo.strip()
     try:
         key = derive_key(bib)
     except ValueError:
         key = key_by_title(store, user_id, bib, full_text)
+    target_floor = store.get_category(user_id, book).floor if store.get_category(user_id, book) else None
+    if target_floor is None:
+        raise ValueError(f"책 {book!r}가 없다")
     existing = store.resolve_ref(user_id, key)
     if existing:
         old = store.get_passages(user_id, existing.key)
@@ -127,17 +132,21 @@ def add_ref(
         new = [p for p in passages if p.text.strip() not in seen]
         ref = Ref(
             key=existing.key,
-            status="verified",
+            status="verified" if verified or existing.status == "verified" else "unverified",
             bib={**existing.bib, **clean_bib},
             aliases=tuple(dict.fromkeys([*existing.aliases, *(aliases or [])])),
             file_path=file_label or file_path or existing.file_path,
             created_at=existing.created_at,
         )
         stored = store.put_ref(user_id, ref, passages=[*old, *new], full_text=full_text)
-        if floor and needs_share(store, user_id, stored.floor, floor):  # 두 프로젝트가 함께 쓰게 됐다: 「내 서재」로, 이유를 남긴다
-            stored = share_ref(store, user_id, stored.key, stored.floor, floor)
-        return stored, existing.status, len(new)
-    target = floor or (default_floor() if default_floor else None)
-    home = store.place(user_id, "refs", target) if target else None
-    ref = Ref(key=key, status="verified", bib=clean_bib, aliases=tuple(aliases or ()), file_path=file_label or file_path, floor=home)
-    return store.put_ref(user_id, ref, passages=passages, full_text=full_text), None, len(passages)
+        moved = None
+        if needs_share(store, user_id, stored.floor, target_floor):  # 두 프로젝트가 함께 쓰게 됐다: 「내 서재」로, 이유를 남긴다
+            stored = share_ref(store, user_id, stored.key, stored.floor, target_floor)
+            moved = stored.book
+        elif stored.floor == target_floor and stored.book != book:  # 같은 프로젝트: 저자가 고른 책으로
+            stored = store.set_ref_book(user_id, stored.key, book)
+            moved = book
+        return stored, existing.status, len(new), moved
+    ref = Ref(key=key, status="verified" if verified else "unverified", bib=clean_bib, aliases=tuple(aliases or ()),
+              file_path=file_label or file_path, book=book)
+    return store.put_ref(user_id, ref, passages=passages, full_text=full_text), None, len(passages), None

@@ -125,16 +125,21 @@ async def test_book_issues_lists_and_filters(settings: Settings, store: LocalSto
     seed_demo(store, settings.user_id)
     store.add_issue(settings.user_id, "demo", "에이전트가 남긴 것", origin="agent", chapter_number=3)
     async with Client(build_server(settings, store)) as client:
-        everything = _text(await client.call_tool("book_issues", {}))
+        def issues(args: dict) -> str:  # 첫 줄은 그 원고의 컨텍스트(#96), 그 아래가 목록
+            return client.call_tool("book_issues", args)
+
+        first = _text(await issues({}))
+        assert first.splitlines()[0].startswith("컨텍스트")
+        everything = first.split("\n", 1)[1]
         assert everything.splitlines()[0] == "확인 요청 4건 (status=open)"
         assert "- I1 · open · 1장 · 원고 코멘트 · citation→daeschler2006 ⇒ refs 없음 · Daeschler 2006 원문 확인 필요" in everything
-        comments = _text(await client.call_tool("book_issues", {"origin": "import_comment"}))
+        comments = _text(await issues({"origin": "import_comment"})).split("\n", 1)[1]
         assert comments.splitlines()[0] == "확인 요청 1건 (status=open, origin=import_comment)"
-        ch3 = _text(await client.call_tool("book_issues", {"chapter_number": 3, "kind": "general"}))
+        ch3 = _text(await issues({"chapter_number": 3, "kind": "general"})).split("\n", 1)[1]
         assert [line.split(" · ")[0] for line in ch3.splitlines()[1:]] == ["- I2", "- I4"]
-        limited = _text(await client.call_tool("book_issues", {"limit": 2}))
+        limited = _text(await issues({"limit": 2})).split("\n", 1)[1]
         assert "앞 2건만 표시" in limited and len(limited.splitlines()) == 3
-        assert _text(await client.call_tool("book_issues", {"status": "closed"})) == "확인 요청 0건 (status=closed)"
+        assert _text(await issues({"status": "closed"})).split("\n", 1)[1] == "확인 요청 0건 (status=closed)"
         assert (await client.call_tool("book_issues", {"origin": "robot"})).is_error
 
 
@@ -151,7 +156,7 @@ async def test_other_user_gets_empty_result(settings: Settings, store: LocalStor
 
 
 async def test_ref_add_updates_outline_count_immediately(settings: Settings, store: LocalStore):
-    # 장별 미확인 key는 파생값 캐시다. ref_add로 문헌이 verified가 되면 곧바로 다시 계산돼야 한다(사용자 결정 #43).
+    # 장별 미확인 key는 파생값 캐시다. 원문 확인 글로 넣어 verified가 되면 곧바로 다시 계산돼야 한다(사용자 결정 #43, #96).
     from magus.melchior.bibliography import import_bibliography
     from magus.melchior.check import refresh_cite_counts
 
@@ -162,7 +167,8 @@ async def test_ref_add_updates_outline_count_immediately(settings: Settings, sto
     refresh_cite_counts(store, "alice")
     async with Client(build_server(settings, store)) as client:
         assert "미확인 문헌 2편" in _text(await client.call_tool("book_outline", {}))
-        await client.call_tool("ref_add", {"bib": {"key": "clack2012"}, "passages": [{"text": "네발동물", "reason": "1장"}]})
+        await client.call_tool("category_put", {"book": "참고문헌", "author": "me", "source": {"key": "clack2012"}, "checked": True,
+                                                "parts": [{"text": "네발동물", "reason": "1장"}]})
         outline = _text(await client.call_tool("book_outline", {}))
     assert "미확인 문헌 1편" in outline
     toc = [line for line in outline.splitlines() if line.startswith("- 제")]

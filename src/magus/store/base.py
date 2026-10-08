@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, Protocol
 
+from magus.contexts import Context, SavedContext  # 컨텍스트(#96). 규칙과 함께 magus.contexts에 둔다(순환 import를 피해)
+
 IssueStatus = Literal["open", "closed"]
 IssueOrigin = Literal["import_comment", "user", "agent"]
 # citation: 출처 확인 코멘트 + 문헌이 지목됨 / fact: 출처 확인 코멘트지만 문헌 없음(사실·수치 확인) / general: 그 외
@@ -25,11 +27,12 @@ RefStatus = Literal["unverified", "verified"]
 # style_passage·ref_bib는 웹 책장 검색 전용이다(문체 구절·문헌 서지). 도구 검색(style_search·ref_search)은 쓰지 않고 임베딩도 하지 않는다.
 # category는 저자가 만든 카테고리의 항목(#92). owner_id는 "<카테고리 id>/<항목 id>"다.
 # document는 문서 책의 지금 판 내용(#94). 웹 책장 검색 전용이다.
+# #96: 생각·문체는 글(category 레인)이 됐다. idea_*·style* 레인은 쓰지 않는다(옛 인덱스를 읽을 일이 없어 이름만 남긴다).
 Lane = Literal["ref_picked", "ref_full", "idea_me", "idea_ai", "style", "style_passage", "ref_bib", "category", "document"]
 WEB_ONLY_LANES: tuple[str, ...] = ("style_passage", "ref_bib", "document")
 TagsBy = Literal["ai", "author"]  # 문체 태그를 누가 정했나: Claude가 뽑음(ai) / 저자가 말함(author). 기록 전 항목은 None
 # 휴지통에 옮길 수 있는 책장 항목(#88). 카테고리는 통째(category, id = 카테고리 id)와 항목(category_item, id = "<카테고리 id>/<항목 id>")
-TrashKind = Literal["idea", "style", "category", "category_item", "node"]
+TrashKind = Literal["category", "category_item", "node"]  # #96: 생각·문체 휴지통은 책의 글 휴지통(category_item)이 됐다
 TitleBy = Literal["ai", "author"]  # 항목 제목을 누가 지었나(#92). 태그의 tags_by와 같은 방식
 TitleMode = Literal["ask", "ai", "none"]
 EditedBy = Literal["author", "ai"]  # 항목을 나중에 고친 사람(웹에서 저자가 고치면 author). 처음 쓴 사람(author 필드)은 그대로 둔다  # 저자가 제목을 말하지 않았을 때: 매번 묻기 / AI가 짓기 / 비워 두기
@@ -46,6 +49,7 @@ class Project:
     title_en: str | None = None
     subtitle_en: str | None = None
     color: str | None = None  # 원고 책의 책 색(#94). 없으면 원고 책 기본 색
+    contexts: tuple[Context, ...] = ()  # 올린 문서가 든 책(가운데 노드)의 컨텍스트(#96, project.json "contexts")
 
 
 @dataclass(frozen=True)
@@ -210,10 +214,12 @@ class Ref:
     has_fulltext: bool = False
     file_path: str | None = None
     created_at: str = ""
-    floor: str | None = None  # 꽂힌 층(공용 "common" 또는 프로젝트 id, #93). None이면 저장소가 정한다
+    floor: str | None = None  # 그 글이 있는 프로젝트(#93 층 → #95). None이면 저장소가 정한다(book의 프로젝트)
     updated_at: str = ""  # 마지막으로 고친 시각(층의 최근 수정에 쓴다). 기록 전 문헌은 created_at
     # 두 작업물이 함께 쓰게 되어 공용으로 옮겨졌을 때의 기록(#93-a 더함): {"at", "from", "to", "reason"}. 저자 모르게 배치가 바뀌지 않게
     moved: dict[str, str] | None = None
+    # 그 글이 꽂힌 책(카테고리 id, #96). 문헌·참고문헌 항목도 여느 글처럼 어떤 책에든 들어간다. None이면 저장소가 정한다
+    book: str | None = None
 
 
 IdeaKind = Literal["thought", "ai", "article", "conversation", "tv", "other"]
@@ -222,7 +228,8 @@ Author = Literal["me", "ai"]
 
 @dataclass(frozen=True)
 class Idea:
-    """Casper의 생각 한 조각. author=me가 사용자의 말, ai가 AI의 말이다."""
+    """옛 형식(#96 전)의 생각 한 조각(shelf/casper/<id>.json). 이전(magus maps apply)과 되돌리기만 읽고 쓴다.
+    #96부터 생각은 책의 글(CategoryItem)이다."""
 
     id: str
     text: str
@@ -240,7 +247,8 @@ class Idea:
 
 @dataclass(frozen=True)
 class StyleEntry:
-    """Balthasar의 문체 표본. passage는 원문 구절, reason은 왜 좋은지, tags는 {호흡, 시점, 열기, 장치, 어미, 톤}."""
+    """옛 형식(#96 전)의 문체 표본(shelf/balthasar/<id>.json). 이전과 되돌리기만 읽고 쓴다. #96부터 책의 글(CategoryItem)이다.
+    passage는 원문 구절, reason은 왜 좋은지, tags는 {호흡, 시점, 열기, 장치, 어미, 톤}."""
 
     id: str
     passage: str
@@ -263,13 +271,17 @@ class Category:
     fields: tuple[str, ...] = ()
     created_at: str = ""
     updated_at: str = ""
-    items: int = 0  # 항목 수(목록에서 채운다)
-    floor: str = "common"  # 꽂힌 층(#93): 공용 "common" 또는 프로젝트 id
+    items: int = 0  # 글 수(목록에서 채운다). 문헌·참고문헌 항목(sources)은 따로 센다
+    floor: str = "common"  # 그 책이 있는 프로젝트(#93 층 → #95)
+    contexts: tuple[Context, ...] = ()  # 컨텍스트(#96). 없으면 꽂힌 노드의 것을 따른다
+    sources: int = 0  # 이 책에 든 문헌·참고문헌 항목 수(#96, refs.book). 목록에서 채운다
+    verified: int = 0  # 그중 원문 확인 수
 
 
 @dataclass(frozen=True)
 class CategoryItem:
-    """카테고리 항목 하나. author: 누가 말했나(me = 저자의 말, ai = Claude가 쓴 글). chapters: [(project_id, 장 번호)]."""
+    """책의 글 하나(#96. 옛 '카테고리 항목', 옛 생각·문체도 이것이 됐다). author: 누가 말했나(me = 저자의 말, ai = Claude가 쓴 글).
+    chapters: [(project_id, 장 번호)]. 문헌(서지·원문 확인)은 이것이 아니라 Ref로 저장되고 같은 책에 함께 보인다."""
 
     id: str
     category_id: str
@@ -284,6 +296,14 @@ class CategoryItem:
     updated_at: str = ""
     edited_at: str | None = None  # 고친 시각과 고친 사람. AI가 쓴 항목을 저자가 고치면 author는 ai 그대로, edited_by는 author
     edited_by: EditedBy | None = None
+    # #96에서 더한 칸(모두 선택). 어느 책에든 쓸 수 있고, 무엇을 묻고 채울지는 그 책의 컨텍스트가 AI에게 알려 준다
+    reason: str | None = None  # 이유(왜 골랐나·왜 좋은가). 저자가 말한 것만
+    where: str | None = None  # 위치(출전·쪽·장소)
+    passages: tuple[Passage, ...] = ()  # 쓸 부분(원문에서 고른 대목과 그 이유·위치)
+    parent_id: str | None = None  # 이 글이 응답한 글(대화 기록의 AI 발화)
+    origin: str | None = None  # 어디서 왔나(대화 기록 이름 등)
+    kind: str | None = None  # 옛 생각의 갈래(thought·ai·article·conversation·tv·other). 화면에 보이지 않고 되돌리기에 쓴다
+    tags_by: TagsBy | None = None  # 태그를 누가 정했나(옛 문체 #89)
 
 
 @dataclass(frozen=True)
@@ -322,6 +342,7 @@ class Document:
     created_at: str = ""
     updated_at: str = ""
     versions: tuple[DocVersion, ...] = ()
+    contexts: tuple[Context, ...] = ()  # 컨텍스트(#96). 출처 확인 문서는 만들 때 그 설명을 붙인다
 
 
 @dataclass(frozen=True)
@@ -380,6 +401,7 @@ class MapNode:
     link: tuple[str, str] | None = None  # (원본 프로젝트 id, 원본 노드 id)
     link_title: str = ""  # 원본 프로젝트 이름
     missing: bool = False  # 연결 노드의 원본이 없다
+    contexts: tuple[Context, ...] = ()  # 노드의 컨텍스트(#96). 연결 노드는 원본 노드의 것
 
 
 @dataclass(frozen=True)
@@ -413,7 +435,7 @@ class Profile:
 
 @dataclass(frozen=True)
 class TrashItem:
-    """휴지통의 생각·문체 하나(trash/shelf/<casper|balthasar>/<id>.json). 지우지 않고 옮겨 둔 것이라 되살릴 수 있다(#88)."""
+    """휴지통의 책·글·노드 하나. 지우지 않고 옮겨 둔 것이라 되살릴 수 있다(#88·#92·#95)."""
 
     kind: TrashKind
     id: str
@@ -604,45 +626,49 @@ class Store(Protocol):
         """번호순. status=None이면 전체."""
         ...
 
-    # 문헌 (Melchior) — 사람 소유. 프로젝트와 무관하다.
+    # 문헌 (Melchior) — 사람마다 key 하나. 어느 책의 글로 보인다(#96: refs.book)
     def get_ref(self, user_id: str, key: str, *, floors: Iterable[str] | None = None) -> Ref | None: ...
     def resolve_ref(self, user_id: str, key: str, *, floors: Iterable[str] | None = None) -> Ref | None:
         """key로 찾고, 없으면 aliases에서 찾는다. floors를 주면 그 층들 안에서만."""
         ...
-    def list_refs(self, user_id: str, status: RefStatus | None = None, *, floors: Iterable[str] | None = None) -> list[Ref]:
-        """floors를 주면 그 층들의 문헌만(인용 점검: 그 작업물 층 + 공용, #93)."""
+    def list_refs(self, user_id: str, status: RefStatus | None = None, *, floors: Iterable[str] | None = None,
+                  book: str | None = None) -> list[Ref]:
+        """floors를 주면 그 프로젝트들의 문헌만(인용 점검 범위), book을 주면 그 책의 것만(#96)."""
         ...
     def get_passages(self, user_id: str, key: str) -> list[Passage]: ...
     def put_ref(
         self, user_id: str, ref: Ref, passages: list[Passage] | None = None, full_text: str | None = None
     ) -> Ref:
-        """bib.json을 쓰고 인덱스·청크를 갱신한다. passages/full_text가 None이면 기존 것을 그대로 둔다."""
+        """bib.json을 쓰고 인덱스·청크를 갱신한다. passages/full_text가 None이면 기존 것을 그대로 둔다.
+        ref.book이 없으면 지금 책, 새 문헌이면 그 프로젝트의 문헌 책(source_book, 없으면 만든다, #96)."""
+        ...
+    def source_book(self, user_id: str, floor: str, *, create: bool = False) -> str | None:
+        """그 프로젝트에서 문헌·참고문헌 항목이 든 책(가장 많이 든 책). 없으면 create일 때 「참고문헌」 책을 만든다(#96)."""
+        ...
+    def default_project(self, user_id: str) -> str:
+        """프로젝트를 말하지 않았을 때 문헌이 갈 프로젝트: 프로젝트가 하나면 그것, 아니면 「내 서재」."""
+        ...
+    def set_ref_book(self, user_id: str, key: str, book: str, reason: str | None = None) -> Ref:
+        """문헌 한 편을 다른 책으로(프로젝트도 그 책의 것). reason을 주면 bib.json "moved"에 옮긴 기록을 남긴다(#93-a)."""
         ...
 
-    # 영감 (Casper) — 사람 소유
-    def add_ideas(self, user_id: str, ideas: list[Idea]) -> list[Idea]:
-        """한 번에 여러 개를 쓴다(대화 기록 한 편). 각자 shelf/casper/<id>.json이 된다."""
-        ...
-    def get_ideas(self, user_id: str, ids: list[str]) -> dict[str, Idea]: ...
-    def list_ideas(self, user_id: str, author: Author | None = None, *, floors: Iterable[str] | None = None) -> list[Idea]: ...
-
-    # 문체 (Balthasar) — 사람 소유
-    def add_style(self, user_id: str, entry: StyleEntry) -> StyleEntry:
-        """reason + tags만 색인·임베딩한다(balthasar.style.search_text). passage는 색인하지 않는다."""
-        ...
-    def get_styles(self, user_id: str, ids: list[str]) -> dict[str, StyleEntry]: ...
-    def list_styles(self, user_id: str, *, floors: Iterable[str] | None = None) -> list[StyleEntry]: ...
-
-    # 휴지통(생각·문체, #88) — 지우지 않고 trash/shelf/로 옮긴다. 검색·목록·웹에서 빠지고 되살릴 수 있다
-    def trash_idea(self, user_id: str, idea_id: str, note: str) -> list[Idea]:
-        """그 생각과, 그 생각에 응답한 AI 발화(parent_id)를 함께 옮긴다. 없으면 []."""
-        ...
-    def trash_style(self, user_id: str, style_id: str, note: str) -> StyleEntry | None: ...
+    # 휴지통 — 지우지 않고 trash/shelf/로 옮긴다. 검색·목록·웹에서 빠지고 되살릴 수 있다
     def list_trash(self, user_id: str) -> list[TrashItem]: ...
     def restore_trash(self, user_id: str, kind: TrashKind, item_id: str, *, name: str | None = None) -> list[str]:
-        """되살린 id들(생각이면 함께 옮긴 AI 발화 포함). 휴지통에 없으면 ValueError.
-        카테고리는 같은 이름이 이미 있으면 ValueError(name으로 새 이름을 주면 그 이름으로 되살린다)."""
+        """되살린 id들(글이면 함께 옮긴 응답 글 포함). 휴지통에 없으면 ValueError.
+        책은 같은 이름이 이미 있으면 ValueError(name으로 새 이름을 주면 그 이름으로 되살린다)."""
         ...
+
+    # 자주 쓰는 컨텍스트(#96) — shelf/contexts.json. 파일이 없으면 처음 제공하는 넷
+    def list_saved_contexts(self, user_id: str) -> list[SavedContext]: ...
+    def save_saved_context(self, user_id: str, context: SavedContext) -> SavedContext:
+        """같은 id면 고치고, 없으면 더한다(이름이 같은 것이 있으면 ValueError). 처음 쓸 때 기본 넷도 함께 파일에 적는다."""
+        ...
+    def delete_saved_context(self, user_id: str, context_id: str) -> bool: ...
+    def set_book_contexts(self, user_id: str, key: str, contexts: tuple[Context, ...]) -> None:
+        """책(카테고리 id · ms.<프로젝트> · doc.<id>)의 컨텍스트를 바꾼다(빈 것이면 뗀다)."""
+        ...
+    def set_node_contexts(self, user_id: str, floor: str, node_id: str, contexts: tuple[Context, ...]) -> MapNode: ...
 
     # 카테고리(#92) — 사람 소유. 원본은 shelf/categories/<id>/{category.json, items/<항목 id>.json}
     def list_categories(self, user_id: str, *, floors: Iterable[str] | None = None) -> list[Category]:
@@ -650,10 +676,11 @@ class Store(Protocol):
         ...
     def get_category(self, user_id: str, category_id: str) -> Category | None: ...
     def create_category(self, user_id: str, name: str, template: str, color: str, fields: tuple[str, ...],
-                        floor: str | None = None, node: str | None = None) -> Category:
-        """이름·템플릿·색은 호출자가 magus.category.rules로 검사한 값이다. id는 저장소가 짓는다.
-        이름은 프로젝트마다 하나(같은 프로젝트에 같은 이름이 있으면 ValueError). floor가 None이면 「내 서재」.
-        node: 꽂을 노드(#95). 없으면 이름이 같은 노드, 그것도 없으면 이름이 같은 새 노드."""
+                        floor: str | None = None, node: str | None = None, *, contexts: tuple[Context, ...] = (),
+                        category_id: str | None = None) -> Category:
+        """책 만들기(#96: 모든 책). 이름·템플릿·색은 호출자가 magus.category.rules로 검사한 값이다. id는 저장소가 짓는다
+        (category_id는 이전만 준다). 이름은 프로젝트마다 하나(같은 프로젝트에 같은 이름이 있으면 ValueError).
+        floor가 None이면 「내 서재」. node: 꽂을 노드(#95). 없으면 이름이 같은 노드, 그것도 없으면 이름이 같은 새 노드."""
         ...
     def update_category(self, user_id: str, category_id: str, *, name: str | None = None, color: str | None = None) -> Category: ...
     def trash_category(self, user_id: str, category_id: str, note: str) -> Category | None:
@@ -677,16 +704,6 @@ class Store(Protocol):
         """「내 서재」가 먼저, 그다음 프로젝트(만든 순서). updated_at(최근 수정)을 채운다."""
         ...
     def get_floor(self, user_id: str, floor_id: str) -> Floor | None: ...
-    def book_targets(self, user_id: str, kind: str, floor: str) -> list[str]:
-        """기본 책(kind)에 넣으면 들어갈 프로젝트 후보: 자기 책, 없으면 연결 노드가 가리키는 그 책들."""
-        ...
-    def add_builtin(self, user_id: str, kind: str, floor: str, node: str | None = None) -> bool:
-        """그 프로젝트에 기본 책을 다시 꽂는다(노드를 주면 그 노드에). 이미 있으면 False."""
-        ...
-    def place(self, user_id: str, kind: str, floor: str | None) -> str:
-        """새 항목이 들어갈 프로젝트: 자기 책 → 연결 노드로 이어진 책(하나일 때) → 그 프로젝트에 기본 책을 다시 꽂는다.
-        floor가 None이면 「내 서재」부터 그 종류가 있는 첫 프로젝트."""
-        ...
 
     # 지도(#95) — shelf/maps/<프로젝트>.json(노드·선·책 배치). 파일이 없으면 지금 배치에서 계산한 지도
     def get_map(self, user_id: str, floor: str) -> ProjectMap | None: ...
@@ -703,7 +720,9 @@ class Store(Protocol):
                  color: str | None = None) -> MapNode: ...
     def add_link_node(self, user_id: str, floor: str, target_floor: str, target_node: str, *, x: float | None = None,
                       y: float | None = None) -> MapNode: ...
-    def ensure_link(self, user_id: str, floor: str, target_floor: str, kind: str) -> MapNode | None: ...
+    def ensure_link(self, user_id: str, floor: str, target_floor: str, book: str) -> MapNode | None:
+        """floor의 지도에 target_floor의 그 책(카테고리 id)이 꽂힌 노드로 가는 연결 노드가 없으면 붙인다."""
+        ...
     def update_node(self, user_id: str, floor: str, node_id: str, *, name: str | None = None, color: str | None = None,
                     x: float | None = None, y: float | None = None) -> MapNode: ...
     def connect_nodes(self, user_id: str, floor: str, a: str, b: str) -> bool: ...
@@ -712,9 +731,6 @@ class Store(Protocol):
     def place_book(self, user_id: str, floor: str, key: str, node_id: str) -> tuple[str | None, str]: ...
     def move_category(self, user_id: str, category_id: str, to_floor: str, to_node: str | None = None) -> FloorMove:
         """저자의 카테고리를 통째로 다른 층에. 받는 층에 같은 이름이 있으면 ValueError."""
-        ...
-    def move_builtin(self, user_id: str, kind: str, from_floor: str, to_floor: str, to_node: str | None = None) -> FloorMove:
-        """기본 카테고리(생각·문체·문헌)를 그 항목과 함께 다른 층에. 받는 층에 같은 종류가 있으면 합친다."""
         ...
     def last_move(self, user_id: str) -> FloorMove | None: ...
     def record_move(self, user_id: str, move: FloorMove) -> FloorMove: ...
@@ -742,15 +758,8 @@ class Store(Protocol):
                         title_by: str | None = None) -> Document: ...
     def trash_document(self, user_id: str, doc_id: str, note: str) -> Document | None: ...
 
-    def set_ref_floor(self, user_id: str, key: str, floor: str, reason: str | None = None) -> Ref:
-        """문헌 한 편의 층만 바꾼다(두 작업물이 함께 쓰게 된 문헌을 공용으로 옮길 때). reason을 주면 bib.json의 "moved"에
-        옮긴 시각·원래 층·이유를 남긴다(웹 문헌 항목에 보인다)."""
-        ...
     def category_updated(self, user_id: str, category_id: str) -> str:
-        """카테고리의 최근 수정(카테고리·항목 중 가장 최근)."""
-        ...
-    def builtin_updated(self, user_id: str, kind: str, floor: str) -> str:
-        """그 층 기본 카테고리의 최근 수정(항목 중 가장 최근)."""
+        """책의 최근 수정(책·글·문헌 중 가장 최근)."""
         ...
 
     # 검색 청크 (모든 책장 공용)

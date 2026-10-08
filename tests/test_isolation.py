@@ -38,10 +38,9 @@ from magus.config import Settings
 from magus.search import hybrid_search
 from magus.server import build_server
 from magus.signing import sign
-from magus.store import Idea, LocalStore, Passage, Ref, StyleEntry
+from magus.store import CategoryItem, LocalStore, Passage, Ref
 from magus.web import SESSION_COOKIE, Web
 
-TAGS = {"호흡": "짧음", "시점": "1인칭", "열기": "장면", "장치": [], "어미": "-다", "톤": "건조"}
 
 
 def _hashes(root: Path) -> dict[str, str]:
@@ -54,10 +53,14 @@ def _fill(store: LocalStore, user: str, word: str, n: int) -> None:
     store.write_chapter(user, "book", 1, f"{word}의 본문이다(Clack, 2012).", "x", title=f"{word}의 장")
     store.add_decision(user, "book", f"{word}의 결정")
     store.add_issue(user, "book", f"{word}의 미해결", chapter_number=1)
-    store.put_ref(user, Ref(key="clack2012", status="verified", bib={"title": f"{word}의 서지"}),
+    # 같은 책 id(옛 기본 책을 이전한 id 모양)·같은 글 id·같은 문헌 key로: 내용만 다르게(#96)
+    for book, name in (("refs-book", "문헌"), ("ideas-book", "생각"), ("styles-book", "문체")):
+        store.create_category(user, name, "blank", "#1f2f5c", (), "book", category_id=book)
+    store.put_ref(user, Ref(key="clack2012", status="verified", bib={"title": f"{word}의 서지"}, book="refs-book"),
                   passages=[Passage(f"{word}의 발췌 네발동물", "근거")])
-    store.add_ideas(user, [Idea(id=f"2026100600000000{n}-aaaaaa", text=f"{word}의 생각 바다", kind="thought", author="me")])
-    store.add_style(user, StyleEntry(id=f"2026100600000000{n}-bbbbbb", passage=f"{word}의 구절", reason=f"{word}의 짧은 호흡", tags=TAGS))
+    store.put_category_item(user, CategoryItem(f"2026100600000000{n}-aaaaaa", "ideas-book", f"{word}의 생각 바다", "me"))
+    store.put_category_item(user, CategoryItem(f"2026100600000000{n}-bbbbbb", "styles-book", f"{word}의 구절", "me",
+                                               reason=f"{word}의 짧은 호흡"))
     store.put_inbox(user, "원고.docx", word.encode())
 
 
@@ -81,11 +84,11 @@ def test_same_ids_in_two_users_never_mix(store: LocalStore, data_dir: Path):
                 *(i.text for i in store.list_issues(user, "book")),
                 str(store.get_ref(user, "clack2012").bib),
                 *(p.text for p in store.get_passages(user, "clack2012")),
-                *(i.text for i in store.list_ideas(user)),
-                *(s.reason for s in store.list_styles(user)),
+                *(i.content for i in store.list_category_items(user)),
+                *(i.reason for i in store.list_category_items(user) if i.reason),
                 store.inbox_path(user, "원고.docx").read_bytes().decode(),
             ]
-            for query, lanes in (("네발동물", ["ref_picked"]), ("바다", ["idea_me"]), ("호흡", ["style"])):
+            for query, lanes in (("네발동물", ["ref_picked"]), ("바다", ["category"]), ("호흡", ["category"])):
                 seen += [c.text for c in hybrid_search(store, user, query, lanes, 10, None)]  # FTS
                 seen += [c.text for c in hybrid_search(store, user, query, lanes, 10, _SameVector())]  # FTS + 벡터
             assert all(word in text for text in seen), (user, seen)
@@ -98,6 +101,7 @@ def test_same_ids_in_two_users_never_mix(store: LocalStore, data_dir: Path):
 async def test_file_arguments_cannot_reach_other_spaces(store: LocalStore, data_dir: Path, settings: Settings):
     """원격과 같은 규칙(build_server 기본: 받은함 이름만). 앨리스가 밥의 받은함·책장·프로젝트에 닿는 길을 모두 막는다."""
     seed_demo(store, "alice")
+    store.create_category("alice", "생각", "blank", "#1f2f5c", (), "demo")  # 파일 인자를 받는 도구가 넣을 책
     bob_inbox = data_dir / "users" / "bob" / "inbox"
     bob_inbox.mkdir(parents=True)
     shutil.copy(FIXTURES / "닿으려는_종_합성.docx", bob_inbox / "b.docx")
@@ -108,12 +112,16 @@ async def test_file_arguments_cannot_reach_other_spaces(store: LocalStore, data_
     async with Client(build_server(settings, store)) as c:
         for path in paths:
             assert (await c.call_tool("book_import", {"path": path, "project_id": "x"})).is_error, path
-            assert (await c.call_tool("ref_add", {"bib": {"authors": "Clack, J.", "year": "2012", "title": "G"},
-                                                  "passages": [{"text": "t", "reason": "r"}], "file_path": path})).is_error, path
+            assert (await c.call_tool("category_put", {"book": "생각", "author": "me", "checked": True,
+                                                       "source": {"authors": "Clack, J.", "year": "2012", "title": "G"},
+                                                       "parts": [{"text": "t", "reason": "r"}], "file": path})).is_error, path
             md = path.replace(".docx", ".md")
-            assert (await c.call_tool("idea_add_conversation", {"path": md})).is_error, md
+            assert (await c.call_tool("idea_add_conversation", {"path": md, "book": "생각"})).is_error, md
         for key in ("../../bob/shelf/melchior/x", "..", "bob/x"):  # 문헌 key는 책장 폴더 이름이 된다
-            assert (await c.call_tool("ref_add", {"bib": {"key": key}, "passages": [{"text": "t", "reason": "r"}]})).is_error, key
+            assert (await c.call_tool("category_put", {"book": "생각", "author": "me", "checked": True, "source": {"key": key},
+                                                       "parts": [{"text": "t", "reason": "r"}]})).is_error, key
+        for book in ("../bob", "ideas-book/../../bob"):  # 책 이름·id로도 밖에 닿지 않는다
+            assert (await c.call_tool("category_put", {"book": book, "author": "me", "content": "x", "untitled": True})).is_error
         assert (await c.call_tool("book_import", {"path": "x.docx", "project_id": "../bob"})).is_error
         exported = (await c.call_tool("book_export", {"path": "../../../bob/projects/x.docx", "project_id": "demo"})).content[0].text
     assert Path(exported.splitlines()[0].removeprefix("docx를 만들었다: ")).parent == data_dir.resolve() / "users/alice/projects/demo/exports"
@@ -215,7 +223,7 @@ def test_web_pages_are_per_user_even_with_same_project_id(server_proc, fake_issu
         assert "파일 이름으로 쓸 수 없다" in page
         assert "x.pdf" not in [p.name for p in (data_dir / "users" / "alice" / "inbox").iterdir()]
         assert (data_dir / "users" / "alice" / "inbox" / "원고.docx").exists()
-        assert "없는 원고 책입니다" in bob.post("/book/export", data={"csrf": b_csrf, "project_id": "synth"}).text  # 밥의 층은 아직 비었다
+        assert "올린 원고가 없습니다" in bob.post("/book/export", data={"csrf": b_csrf, "project_id": "synth"}).text  # 밥의 층은 아직 비었다
         # 밥도 같은 id(synth)의 자기 층에 원고 책을 올린다
         bob.post("/inbox/upload", data={"csrf": b_csrf}, files={"files": ("밥.docx", b"x")})
         made = bob.post("/shelf/manuscript", data={"csrf": b_csrf, "floor": "synth"},
@@ -268,13 +276,14 @@ async def test_concurrent_requests_keep_their_own_user(keys, auth_server):  # no
     tokens = {"앨리스": _token(good, aud=url), "밥": _token(good, aud=url, sub="sub-bob")}
     for word, token in tokens.items():
         async with _client(url, token) as c:
-            await c.call_tool("idea_add", {"text": f"{word}의 바다 생각", "kind": "thought", "untitled": True})
+            await c.call_tool("category_create", {"name": "생각"})
+            await c.call_tool("category_put", {"book": "생각", "author": "me", "content": f"{word}의 바다 생각", "untitled": True})
     results: list[tuple[str, str]] = []
 
     async def ask(word: str) -> None:
         async with _client(url, tokens[word]) as c:
             for _ in range(5):
-                results.append((word, (await c.call_tool("idea_search", {"query": "바다", "author": "all"})).content[0].text))
+                results.append((word, (await c.call_tool("category_search", {"query": "바다"})).content[0].text))
 
     async with anyio.create_task_group() as tg:
         for _ in range(4):
@@ -297,7 +306,7 @@ def test_shelf_pages_show_only_own_shelf(server_proc, fake_issuer):  # noqa: F81
     for n, (user, word) in enumerate((("alice", "앨리스"), ("bob", "밥"))):
         _fill(store, user, word, n + 1)
         _fill_more(store, user, word)
-    store.add_ideas("bob", [Idea(id="20261006000000009-cccccc", text="밥만의 생각 바다", kind="thought", author="me")])
+    store.put_category_item("bob", CategoryItem("20261006000000009-cccccc", "ideas-book", "밥만의 생각 바다", "me"))
     store.close()
     lists = ("/shelf/ideas?project=book", "/shelf/refs?project=book", "/shelf/styles", "/shelf?q=바다", "/shelf/ideas?q=바다",
              "/shelf/refs?q=서지", "/shelf/styles?q=구절", "/shelf/refs/clack2012")
@@ -305,9 +314,9 @@ def test_shelf_pages_show_only_own_shelf(server_proc, fake_issuer):  # noqa: F81
     for user in ("alice", "bob"):
         with httpx2.Client(base_url=base, timeout=120) as c:
             assert _login(c, issuer_state, f"sub-{user}").status_code == 303
-            # 예전 주소는 그 사용자의 층 주소로 넘어간다(#93): 넘어간 뒤의 화면으로 본다
+            # 예전 주소(/shelf/ideas…)는 이전으로 생긴 책(ideas-book 등)으로 넘어간다(#93·#96): 넘어간 뒤의 화면으로 본다
             pages[user] = {path: c.get(path, follow_redirects=True) for path in (
-                *lists, "/shelf", "/shelf/p/book?node=b-ideas", *(f"/shelf/ideas/2026100600000000{n}-aaaaaa" for n in (1, 2)),
+                *lists, "/shelf", "/shelf/p/book?node=b-ideas-book", *(f"/shelf/ideas/2026100600000000{n}-aaaaaa" for n in (1, 2)),
                 "/shelf/ideas/20261006000000009-cccccc")}
     for user, word, other in (("alice", "앨리스", "밥"), ("bob", "밥", "앨리스")):
         for path, response in pages[user].items():
@@ -315,8 +324,8 @@ def test_shelf_pages_show_only_own_shelf(server_proc, fake_issuer):  # noqa: F81
         for path in lists:
             assert pages[user][path].status_code == 200 and word in pages[user][path].text, (user, path)
     assert "밥만의" not in "".join(r.text for r in pages["alice"].values())
-    assert 'aria-label="생각, 항목 1개"' in pages["alice"]["/shelf/p/book?node=b-ideas"].text
-    assert 'aria-label="생각, 항목 2개"' in pages["bob"]["/shelf/p/book?node=b-ideas"].text
+    assert 'aria-label="생각, 글 1개"' in pages["alice"]["/shelf/p/book?node=b-ideas-book"].text
+    assert 'aria-label="생각, 글 2개"' in pages["bob"]["/shelf/p/book?node=b-ideas-book"].text
     # 남의 항목 id로 들어가면 없는 항목(404)이다. 자기 항목은 펼쳐진 채 보인다
     assert pages["alice"]["/shelf/ideas/20261006000000002-aaaaaa"].status_code == 404
     assert pages["bob"]["/shelf/ideas/20261006000000001-aaaaaa"].status_code == 404
@@ -327,4 +336,4 @@ def test_shelf_pages_show_only_own_shelf(server_proc, fake_issuer):  # noqa: F81
 
 def _fill_more(store: LocalStore, user: str, word: str) -> None:
     """책장 검색용: 문체 구절·문헌 서지에도 사용자 표시를 넣는다(웹 전용 레인)."""
-    store.add_style(user, StyleEntry(id="20261006000000005-dddddd", passage=f"{word}의 구절 둘", reason="호흡", tags=TAGS))
+    store.put_category_item(user, CategoryItem("20261006000000005-dddddd", "styles-book", f"{word}의 구절 둘", "me", reason="호흡"))

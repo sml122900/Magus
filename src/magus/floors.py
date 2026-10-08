@@ -18,9 +18,10 @@ from __future__ import annotations
 
 COMMON = "common"  # 공용 층의 id. 프로젝트 id로 쓸 수 없다
 COMMON_NAME = "내 서재"  # 옛 공용 층은 프로젝트 「내 서재」(#95)
-FLOORS_SCHEMA = 1  # floors.json 형식
+FLOORS_SCHEMA = 1  # floors.json 형식(층·기본 카테고리, #93)
+BOOKS_SCHEMA = 2  # floors.json 형식(#96: 기본 카테고리 없음, "builtins"를 쓰지 않는다)
 MAX_FLOORS = 20  # 프로젝트 수(「내 서재」 빼고)
-NEW_FLOOR_BUILTINS = ("ideas", "refs")  # 새 작업물 층에 생기는 기본 카테고리
+NEW_FLOOR_BUILTINS = ("ideas", "refs")  # 새 작업물 층에 생기던 기본 카테고리(#96 전. 옛 배치를 읽을 때만 쓴다)
 COMMON_BUILTINS = ("styles",)  # 공용 층에 처음부터 있는 기본 카테고리
 BUILTIN_ORDER = ("ideas", "styles", "refs")
 

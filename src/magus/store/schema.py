@@ -1,7 +1,8 @@
 """SQLite 인덱스 스키마. 인덱스는 언제든 원본 파일에서 다시 만들 수 있으므로,
 스키마가 바뀌면 SCHEMA_VERSION을 올린다. 그러면 LocalStore가 인덱스를 지우고 다시 만든다."""
 
-SCHEMA_VERSION = 19  # 17: 층(#93). 18: refs.moved(공용으로 옮긴 기록). 19: 문서 책(documents, 레인 document)·원고 책 색(#94)
+SCHEMA_VERSION = 20  # 17: 층(#93). 18: refs.moved(공용으로 옮긴 기록). 19: 문서 책(documents, 레인 document)·원고 책 색(#94)
+# 20: 컨텍스트(#96). 생각·문체 표(ideas·style_entries)를 빼고 글(category_items)에 칸을 더함, refs.book, contexts 열
 
 # 지울 때는 역순으로 지운다. chunks_fts는 가상 테이블이다(그림자 테이블도 함께 지워진다).
 TABLES = (
@@ -14,7 +15,7 @@ TABLES = (
     "issues",
     "refs",
     "ref_passages",
-    "ideas",
+    "ideas",  # #96 전 표. 지울 때만 이름을 쓴다(옛 인덱스를 지우려고)
     "style_entries",
     "categories",
     "category_items",
@@ -38,6 +39,7 @@ CREATE TABLE projects (
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
     color       TEXT,
+    contexts    TEXT NOT NULL DEFAULT '[]',  -- 올린 문서가 든 책의 컨텍스트(#96)
     PRIMARY KEY (user_id, id)
 );
 
@@ -127,6 +129,7 @@ CREATE TABLE refs (
     updated_at    TEXT,
     floor         TEXT NOT NULL DEFAULT 'common',
     moved         TEXT,
+    book          TEXT,  -- 그 글이 꽂힌 책(카테고리 id, #96)
     UNIQUE (user_id, key)
 );
 
@@ -139,37 +142,7 @@ CREATE TABLE ref_passages (
     locator  TEXT
 );
 
-CREATE TABLE ideas (
-    id          TEXT NOT NULL,
-    user_id     TEXT NOT NULL,
-    text        TEXT NOT NULL,
-    kind        TEXT NOT NULL CHECK (kind IN ('thought', 'ai', 'article', 'conversation', 'tv', 'other')),
-    origin      TEXT,
-    author      TEXT NOT NULL CHECK (author IN ('me', 'ai')),
-    parent_id   TEXT,
-    created_at  TEXT NOT NULL,
-    title       TEXT,
-    title_by    TEXT CHECK (title_by IN ('ai', 'author')),
-    edited_at   TEXT,
-    edited_by   TEXT CHECK (edited_by IN ('author', 'ai')),
-    floor       TEXT NOT NULL DEFAULT 'common',
-    PRIMARY KEY (user_id, id)
-);
-
-CREATE TABLE style_entries (
-    id          TEXT NOT NULL,
-    user_id     TEXT NOT NULL,
-    passage     TEXT NOT NULL,
-    reason      TEXT NOT NULL,
-    work        TEXT,
-    tags        TEXT NOT NULL DEFAULT '{}',
-    created_at  TEXT NOT NULL,
-    tags_by     TEXT CHECK (tags_by IN ('ai', 'author')),
-    floor       TEXT NOT NULL DEFAULT 'common',
-    PRIMARY KEY (user_id, id)
-);
-
--- 저자가 만든 카테고리(#92). 원본은 shelf/categories/<id>/category.json. schema_version은 파일 형식 버전이다.
+-- 책(#92 카테고리 → #96 모든 책). 원본은 shelf/categories/<id>/category.json. schema_version은 파일 형식 버전이다.
 CREATE TABLE categories (
     id              TEXT NOT NULL,
     user_id         TEXT NOT NULL,
@@ -182,6 +155,7 @@ CREATE TABLE categories (
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     floor           TEXT NOT NULL DEFAULT 'common',
+    contexts        TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (user_id, id),
     UNIQUE (user_id, floor, name_key)
 );
@@ -202,6 +176,13 @@ CREATE TABLE category_items (
     updated_at      TEXT NOT NULL,
     edited_at       TEXT,
     edited_by       TEXT CHECK (edited_by IN ('author', 'ai')),
+    reason          TEXT,
+    location        TEXT,
+    passages        TEXT NOT NULL DEFAULT '[]',
+    parent_id       TEXT,
+    origin          TEXT,
+    kind            TEXT,
+    tags_by         TEXT CHECK (tags_by IN ('ai', 'author')),
     PRIMARY KEY (user_id, category_id, id)
 );
 
@@ -217,6 +198,7 @@ CREATE TABLE documents (
     versions    INTEGER NOT NULL,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
+    contexts    TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (user_id, id)
 );
 

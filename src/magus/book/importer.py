@@ -238,7 +238,7 @@ class ImportReport:
             f"- 목차 등으로 판단해 버린 제목 줄: {len(self.discarded)}개"
             + (f" — {', '.join(self.discarded[:8])}" + (" …" if len(self.discarded) > 8 else "") if self.discarded else ""),
             f"- 빠진 장 번호: {', '.join(map(str, self.gaps)) or '없음'} · 본문 없는 장: {', '.join(map(str, self.empty_chapters)) or '없음'}",
-            f"- 코멘트 → 확인 요청 {len(self.comment_rows)}건: citation {citation}(문헌 지목, refs 연결 {self.comments_linked})"
+            f"- 코멘트 → 확인 요청 {len(self.comment_rows)}건: citation {citation}(문헌 지목, 문헌 글과 이어짐 {self.comments_linked})"
             f" · fact {kinds.get('fact', 0)}(사실·수치 확인) · general {kinds.get('general', 0)}"
             + (f" · 장 밖 코멘트 {dict(self.comments_outside)}" if self.comments_outside else "")
             + (" · 작성자 " + ", ".join(f"{who} {n}" for who, n in self.comment_authors.most_common()) if self.comment_authors else ""),

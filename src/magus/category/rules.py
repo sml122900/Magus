@@ -1,7 +1,7 @@
-"""카테고리 규칙(#92): 템플릿, 이름 규칙, 책 색, 제목 기본값. 저장(store)과 화면(webshelf)·도구(category.tools)가 함께 쓴다.
+"""책 규칙(#92 카테고리 → #96 모든 책): 템플릿(칸), 이름 규칙, 책 색, 제목 기본값. 저장(store)과 화면(webshelf)·도구(category.tools)가 함께 쓴다.
 
-- 생각·문체·문헌은 기본 카테고리다. 이름을 바꾸거나 휴지통으로 옮길 수 없고, 넣는 것은 각자의 도구(idea_add 등)로 한다.
-  책 색만 바꿀 수 있다.
+- #96부터 기본 카테고리(생각·문체·문헌)가 없다. 옛 기본 카테고리는 이전으로 이름이 같은 여느 책이 됐고(이름·색·휴지통 모두 된다),
+  무엇을 담는 책인지는 컨텍스트(magus.contexts)가 말한다. BUILTINS·DEFAULT_COLORS는 이전과 옛 데이터를 읽을 때만 쓴다.
 - 책 색은 기본 색 이름(PALETTE) 또는 #RRGGBB만 받는다. 저장할 때 ^#[0-9a-fA-F]{6}$로 검사하고 소문자로 둔다.
   그 밖의 문자열은 스타일에 넣지 않는다. 색에 뜻을 붙이지 않는다(뜻은 저자가 정한다).
 """
@@ -12,18 +12,18 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-SCHEMA_VERSION = 1  # 카테고리·항목·책장 설정 파일 형식. 형식이 바뀌면 올리고 읽을 때 옮긴다
+SCHEMA_VERSION = 1  # 책·글·책장 설정 파일 형식. 형식이 바뀌면 올리고 읽을 때 옮긴다
+ITEM_SCHEMA = 2  # #96에서 더한 칸(이유·위치·쓸 부분·응답한 글 등)이 있는 글. 없는 글은 1 그대로
 NAME_MAX = 12  # 책등에 세로로 들어가는 길이(한글 12자)
-MAX_CATEGORIES = 30  # 사용자마다 만들 수 있는 카테고리 수(기본 셋 빼고)
+MAX_CATEGORIES = 60  # 사용자마다 만들 수 있는 책 수(올린 문서가 든 책·문서 책 빼고). #96: 옛 기본 책도 여기에 든다(30 → 60)
 MAX_MY_COLORS = 12
 TITLE_MAX = 80
 CONTENT_MAX = 20_000
 FIELD_MAX = 500
 TAGS_MAX, TAG_MAX = 10, 30
 
-# ---- 기본 카테고리 ----------------------------------------------------------------------------
-BUILTINS: dict[str, str] = {"ideas": "생각", "styles": "문체", "refs": "문헌"}  # 주소 이름 → 저자에게 보이는 이름
-BUILTIN_TOOLS = {"ideas": "idea_add", "styles": "style_add", "refs": "ref_add"}
+# ---- 옛 기본 카테고리(#96 전). 이전이 이 이름·색으로 책을 만든다 ---------------------------------------------
+BUILTINS: dict[str, str] = {"ideas": "생각", "styles": "문체", "refs": "문헌"}  # 옛 주소 이름 → 이름
 DEFAULT_COLORS = {"ideas": "#1f2f5c", "styles": "#6e1f2f", "refs": "#1f4a3a"}  # 남색·자주·짙은 초록
 
 # ---- 책 색(책장 전용) ----------------------------------------------------------------------------
@@ -79,7 +79,7 @@ class Template:
 
 
 TEMPLATES: tuple[Template, ...] = (
-    Template("blank", "빈 카테고리", "일반", (), "제목과 내용만 적습니다."),
+    Template("blank", "빈 책", "일반", (), "제목과 내용만 적습니다."),
     Template("person", "인물", "인물", (("원어 표기", "예: Adam Smith"), ("생몰", "예: 1723–1790"), ("소속·국적", "")),
              "책에 나오는 사람"),
     Template("case", "사례", "사례", (("시기", "예: 1850년대"), ("장소", ""), ("출처", "책·기사·기관 이름")), "이야기로 쓸 사례"),
@@ -93,16 +93,19 @@ TEMPLATE_NAMES = tuple(t.name for t in TEMPLATES)
 
 
 def template_of(value: str) -> Template:
-    """템플릿 이름(빈 카테고리·인물·사례·수치·용어) 또는 파일의 key."""
-    t = TEMPLATE_BY_NAME.get((value or "").strip()) or TEMPLATE_BY_KEY.get((value or "").strip())
+    """템플릿 이름(빈 책·인물·사례·수치·용어) 또는 파일의 key. 옛 이름 '빈 카테고리'도 받는다."""
+    raw = (value or "").strip()
+    raw = "빈 책" if raw in ("빈 카테고리", "") else raw
+    t = TEMPLATE_BY_NAME.get(raw) or TEMPLATE_BY_KEY.get(raw)
     if t is None:
         raise ValueError(f"템플릿 {value!r}이 없다. {'·'.join(TEMPLATE_NAMES)} 중 하나")
     return t
 
 
 # ---- 이름 규칙 --------------------------------------------------------------------------------
+# #96: 생각·문체·문헌·원고는 여느 책 이름으로 쓸 수 있다(옛 기본 책도 그 이름의 책이 됐다)
 RESERVED = (
-    "생각", "문체", "문헌", "원고", "전체", "확인 요청", "AI 확인 요청", "결정", "수정본", "책장", "카테고리", "받은함",
+    "전체", "확인 요청", "AI 확인 요청", "결정", "수정본", "책장", "카테고리", "받은함", "컨텍스트",
     "휴지통", "인용 체크리스트", "책", "영감", "미해결", "이슈", "책 지도", "새 판", "서랍", "공용", "층",
     "프로젝트", "지도", "노드", "연결 노드", "내 서재", "게시판",
     "Casper", "Melchior", "Balthasar", "idea", "style", "ref", "book",
@@ -130,18 +133,18 @@ def check_name(name: str, taken: dict[str, str]) -> str:
     """새 이름 검사. taken: 이미 쓰는 이름의 열쇠 → 이름. 통과하면 정리한 이름, 아니면 ValueError(이유를 한국어로)."""
     clean = clean_name(name)
     if not clean:
-        raise ValueError("카테고리 이름이 비어 있습니다")
+        raise ValueError("책 이름이 비어 있습니다")
     if len(clean) > NAME_MAX:
-        raise ValueError(f"카테고리 이름은 {NAME_MAX}자까지입니다(책등에 들어가는 길이). 지금 {len(clean)}자")
+        raise ValueError(f"책 이름은 {NAME_MAX}자까지입니다(책등에 들어가는 길이). 지금 {len(clean)}자")
     if bad := sorted({c for c in clean if not (c.isalnum() or c in _NAME_CHARS)}):
-        raise ValueError(f"카테고리 이름에 쓸 수 없는 글자가 있습니다: {' '.join(bad)} (글자·숫자·띄어쓰기·가운뎃점·하이픈·괄호만)")
+        raise ValueError(f"책 이름에 쓸 수 없는 글자가 있습니다: {' '.join(bad)} (글자·숫자·띄어쓰기·가운뎃점·하이픈·괄호만)")
     if clean.replace(" ", "").isdigit():
-        raise ValueError("숫자만으로는 카테고리 이름을 지을 수 없습니다")
+        raise ValueError("숫자만으로는 책 이름을 지을 수 없습니다")
     key = name_key(clean)
     if key in RESERVED_KEYS:
-        raise ValueError(f"'{clean}'은 정해진 이름이라 카테고리 이름으로 쓸 수 없습니다")
+        raise ValueError(f"'{clean}'은 정해진 이름이라 책 이름으로 쓸 수 없습니다")
     if key in taken:
-        raise ValueError(f"'{taken[key]}' 카테고리가 이미 있습니다. 다른 이름을 지어 주세요")
+        raise ValueError(f"'{taken[key]}' 책이 이미 있습니다. 다른 이름을 지어 주세요")
     return clean
 
 

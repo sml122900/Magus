@@ -39,10 +39,11 @@ class BibReport:
     differs: list[str] = field(default_factory=list)  # 이미 있는 key인데 새 목록의 제목·연도가 다름(갱신하지 않음)
     # 다른 프로젝트에만 있던 문헌을 이 원고도 쓰게 되어 「내 서재」로 옮긴 것(#93·#95: 문헌은 사람마다 한 권, 두 프로젝트가 쓰면 내 서재)
     shared: list[str] = field(default_factory=list)
+    book: str | None = None  # 새 문헌을 넣은 책(카테고리 id, #96)
 
     def render(self) -> str:
         out = [
-            f"참고문헌 {self.lines}줄 → 새 refs {len(self.created)}건(unverified), 이미 있음 {len(self.existing)}건, "
+            f"참고문헌 {self.lines}줄 → 새 문헌 글 {len(self.created)}건(원문 확인 전), 이미 있음 {len(self.existing)}건, "
             f"파싱 실패 {len(self.failed)}줄, key 충돌 {len(self.collisions)}건, 중복 서지 {len(self.duplicates)}건, "
             f"기존 서지와 다름 {len(self.differs)}건"
         ]
@@ -198,12 +199,12 @@ def _assign_keys(store: Store, user_id: str, refs: list[Ref]) -> list[tuple[Ref,
     return [o for o in out if o is not None]
 
 
-def import_bibliography(store: Store, user_id: str, text: str, floor: str | None = None) -> BibReport:
-    """floor: 이 참고문헌을 쓰는 프로젝트(#95). 새 문헌은 그 프로젝트의 문헌(없으면 지도의 연결 노드가 가리키는 문헌)에 꽂는다.
+def import_bibliography(store: Store, user_id: str, text: str, floor: str | None = None, book: str | None = None) -> BibReport:
+    """floor: 이 참고문헌을 쓰는 프로젝트(#95). book: 새 문헌을 넣을 책(#96). 없으면 그 프로젝트에서 문헌이 든 책,
+    그것도 없으면 「참고문헌」 책을 새로 만든다(새 문헌이 있을 때만).
     이 원고의 인용 점검이 보지 못하는 다른 프로젝트에 이미 있는 문헌이면, 두 프로젝트가 함께 쓰도록 「내 서재」의 문헌으로 옮기고
     두 지도에 그 노드로 가는 연결 노드를 붙인다(인용 점검은 자기 문헌 + 연결 노드가 가리키는 문헌을 본다)."""
     report = BibReport()
-    home = store.place(user_id, "refs", floor) if floor else None
     lines, refs = [], []
     for line in (raw.strip() for raw in text.splitlines()):
         if not line or _HEADING.match(line):
@@ -236,6 +237,9 @@ def import_bibliography(store: Store, user_id: str, text: str, floor: str | None
                 share_ref(store, user_id, ref.key, existing.floor, floor)
                 report.shared.append(ref.key)
             continue
-        store.put_ref(user_id, replace(ref, floor=home) if home else ref)
+        if book is None:
+            book = store.source_book(user_id, floor or store.default_project(user_id), create=True)
+        store.put_ref(user_id, replace(ref, book=book))
         report.created.append(ref.key)
+    report.book = book
     return report

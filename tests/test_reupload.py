@@ -21,7 +21,8 @@ from magus.book.outline import build_outline
 from magus.book.reupload import reupload_manuscript
 from magus.melchior.refs import add_ref
 from magus.server import build_server
-from magus.store import Idea, LocalStore, Passage
+from magus.store import CategoryItem, LocalStore, Passage
+from tests.conftest import make_book
 
 U, P = "alice", "b"
 D1, D2 = "2026-10-02T09:00:00Z", "2026-10-04T09:00:00Z"
@@ -64,8 +65,9 @@ def e1(store: LocalStore, tmp_path: Path):
     import_manuscript(store, U, edition(tmp_path / "e1.docx", 1), project_id=P)
     store.add_decision(U, P, "제목은 그대로 둔다")
     store.add_issue(U, P, "3장 순서 다시 보기", origin="user", chapter_number=3)
-    store.add_ideas(U, [Idea(id="20261003000000000-aaaaaa", text="물가는 궁지다", kind="thought", author="me")])
-    add_ref(store, U, {"key": "clack2012"}, [Passage("tetrapods came ashore", "1장 근거")])
+    ideas = make_book(store, U, "생각", "생각 메모", floor=P)
+    store.put_category_item(U, CategoryItem("20261003000000000-aaaaaa", ideas, "물가는 궁지다", "me"))
+    add_ref(store, U, {"key": "clack2012"}, [Passage("tetrapods came ashore", "1장 근거")], book=store.source_book(U, P))
     by_text = {i.text.split("\n")[0]: i for i in store.list_issues(U, P)}
     store.close_issue(U, P, by_text["문단 줄이기"].id, "Word에서 고치기로")
     store.write_chapter(U, P, 4, "고래는 돌아갔다. Magus에서 덧붙인 문장.", "Magus에서 고침")
@@ -111,7 +113,7 @@ def test_reupload_replaces_only_changed_chapters_and_keeps_history(store: LocalS
     assert [i for i in store.list_issues(U, P, None) if i.origin != "import_comment"] == direct
     after = _files(root)
     assert {k: after[k] for k in before} == before
-    assert [i.text for i in store.list_ideas(U)] == ["물가는 궁지다"]
+    assert [i.content for i in store.list_category_items(U) if i.author == "me"] == ["물가는 궁지다"]
     assert store.get_ref(U, "clack2012").status == "verified"
     # key 안정화: 순서가 바뀌어도 talent는 hsieh2019, 새 housing이 hsieh2019-2
     assert store.get_ref(U, "hsieh2019").bib["title"].startswith("The allocation of talent")
@@ -141,7 +143,7 @@ def test_outline_shows_edition_and_asks_for_latest_upload(store: LocalStore, tmp
     assert "(e2.docx) · 그 뒤 Magus에서 고친 장 0" in text and "지남" not in text
     assert "- 그중 해결됐을 수 있음 2건(수정본에서 코멘트나 걸린 문장이 사라짐)" in text
     later = build_outline(store, U, P, now=datetime.now(UTC) + timedelta(days=8))
-    assert "업로드 뒤 8일 지남. 그사이 저자가 Word에서 고쳤다면, 최신본을 책장의 원고 책에서 수정본으로 올리도록" in later
+    assert "업로드 뒤 8일 지남. 그사이 저자가 Word에서 고쳤다면, 최신본을 책장(가운데 노드)에서 수정본으로 올리도록" in later
 
 
 def test_same_file_again_changes_nothing(store: LocalStore, tmp_path: Path, e1):
@@ -186,8 +188,8 @@ async def test_book_import_new_edition_tool(settings, store: LocalStore, tmp_pat
         done = (await client.call_tool("book_import", {"path": "e2.docx", "project_id": P, "new_edition": True})).content[0].text
         stale = (await client.call_tool("book_issues", {"project_id": P, "possibly_resolved": True})).content[0].text
     assert refused.is_error and "new_edition=true" in refused.content[0].text
-    assert done.startswith("## 수정본 E2 — 가상 책 (b)") and "### 바뀐 장" in done
-    assert stale.startswith("확인 요청 2건 (status=open, 해결됐을 수 있음만)")
+    assert done.startswith("컨텍스트: 없음(일반 메모로 다룬다) — 책 「가상 책」\n\n## 수정본 E2 — 가상 책 (b)") and "### 바뀐 장" in done
+    assert stale.split("\n", 1)[1].startswith("확인 요청 2건 (status=open, 해결됐을 수 있음만)")  # 첫 줄은 컨텍스트(#96)
     assert "해결됐을 수 있음(원고에서 코멘트가 지워짐, E2)" in stale and "해결됐을 수 있음(걸린 문장이 원고에 없음, E2)" in stale
 
 

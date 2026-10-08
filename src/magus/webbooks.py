@@ -1,4 +1,6 @@
-"""모든 동작을 책장에서(사용자 결정 #94, 2026-10-07): 책 추가(원고·모음·문서), 원고 책 화면, 문서 책 화면, 문헌 등록. Web에 섞는 BookPages.
+"""모든 동작을 책장에서(사용자 결정 #94, 2026-10-07 → #96 종류 없음): 책 추가(새 책·문서 올리기·원고에서 만든 문서 안내),
+올린 원고 화면, 원고에서 만든 문서 화면, 원문 확인 글 넣기. Web에 섞는 BookPages.
+#96: 화면에 '원고 책·모음 책·문서 책' 같은 종류 이름을 쓰지 않는다. 올린 원고·문서에도 컨텍스트를 붙인다(책 설정, 머리에 표시).
 
 - 책 추가(/shelf/add?project=&node=, #95): 종류를 고른다. 원고는 그 자리에서 파일을 고르면 올라가고 가져오기까지 한다(받은함을 거치지 않음, 진행 표시).
   모음은 이름·템플릿·색(/shelf/new). 문서는 Claude 대화로 만든다는 안내만.
@@ -27,6 +29,8 @@ from magus.book.documents import DOC_TYPES, STALE_WORDS, build_source_check, is_
 from magus.book.importer import import_manuscript
 from magus.book.outline import chapter_count
 from magus.book.reupload import reupload_manuscript
+from magus.contexts import attach_manuscript_context, view_for_book
+from magus.webcontexts import CONTEXT_SCRIPT, context_fieldset, contexts_from_form, contexts_view_html, register_row
 from magus.floors import COMMON
 from magus.ids import local_time
 from magus.inbox import LimitError, mb, safe_filename, save_upload
@@ -154,9 +158,10 @@ class BookPages:
         ]
 
     def _book_page(self, title: str, body: str, session: tuple[str, str], status: int = 200) -> Response:
+        from magus.webcontexts import CONTEXT_STYLE  # noqa: PLC0415
         from magus.webshelf import SHELF_STYLE
 
-        return self._page(title, body, session, status, current="프로젝트", css=SHELF_STYLE + BOOK_STYLE)
+        return self._page(title, body, session, status, current="프로젝트", css=SHELF_STYLE + BOOK_STYLE + CONTEXT_STYLE)
 
     def _floor_crumb(self, uid: str, floor_id: str) -> str:
         floor = self.store.get_floor(uid, floor_id)
@@ -165,51 +170,53 @@ class BookPages:
 
     # ---- 책 추가 ------------------------------------------------------------------------------
     def _add_body(self, uid: str, session: tuple[str, str], floor: Floor, error: str = "", node: Any = None) -> str:
-        """책 추가(#94·#95): 그 프로젝트의 그 노드(node, 없으면 가운데)에 꽂을 책 종류를 고른다."""
+        """책 추가(#94·#95 → #96): 새 책 만들기 / 문서 올리기(장으로 나뉘는 원고, 가운데 노드) / 원고에서 만든 문서 안내."""
         csrf = self._csrf_input(session)
         limit = f"파일 한 개 {mb(self.settings.max_upload_bytes)}까지(docx 또는 pdf)."
         here = "가운데 노드" if node is None or node.center else f"「{node.name}」 노드"
+        query = urllib.parse.urlencode([("project", floor.id), *([("node", node.id)] if node is not None else [])])
+        new_book = (
+            '<section class="card kind"><h2>새 책</h2>'
+            f"<p>글을 쌓아 두는 책입니다. 이름과 컨텍스트(AI가 이 책을 읽는 방법)를 정하면 {here}에 꽂힙니다. "
+            "컨텍스트는 자주 쓰는 것을 단추로 붙이거나 직접 적습니다.</p>"
+            f'<p><a class="button" href="/shelf/new?{html.escape(query)}">새 책 만들기</a></p></section>'
+        )
         if floor.common:
-            manuscript = (
-                '<section class="card kind"><h2>원고 책</h2>'
-                f"<p>「{html.escape(floor.label)}」에는 원고를 두지 않습니다. 원고 파일을 고르면 새 프로젝트를 만들고 그 가운데 노드에 원고 책으로 꽂습니다.</p>"
+            upload = (
+                '<section class="card kind"><h2>문서 올리기</h2>'
+                f"<p>「{html.escape(floor.label)}」에는 원고를 두지 않습니다. Word(docx)나 PDF 원고를 고르면 새 프로젝트를 만들고 "
+                "그 가운데 노드에 올립니다.</p>"
                 f'<form method="post" action="/shelf/manuscript" enctype="multipart/form-data" data-progress="{IMPORTING}">{csrf}'
                 '<input type="hidden" name="project" value="new">'
                 f'<label>원고 파일 <input type="file" name="file" accept=".docx,.pdf" required></label><p class="muted">{limit}</p>'
                 f'<p><button class="primary">새 프로젝트로 올리기</button></p>{progress_box()}</form></section>'
             )
         elif floor.has_manuscript:
-            manuscript = (
-                '<section class="card kind"><h2>원고 책</h2>'
-                "<p>이 프로젝트에는 원고 책이 이미 있습니다(가운데 노드). Word에서 고친 원고는 원고 책 안의 '수정본 이력'에서 올립니다.</p>"
-                f'<p><a href="/shelf/book/{html.escape(floor.id)}?tab=editions">원고 책의 수정본 올리기로 가기</a></p></section>'
+            upload = (
+                '<section class="card kind"><h2>문서 올리기</h2>'
+                "<p>이 프로젝트에는 올린 원고가 이미 있습니다(가운데 노드). Word에서 고친 원고는 그 원고의 '수정본 이력'에서 올립니다.</p>"
+                f'<p><a href="/shelf/book/{html.escape(floor.id)}?tab=editions">수정본 올리기로 가기</a></p></section>'
             )
         else:
-            manuscript = (
-                '<section class="card kind"><h2>원고 책</h2>'
-                "<p>Word(docx)나 PDF 원고 파일을 고르면 바로 올라가고, 장·확인 요청·참고문헌을 읽어 이 프로젝트의 원고 책이 됩니다"
-                "(원고 책은 가운데 노드에 꽂힙니다).</p>"
+            upload = (
+                '<section class="card kind"><h2>문서 올리기</h2>'
+                "<p>Word(docx)나 PDF 원고를 고르면 바로 올라가고, 장·확인 요청·참고문헌을 읽어 가운데 노드에 꽂힙니다. "
+                "자주 쓰는 컨텍스트 「원고」가 있으면 함께 붙습니다(책 설정에서 떼거나 고칩니다).</p>"
                 f'<form method="post" action="/shelf/manuscript" enctype="multipart/form-data" data-progress="{IMPORTING}">{csrf}'
                 f'<input type="hidden" name="project" value="{html.escape(floor.id)}">'
                 f'<label>원고 파일 <input type="file" name="file" accept=".docx,.pdf" required></label><p class="muted">{limit}</p>'
                 f'<p><button class="primary">올리기</button></p>{progress_box()}</form></section>'
             )
-        query = urllib.parse.urlencode([("project", floor.id), *([("node", node.id)] if node is not None else [])])
-        collection = (
-            '<section class="card kind"><h2>모음 책</h2>'
-            f"<p>생각·사례·인물·용어처럼 모아 두는 책입니다. 이름·템플릿·색을 정하면 {here}에 꽂힙니다.</p>"
-            f'<p><a class="button" href="/shelf/new?{html.escape(query)}">모음 책 만들기</a></p></section>'
-        )
         document = (
-            '<section class="card kind"><h2>문서 책</h2>'
-            "<p>원고에서 만든 읽기용 문서입니다(첫 종류: 출처 확인 문서). Claude에게 이렇게 말씀하세요.</p>"
+            '<section class="card kind"><h2>원고에서 만든 문서</h2>'
+            "<p>올린 원고에서 만드는 읽기용 문서입니다(첫 종류: 출처 확인 문서). Claude에게 이렇게 말씀하세요.</p>"
             f"<p><b>\"이 원고 인용 확인하고 나에게 물어볼 것 정리해서 「… 출처 확인 문서」로 만들어 {here}에 넣어 줘\"</b></p>"
             '<p class="muted">질문·수치·문헌 목록은 Magus가 원고와 문헌에서 그대로 만듭니다. Claude는 원하시면 머리말만 붙입니다.</p></section>'
         )
         if not floor.has_manuscript:
-            document = document.replace("<p>원고에서 만든", "<p>문서 책은 원고가 있는 프로젝트에 꽂힙니다. 원고에서 만든", 1)
+            document = document.replace("<p>올린 원고에서 만드는", "<p>원고가 있는 프로젝트에 꽂힙니다. 올린 원고에서 만드는", 1)
         err = f'<p class="msg err">{html.escape(error)}</p>' if error else ""
-        return f'{self._floor_crumb(uid, floor.id)}{err}<div class="kinds">{manuscript}{collection}{document}</div>{UPLOAD_PROGRESS}'
+        return f'{self._floor_crumb(uid, floor.id)}{err}<div class="kinds">{new_book}{upload}{document}</div>{UPLOAD_PROGRESS}'
 
     async def add_book(self, request: Request) -> Response:
         session = self.user_of(request)
@@ -260,14 +267,15 @@ class BookPages:
             if floor_id != "new":
                 floor = await run_in_threadpool(self.store.get_floor, uid, floor_id)
                 if floor is None or floor.common:
-                    raise ValueError("원고 책은 원고 프로젝트의 가운데 노드에 꽂습니다.")
+                    raise ValueError("원고는 프로젝트의 가운데 노드에 올립니다.")
                 if floor.has_manuscript:
-                    raise ValueError("이 프로젝트에는 원고 책이 이미 있습니다. 고친 원고는 원고 책의 '수정본 이력'에서 올립니다.")
+                    raise ValueError("이 프로젝트에는 올린 원고가 이미 있습니다. 고친 원고는 그 원고의 '수정본 이력'에서 올립니다.")
                 project_id = floor.id
             with tempfile.TemporaryDirectory() as tmp:
                 path = Path(tmp) / name
                 path.write_bytes(data)
                 report = await run_in_threadpool(import_manuscript, self.store, uid, path, project_id=project_id)
+                await run_in_threadpool(attach_manuscript_context, self.store, uid, report.project_id)  # 「원고」 컨텍스트(#96)
         except PermissionError:
             return self._book_page("책 추가", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         except (ValueError, FileNotFoundError, LimitError) as e:
@@ -283,12 +291,14 @@ class BookPages:
         issues = self.store.list_issues(uid, project.id, "open")
         last = latest_edition(self.store, uid, project.id)
         parts = len(self.store.list_parts(uid, project.id))
-        meta = (f"원고 책 · {chapter_count(chapters)}" + (f" · {parts}부" if parts else "") + f" · {sum(c.char_count for c in chapters):,}자 · "
+        meta = (f"올린 원고 · {chapter_count(chapters)}" + (f" · {parts}부" if parts else "") + f" · {sum(c.char_count for c in chapters):,}자 · "
                 + (f"수정본 E{last}" if last else "수정본 기록 없음") + f" · 열린 확인 요청 {len(issues)}건"
                 + f' · <a href="/shelf/edit/ms.{html.escape(project.id)}">책 설정</a>')
         base = f"/shelf/book/{urllib.parse.quote(project.id)}"
         tabs = "".join(f'<a href="{base}?tab={key}"{" aria-current=page" if key == tab else ""}>{name}</a>' for key, name in TABS)
-        return f'{self._floor_crumb(uid, project.id)}<p class="floor-meta">{meta}</p><nav class="tabs" aria-label="원고 책">{tabs}</nav>'
+        context = contexts_view_html(view_for_book(self.store, uid, f"ms.{project.id}"), f"/shelf/edit/ms.{project.id}")
+        return (f'{self._floor_crumb(uid, project.id)}<p class="floor-meta">{meta}</p>{context}'
+                f'<nav class="tabs" aria-label="올린 원고">{tabs}</nav>')
 
     def _manuscript_done(self, uid: str, project: Any, request: Request) -> str:
         done = request.query_params.get("done")
@@ -296,7 +306,7 @@ class BookPages:
             chapters = self.store.list_chapters(uid, project.id)
             issues = self.store.list_issues(uid, project.id, None)
             refs = self.store.list_refs(uid, floors=cite_floors(self.store, uid, project.id))
-            return (f'<p class="msg">원고 책을 만들었습니다: {chapter_count(chapters)} · 부 {len(self.store.list_parts(uid, project.id))}개 · '
+            return (f'<p class="msg">원고를 올렸습니다: {chapter_count(chapters)} · 부 {len(self.store.list_parts(uid, project.id))}개 · '
                     f"확인 요청 {len(issues)}건(원고 코멘트에서) · 문헌 {len(refs)}편(참고문헌에서). "
                     "가져온 내용은 '수정본 이력'의 리포트에서 볼 수 있습니다.</p>")
         if done == "edition":
@@ -313,7 +323,7 @@ class BookPages:
         except ValueError:
             project = None
         if project is None or not await run_in_threadpool(self.store.list_chapters, uid, project.id):
-            return self._book_page("원고 책", '<p class="msg err">없는 원고 책입니다. <a href="/shelf">책장</a>으로 돌아가세요.</p>', session, 404)
+            return self._book_page("원고", '<p class="msg err">올린 원고가 없습니다. <a href="/shelf">프로젝트</a>로 돌아가세요.</p>', session, 404)
         tab = request.query_params.get("tab") if request.query_params.get("tab") in dict(TABS) else "chapters"
         body = await run_in_threadpool(self._manuscript_body, uid, session, project, tab, request)
         return self._book_page(project.title, body, session)
@@ -473,7 +483,7 @@ class BookPages:
         upload = (
             f'<form method="post" action="/shelf/book/{urllib.parse.quote(project.id)}/edition" enctype="multipart/form-data" '
             f'class="card" data-progress="{EDITING}">{self._csrf_input(session)}<h2>수정본 올리기</h2>'
-            "<p>Word에서 고친 원고 파일을 고르면 바로 수정본으로 맞춥니다. 바뀐 장만 바뀌고, 결정·확인 요청·생각·문체·문헌은 그대로입니다.</p>"
+            "<p>Word에서 고친 원고 파일을 고르면 바로 수정본으로 맞춥니다. 바뀐 장만 바뀌고, 결정·확인 요청·다른 책의 글은 그대로입니다.</p>"
             '<label>고친 원고 파일 <input type="file" name="file" accept=".docx,.pdf" required></label>'
             '<p><label><input type="checkbox" name="force" value="1"> 장 제목이 많이 달라도 같은 책으로 올리기</label></p>'
             f'<p><button class="primary">수정본 올리기</button></p>{progress_box()}</form>'
@@ -490,7 +500,7 @@ class BookPages:
         uid = session[0]
         project = await run_in_threadpool(self.store.get_project, uid, request.path_params["project"])
         if project is None:
-            return self._book_page("원고 책", '<p class="msg err">없는 원고 책입니다.</p>', session, 404)
+            return self._book_page("원고", '<p class="msg err">올린 원고가 없습니다.</p>', session, 404)
         try:
             form, data, name = await self._uploaded(request, session)
             with tempfile.TemporaryDirectory() as tmp:
@@ -512,7 +522,7 @@ class BookPages:
         uid = session[0]
         doc = await run_in_threadpool(self.store.get_document, uid, request.path_params["doc"])
         if doc is None:
-            return self._book_page("문서 책", '<p class="msg err">없는 문서 책입니다. <a href="/shelf">책장</a>으로 돌아가세요.</p>', session, 404)
+            return self._book_page("문서", '<p class="msg err">없는 문서입니다. <a href="/shelf">프로젝트</a>로 돌아가세요.</p>', session, 404)
         number = request.query_params.get("v")
         number_i = int(number) if number and number.isdigit() else doc.versions[-1].number
         content = await run_in_threadpool(self.store.read_document, uid, doc.id, number_i)
@@ -526,7 +536,7 @@ class BookPages:
         current = doc.versions[-1]
         project = self.store.get_project(uid, doc.project_id)
         made = "서버가 원고·문헌 데이터로 만듦" + {"ai": "(머리말은 Claude가 씀)", "author": "(머리말은 저자가 말함)"}.get(version.preface_by or "", "")
-        meta = (f"문서 책 · {DOC_TYPES.get(doc.doc_type, doc.doc_type)} · 기준 원고 "
+        meta = (f"원고에서 만든 문서 · {DOC_TYPES.get(doc.doc_type, doc.doc_type)} · 기준 원고 "
                 + (f"『{html.escape(project.title)}』" if project else "(없음)") + (f" E{version.edition}" if version.edition else "")
                 + f" · 만든 시각 {local_time(version.at, WHEN)} · {made}"
                 + f' · <a href="/shelf/edit/doc.{html.escape(doc.id)}">책 설정</a>')
@@ -552,11 +562,12 @@ class BookPages:
             + (f"E{v.edition} 기준" if v.edition else "수정본 기록 전") + (" · 지금 것" if v.number == current.number else "") + "</li>"
             for v in reversed(doc.versions)
         )
-        return (f'{self._floor_crumb(uid, doc.floor)}<p class="floor-meta">{meta}</p>{notices}{actions}'
+        context = contexts_view_html(view_for_book(self.store, uid, f"doc.{doc.id}"), f"/shelf/edit/doc.{doc.id}")
+        return (f'{self._floor_crumb(uid, doc.floor)}<p class="floor-meta">{meta}</p>{context}{notices}{actions}'
                 f'<article class="doc">{to_html(content)}</article>'
                 f'<details class="card no-print doc-history"><summary>만든 이력 {len(doc.versions)}</summary><ol>{history}</ol>'
                 "<p class=\"muted\">다시 만들면 서버가 지금의 원고·문헌으로 질문·수치를 새로 만듭니다(머리말은 넣지 않습니다. "
-                "머리말이 필요하면 Claude에게 부탁하세요). 답하고 닫는 일은 원고 책의 확인 요청에서 합니다.</p></details>")
+                "머리말이 필요하면 Claude에게 부탁하세요). 답하고 닫는 일은 원고의 확인 요청에서 합니다.</p></details>")
 
     async def document_redo(self, request: Request) -> Response:
         session = self.user_of(request)
@@ -566,10 +577,10 @@ class BookPages:
         try:
             await self._form(request, session)
         except PermissionError:
-            return self._book_page("문서 책", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            return self._book_page("문서", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         doc = await run_in_threadpool(self.store.get_document, uid, request.path_params["doc"])
         if doc is None:
-            return self._book_page("문서 책", '<p class="msg err">없는 문서 책입니다.</p>', session, 404)
+            return self._book_page("문서", '<p class="msg err">없는 문서입니다.</p>', session, 404)
 
         def redo() -> None:
             content, version = build_source_check(self.store, uid, doc.project_id, doc.title, previous=doc.versions[-1])
@@ -587,7 +598,7 @@ class BookPages:
         number = request.query_params.get("v")
         content = await run_in_threadpool(self.store.read_document, uid, doc.id, int(number) if number and number.isdigit() else None) if doc else None
         if doc is None or content is None:
-            return self._book_page("문서 책", '<p class="msg err">없는 문서 책입니다.</p>', session, 404)
+            return self._book_page("문서", '<p class="msg err">없는 문서입니다.</p>', session, 404)
 
         def build() -> bytes:
             with tempfile.TemporaryDirectory() as tmp:
@@ -599,7 +610,7 @@ class BookPages:
         return Response(data, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{name}"})
 
-    # ---- 원고 책·문서 책 설정(이름·색·위치)과 휴지통 ------------------------------------------------
+    # ---- 올린 원고·문서 설정(이름·색·컨텍스트·위치)과 휴지통 ----------------------------------------------
     async def book_edit(self, request: Request, key: str) -> Response:
         session = self.user_of(request)
         if not session:
@@ -611,19 +622,33 @@ class BookPages:
             if project is None:
                 return self._book_page("책 설정", '<p class="msg err">없는 책입니다.</p>', session, 404)
             name, color, floor_id, back = project.title, project.color or MANUSCRIPT_COLOR, project.id, f"/shelf/book/{ident}"
+            attached = project.contexts
         else:
             doc = await run_in_threadpool(self.store.get_document, uid, ident)
             if doc is None:
                 return self._book_page("책 설정", '<p class="msg err">없는 책입니다.</p>', session, 404)
             name, color, floor_id, back = doc.title, doc.color, doc.floor, f"/shelf/doc/{ident}"
+            attached = doc.contexts
         error = ""
+        saved = await run_in_threadpool(self.store.list_saved_contexts, uid)
         if request.method == "POST":
             try:
                 form = await self._form(request, session)
             except PermissionError:
                 return self._book_page("책 설정", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
             new_name = " ".join(str(form.get("name") or "").split())[:120]
+            if form.get("register") is not None:  # 자주 쓰는 컨텍스트로 등록만 하고 이 화면을 다시 보인다
+                error = await run_in_threadpool(register_row, self.store, uid, form)
+                saved = await run_in_threadpool(self.store.list_saved_contexts, uid)
+                try:
+                    attached = contexts_from_form(form, saved)
+                except ValueError:
+                    pass
+                name, color = new_name or name, safe_color(str(form.get("hex") or ""), color)
+                form = None
+        if request.method == "POST" and form is not None:
             try:
+                attached = contexts_from_form(form, saved)
                 new_color = chosen_color(form)
                 if not new_name:
                     raise ValueError("이름을 적어 주세요.")
@@ -637,6 +662,7 @@ class BookPages:
                     await run_in_threadpool(lambda: self.store.update_document(
                         uid, ident, title=new_name if new_name != name else None, color=new_color,
                         title_by="author" if new_name != name else None))
+                await run_in_threadpool(self.store.set_book_contexts, uid, key, attached)
                 note = await run_in_threadpool(self._keep_color, uid, form, new_color)
                 return RedirectResponse(state_url(floor_id, key, done="edit", c=key) + note, status_code=303)
             except ValueError as e:
@@ -644,7 +670,7 @@ class BookPages:
                 name, color = new_name or name, safe_color(str(form.get("hex") or ""), color)
         settings = await run_in_threadpool(self.store.get_shelf_settings, uid)
         if kind == "ms":
-            place = ('<h2>위치</h2><p class="muted">원고 책은 가운데 노드 자체라 옮기지 않습니다. 다른 원고면 새 프로젝트를 만들어 올려 주세요.</p>')
+            place = ('<h2>위치</h2><p class="muted">올린 원고는 가운데 노드 자체라 옮기지 않습니다. 다른 원고면 새 프로젝트를 만들어 올려 주세요.</p>')
         else:
             from magus.webshelf import Kind  # noqa: PLC0415
 
@@ -653,13 +679,15 @@ class BookPages:
             f'<p class="crumb"><a href="{html.escape(back)}">← {html.escape(name)}</a></p>{error}'
             f'<form method="post" action="/shelf/edit/{html.escape(key)}" class="colors">{self._csrf_input(session)}'
             f'<label class="block">이름 <input name="name" value="{html.escape(name)}" maxlength="120" required></label>'
+            + context_fieldset(saved, attached, what="이 책")
             + color_fieldset(color, settings.my_colors)
             + f'<p><button class="primary">저장</button> <a href="{html.escape(back)}">그만두기</a></p></form>'
             + place + f'<h2>휴지통</h2><p><a href="/shelf/trash/{html.escape(key)}">이 책을 휴지통으로 옮기기</a></p>'
         )
         from magus.webshelf import COLOR_SCRIPT  # noqa: PLC0415
 
-        return self._book_page(f"{name} — 책 설정", body + COLOR_SCRIPT, session, 400 if error else 200)
+        return self._book_page(f"{name} — 책 설정", body + COLOR_SCRIPT + CONTEXT_SCRIPT, session,
+                               400 if error.startswith('<p class="msg err">') else 200)
 
     async def book_trash(self, request: Request, key: str) -> Response:
         session = self.user_of(request)
@@ -676,7 +704,7 @@ class BookPages:
             issues = await run_in_threadpool(self.store.list_issues, uid, ident, None)
             decisions = await run_in_threadpool(self.store.list_decisions, uid, ident)
             what = (f"<p>장 {len(chapters)}개, 확인 요청 {len(issues)}건, 결정 {len(decisions)}건, 수정본 이력이 함께 옮겨집니다. "
-                    "프로젝트와 그 지도의 다른 책(생각·문헌·모음·문서)은 그대로 남고, 이 프로젝트는 원고 없는 프로젝트가 됩니다.</p>")
+                    "프로젝트와 그 지도의 다른 책은 그대로 남고, 이 프로젝트는 원고 없는 프로젝트가 됩니다. 붙여 둔 컨텍스트는 남습니다.</p>")
         else:
             doc = await run_in_threadpool(self.store.get_document, uid, ident)
             if doc is None:
@@ -700,18 +728,21 @@ class BookPages:
                 f'<p><button>휴지통으로 옮기기</button> <a href="{html.escape(back)}">그만두기</a></p></form></div>')
         return self._book_page("휴지통으로", body, session)
 
-    # ---- 문헌 등록(문헌 책에 논문 파일 넣기) ------------------------------------------------------
-    def ref_register_form(self, uid: str, session: tuple[str, str], floor: str) -> str:
+    # ---- 원문 확인 글 넣기(어느 책에든 논문 파일·쓸 부분, #94 → #96) ------------------------------------------
+    def ref_register_form(self, uid: str, session: tuple[str, str], book: str) -> str:
+        category = self.store.get_category(uid, book)
+        floor = category.floor if category else COMMON
         visible = list(self.store.cite_scope(uid, floor))  # 그 프로젝트 + 연결 노드가 가리키는 문헌(#95)
         refs = sorted((r for r in self.store.list_refs(uid, "unverified", floors=visible) if not r.key.startswith("raw-")),
                       key=lambda r: cite_label(r, r.key))
         options = "".join(f'<option value="{html.escape(r.key)}">{html.escape(cite_label(r, r.key))}</option>' for r in refs[:600])
         return (
-            f'<details class="card write"><summary>논문 파일로 문헌 등록</summary>'
-            "<p>원문을 읽고 쓸 부분을 고르셨으면, 그 파일을 올리고 쓸 부분과 고른 이유를 적어 주세요. '확인한 문헌'이 됩니다. "
-            "Claude에게 말씀하셔도 됩니다(예: \"이 논문을 문헌으로 등록해 줘. 쓸 부분은 「…」, 이유는 …\").</p>"
+            f'<details class="card write"><summary>원문을 확인한 논문·책 넣기</summary>'
+            "<p>원문을 읽고 쓸 부분을 고르셨으면, 그 파일을 올리고 쓸 부분과 고른 이유를 적어 주세요. 이 책에 '원문 확인' 글로 들어가고, "
+            "인용 점검이 이 글을 확인한 것으로 봅니다. Claude에게 말씀하셔도 됩니다(예: \"이 논문을 이 책에 원문 확인으로 넣어 줘. "
+            "쓸 부분은 「…」, 이유는 …\").</p>"
             f'<form method="post" action="/shelf/refs/register" enctype="multipart/form-data">{self._csrf_input(session)}'
-            f'<input type="hidden" name="floor" value="{html.escape(floor)}">'
+            f'<input type="hidden" name="book" value="{html.escape(book)}">'
             '<label class="block">논문 파일(pdf·docx·txt·md, 없어도 됩니다) <input type="file" name="file" accept=".pdf,.docx,.txt,.md"></label>'
             f'<label class="block">어느 문헌인가요? <select name="key"><option value="">목록에 없는 새 문헌(아래에 적기)</option>{options}</select></label>'
             '<details><summary>새 문헌이면: 저자·연도·제목</summary>'
@@ -721,7 +752,7 @@ class BookPages:
             '<label class="block">쓸 부분(원문 그대로) <textarea name="passage" rows="4" required maxlength="5000"></textarea></label>'
             '<label class="block">고른 이유 <input name="reason" required maxlength="300"></label>'
             '<label class="block">쪽수 등 위치(선택, 예: p.45) <input name="locator" maxlength="60"></label>'
-            "<p><button class=\"primary\">확인한 문헌으로 등록</button></p></form></details>"
+            "<p><button>원문 확인 글로 넣기</button></p></form></details>"
         )
 
     async def ref_register(self, request: Request) -> Response:
@@ -733,8 +764,8 @@ class BookPages:
             form = await self._form(request, session)
         except PermissionError:
             return self._book_page("문헌", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-        floor = str(form.get("floor") or COMMON)
-        back = f"/shelf/refs.{floor}"
+        book = str(form.get("book") or "")
+        back = f"/shelf/{urllib.parse.quote(book)}" if book else "/shelf"
         key = str(form.get("key") or "").strip()
         bib: dict[str, Any] = {"key": key} if key else {
             "authors": str(form.get("authors") or "").strip(), "year": str(form.get("year") or "").strip(),
@@ -748,9 +779,8 @@ class BookPages:
                 saved = await run_in_threadpool(save_upload, self.store, uid, item.filename, await item.read(),
                                                 self.settings.max_upload_bytes, self.settings.max_user_bytes)
                 path, label = self.store.inbox_path(uid, saved.name), f"inbox/{saved.name}"
-            work = floor if floor != COMMON else None
-            ref, _, _ = await run_in_threadpool(lambda: add_ref(self.store, uid, bib, [passage], file_path=str(path) if path else None,
-                                                                file_label=label, floor=work, default_floor=lambda: COMMON))
+            ref, _, _, _ = await run_in_threadpool(lambda: add_ref(self.store, uid, bib, [passage], book=book,
+                                                                   file_path=str(path) if path else None, file_label=label))
             await run_in_threadpool(after_refs_changed, self.store, uid)
         except LimitError:
             return RedirectResponse(f"{back}?registererr=big", status_code=303)
@@ -758,5 +788,6 @@ class BookPages:
             text = str(e)
             code = "passage" if ("passages" in text or "reason" in text) else "bib" if ("저자" in text or "key" in text) else "other"
             return RedirectResponse(f"{back}?registererr={code}", status_code=303)
-        return RedirectResponse(f"/shelf/refs.{ref.floor}/{urllib.parse.quote(ref.key)}?done=registered", status_code=303)
+        return RedirectResponse(f"/shelf/{urllib.parse.quote(ref.book or book)}/{urllib.parse.quote(ref.key)}?done=registered",
+                                status_code=303)
 
