@@ -309,7 +309,7 @@ def build_tools(
             name="book_import",
             description=(
                 "올린 문서 파일(docx, 없으면 pdf)을 가운데 노드의 책으로 가져온다(새 프로젝트, 또는 project_id가 올린 문서가 없는 프로젝트면 그 가운데 노드). "
-                "path에는 올린 파일 이름을 준다(files_list로 확인). "
+                "path에는 files_list에 보이는 이름을 준다(올린 파일 이름, 게시판 글의 첨부는 '첨부:<id>'). "
                 "저자가 올린 문서 없이 새 프로젝트를 만들자고 하면 path 없이 title만 준다(문서는 나중에 같은 project_id로 가져온다). "
                 "'제N부'·'제N장' 제목으로 장을 나누고, "
                 "Word 코멘트는 확인 요청(import_comment, kind=citation|fact|general)으로, 참고문헌은 원문 확인 전의 문헌 글로 넣는다. "

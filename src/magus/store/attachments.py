@@ -105,6 +105,19 @@ class AttachmentMixin:
         write_json(target.parent / f"{attachment_id}.trash.json", {"at": utcnow(), "note": note})
         return True
 
+    @locked
+    def file_attachments(self, user_id: str, suffixes: tuple[str, ...]) -> list[tuple[str, Attachment]]:
+        shelf = self._user_dir(user_id) / "shelf"
+        found: list[tuple[str, Attachment]] = []
+        for folder in (shelf / "categories").glob("*/files/*/*"):  # <책>/files/<글>/<첨부 id>
+            book, item = folder.parents[2].name, folder.parent.name
+            if (shelf / "categories" / book / "items" / f"{item}.json").is_file() and (a := self._one(folder)):
+                found.append((f"{book}/{item}", a))
+        for folder in (shelf / "melchior").glob("*/files/*"):  # <key>/files/<첨부 id>
+            if (folder.parents[1] / "bib.json").is_file() and (a := self._one(folder)):
+                found.append((f"ref:{folder.parents[1].name}", a))
+        return sorted(((o, a) for o, a in found if Path(a.name).suffix.lower() in suffixes), key=lambda x: x[1].id, reverse=True)
+
     # 글 휴지통·되살리기 때 첨부도 함께(CategoryMixin이 부른다)
     def _move_item_files(self, user_id: str, book: str, item: str, *, to_trash: bool) -> None:
         live = self._user_dir(user_id) / "shelf" / "categories" / book / "files" / item

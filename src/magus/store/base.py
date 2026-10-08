@@ -523,6 +523,10 @@ class Store(Protocol):
     def trash_attachment(self, user_id: str, owner: str, attachment_id: str, note: str) -> bool:
         """지우지 않고 trash/shelf/attachments/로 옮긴다. 없으면 False."""
         ...
+    def file_attachments(self, user_id: str, suffixes: tuple[str, ...]) -> list[tuple[str, Attachment]]:
+        """모든 글·문헌 글의 첨부 중 이름이 suffixes(소문자 확장자)로 끝나는 것 (owner, 첨부). 새것부터.
+        게시판에 첨부한 문서를 files_list가 보이고 도구의 파일 인자('첨부:<id>')로 읽게 한다(2026-10-09)."""
+        ...
     def get_profile(self, user_id: str) -> Profile:
         """없으면 빈 프로필. 읽기만 하면 사용자 폴더를 만들지 않는다."""
         ...

@@ -67,11 +67,12 @@ def test_screen_names_come_from_a_fixed_list():
     assert screen_key("/shelf/p/city/trash") == "node_trash"
     assert screen_key("/shelf/book/x", "tab=issues") == "doc_issues" and screen_key("/shelf/book/x") == "doc_chapters"
     assert screen_key("/shelf/book/x", "tab=cites&view=questions") == "doc_questions"
-    assert screen_key("/shelf/abc") == "board" and screen_key("/shelf/abc/def") == "board"
+    assert screen_key("/shelf/abc") == "board" and screen_key("/shelf/abc/def") == "post" and screen_key("/shelf/write/abc") == "write"
+    assert screen_key("/shelf/add") == "new_book" and screen_key("/shelf/new") == "new_book"
     assert screen_key("/shelf/abc/def/edit") == "item_edit" and screen_key("/shelf/edit/abc") == "book_settings"
     assert screen_key("/me/files") == "files" and screen_key("/login") == "other"
-    assert screen_label("map", "board") == "프로젝트 지도 · 패널: 게시판"
-    assert screen_label("<script>앨리스의 책", "도시는 어떻게") == "기타"  # 브라우저가 보낸 값은 목록에 있을 때만
+    assert screen_label("post") == "글 보기" and screen_label("<script>") == "기타"
+    assert screen_label("<script>앨리스의 책") == "기타"  # 브라우저가 보낸 값은 목록에 있을 때만
     assert set(SCREENS.values()) >= {"게시판", "프로젝트 지도"}
 
 
@@ -159,7 +160,7 @@ def fake_api():
 
 
 def _ask(c: httpx2.Client, csrf: str, q: str = SECRET_Q, **extra) -> httpx2.Response:
-    return c.post("/help/ask", json={"csrf": csrf, "q": q, "screen": "map", "sub": "board", **extra})
+    return c.post("/help/ask", json={"csrf": csrf, "q": q, "screen": "board", **extra})
 
 
 def test_help_endpoint_with_fake_api(server_proc, fake_api):  # noqa: F811
@@ -171,14 +172,14 @@ def test_help_endpoint_with_fake_api(server_proc, fake_api):  # noqa: F811
         csrf = _csrf(page)
         assert 'class="help-btn" aria-label="도움말" title="도움말"' in page and 'data-screen="projects"' in page
         assert "sk-ant-fake-key-123" not in page  # 키는 브라우저로 내려가지 않는다
-        assert "help-btn" not in c.get("/shelf/p/common", headers={"sec-fetch-dest": "iframe"}).text  # 패널 안 화면에는 없다
+        assert 'class="help-btn"' in c.get("/shelf/ideas-x", headers={"sec-fetch-dest": "iframe"}).text  # 머리 없는 iframe 모양은 없앴다
         assert _ask(c, "틀림").status_code == 403
         ok = _ask(c, csrf)
         assert ok.status_code == 200 and ok.json() == {"ok": True, "answer": SECRET_A, "left": 1}  # 굵은 글씨 표시는 뗀다
         [seen] = state["seen"]
         assert seen["path"] == "/v1/messages" and seen["key"] == "sk-ant-fake-key-123"
         assert seen["body"]["model"] == "claude-haiku-4-5-20251001" and seen["body"]["max_tokens"] == 600
-        assert seen["body"]["messages"] == [{"role": "user", "content": f"지금 화면: 프로젝트 지도 · 패널: 게시판\n\n질문: {SECRET_Q}"}]
+        assert seen["body"]["messages"] == [{"role": "user", "content": f"지금 화면: 게시판\n\n질문: {SECRET_Q}"}]
         assert seen["body"]["system"][0]["cache_control"] == {"type": "ephemeral"} and "# 용어 사전" in seen["body"]["system"][0]["text"]
         assert "alice" not in json.dumps(seen["body"], ensure_ascii=False)  # 사용자 이름·자료는 보내지 않는다
         state["fail"] = 500

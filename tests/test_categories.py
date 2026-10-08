@@ -282,7 +282,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         shelf = c.get("/login?next=/shelf").text
         csrf = _csrf(shelf)
         # 책 추가 자리는 노드의 책장에 있다(#95). 프로젝트가 없으면 「내 서재」 하나
-        assert '<a class="book add" href="/shelf/add?project=common&amp;node=center" aria-label="책 추가">' in c.get(
+        assert '<a class="book add" href="/shelf/new?project=common&amp;node=center" aria-label="새 책">' in c.get(
             "/shelf/p/common?node=center").text
         form = c.get("/shelf/new").text
         assert 'name="template"' not in form and form.count('name="color" value="#') == 18 and 'value="custom"' in form  # 칸 모양은 대화로(#97)
@@ -296,18 +296,23 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
             assert page.status_code == 400 and why in page.text and '"><script>' not in page.text, data
         made = c.post("/shelf/new", data={"csrf": csrf, "name": "사례", "template": "case", "color": "custom", "hex": "",
                                           "r": "74", "g": "103", "b": "65", "keep": "1", "ctx_pick": "ctx-paper"})
-        assert "「사례」 만들었습니다." in made.text
-        assert 'aria-label="사례, 컨텍스트 논문, 글 0개"' in made.text and "--c:#4a6741;" in made.text  # 위 띠 = 컨텍스트 이름
-        assert '<span class="band top" aria-hidden="true">논문</span>' in made.text
-        cid = re.search(r'data-key="(\d{17}-[0-9a-f]{6})"', made.text).group(1)
+        assert "「사례」 만들었습니다." in made.text  # 만들면 그 책의 게시판으로(2026-10-09)
+        cid = re.search(r"/shelf/(\d{17}-[0-9a-f]{6})\?done=made", str(made.url)).group(1)
+        store = LocalStore(data_dir)
+        where = store.node_of_book("alice", cid)
+        store.close()
+        panel = c.get(f"/shelf/p/{where[0]}", params={"node": where[1]}).text
+        assert 'aria-label="사례, 컨텍스트 논문, 글 0개"' in panel and "--c:#4a6741;" in panel  # 위 띠 = 컨텍스트 이름
+        assert '<span class="band top" aria-hidden="true">논문</span>' in panel
         store = LocalStore(data_dir)
         assert store.get_shelf_settings("alice").my_colors == ("#4a6741",)  # 내 색에 저장
         [attached] = store.get_category("alice", cid).contexts
         assert attached.name == "논문" and attached.text.startswith("원문을 읽고 모은 논문과 책이다.")
         store.close()
-        empty = c.get(f"/shelf/{cid}").text  # 빈 책: 한 줄 + '새 글' 하나(#97)
-        assert '<p class="empty">글이 없습니다.</p>' in empty and '<summary class="btn">새 글</summary>' in empty
-        assert 'name="f:시기"' not in empty and 'name="reason"' not in empty and 'name="files" multiple' in empty
+        empty = c.get(f"/shelf/{cid}").text  # 빈 책: 한 줄 + '글쓰기' 하나(글쓰기는 별도 페이지, 2026-10-09)
+        assert '<p class="empty">글이 없습니다.</p>' in empty and f'<a class="button write-btn" href="/shelf/write/{cid}">글쓰기</a>' in empty
+        write = c.get(f"/shelf/write/{cid}").text
+        assert 'name="f:시기"' not in write and 'name="reason"' not in write and 'name="files" multiple' in write
         assert '<details class="ctx"><summary>논문</summary><p>원문을 읽고 모은 논문과 책이다.' in empty  # 머리에 컨텍스트(누르면 전문)
         store = LocalStore(data_dir)  # 노드에도 컨텍스트가 있으면 노드 → 책 순서로 보인다(#96-d)
         floor, node = store.node_of_book("alice", cid)
@@ -321,7 +326,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         assert "error=empty" in str(c.post(f"/shelf/write/{cid}", data={"csrf": csrf, "content": "  "}).url)
         written = c.post(f"/shelf/write/{cid}", data={"csrf": csrf, "title": "", "content": "<script>alert(1)</script> 강가 장날",
                                                        "f:시기": "1850년대", "f:없는칸": "무시", "reason": "도입부", "where": "향토지 12쪽"})
-        assert re.search(rf"/shelf/{cid}/\d{{17}}-[0-9a-f]{{6}}$", str(written.url)) and " open data-here>" in written.text
+        assert re.search(rf"/shelf/{cid}/\d{{17}}-[0-9a-f]{{6}}$", str(written.url)) and '<p class="post-meta">' in written.text
         assert "&lt;script&gt;alert(1)&lt;/script&gt; 강가 장날" in written.text and "<script>alert" not in written.text
         assert "<p>시기:" not in written.text and "도입부" not in written.text  # 웹의 새 글은 제목·본문·첨부만(#97)
         assert c.post("/shelf/write/ideas", data={"csrf": csrf, "content": "x"}).status_code == 404  # 옛 기본 책 주소: 이전 전에는 없다
@@ -340,7 +345,9 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         done = c.post(f"/shelf/edit/{cid}", data={"csrf": csrf, "name": "옛 사례", "color": "#2f6db5", "ctx_pick": "ctx-paper",
                                                   "ctx_name": "논문", "ctx_text": "고친 컨텍스트", "ctx_from": "ctx-paper",
                                                   "ctx_new": "직접 적은 둘째"}).text
-        assert "「옛 사례」 저장했습니다." in done and 'aria-label="옛 사례, 컨텍스트 논문 외 1, 글 1개"' in done and "--c:#2f6db5;" in done
+        assert "「옛 사례」 저장했습니다." in done  # 저장하면 그 책의 게시판으로
+        panel = c.get(f"/shelf/p/{where[0]}", params={"node": where[1]}).text
+        assert 'aria-label="옛 사례, 컨텍스트 논문 외 1, 글 1개"' in panel and "--c:#2f6db5;" in panel
         store = LocalStore(data_dir)
         assert [(x.name, x.text) for x in store.get_category("alice", cid).contexts] == [("논문", "고친 컨텍스트"), ("", "직접 적은 둘째")]
         assert next(x for x in store.list_saved_contexts("alice") if x.id == "ctx-paper").text.startswith("원문을 읽고")  # 원본 그대로
@@ -399,18 +406,18 @@ def test_web_category_list_search_and_titles(server_proc):  # noqa: F811
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         c.get("/login?next=/shelf")
         listed = c.get(f"/shelf/{c1.id}").text
-        assert '<span class="t">장날<span class="tag" title="AI가 지은 제목">AI 제목</span></span>' in listed
-        assert '<span class="t none">제목 없는 글 물결</span>' in listed
-        assert '<span class="aux"><span class="tag" title="AI가 쓴 글">AI</span></span>' in listed  # 누가: Claude가 쓴 글
+        assert ('<span class="pt">장날<span class="tag" title="AI가 쓴 글">AI</span>'  # 누가: Claude가 쓴 글, 지은 제목
+                '<span class="tag" title="AI가 지은 제목">AI 제목</span></span>') in listed
+        assert '<span class="pt none">제목 없는 글 물결</span>' in listed
         assert '<p class="sum">글 2 · <a href=' in listed and 'aria-label="책 설정"' in listed
         assert 'class="ctxs"' not in listed  # 컨텍스트가 없으면 아무것도 보이지 않는다(#97)
         assert "물결" not in c.get(f"/shelf/{c1.id}?author=ai").text
         found = c.get(f"/shelf/{c1.id}", params={"q": "장날"}).text
         assert "「장날」 1 · " in found and "<mark>장날</mark>" in found
         everywhere = c.get("/shelf", params={"q": "물결"}).text
-        assert re.search(rf'<a href="/shelf/p/common\?node=[^"]+&amp;book={c1.id}">사례</a> <small>1개</small>', everywhere)
+        assert f'<a href="/shelf/{c1.id}">사례</a> <small>1개</small>' in everywhere
         assert "<mark>물결</mark>" in everywhere
-        assert '<details id="i-20261006000000001-aaaaab" open data-here>' in c.get(f"/shelf/{c1.id}/20261006000000001-aaaaab").text
+        assert "<h1>제목 없는 글 물결</h1>" in c.get(f"/shelf/{c1.id}/20261006000000001-aaaaab").text
 
 
 def test_web_categories_are_per_user(server_proc, fake_issuer):  # noqa: F811
@@ -510,10 +517,10 @@ def test_web_list_shows_fields_when_no_title_or_content(server_proc):  # noqa: F
     store.close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as w:
         page = w.get(f"/login?next=/shelf/{c.id}").text
-        assert '<span class="t none">장소: 엘알토, 볼리비아</span>' in page
+        assert '<span class="pt none">장소: 엘알토, 볼리비아</span>' in page
         csrf = _csrf(page)
-        assert 'name="content" rows="6" maxlength="20000"></textarea>' in page  # 내용이 꼭 필요하지 않다
-        assert "<p>장소: 엘알토, 볼리비아</p>" in page  # 칸은 본문의 일부로 보인다(#97)
+        assert 'name="content" rows="10" maxlength="20000"></textarea>' in w.get(f"/shelf/write/{c.id}").text  # 내용이 꼭 필요하지 않다
+        assert "<p>장소: 엘알토, 볼리비아</p>" in w.get(f"/shelf/{c.id}/20261006000000000-aaaaaa").text  # 칸은 본문의 일부로 보인다(#97)
         only_field = w.post(f"/shelf/write/{c.id}", data={"csrf": csrf, "title": "", "content": "", "f:시기": "1950년대"})
         assert "error=empty" in str(only_field.url)  # 웹의 새 글은 제목·본문·첨부만(칸은 대화로, #97)
         nothing = w.post(f"/shelf/write/{c.id}", data={"csrf": csrf, "title": "", "content": ""})

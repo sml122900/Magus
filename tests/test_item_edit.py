@@ -50,7 +50,7 @@ def test_edit_and_trash_on_the_shelf(server_proc):  # noqa: F811
         listed, ideas = opened.text, opened.url.path
         csrf = _csrf(listed)
         assert ideas == f"/shelf/{IDEAS}"
-        assert f'<a href="{ideas}/{AI}/edit">고치기</a> <a href="{ideas}/{AI}/trash">휴지통</a>' in listed
+        assert f'<a class="post" href="{ideas}/{AI}">' in listed
         form = c.get(f"/shelf/ideas/{AI}/edit").text  # 옛 주소의 고치기도 그 책으로
         assert ">그 관점은 흥미롭습니다</textarea>" in form and 'name="files" multiple' in form  # 제목·본문·첨부(#97)
         assert 'name="reason"' not in form and 'name="where"' not in form
@@ -69,7 +69,7 @@ def test_edit_and_trash_on_the_shelf(server_proc):  # noqa: F811
         item = c.post(f"/shelf/{cid}/20261006000000002-cccccc/edit",
                       data={"csrf": csrf, "title": "요약", "content": "저자가 다듬은 요약", "f:시기": "1860년대", "f:장소": "강가"}).text
         assert "<p>시기: 1850년대</p>" in item and "장소: 강가" not in item  # 칸은 본문의 일부로 보이고, 웹에서는 바꾸지 않는다
-        assert '<span class="t">요약<span class="tag" title="AI가 지은 제목">AI 제목</span></span>' in item
+        assert "<h1>요약</h1>" in item and "제목은 AI가 지음" in item
         # 휴지통: 확인 화면 한 번, 이 글에 응답한 글도 함께
         confirm = c.get(f"{ideas}/{ME}/trash").text
         assert "물가는 궁지다" in confirm and "응답한 글 1" in confirm

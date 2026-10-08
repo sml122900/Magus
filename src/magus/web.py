@@ -41,10 +41,11 @@ from magus.ids import local_time, utcnow
 from magus.inbox import LimitError, mb, save_upload, size_text
 from magus.signing import sign, unsign
 from magus.store import Profile, Store
+from magus.webboard import BoardPages
 from magus.webbooks import BookPages
 from magus.webcontexts import ContextPages
 from magus.webmap import MapPages
-from magus.webshelf import EMBED, ShelfPages, is_panel_request, safe_at, state_url
+from magus.webshelf import ShelfPages
 
 log = logging.getLogger("magus.web")
 SCREEN: contextvars.ContextVar[str] = contextvars.ContextVar("magus_screen", default="other")  # 도움말에 보낼 화면 이름 열쇠(#97)
@@ -120,13 +121,6 @@ border:2px solid currentColor;border-right-color:transparent;border-radius:50%;a
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (max-width:767px){main{padding:16px 12px 24px}h1{font-size:22px}table{min-width:640px}
 button,input[type=file]::file-selector-button,input:not([type=radio]):not([type=checkbox]):not([type=hidden]),select{min-height:44px}}
-"""
-# 패널의 게시판 자리(iframe) 안의 화면: 흰 바탕, 좁은 여백. 제목(h1)은 패널 머리가 보이므로 숨기고, 돌아가는 길('← 프로젝트 · 「제목」')도 뺀다.
-EMBED_STYLE = """
-body.embed{background:var(--canvas)}
-body.embed main{max-width:none;padding:12px 16px 24px}
-body.embed main>h1{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-body.embed .crumb:has(> a[href="/shelf"]){display:none}
 """
 # 받은함: 파일을 고르면 바로 올린다(자바스크립트가 꺼져 있으면 '올리기' 버튼으로). 올리는 동안 버튼 옆에 도는 표시가 보인다.
 UPLOAD_SCRIPT = """<script>
@@ -233,7 +227,7 @@ def _pkce() -> tuple[str, str]:
 
 
 @dataclass
-class Web(ShelfPages, MapPages, BookPages, ContextPages):
+class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
     store: Store
     settings: Settings
     base_url: str  # 바깥에서 보이는 주소(원격: PUBLIC_URL, 로컬: http://127.0.0.1:포트)
@@ -313,31 +307,21 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
             server.custom_route(path, methods=methods, include_in_schema=False)(self._wrap(handler))
 
     def _wrap(self, handler: Callable[[Request], Awaitable[Response]]) -> Callable[[Request], Awaitable[Response]]:
-        """지도 화면(#95): 책 화면 주소를 브라우저 주소창으로 바로 열면 그 프로젝트 지도의 그 노드·그 책 패널로 넘긴다.
-        패널의 게시판 자리(iframe) 안의 요청이면 머리(메뉴) 없는 모양으로 그린다(EMBED)."""
+        """화면마다 도움말이 보낼 화면 이름 열쇠를 정해 둔다(#97). 책은 별도 페이지(게시판)라 주소를 바꾸지 않는다(2026-10-09)."""
 
         async def run(request: Request) -> Response:
-            path = request.url.path
-            if (request.method == "GET" and request.headers.get("sec-fetch-dest") == "document"
-                    and request.headers.get("sec-fetch-mode") == "navigate" and path.startswith("/shelf/")
-                    and not path.startswith("/shelf/floor/") and not path.endswith("/docx") and "/files/" not in path):
-                at = safe_at(path + (f"?{request.url.query}" if request.url.query else ""))
-                if at:
-                    return RedirectResponse(state_url(at=at), status_code=303)
-            token = EMBED.set(is_panel_request(request))
-            screen = SCREEN.set(screen_key(path, request.url.query))
+            screen = SCREEN.set(screen_key(request.url.path, request.url.query))
             try:
                 return await handler(request)
             finally:
-                EMBED.reset(token)
                 SCREEN.reset(screen)
 
         return run
 
     # --- 공통 ---
     def _page(self, title: str, body: str, session: tuple[str, str] | None = None, status: int = 200, *,
-              current: str | None = None, css: str = "") -> HTMLResponse:
-        """current: 지금 보고 있는 메뉴 이름(없으면 제목). css: 그 화면에만 더하는 스타일(책장)."""
+              current: str | None = None, css: str = "", lead: str = "") -> HTMLResponse:
+        """current: 지금 보고 있는 메뉴 이름(없으면 제목). css: 그 화면에만 더하는 스타일(책장). lead: 제목 위(위치 표시 등)."""
         nav = ""
         if session:  # 지금 보고 있는 메뉴(제목이 메뉴 이름과 같은 화면)는 aria-current로 표시한다
             links = "".join(
@@ -348,20 +332,13 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
                    f'<form method="post" action="/logout" class="inline">{self._csrf_input(session)}<button>로그아웃</button></form></nav>')
         body = body.replace("<table>", '<div class="table-wrap"><table>').replace("</table>", "</table></div>")
         screen = html.escape(SCREEN.get())  # 도움말이 보낼 화면 이름 열쇠(정해 둔 목록, #97)
-        if EMBED.get():  # 책장 패널(iframe) 안: 머리(메뉴) 없이, 제목은 패널 머리가 보인다
-            return HTMLResponse(
-                f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(title)} · Magus</title><style>{STYLE}{css}{EMBED_STYLE}</style></head><body class="embed" data-screen="{screen}">
-<main><h1>{html.escape(title)}</h1>{body}</main></body></html>""",
-                status_code=status,
-            )
         helper = (widget(self.csrf(session[1]), user_key(session[0]))  # 오른쪽 아래 '?'(#97 D), 대화는 이 사용자 열쇠로 브라우저에
                   if session and self.helpbot is not None else "")
         return HTMLResponse(
             f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)} · Magus</title><style>{STYLE}{css}{HELP_STYLE if helper else ""}</style></head><body data-screen="{screen}">
 <header class="site"><div class="site-in"><span class="brand">Magus</span>{nav}</div></header>
-<main><h1>{html.escape(title)}</h1>{body}</main>{helper}</body></html>""",
+<main>{lead}<h1>{html.escape(title)}</h1>{body}</main>{helper}</body></html>""",
             status_code=status,
         )
 
@@ -395,7 +372,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
             return JSONResponse({"ok": False, "error": "잘못된 요청입니다. 화면을 새로 고쳐 주세요."}, status_code=403)
         if self.helpbot is None:
             return JSONResponse({"ok": False, "error": "지금은 도움말을 쓸 수 없어요."}, status_code=503)
-        screen = screen_label(str(data.get("screen") or ""), str(data.get("sub") or ""))
+        screen = screen_label(str(data.get("screen") or ""))
         status, body = await run_in_threadpool(self.helpbot.ask, session[0], str(data.get("q") or ""), screen, data.get("history"))
         return JSONResponse(body, status_code=status)
 

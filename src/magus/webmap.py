@@ -35,11 +35,12 @@ from magus.store import Floor, MapNode, ProjectMap, Store
 from magus.store.floors import MoveError
 from magus.store.formats import one_line
 from magus.store.maps import MapError
+from magus.webboard import post_row_html
 from magus.webmap_assets import MAP_SCRIPT, MAP_STYLE, PROJECTS_STYLE, TRASH_STYLE
 from magus.contexts import View
 from magus.webcontexts import CONTEXT_SCRIPT, CONTEXT_STYLE, context_fieldset, contexts_from_form, contexts_view_html, register_row
 from magus.webshelf import (
-    EMBED, GROUP_SIZE, Book, Kind, add_book, book_html, category_kind, clean_query, find, row_html,
+    GROUP_SIZE, Book, Kind, add_book, book_html, category_kind, clean_query, find,
     safe_at, shelf_html, state_url, text_color,
 )
 
@@ -120,7 +121,7 @@ class MapPages:
     csrf: Callable[[str], str]
     books: Callable[[str, str], list[Book]]
     book_objects: Callable[[str, Any], list[Book]]
-    _rows: Callable[..., list[Any]]
+    _posts: Callable[..., list[Any]]  # BoardPages
     _done_message: Callable[[str, Request], str]
 
     def map_routes(self) -> list[tuple[str, list[str], Callable[..., Any]]]:
@@ -142,57 +143,24 @@ class MapPages:
         from magus.webbooks import BOOK_STYLE  # noqa: PLC0415  (올리기 진행 막대)
         from magus.webshelf import SHELF_STYLE  # noqa: PLC0415
 
-        return self._page(title, body, session, status, current="프로젝트", css=SHELF_STYLE + BOOK_STYLE + CONTEXT_STYLE + css)
+        from magus.webboard import BOARD_STYLE  # noqa: PLC0415
 
-    def _break_out(self, request: Request) -> Response:
-        """패널(iframe) 안에서 프로젝트 화면 주소가 열리면(저장·휴지통 뒤 넘어오기) 바깥 화면을 그 주소로 바꾼다."""
-        url = request.url.path + (f"?{request.url.query}" if request.url.query else "")
-        return HTMLResponse(f'<!doctype html><meta charset="utf-8"><a id="go" href="{html.escape(url)}" target="_top">지도로 가기</a>'
-                            '<script>window.top.location.replace(document.getElementById("go").href)</script>')
+        return self._page(title, body, session, status, current="프로젝트", css=SHELF_STYLE + BOOK_STYLE + CONTEXT_STYLE + BOARD_STYLE + css)
 
     # ---- 프로젝트 목록 ------------------------------------------------------------------------
-    def locate(self, uid: str, at: str) -> tuple[str | None, str | None]:
-        """게시판 자리의 주소(책 화면) → (프로젝트, 책). 책 추가·새 책처럼 책이 없는 화면은 (프로젝트, None)."""
-        path, _, query = at.partition("?")
-        parts = [urllib.parse.unquote(x) for x in path.split("/")[2:] if x]
-        if not parts:
-            return None, None
-        head = parts[0]
-        if head in ("add", "new"):
-            params = dict(urllib.parse.parse_qsl(query))
-            return params.get("project") or params.get("floor"), None
-        if head == "book" and len(parts) > 1:
-            key = f"ms.{parts[1]}"
-        elif head == "doc" and len(parts) > 1:
-            key = f"doc.{parts[1]}"
-        elif head in ("edit", "trash") and len(parts) > 1:
-            key = parts[1]
-        else:
-            key = head
-        try:
-            return self.store.book_floor(uid, key), key
-        except ValueError:
-            return None, None
-
     async def project_list(self, request: Request) -> Response:
         session = self.user_of(request)
         if not session:
             return self._need_login(request)
-        if EMBED.get():
-            return self._break_out(request)
         uid = session[0]
         params = request.query_params
-        # 옛 주소(층·한 화면 책장: ?floor=·?at=·?zoom=)는 그 프로젝트 화면으로
-        at = safe_at(params.get("at")) or safe_at(params.get("next"))
+        # 옛 주소: 게시판 자리(?at=·?next=)는 그 화면(별도 페이지)으로, 층·한 화면 책장(?floor=·?zoom=)은 그 프로젝트 화면으로
+        if at := safe_at(params.get("at")) or safe_at(params.get("next")):
+            return RedirectResponse(at, status_code=303)
         floor = params.get("floor") or params.get("zoom")
-        if at or floor:
-            book = params.get("book")
-            if at and not floor:
-                floor, found_book = await run_in_threadpool(self.locate, uid, at)
-                book = book or found_book
-            if floor and await run_in_threadpool(self.store.get_floor, uid, floor):
-                keep = {k: v for k, v in params.items() if k in ("done", "c", "full", "moved", "undone", "moveerr", "b", "t")}
-                return RedirectResponse(state_url(floor, book, at, **keep), status_code=303)
+        if floor and await run_in_threadpool(self.store.get_floor, uid, floor):
+            keep = {k: v for k, v in params.items() if k in ("done", "c", "full", "moved", "undone", "moveerr", "b", "t")}
+            return RedirectResponse(state_url(floor, params.get("book"), **keep), status_code=303)
         q = clean_query(params.get("q"))
         floors = await run_in_threadpool(self.store.list_floors, uid)
         form = (f'<form method="get" action="/shelf" class="search" role="search">'
@@ -304,33 +272,18 @@ class MapPages:
         return f"「{found.label}」" if found else ""
 
     # ---- 프로젝트 화면 -------------------------------------------------------------------------
-    def _view(self, uid: str, found: ProjectMap, params: Any) -> tuple[MapNode | None, Book | None, str | None, str | None]:
-        """주소 → (열린 노드, 열린 책, 게시판 자리에 열 주소, 그 주소가 책 첫 화면과 다르면 at). 맞지 않는 값은 버린다."""
-        at = safe_at(params.get("at"))
+    def _view(self, uid: str, found: ProjectMap, params: Any) -> MapNode | None:
+        """주소 → 열린 노드. book이 있으면 그 책이 꽂힌 노드(옮긴 뒤·만든 뒤 알림에 쓴다)."""
         node = found.node(params.get("node") or "")
         book_key = params.get("book") or None
-        if at and not book_key:
-            _, book_key = self.locate(uid, at)
         if book_key and node is None:
             node = found.node_of(book_key)
-        if node is None and at and not book_key:  # 책 추가·새 책 화면: 주소의 노드
-            query = dict(urllib.parse.parse_qsl(at.partition("?")[2]))
-            node = found.node(query.get("node") or "") or (found.nodes[0] if query.get("project") == found.floor else None)
-        book = None
-        if node is not None and book_key and book_key in node.books:
-            book = next(iter(self.book_objects(uid, [book_key])), None)
-        if book is not None and at == book.href:
-            at = None
-        if book is None and not (at and (at.startswith("/shelf/add") or at.startswith("/shelf/new"))):
-            at = None
-        return node, book, at or (book.href if book else None), at
+        return node
 
     async def project_page(self, request: Request) -> Response:
         session = self.user_of(request)
         if not session:
             return self._need_login(request)
-        if EMBED.get():
-            return self._break_out(request)
         uid = session[0]
         floor_id = request.path_params["project"]
         found = await run_in_threadpool(self.store.get_map, uid, floor_id)
@@ -339,8 +292,10 @@ class MapPages:
             return self._map_page("프로젝트", '<p class="msg err">없는 프로젝트입니다. <a href="/shelf">프로젝트 목록</a>으로 돌아가세요.</p>',
                                   session, 404)
         params = request.query_params
-        node, book, src, at = await run_in_threadpool(self._view, uid, found, params)
-        here = state_url(floor_id, book.key if book else None, at, node.id if node else None)
+        if at := safe_at(params.get("at")):  # 예전 주소(옆 패널의 게시판 자리) → 그 화면을 별도 페이지로(2026-10-09)
+            return RedirectResponse(at, status_code=303)
+        node = await run_in_threadpool(self._view, uid, found, params)
+        here = state_url(floor_id, node=node.id if node else None)
         notices = await run_in_threadpool(self._notices, uid, request, session, here, found)
         q = clean_query(params.get("q"))
         view = params.get("view") if params.get("view") in ("map", "list") else "auto"
@@ -353,23 +308,17 @@ class MapPages:
         bar = self._toolbar(floor, found, q, view)
         new_node = await run_in_threadpool(self._new_node_form, uid, session, floor, found)
         map_html = await run_in_threadpool(self._map_html, uid, found, node)
-        list_html = await run_in_threadpool(self._list_html, uid, floor, found, node, book)
+        list_html = await run_in_threadpool(self._list_html, uid, floor, found, node)
         panel = await run_in_threadpool(self._panel_html, uid, session, floor, found, node)
-        book_title = book.name if book else ("책 추가" if src else "")
-        board = (f'<section class="pp-book" id="book-panel" aria-labelledby="bp-title"{"" if src else " hidden"}>'
-                 f'<div class="bp-head"><h2 class="bp-title" id="bp-title" tabindex="-1">{html.escape(book_title)}</h2>'
-                 f'<a class="bp-close" href="{html.escape(state_url(floor_id, node=node.id if node else None))}">닫기</a></div>'
-                 f'<iframe class="bp-frame" title="{html.escape(book_title or "책")}" src="{html.escape(src or "about:blank")}"></iframe></section>')
         data = {"project": floor_id, "csrf": self.csrf(session[1]), "post": f"/shelf/p/{urllib.parse.quote(floor_id)}/map",
                 "panel": f"/shelf/p/{urllib.parse.quote(floor_id)}/panel", "page": f"/shelf/p/{urllib.parse.quote(floor_id)}",
                 "nodes": [{"id": n.id, "x": n.x, "y": n.y} for n in found.nodes], "edges": [list(e) for e in found.edges]}
-        state = "".join(f' data-{k}="{html.escape(v)}"' for k, v in (("node", node.id if node else ""), ("book", book.key if book else ""),
-                                                                        ("at", at or "")) if v)
+        state = f' data-node="{html.escape(node.id)}"' if node else ""
         head = (f'<div class="pm-head"><h1 class="pm-title">{html.escape(project_name(floor))}</h1>{new_node}'
                 f'<p class="pm-meta">노드 {len(found.nodes)} · 선 {len(found.edges)} · {when_text(floor.updated_at)}</p></div>')
         body = (f'{notices}<p class="crumb"><a href="/shelf">← 프로젝트</a></p><div class="pm" data-view="{view}">{head}{bar}{search}'
                 f'<div class="pm-body"{state}><div class="pm-main">{map_html}{list_html}</div>'
-                f'<aside class="pm-panel" id="panel" aria-label="노드의 책장">{panel}{board}</aside></div></div>'
+                f'<aside class="pm-panel" id="panel" aria-label="노드의 책장">{panel}</aside></div></div>'
                 f'<script type="application/json" id="map-data">{json_script(data)}</script>'
                 + self._move_form(session, here) + MAP_SCRIPT)
         return self._map_page(project_name(floor), body, session, css=MAP_STYLE)
@@ -472,15 +421,13 @@ class MapPages:
                 f'<span class="nname">{html.escape(name)}</span><span class="nsub">{html.escape(sub)}</span>'
                 '<span class="knob" aria-hidden="true">＋</span></a>')
 
-    def _list_html(self, uid: str, floor: Floor, found: ProjectMap, node: MapNode | None, book: Book | None) -> str:
-        """목록 보기(휴대폰의 첫 모습, 키보드·낭독기): 노드 → 책 → 게시판."""
+    def _list_html(self, uid: str, floor: Floor, found: ProjectMap, node: MapNode | None) -> str:
+        """목록 보기(휴대폰의 첫 모습, 키보드·낭독기): 노드 → 책(누르면 그 책의 게시판 페이지)."""
         items = []
         for n in found.nodes:
             books = self.book_objects(uid, n.books)
-            here = book.key if book is not None and node is not None and node.id == n.id else None
             links = "".join(
-                f'<li><a href="{html.escape(state_url(floor.id, b.key, node=n.id))}#book-panel"'
-                + (' aria-current="true"' if b.key == here else "") + ">"
+                f'<li><a href="{html.escape(b.href or "")}">'
                 f'{html.escape(b.name)}</a> <small>{html.escape(b.band + " · " if b.band else "")}{html.escape(_count_text(b))}</small></li>'  # 컨텍스트 · 수(#96)
                 for b in books)
             sub = node_sub(n, books)
@@ -698,8 +645,6 @@ class MapPages:
         session = self.user_of(request)
         if not session:
             return self._need_login(request)
-        if EMBED.get():
-            return self._break_out(request)
         uid = session[0]
         floor = await run_in_threadpool(self.store.get_floor, uid, request.path_params["project"])
         if floor is None:
@@ -824,20 +769,20 @@ class MapPages:
                 seen.add(b.key)
                 in_name = needle and needle in b.name.replace(" ", "").lower()
                 kind = self._kind_of(uid, b.key)
-                rows = self._rows(uid, kind, None, q) if kind is not None else []
+                rows = self._posts(uid, kind, None, q) if kind is not None else []
                 if b.key.startswith("doc.") and b.key[4:] in doc_hits:
                     rows = rows or []
                     in_name = True
                 if not rows and not in_name:
                     continue
                 where = "" if n.name == b.name else f'{html.escape(node_label(n) if not n.center else "가운데")} · '
-                more = (f' <small><a href="{html.escape(state_url(floor.id, b.key, f"/shelf/{b.key}?q={urllib.parse.quote(q)}", n.id))}">'
-                        "모두 보기</a></small>" if len(rows) > GROUP_SIZE else "")
-                items = "".join(_retarget(row_html(r, q), floor.id, b.key, n.id) for r in rows[:GROUP_SIZE])
+                more = (f' <small><a href="/shelf/{html.escape(b.key)}?q={html.escape(urllib.parse.quote(q))}">모두 보기</a></small>'
+                        if len(rows) > GROUP_SIZE else "")
+                items = "".join(post_row_html(r, q) for r in rows[:GROUP_SIZE])
                 band = f"{html.escape(b.band)} · " if b.band else ""
-                parts.append(f'<section class="group"><h3>{where}<a href="{html.escape(state_url(floor.id, b.key, node=n.id))}">'
+                parts.append(f'<section class="group"><h3>{where}<a href="{html.escape(b.href or "")}">'
                              f'{html.escape(b.name)}</a> <small>{band}{len(rows)}개</small>{more}</h3>'
-                             + (f'<ol class="board">{items}</ol>' if items else "") + "</section>")
+                             + (f'<ol class="posts">{items}</ol>' if items else "") + "</section>")
         return "".join(parts)
 
     def _kind_of(self, uid: str, key: str) -> Kind | None:
@@ -916,15 +861,6 @@ def _count_text(book: Book) -> str:
     if book.verified is not None:
         return f"확인 {book.verified} · 전체 {book.count}"
     return f"{book.count}개"
-
-
-def _retarget(row: str, floor: str, key: str, node: str) -> str:
-    """검색 결과 줄의 '이 항목의 주소'를 프로젝트 화면(그 노드·책, 게시판 자리에 그 항목)으로."""
-    def swap(m: re.Match[str]) -> str:
-        at = html.unescape(m.group(1))
-        return f'href="{html.escape(state_url(floor, key, at, node))}"'
-
-    return re.sub(r'href="(/shelf/[^"]+)"', swap, row, count=1)
 
 
 def _zip_response(data: bytes, name: str) -> Response:

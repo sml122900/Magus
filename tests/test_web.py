@@ -265,8 +265,9 @@ def test_remote_requires_session_secret(tmp_path: Path):
     assert proc.returncode == 2 and "SESSION_SECRET" in proc.stderr
 
 
-def test_add_book_choices_follow_the_floor(server_proc):
-    """책 추가(#94·#95): 원고 없는 프로젝트면 원고 올리기, 원고 책이 있으면 수정본으로 안내, 「내 서재」면 새 프로젝트로 올리기."""
+def test_new_book_replaces_add_book(server_proc):
+    """책장에는 책 목록과 '새 책' 하나(2026-10-09). 옛 '책 추가'(새 책·문서 올리기 두 칸) 주소는 같은 자리의 새 책으로 넘기고,
+    새 책 화면 위에는 위치 표시(프로젝트 › 「프로젝트」 › 노드). 문서는 게시판 첨부로, 새 프로젝트는 프로젝트 목록의 '+ 프로젝트'로."""
     from magus.store import LocalStore
 
     base, data_dir, _ = server_proc({})
@@ -277,15 +278,16 @@ def test_add_book_choices_follow_the_floor(server_proc):
     store.close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         c.get("/login?next=/shelf")
-        empty = c.get("/shelf/add?project=empty&node=center").text
-        assert 'name="project" value="empty"' in empty and '<button class="primary">올리기</button>' in empty
-        assert c.get("/shelf/add?floor=empty").text.count('name="project" value="empty"') == 1  # 옛 주소 이름(floor)도 받는다
-        full = c.get("/shelf/add?project=full").text
-        assert "수정본 올리기</a>" in full and 'action="/shelf/manuscript"' not in full  # 올린 문서가 있으면 수정본으로
-        assert "<h2>새 책</h2>" in empty and "<h2>문서 올리기</h2>" in empty and "올린 문서에서 만든 문서" not in empty
-        common = c.get("/shelf/add?project=common").text
-        assert 'name="project" value="new"' in common and '<button class="primary">올리기</button>' in common
-        assert c.get("/shelf/add?project=nothing").status_code == 404
+        empty = c.get("/shelf/add?project=empty&node=center")
+        assert str(empty.url).endswith("/shelf/new?project=empty&node=center")
+        empty = empty.text
+        assert re.search(r'<nav class="trail" aria-label="위치"><a href="/shelf">프로젝트</a>.*?<a href="/shelf/p/empty">빈 책</a>'
+                         r'.*?<a href="/shelf/p/empty\?node=center">가운데</a></nav>', empty)
+        assert 'action="/shelf/new?project=empty&amp;node=center"' in empty and 'type="file"' not in empty and "문서 올리기" not in empty
+        assert str(c.get("/shelf/add?floor=empty").url).endswith("/shelf/new?floor=empty")  # 옛 주소 이름(floor)도 받는다
+        common = c.get("/shelf/new?project=common").text
+        assert '<a href="/shelf/p/common">내 서재</a>' in common and 'type="file"' not in common
+        assert c.get("/shelf/add?project=nothing").status_code == 404 and c.get("/shelf/new?project=nothing").status_code == 404
         assert c.get("/book", follow_redirects=False).headers["location"] == "/shelf/book/full?tab=chapters"
     assert "aria-current=page>프로젝트</a>" in empty  # 메뉴는 프로젝트 하나(#95)
     assert "border:1px solid var(--mute)" in empty and "--input" not in empty  # 입력칸 테두리 대비 4.75
@@ -328,9 +330,9 @@ def _seed_shelf(data_dir: Path) -> None:
 
 
 def test_shelf_books_and_board_lists(server_proc):
-    """책장: 책이 노드에 꽂히고(낭독기 이름 "생각, 컨텍스트 생각 메모, 글 N개", 위 띠 = 컨텍스트 이름), 책을 누르면 게시판형 목록.
-    한 줄 = 제목(없으면 내용 앞부분을 흐리게) · 작성 시각 · 보조 정보, 누르면 그 자리에서 펼친다(details). 예전 주소는 넘긴다.
-    #96: 글과 그 책의 문헌 글이 한 게시판에, 어느 책에든 바로 적기·원문 확인 글 넣기가 있다."""
+    """책장: 책이 노드에 꽂히고(낭독기 이름 "생각, 컨텍스트 생각 메모, 글 N개", 위 띠 = 컨텍스트 이름), 책을 누르면 게시판 페이지
+    (2026-10-09). 한 줄 = 제목(없으면 내용 앞부분을 흐리게) · 첨부 표시 · 날짜, 최신 글이 위, 20개씩. 누르면 글 보기 페이지.
+    글과 그 책의 문헌 글이 한 게시판에. 이유·위치·태그·원문 확인 표시는 파일에 그대로 있고 보이지 않는다. 예전 주소는 넘긴다."""
     from magus.ids import local_time
 
     base, data_dir, _ = server_proc({})
@@ -356,45 +358,42 @@ def test_shelf_books_and_board_lists(server_proc):
 
         ideas = c.get("/shelf/ideas").text  # 옛 주소 → 이전으로 생긴 책
         assert '<details class="ctx"><summary>생각 메모</summary><p>떠오른 생각을 적어 둔 메모다.' in ideas  # 머리에 컨텍스트
+        assert '<nav class="trail" aria-label="위치">' in ideas and '<span aria-current="page">생각</span></nav>' in ideas
         assert ideas.index("긴 생각") < ideas.index("그 관점은") < ideas.index("물가는 궁지다")  # 최신 것부터
-        assert '<span class="t none">물가는 궁지다</span>' in ideas  # 제목이 없으면 내용 앞부분을 흐리게
+        assert '<a class="post" href="/shelf/ideas-common/20261001000000000-aaaaaa"><span class="pt none">물가는 궁지다</span>' in ideas
         when = local_time("2026-10-01T05:07:00.000Z", "%Y-%m-%d %H:%M")
-        assert f'<time class="when" datetime="2026-10-01T05:07:00.000Z">{when}</time><span class="aux"></span>' in ideas  # 저자의 글
-        assert '<span class="aux"><span class="tag" title="AI가 쓴 글">AI</span></span>' in ideas
-        assert 'AI의 답입니다.' not in ideas  # 보기는 제목·본문·첨부만(#97). 응답 관계는 파일에 그대로
-        assert '<a href="/shelf/ideas-common/20261001000000000-aaaaaa" aria-label="이 글의 주소" title="이 글의 주소">🔗</a>' in ideas
-        first = ideas.split('<ol class="board">')[1].split("</summary>")[0]
-        assert "가" * 70 in first and "가" * 80 not in first and "가" * 400 in ideas  # 줄에는 앞부분만, 펼치면 전부
-        assert "1–100 / 123" in ideas and "다음</a>" in ideas and "오래된 생각 0<" not in ideas
-        assert "오래된 생각 0<" in c.get("/shelf/ideas-common?page=2").text
+        assert f'<time class="pd" datetime="2026-10-01T05:07:00.000Z">{when}</time>' in ideas
+        assert '<span class="pt none">그 관점은 흥미롭습니다<span class="tag" title="AI가 쓴 글">AI</span></span>' in ideas
+        first = ideas.split('<ol class="posts">')[1].split("</a>")[0]
+        assert "가" * 75 in first and "가" * 76 not in first  # 줄에는 앞부분만
+        assert "가" * 400 in c.get("/shelf/ideas-common/20261002000000000-aaaaac").text  # 글 보기에는 전부
+        assert ideas.count('<a class="post"') == 20 and '<nav class="pages" aria-label="쪽">' in ideas and "오래된 생각 0<" not in ideas
+        assert "오래된 생각 0<" in c.get("/shelf/ideas-common?page=7").text
         only_ai = c.get("/shelf/ideas-common?author=ai").text
         assert "그 관점은" in only_ai and "물가는 궁지다" not in only_ai
 
         refs = c.get("/shelf/refs").text
-        listed = refs.split('<ol class="board">')[1]  # 목록
-        assert listed.index("Clack(2012) 『Gaining ground』") < listed.index("Diamond(1997)")  # 원문 확인 글부터
-        # 문헌 글(#97): 제목(서지)·본문(쓸 부분)·첨부와 '원문 확인' 체크 하나. 원문 확인 거르기·넣기 폼은 없다
-        assert '<span class="aux"><span class="tag" title="원문 확인">원문 확인</span></span>' in refs
-        assert '<blockquote>「tetrapods came ashore」</blockquote>' in refs and "1장의 근거" not in refs
-        assert re.search(r'action="/shelf/refs-common/clack2012/check" class="check">.*?name="checked" value="1" checked> 원문 확인', refs)
-        assert re.search(r'action="/shelf/refs-common/diamond1997/check" class="check">.*?name="checked" value="1"> 원문 확인', refs)
-        assert "status=verified" not in refs and "인용 상태</a>" not in refs and '<p class="sum">글 2 ' in refs
+        listed = refs.split('<ol class="posts">')[1]
+        assert "Clack(2012) 『Gaining ground』" in listed and "Diamond(1997)" in listed
+        assert "/check" not in refs and 'type="checkbox"' not in refs and "원문 확인</span>" not in listed  # 웹에서 원문 확인 체크·표시는 뺐다
+        assert "status=verified" not in refs and "인용 상태</a>" not in refs and '<p class="sum">글 2</p>' in refs
+        clack = c.get("/shelf/refs/clack2012")  # 옛 주소 → 그 문헌 글 보기
+        assert str(clack.url).endswith("/shelf/refs-common/clack2012") and "<h1>Clack(2012) 『Gaining ground』</h1>" in clack.text
+        assert '<blockquote>「tetrapods came ashore」</blockquote>' in clack.text and "1장의 근거" not in clack.text
         styles = c.get("/shelf/styles").text
-        assert "위치: 유홍준" not in styles and "이유: 짧은 호흡" not in styles and '<span class="t none">짧다. 끊긴다.</span>' in styles
+        assert "유홍준" not in styles and "짧은 호흡" not in styles and '<span class="pt none">짧다. 끊긴다.</span>' in styles
+        post = c.get("/shelf/styles-common/20261003000000000-cccccc").text
+        assert "<p>짧다. 끊긴다.</p>" in post and "유홍준" not in post and "짧은 호흡" not in post and "호흡: 짧음" not in post
         short = c.get("/shelf/styles-common?tag=호흡: 짧음").text  # 태그 거르기는 주소로 그대로 된다(태그는 파일에 그대로)
         assert "짧다. 끊긴다." in short and "길게 이어지는" not in short and '<span class="tag">호흡: 짧음</span>' in short
 
-        # 고유 주소: 그 항목이 있는 쪽을 열고, 그 항목을 펼친 채 보인다
-        oldest = "2026090000000" + "00000-bbbbbb"  # 오래된 생각 0(둘째 쪽)
-        old = c.get(f"/shelf/ideas/{oldest}").text
-        assert f'<details id="i-{oldest}" open data-here>' in old and "101–123 / 123" in old
-        assert old.count(" open data-here") == 1 and "scrollIntoView" in old
-        assert '<details id="i-clack2012" open data-here>' in c.get("/shelf/refs/clack2012").text
+        oldest = "2026090000000" + "00000-bbbbbb"  # 오래된 생각 0
+        old = c.get(f"/shelf/ideas/{oldest}")  # 옛 고유 주소 → 그 글 보기 페이지
+        assert str(old.url).endswith(f"/shelf/ideas-common/{oldest}") and "<h1>오래된 생각 0</h1>" in old.text
         assert c.get("/shelf/ideas/20260101000000000-ffffff").status_code == 404
         assert c.get("/shelf/nothing").status_code == 404
-        for page in (styles, ideas):  # 로그아웃 · 새 글
-            assert page.count('method="post"') == 2
-        assert refs.count('method="post"') == 4  # 로그아웃 · 새 글 · 문헌 글마다 원문 확인 체크(#97)
+        for page in (styles, ideas, refs):  # 로그아웃만(찾기는 GET, 글쓰기는 별도 페이지)
+            assert page.count('method="post"') == 1
         assert shelf.count('method="post"') == 3  # 로그아웃 · 끌어 옮기기(숨은 폼) · 새 프로젝트 만들기
         assert "<h1>생각</h1>" in ideas and 'aria-current=page>프로젝트</a>' in styles
 
@@ -425,8 +424,8 @@ def test_shelf_search_marks_hits(server_proc):
         hit = c.get("/shelf/refs-common", params={"q": "ashore"}).text
         assert re.search(r'<small class="hit">[^<]*tetrapods came <mark>ashore</mark></small>', hit)  # 제목 밖에서 맞으면 맞은 곳 한 줄
         both = c.get("/shelf", params={"q": "물"}).text  # 프로젝트 → 노드 · 책으로 묶는다(#95). 책 옆에 컨텍스트 이름(#96)
-        assert re.search(r'<a href="/shelf/p/common\?node=b-ideas-common&amp;book=ideas-common">생각</a> <small>생각 메모 · \d+개</small>', both)
-        assert '<a href="/shelf/p/common?node=b-styles-common&amp;book=styles-common">문체</a> <small>문체 · 1개</small>' in both
+        assert re.search(r'<a href="/shelf/ideas-common">생각</a> <small>생각 메모 · \d+개</small>', both)  # 누르면 그 책의 게시판
+        assert '<a href="/shelf/styles-common">문체</a> <small>문체 · 1개</small>' in both
         assert "<p>「물」 1</p>" in both and ">문헌</a>" not in both and '<h2><a href="/shelf/p/common">내 서재</a>' in both
         evil = c.get("/shelf/ideas-common", params={"q": "<script>"}).text
         assert "<script>alert" not in evil and "&lt;script&gt;alert(1)&lt;/script&gt;" in c.get("/shelf/ideas-common").text

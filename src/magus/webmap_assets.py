@@ -112,11 +112,6 @@ border-left:4px solid var(--ruby);border-radius:10px;padding:4px 16px;box-shadow
 .pp-hint{color:var(--ink2);font-size:15px;margin:4px 0 8px}
 .pp-set{border-top:1px solid var(--line);padding-top:4px}.pp-set>summary{font-weight:600;color:var(--ink2);min-height:44px;display:flex;align-items:center}
 .pp-set h3{font-size:16px;margin:12px 0 4px}.pp-lines{margin:4px 0;padding-left:20px}.pp-lines li{margin:4px 0}
-.pp-book{border-top:2px solid var(--line);margin-top:12px;padding-top:4px}
-.bp-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
-.bp-title{margin:8px 0;font-size:20px}.bp-title:focus{outline:none}
-.bp-close{display:inline-flex;align-items:center;min-height:40px;padding:8px 16px;border-radius:9999px;border:1px solid var(--primary);text-decoration:none}
-.bp-frame{display:block;width:100%;height:max(560px,75vh);border:1px solid var(--line);border-radius:8px;background:var(--canvas)}
 a.book.lifting{opacity:.4}
 .ghost{position:fixed!important;left:0;top:0;pointer-events:none;z-index:50;transform:translate(-50%,-60%) rotate(-4deg);opacity:.92;list-style:none}
 """
@@ -154,8 +149,6 @@ MAP_SCRIPT = r"""<script>
   var viewEl = document.querySelector(".map-view"), world = viewEl.querySelector(".world");
   var svg = world.querySelector("svg.edges"), band = svg.querySelector("line.band"), cut = world.querySelector(".edge-cut");
   var say = viewEl.querySelector(".map-say"), panel = document.getElementById("panel");
-  var bookBox = document.getElementById("book-panel"), frame = bookBox.querySelector("iframe");
-  var bookTitle = document.getElementById("bp-title"), closeLink = bookBox.querySelector(".bp-close");
   var moveForm = document.getElementById("move-form");
   var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var pos = {};
@@ -243,12 +236,10 @@ MAP_SCRIPT = r"""<script>
   cut.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
 
   // ---- 주소와 패널 ----
-  var state = {node: body.getAttribute("data-node") || "", book: body.getAttribute("data-book") || "", at: body.getAttribute("data-at") || ""};
+  var state = {node: body.getAttribute("data-node") || ""};
   function url(s) {
     var q = [];
     if (s.node) q.push("node=" + encodeURIComponent(s.node));
-    if (s.book) q.push("book=" + encodeURIComponent(s.book));
-    if (s.at) q.push("at=" + encodeURIComponent(s.at));
     if (pm.getAttribute("data-view") !== "auto") q.push("view=" + pm.getAttribute("data-view"));
     return D.page + (q.length ? "?" + q.join("&") : "");
   }
@@ -259,10 +250,6 @@ MAP_SCRIPT = r"""<script>
     var el = id && nodeEl(id);
     if (el) { el.classList.add("on"); el.setAttribute("aria-current", "true"); }
   }
-  function closeBook(silent) {
-    bookBox.hidden = true; frame.src = "about:blank";
-    if (!silent) push({node: state.node, book: "", at: ""});
-  }
   function openNode(id, opts) {
     opts = opts || {};
     markNode(id);
@@ -272,45 +259,20 @@ MAP_SCRIPT = r"""<script>
         var box = document.getElementById("pp-node");
         box.insertAdjacentHTML("beforebegin", h); box.remove(); wirePanel();
         if (opts.refresh) return;
-        closeBook(true);
-        push({node: id, book: "", at: ""});
+        push({node: id});
         var t = document.getElementById("pp-title");
         if (t) t.focus({preventScroll: true});
         if (window.matchMedia("(max-width:1199px)").matches) panel.scrollIntoView({block: "start", behavior: reduce ? "auto" : "smooth"});
       });
   }
-  var first = "", loads = 0;
-  function openBook(a, title) {
-    var key = a.getAttribute("data-key") || "", href = a.getAttribute("href");
-    title = title || a.getAttribute("data-name") || a.textContent.trim();
-    bookBox.hidden = false; bookTitle.textContent = title; frame.title = title; first = href; loads = 0; frame.src = href;
-    closeLink.setAttribute("href", url({node: state.node}));
-    push({node: state.node, book: key, at: key ? "" : href});
-    bookTitle.focus({preventScroll: true});
-    bookBox.scrollIntoView({block: "start", behavior: reduce ? "auto" : "smooth"});
-  }
-  if (!bookBox.hidden) first = state.at ? "" : frame.getAttribute("src");
-  frame.addEventListener("load", function () {
-    loads += 1;
-    var loc;
-    try { loc = frame.contentWindow.location; } catch (e) { return; }
-    if (!loc || loc.href === "about:blank") return;
-    var here = loc.pathname + loc.search;
-    if (state.book && first && here !== first && here.indexOf("/shelf/") === 0) push({node: state.node, book: state.book, at: here}, true);
-    else if (state.book && here === first && state.at) push({node: state.node, book: state.book, at: ""}, true);
-    if (loads > 1 && state.node) openNode(state.node, {refresh: true});  // 게시판에서 적거나 고친 뒤 책장의 수를 맞춘다
-  });
-  closeLink.addEventListener("click", function (e) { e.preventDefault(); closeBook(false); });
 
-  // ---- 패널의 책: 누르면 열고, 끌어 지도의 노드에 놓으면 옮긴다 ----
+  // ---- 패널의 책: 누르면 그 책의 페이지로(보통 링크), 끌어 지도의 노드에 놓으면 옮긴다 ----
   function wirePanel() {
     var box = document.getElementById("pp-node");
     if (!box) return;
     box.querySelectorAll("a.book").forEach(function (a) {
-      a.addEventListener("click", function (e) {
-        if (a.getAttribute("data-dragged")) { e.preventDefault(); a.removeAttribute("data-dragged"); return; }
-        e.preventDefault();
-        openBook(a, a.classList.contains("add") ? "책 추가" : "");
+      a.addEventListener("click", function (e) {  // 끌어 옮긴 뒤의 눌림만 막는다
+        if (a.getAttribute("data-dragged")) { e.preventDefault(); a.removeAttribute("data-dragged"); }
       });
       if (a.getAttribute("data-book")) wireBookDrag(a);
     });

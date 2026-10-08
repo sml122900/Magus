@@ -199,6 +199,16 @@ def _mini_docx(path: Path, comment: str) -> Path:
     return path
 
 
+def _import(data_dir: Path, user: str, path: Path) -> None:
+    from magus.book.importer import import_manuscript  # noqa: PLC0415
+
+    store = LocalStore(data_dir)
+    try:
+        import_manuscript(store, user, path, project_id="synth")
+    finally:
+        store.close()
+
+
 def test_web_pages_are_per_user_even_with_same_project_id(server_proc, fake_issuer, tmp_path: Path):  # noqa: F811
     issuer, issuer_state, _ = fake_issuer
     base, data_dir, _ = server_proc({
@@ -214,8 +224,7 @@ def test_web_pages_are_per_user_even_with_same_project_id(server_proc, fake_issu
             store.create_project(who, f"{who}의 층", project_id="synth")
         store.close()
         alice.post("/inbox/upload", data={"csrf": a_csrf}, files={"files": ("원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes())})
-        alice.post("/shelf/manuscript", data={"csrf": a_csrf, "floor": "synth"},
-                   files={"file": ("원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")})
+        _import(data_dir, "alice", FIXTURES / "닿으려는_종_합성.docx")  # 게시판 첨부 → Claude의 book_import와 같은 일(2026-10-09)
         # 밥: 앨리스가 올린 파일을 지우지 못하고, 이름에 경로를 넣어 올리지도 못한다
         for name in ("../alice/inbox/원고.docx", "..\\alice\\inbox\\원고.docx", "원고.docx"):
             bob.post("/inbox/delete", data={"csrf": b_csrf, "name": name})
@@ -226,9 +235,7 @@ def test_web_pages_are_per_user_even_with_same_project_id(server_proc, fake_issu
         assert "올린 문서가 없습니다" in bob.post("/book/export", data={"csrf": b_csrf, "project_id": "synth"}).text  # 밥의 층은 아직 비었다
         # 밥도 같은 id(synth)의 자기 층에 원고 책을 올린다
         bob.post("/inbox/upload", data={"csrf": b_csrf}, files={"files": ("밥.docx", b"x")})
-        made = bob.post("/shelf/manuscript", data={"csrf": b_csrf, "floor": "synth"},
-                        files={"file": ("밥.docx", _mini_docx(tmp_path / "b.docx", "밥의 코멘트").read_bytes(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")})
-        assert made.status_code == 303 and made.headers["location"] == "/shelf/book/synth?done=imported"
+        _import(data_dir, "bob", _mini_docx(tmp_path / "b.docx", "밥의 코멘트"))
         tabs = {"/book": "chapters", "/issues": "issues", "/checklist": "cites", "/questions": "cites&view=questions"}
         pages = {who: {**{old: c.get(f"/shelf/book/synth?tab={tab}").text for old, tab in tabs.items()}, "/inbox": c.get("/me/files").text}
                  for who, c in (("alice", alice), ("bob", bob))}
@@ -326,12 +333,12 @@ def test_shelf_pages_show_only_own_shelf(server_proc, fake_issuer):  # noqa: F81
     assert "밥만의" not in "".join(r.text for r in pages["alice"].values())
     assert 'aria-label="생각, 글 1개"' in pages["alice"]["/shelf/p/book?node=b-ideas-book"].text
     assert 'aria-label="생각, 글 2개"' in pages["bob"]["/shelf/p/book?node=b-ideas-book"].text
-    # 남의 항목 id로 들어가면 없는 항목(404)이다. 자기 항목은 펼쳐진 채 보인다
+    # 남의 항목 id로 들어가면 없는 글(404)이다. 자기 글은 글 보기 페이지로
     assert pages["alice"]["/shelf/ideas/20261006000000002-aaaaaa"].status_code == 404
     assert pages["bob"]["/shelf/ideas/20261006000000001-aaaaaa"].status_code == 404
     assert pages["alice"]["/shelf/ideas/20261006000000009-cccccc"].status_code == 404
-    assert "open data-here" in pages["alice"]["/shelf/ideas/20261006000000001-aaaaaa"].text
-    assert "open data-here" in pages["bob"]["/shelf/ideas/20261006000000009-cccccc"].text
+    assert '<p class="post-meta">' in pages["alice"]["/shelf/ideas/20261006000000001-aaaaaa"].text
+    assert '<p class="post-meta">' in pages["bob"]["/shelf/ideas/20261006000000009-cccccc"].text
 
 
 def _fill_more(store: LocalStore, user: str, word: str) -> None:

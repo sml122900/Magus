@@ -1,5 +1,5 @@
-"""웹 프로젝트·지도(#95): 프로젝트 목록, 프로젝트 화면(지도 + 패널: 노드의 책장 → 책의 게시판), 지도 바꾸기(폼·스크립트),
-책 옮기기·되돌리기, 옛 주소, 검색, 내려받기(zip), 격리."""
+"""웹 프로젝트·지도(#95): 프로젝트 목록, 프로젝트 화면(지도 + 패널: 노드의 책장. 책을 누르면 별도 페이지의 게시판, 2026-10-09),
+지도 바꾸기(폼·스크립트), 책 옮기기·되돌리기, 옛 주소, 검색, 내려받기(zip), 격리."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def _query(response) -> dict[str, str]:
 
 def test_project_list_and_new_project(server_proc):  # noqa: F811
     base, data_dir, _ = server_proc({})
-    _seed(data_dir)
+    ids = _seed(data_dir)
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         listed = c.get("/login?next=/shelf").text
         csrf = _csrf(listed)
@@ -57,10 +57,11 @@ def test_project_list_and_new_project(server_proc):  # noqa: F811
         made = c.post("/shelf/projects", data={"csrf": csrf, "title": "다음 책 <b>메모</b>"})
         assert re.search(r"/shelf/p/[0-9a-f]{8}\?node=center&done=project$", str(made.url))
         assert "프로젝트를 만들었습니다." in made.text and '<h1 class="pm-title">다음 책 &lt;b&gt;메모&lt;/b&gt;</h1>' in made.text
-        # 모든 프로젝트에서 찾기: 프로젝트 → 노드 · 책으로 묶는다. 누르면 그 노드·책이 열린 지도로
+        # 모든 프로젝트에서 찾기: 프로젝트 → 노드 · 책으로 묶는다. 책은 그 책의 게시판, 글은 글 보기 페이지로
         found = c.get("/shelf", params={"q": "제이콥스"}).text
         assert '<h2><a href="/shelf/p/city">도시는 어떻게 태어났나</a>' in found and "<p>「제이콥스」 1</p>" in found
-        assert re.search(r'<a href="/shelf/p/city\?node=[^"]+&amp;book=\d{17}-[0-9a-f]{6}">인물</a>', found)
+        assert f'<a href="/shelf/{ids["person"]}">인물</a>' in found
+        assert f'<a class="post" href="/shelf/{ids["person"]}/20261007000000000-aaaaaa"><span class="pt"><mark>제이콥스</mark></span>' in found
 
 
 def test_project_page_map_panel_and_board(server_proc):  # noqa: F811
@@ -77,30 +78,32 @@ def test_project_page_map_panel_and_board(server_proc):  # noqa: F811
         assert '<section class="map-list" aria-label="노드 목록">' in page and 'id="map-data"' in page
         assert '<details class="pm-new" id="new-node"><summary class="btn primary-ish">+ 노드</summary>' in page
         assert '<optgroup label="내 서재">' in page and '<optgroup label="강과 사람">' in page  # 연결 노드로 고를 다른 프로젝트의 노드
-        assert '<h2 class="pp-title" id="pp-title" tabindex="-1">노드를 고르세요</h2>' in page and 'id="book-panel"' in page
-        # 노드를 열면 패널에 그 노드의 정면 책장, 책을 열면 그 아래 게시판(iframe)
+        assert '<h2 class="pp-title" id="pp-title" tabindex="-1">노드를 고르세요</h2>' in page
+        assert 'id="book-panel"' not in page and "<iframe" not in page  # 옆 패널의 게시판 자리는 없앴다(책은 별도 페이지)
+        # 노드를 열면 패널에 그 노드의 정면 책장(책 목록 + '새 책' 하나). 책은 그 책의 게시판 페이지로 가는 보통 링크
         node = c.get("/shelf/p/city", params={"node": ids["person_node"]}).text
         assert 'aria-current="true"' in node and 'aria-label="인물, 글 1개"' in node
-        assert f'data-key="{ids["person"]}"' in node and f'href="/shelf/add?project=city&amp;node={ids["person_node"]}"' in node
+        assert re.search(rf'<a class="book[^"]*" href="/shelf/{ids["person"]}"[^>]*data-key="{ids["person"]}"', node)
+        assert f'href="/shelf/new?project=city&amp;node={ids["person_node"]}" aria-label="새 책"' in node and "/shelf/add" not in node
         assert "<summary>⚙ 설정</summary>" in node and "<h3>선</h3>" in node and "<h3>컨텍스트</h3>" in node
         assert "없음 — " not in node  # 노드에 컨텍스트가 없으면 머리에 아무것도 보이지 않는다(#97)
         thoughts = c.get("/shelf/p/city", params={"node": ids["ideas_node"]}).text
         assert 'aria-label="생각, 컨텍스트 생각 메모, 글 1개"' in thoughts
         assert '<span class="band top" aria-hidden="true">생각 메모</span>' in thoughts  # 책등 위 띠 = 컨텍스트 이름
-        book = c.get("/shelf/p/city", params={"node": ids["person_node"], "book": ids["person"]}).text
-        assert f'<iframe class="bp-frame" title="인물" src="/shelf/{ids["person"]}"></iframe>' in book
-        assert f'data-node="{ids["person_node"]}" data-book="{ids["person"]}"' in book
-        by_at = c.get("/shelf/p/city", params={"at": f"/shelf/{ids['person']}/20261007000000000-aaaaaa"}).text  # 게시판 자리 주소만으로
-        assert f'src="/shelf/{ids["person"]}/20261007000000000-aaaaaa"' in by_at and 'aria-label="인물, 글 1개"' in by_at
+        book = c.get("/shelf/p/city", params={"book": ids["person"]}).text  # book만 주면(옮긴 뒤 알림) 그 책이 꽂힌 노드를 연다
+        assert f'<div class="pm-body" data-node="{ids["person_node"]}">' in book or f'data-node="{ids["person_node"]}">' in book
+        assert "data-book=" not in book.split('id="map-data"')[0].split('class="pm-body"')[1][:200]
+        by_at = c.get("/shelf/p/city", params={"at": f"/shelf/{ids['person']}/20261007000000000-aaaaaa"})  # 옛 게시판 자리 주소 → 글 보기
+        assert str(by_at.url).endswith(f"/shelf/{ids['person']}/20261007000000000-aaaaaa") and "<h1>제이콥스</h1>" in by_at.text
         fragment = c.get("/shelf/p/city/panel", params={"node": "center"}).text  # 스크립트가 노드를 열 때 받는 패널
         assert fragment.startswith('<div class="pp-node" id="pp-node" data-node="center">') and 'data-key="ms.city"' in fragment
         # 연결 노드: 원본의 책이 보이고, 책 추가는 원본 노드로
         link = next(n for n in LocalStore(data_dir).get_map("alice", "city").nodes if n.link)
         linked = c.get("/shelf/p/city", params={"node": link.id}).text
-        assert "→ 「내 서재」의 「문체」" in linked and 'href="/shelf/add?project=common&amp;node=' in linked
+        assert "→ 「내 서재」의 「문체」" in linked and 'href="/shelf/new?project=common&amp;node=' in linked
         # 목록 보기(휴대폰·키보드): 노드 → 책
         listed = c.get("/shelf/p/city", params={"view": "list"}).text
-        assert '<div class="pm" data-view="list">' in listed and f'<a href="/shelf/p/city?node={ids["person_node"]}&amp;book={ids["person"]}#book-panel">인물</a>' in listed
+        assert '<div class="pm" data-view="list">' in listed and f'<a href="/shelf/{ids["person"]}">인물</a>' in listed
         assert " 책 · " not in listed and "원고 책" not in listed  # 책 옆 작은 글은 '컨텍스트 · 수'(#96, 종류 이름 없음)
         assert c.get("/shelf/p/nothing").status_code == 404
         # 프로젝트 화면 안에서 찾기: 노드 이름·책 이름·게시판 내용
@@ -108,28 +111,28 @@ def test_project_page_map_panel_and_board(server_proc):  # noqa: F811
         assert '<section class="pm-results" aria-label="찾은 것">' in found and "<mark>제이콥스</mark>" in found
 
 
-def test_old_addresses_and_panel_requests(server_proc):  # noqa: F811
+def test_old_addresses_go_to_pages(server_proc):  # noqa: F811
+    """옛 주소(지도 옆 패널의 게시판 자리 ?at=, 층 주소)는 그 페이지로. 책 화면은 주소창으로 열어도 그대로(지도로 넘기지 않는다)."""
     base, data_dir, _ = server_proc({})
     ids = _seed(data_dir)
     with httpx2.Client(base_url=base, timeout=120) as c:
         c.get("/login?next=/shelf", follow_redirects=True)
         nav = {"sec-fetch-dest": "document", "sec-fetch-mode": "navigate"}
-        # 주소창으로 책 화면을 바로 열면 그 책이 있는 프로젝트 지도로(그 노드·그 책이 열린 채)
         direct = c.get(f"/shelf/{ids['person']}?q=x", headers=nav)
-        assert direct.status_code == 303 and direct.headers["location"] == "/shelf?" + urllib.parse.urlencode({"at": f"/shelf/{ids['person']}?q=x"})
-        located = c.get(direct.headers["location"])
-        assert located.status_code == 303 and located.headers["location"].startswith(f"/shelf/p/city?book={ids['person']}&at=")
+        assert direct.status_code == 200 and '<nav class="trail" aria-label="위치">' in direct.text
+        old = c.get("/shelf?" + urllib.parse.urlencode({"at": f"/shelf/{ids['person']}?q=x"}))
+        assert old.status_code == 303 and old.headers["location"] == f"/shelf/{ids['person']}?q=x"
+        inner = c.get("/shelf/p/city?" + urllib.parse.urlencode({"node": ids["person_node"], "book": ids["person"], "at": f"/shelf/{ids['person']}"}))
+        assert inner.status_code == 303 and inner.headers["location"] == f"/shelf/{ids['person']}"
+        for bad in ("https://evil.example/x", "//evil.example/x", "/shelf/p/river", "/shelf/../me"):  # 책장 안의 책 화면만
+            assert c.get("/shelf/p/city", params={"at": bad}).status_code == 200, bad
         assert c.get("/shelf/floor/city").headers["location"] == "/shelf/p/city"  # 옛 층 주소
         assert c.get("/shelf", params={"floor": "river", "done": "trash"}).headers["location"] == "/shelf/p/river?done=trash"
-        assert c.get("/shelf/doc/x/docx", headers=nav).status_code == 404  # 내려받기는 넘기지 않는다
-        assert c.get(f"/shelf/{ids['person']}").status_code == 200  # Sec-Fetch 머리가 없는 브라우저는 예전처럼
-        # 게시판 자리(iframe) 안: 머리(메뉴) 없이. 그 안에서 프로젝트 화면이 열리면 바깥 화면을 그 주소로
-        panel = c.get(f"/shelf/{ids['person']}", headers={"sec-fetch-dest": "iframe"}).text
-        assert '<body class="embed" data-screen="board">' in panel and "help-btn" not in panel and '<header class="site">' not in panel
-        out = c.get("/shelf/p/city?done=trash", headers={"sec-fetch-dest": "iframe"}).text
-        assert '<a id="go" href="/shelf/p/city?done=trash" target="_top">' in out and "window.top.location.replace" in out
+        panel = c.get(f"/shelf/{ids['person']}", headers={"sec-fetch-dest": "iframe"}).text  # 머리 없는 모양(iframe 전용)은 없앴다
+        assert '<body class="embed"' not in panel and '<header class="site">' in panel
+        assert "window.top.location" not in c.get("/shelf/p/city?done=trash", headers={"sec-fetch-dest": "iframe"}).text
         edited = c.post(f"/shelf/edit/{ids['person']}", data={"csrf": _csrf(c.get("/shelf").text), "name": "사람", "color": "#7a4e2d"})
-        assert edited.headers["location"] == f"/shelf/p/city?book={ids['person']}&done=edit&c={ids['person']}"
+        assert edited.headers["location"] == f"/shelf/{ids['person']}?done=edit"  # 책 설정을 저장하면 그 책의 게시판으로
 
 
 def test_map_edits_with_forms_and_script(server_proc):  # noqa: F811
@@ -225,7 +228,9 @@ def test_move_books_between_nodes_and_undo(server_proc):  # noqa: F811
         c.get("/login?next=/shelf")
         library = LocalStore(data_dir).source_book("alice", COMMON)
         refs = c.get(f"/shelf/{library}").text  # 「내 서재」의 문헌 책(없어서 만든 「참고문헌」)
-        assert "「도시는 어떻게 태어났나」·「강과 사람」 올린 문서가 함께 쓰는 문헌이라 「내 서재」로 옮김" in refs
+        assert f'href="/shelf/{library}/jacobs1969"' in refs
+        post = c.get(f"/shelf/{library}/jacobs1969").text  # 글 보기에 옮긴 시각과 이유
+        assert "「도시는 어떻게 태어났나」·「강과 사람」 올린 문서가 함께 쓰는 문헌이라 「내 서재」로 옮김" in post
 
 
 def test_export_zip(server_proc):  # noqa: F811

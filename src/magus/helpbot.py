@@ -51,8 +51,8 @@ PREAMBLE = """너는 Magus 웹 화면의 도움말이다. Magus는 책을 쓰는
 
 # 화면 이름(정해 둔 목록만 API로 보낸다. 주소에 든 프로젝트·책 이름이나 id는 보내지 않는다)
 SCREENS = {
-    "projects": "프로젝트 목록", "map": "프로젝트 지도", "board": "게시판", "item_edit": "글 고치기", "trash": "휴지통 확인",
-    "add": "책 추가", "new_book": "새 책", "book_settings": "책 설정",
+    "projects": "프로젝트 목록", "map": "프로젝트 지도", "board": "게시판", "post": "글 보기", "write": "글쓰기",
+    "item_edit": "글 고치기", "trash": "휴지통 확인", "new_book": "새 책", "book_settings": "책 설정",
     "doc_chapters": "올린 문서 · 장 목록", "doc_issues": "올린 문서 · 확인 요청", "doc_cites": "올린 문서 · 인용 상태",
     "doc_questions": "올린 문서 · 답해 주실 질문", "doc_editions": "올린 문서 · 수정본 이력", "made_doc": "올린 문서에서 만든 문서",
     "me": "내 정보", "files": "올린 파일", "contexts": "자주 쓰는 컨텍스트", "node_trash": "휴지통(지운 노드)", "other": "기타",
@@ -74,8 +74,10 @@ def screen_key(path: str, query: str = "") -> str:
     head = rest[0]
     if head == "p":
         return "node_trash" if rest[2:3] == ["trash"] else "map"
-    if head in ("add", "new"):
-        return {"add": "add", "new": "new_book"}[head]
+    if head in ("add", "new"):  # 옛 '책 추가'는 새 책으로 넘어간다(2026-10-09)
+        return "new_book"
+    if head == "write":
+        return "write"
     if head == "edit":
         return "book_settings"
     if head == "trash":
@@ -88,14 +90,12 @@ def screen_key(path: str, query: str = "") -> str:
         return "made_doc"
     if len(rest) == 3 and rest[2] in ("edit", "trash"):
         return "item_edit" if rest[2] == "edit" else "trash"
-    return "board" if len(rest) <= 2 else "other"
+    return {1: "board", 2: "post"}.get(len(rest), "other")
 
 
-def screen_label(key: str, sub: str = "") -> str:
-    """브라우저가 보낸 화면 열쇠(지도 화면이면 패널 안 화면도) → 이름. 목록에 없는 값은 '기타'."""
-    main = SCREENS.get(key, SCREENS["other"])
-    inner = SCREENS.get(sub)
-    return f"{main} · 패널: {inner}" if inner and sub != key else main
+def screen_label(key: str) -> str:
+    """브라우저가 보낸 화면 열쇠 → 이름. 목록에 없는 값은 '기타'(책은 별도 페이지라 패널 안 화면은 없다, 2026-10-09)."""
+    return SCREENS.get(key, SCREENS["other"])
 
 
 def load_docs(folder: Path) -> str:
@@ -248,7 +248,7 @@ def _plain(text: str) -> str:
     return re.sub(r"\*\*(.+?)\*\*", r"\1", text)
 
 
-# ---- 화면 부품(Web._page가 로그인한 화면에만 붙인다. 패널(iframe) 안 화면에는 붙이지 않는다) ----------------------
+# ---- 화면 부품(Web._page가 로그인한 화면에만 붙인다) ----------------------
 
 HELP_STYLE = """
 .help-btn{position:fixed;right:16px;bottom:16px;z-index:50;width:52px;height:52px;min-height:52px;padding:0;border-radius:50%;
