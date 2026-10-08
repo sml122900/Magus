@@ -69,7 +69,7 @@ def test_screen_names_come_from_a_fixed_list():
     assert screen_key("/shelf/book/x", "tab=cites&view=questions") == "doc_questions"
     assert screen_key("/shelf/abc") == "board" and screen_key("/shelf/abc/def") == "post" and screen_key("/shelf/write/abc") == "write"
     assert screen_key("/shelf/add") == "new_book" and screen_key("/shelf/new") == "new_book"
-    assert screen_key("/shelf/abc/def/edit") == "item_edit" and screen_key("/shelf/edit/abc") == "book_settings"
+    assert screen_key("/shelf/abc/def/edit") == "other" and screen_key("/shelf/edit/abc") == "book_settings"  # 웹의 글 고치기는 없앴다
     assert screen_key("/me/files") == "files" and screen_key("/login") == "other"
     assert screen_label("post") == "글 보기" and screen_label("<script>") == "기타"
     assert screen_label("<script>앨리스의 책") == "기타"  # 브라우저가 보낸 값은 목록에 있을 때만

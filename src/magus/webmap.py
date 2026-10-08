@@ -641,7 +641,8 @@ class MapPages:
 
     # ---- 노드 휴지통(#97) ------------------------------------------------------------------------
     async def project_trash(self, request: Request) -> Response:
-        """이 프로젝트의 휴지통: 지운 날짜·노드 이름과 [되살리기]. 되살리면 원래 자리·선·책·글·첨부가 돌아온다."""
+        """이 프로젝트의 휴지통: 지운 날짜·노드 또는 글과 [되살리기]. 노드는 원래 자리·선·책·글·첨부가, 글은 그 책에 응답한 글·첨부와
+        함께 돌아온다(2026-10-09). 글은 이 프로젝트의 책에 든 것만, 함께 옮긴 응답 글은 따로 보이지 않는다."""
         session = self.user_of(request)
         if not session:
             return self._need_login(request)
@@ -655,6 +656,19 @@ class MapPages:
                 form = await self._form(request, session)
             except PermissionError:
                 return self._map_page("휴지통", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            if post := str(form.get("item") or ""):  # 글 되살리기
+                book = post.partition("/")[0]
+                try:
+                    owner = await run_in_threadpool(self.store.get_category, uid, book) if book else None
+                except ValueError:
+                    owner = None
+                if owner is None or owner.floor != floor.id:
+                    return RedirectResponse(with_query(here, err="missing"), status_code=303)
+                try:
+                    await run_in_threadpool(self.store.restore_trash, uid, "category_item", post)
+                except ValueError:
+                    return RedirectResponse(with_query(here, err="missing"), status_code=303)
+                return RedirectResponse(f"/shelf/{post}?done=restored", status_code=303)
             ref = str(form.get("node") or "")
             if not ref.startswith(f"{floor.id}/"):
                 return RedirectResponse(with_query(here, err="missing"), status_code=303)
@@ -666,7 +680,7 @@ class MapPages:
                 name = str(e.args[1]) if len(e.args) > 1 else ""
                 return RedirectResponse(with_query(here, err="name" if name else "missing", name=name), status_code=303)
             return RedirectResponse(state_url(floor.id, node=restored.partition("/")[2], done="restored"), status_code=303)
-        items = [t for t in await run_in_threadpool(self.store.list_trash, uid) if t.kind == "node" and t.id.startswith(f"{floor.id}/")]
+        items = await run_in_threadpool(self._trash_rows, uid, floor)
         params = request.query_params
         message = ""
         if params.get("err") == "name":
@@ -679,12 +693,28 @@ class MapPages:
         csrf = self._csrf_input(session)
         rows = "".join(
             f'<li><time datetime="{html.escape(t.trashed_at)}">{local_time(t.trashed_at, "%Y-%m-%d %H:%M")}</time> '
-            f"<b>{html.escape(t.preview)}</b>"
-            f'<form method="post" action="{here}" class="inline">{csrf}<input type="hidden" name="node" value="{html.escape(t.id)}">'
-            "<button>되살리기</button></form></li>" for t in items)
+            f"<b>{html.escape(label)}</b>"
+            f'<form method="post" action="{here}" class="inline">{csrf}'
+            f'<input type="hidden" name="{"node" if t.kind == "node" else "item"}" value="{html.escape(t.id)}">'
+            "<button>되살리기</button></form></li>" for t, label in items)
         body = (f'<p class="crumb"><a href="{html.escape(state_url(floor.id))}">← 「{html.escape(project_name(floor))}」</a></p>{message}'
                 + (f'<ol class="trash-list">{rows}</ol>' if rows else '<p class="empty">휴지통이 비었습니다.</p>'))
         return self._map_page("휴지통", body, session, css=TRASH_STYLE)
+
+    def _trash_rows(self, uid: str, floor: Floor) -> list[tuple[Any, str]]:
+        """(휴지통 항목, 보일 이름). 이 프로젝트의 노드와, 이 프로젝트의 책에 든 글(함께 옮긴 응답 글은 빼고). 최근 것부터."""
+        books = {c.id: c for c in self.store.list_categories(uid, floors=[floor.id])}
+        out = []
+        for t in self.store.list_trash(uid):
+            if t.kind == "node" and t.id.startswith(f"{floor.id}/"):
+                out.append((t, t.preview))
+            elif t.kind == "category_item" and not t.with_id and (book := books.get(t.id.partition("/")[0])) is not None:
+                replies = sum(1 for x in self.store.list_trash(uid) if x.kind == "category_item" and x.with_id
+                              and x.id.partition("/")[0] == book.id and x.with_id == t.id.partition("/")[2])
+                title = one_line(t.preview) or "제목 없는 글"
+                out.append((t, f"글 「{title[:60]}{'…' if len(title) > 60 else ''}」 · 책 「{book.name}」"
+                            + (f" · 응답한 글 {replies}개 함께" if replies else "")))
+        return out
 
     # ---- 책 옮기기·되돌리기 ---------------------------------------------------------------------
     def _move_form(self, session: tuple[str, str], here: str) -> str:

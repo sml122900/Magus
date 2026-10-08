@@ -5,7 +5,8 @@
 - 게시판(/shelf/<책>): 한 줄 = 제목 · 첨부 표시(📎, 그림이면 작은 미리보기) · 날짜. 최신 글이 위, 20개씩, 오른쪽 위 '글쓰기' 하나.
   문헌 글(서지가 있는 글)도 같은 목록에 섞인다(제목은 서지). 거르기(전체·나·AI)·찾기·책 설정(⚙)은 그대로.
 - 글쓰기(/shelf/write/<책>): 제목·본문·첨부. 파일을 끌어다 놓거나 '파일 고르기', 휴대폰은 '사진 찍기'(capture). 누가 = 저자.
-- 글 보기(/shelf/<책>/<글>): 제목·본문·그림(글 안에 바로)·파일 목록(이름을 누르면 내려받기).
+- 글 보기(/shelf/<책>/<글>): 제목·본문·그림(글 안에 바로)·파일 목록(이름을 누르면 내려받기)·🗑(화면 안 확인 창 → 휴지통.
+  응답한 글·첨부도 함께, 되살리기는 프로젝트의 휴지통 화면). 웹에서 글 고치기·원문 확인 체크는 없다(MCP 도구는 그대로).
   칸(인물·사례 등)은 본문 아래 "칸: 값" 줄. 이유·위치·쓸 부분(일반 글)·태그·원문 확인 표시는 파일에 그대로 있고 보이지 않는다.
 - 모든 출력은 이스케이프하고, 첨부 주소는 세션의 사용자 폴더에서만 찾는다(magus.webshelf.shelf_file).
 """
@@ -38,8 +39,7 @@ from magus.webshelf import (
 BOARD_SIZE = 20  # 게시판 한 쪽
 SEP = ' <span aria-hidden="true">›</span> '
 WHEN = "%Y-%m-%d %H:%M"
-DONE = {"made": "만들었습니다.", "edit": "저장했습니다.", "edited": "저장했습니다.", "trashed": "휴지통으로 옮겼습니다.",
-        "posted": "저장했습니다."}
+DONE = {"made": "만들었습니다.", "edit": "저장했습니다.", "trashed": "휴지통으로 옮겼습니다.", "restored": "되살렸습니다."}
 
 BOARD_STYLE = """
 .trail{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;margin:0 0 4px;color:var(--ink2);font-size:15px}
@@ -68,6 +68,12 @@ text-decoration:none;padding:0 10px}.pages [aria-current]{background:var(--prima
 .post-body blockquote{margin:8px 0;padding:4px 12px;border-left:3px solid var(--line);color:var(--ink2)}
 .pics{display:grid;gap:12px;margin:12px 0}.pics img{display:block;max-width:100%;height:auto;border-radius:8px;border:1px solid var(--line)}
 .post-acts{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:12px 0}
+.post-acts details.del{position:relative}
+.post-acts details.del>summary{list-style:none;display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;
+border-radius:9999px;cursor:pointer;font-size:20px;border:1px solid var(--line);background:var(--canvas)}
+.post-acts details.del>summary::-webkit-details-marker{display:none}.post-acts details.del>summary:hover{background:var(--soft)}
+.post-acts .del-box{margin-top:8px;width:min(380px,100%);background:var(--canvas);border:1px solid var(--line);border-left:4px solid var(--ruby);
+border-radius:10px;padding:4px 16px;box-shadow:0 8px 24px rgb(0 0 0/.18)}.post-acts .del-box p{margin:10px 0}
 .write-form textarea{min-height:220px}
 .dropzone{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:16px;border:2px dashed var(--mute);border-radius:12px;background:var(--soft)}
 .dropzone.over{border-color:var(--primary);background:#ecebff}
@@ -83,6 +89,18 @@ ul.chosen img{width:40px;height:40px;object-fit:cover;border-radius:4px}
 @media (max-width:767px){a.post{grid-template-columns:minmax(0,1fr) auto;padding:10px 12px}.pd{grid-column:1/-1;text-align:left;font-size:14px}
 .board-bar .write-btn{margin-left:0}}
 """
+
+# 글 보기의 🗑 확인 창: 열면 첫 단추로 초점, Esc로 닫는다(스크립트가 없어도 details라 열고 닫힌다)
+DEL_SCRIPT = """<script>
+document.addEventListener("toggle", function (e) {
+  var d = e.target;
+  if (d.matches && d.matches("details.del") && d.open) { var b = d.querySelector(".del-box button"); if (b) b.focus(); }
+}, true);
+document.addEventListener("keydown", function (e) {
+  if (e.key !== "Escape") return;
+  document.querySelectorAll("details.del[open]").forEach(function (d) { d.open = false; d.querySelector("summary").focus(); });
+});
+</script>"""
 
 # 글쓰기: 끌어다 놓은 파일을 '파일 고르기' 칸에 더하고, 고른 파일(그림은 작은 미리보기)을 보인다. 스크립트가 꺼져 있어도 고르기·사진 찍기는 된다
 WRITE_SCRIPT = """<script>
@@ -272,7 +290,8 @@ class BoardPages:
         base = f"/shelf/{c.id}"
         done = DONE.get(params.get("done") or "")
         name = f"「{c.name}」 " if params.get("done") in ("made", "edit") else ""
-        message = f'<p class="msg">{html.escape(name)}{done}</p>' if done else ""
+        trash = (f' <a href="/shelf/p/{urllib.parse.quote(c.floor)}/trash">휴지통</a>' if params.get("done") == "trashed" else "")
+        message = f'<p class="msg">{html.escape(name)}{done}{trash}</p>' if done else ""
         items = self.store.list_category_items(uid, c.id)
         links = []
         if items and any(i.author == "ai" for i in items):
@@ -384,7 +403,7 @@ class BoardPages:
                 + (f'<div class="post-body">{text}</div>' if text.strip() else "")
                 + (f'<div class="pics">{pictures}</div>' if pictures else "")
                 + (f'<ul class="files" aria-label="첨부">{others}</ul>' if others else "")
-                + self._post_actions(uid, session, kind, obj, link))
+                + self._post_actions(uid, session, kind, obj, link) + DEL_SCRIPT)
         return title, body
 
     # ---- 글쓰기 ---------------------------------------------------------------------------------

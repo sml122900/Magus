@@ -1,17 +1,18 @@
-"""웹 책장(2026-10-06, #92 → #96): 노드에 꽂힌 책을 양장본으로 보이고, 책을 누르면 게시판형 목록
-(한 줄 = 제목 · 작성 시각 · 보조 정보, 누르면 그 자리에서 펼침)과 검색이 열린다.
+"""웹 책장(2026-10-06, #92 → #96 → 2026-10-09): 노드에 꽂힌 책을 양장본으로 보이고, 책을 누르면 별도 페이지의 게시판
+(magus.webboard: 한 줄 = 제목 · 첨부 표시 · 날짜, 20개씩, 글쓰기·글 보기 페이지)과 검색이 열린다.
 
 #96(종류를 없애고 컨텍스트로): 책에는 종류가 없다. 모든 책이 같은 게시판(글 + 그 책의 문헌 글)이고, 책등 위 띠에는 컨텍스트 이름
 (첫 것 + '외 N', 없으면 빈 띠)이 보인다. 게시판 머리에 컨텍스트(누르면 전문)가 있고, 만들기·설정 화면에서 단추로 붙이고 고친다
 (magus.webcontexts). 옛 주소(/shelf/ideas…, ideas.<프로젝트>)는 이전으로 생긴 책(<종류>-<프로젝트>)으로 넘긴다.
 
-- 항목마다 고유 주소(/shelf/ideas/<id>, /shelf/<카테고리 id>/<항목 id> 등)가 있고, 그 주소로 들어오면 그 항목이 펼쳐진 채 보인다.
+- 글마다 고유 주소(/shelf/<책 id>/<글 id>, 옛 /shelf/ideas/<id>는 넘긴다)가 있고, 그 주소가 글 보기 페이지다.
 - 검색은 서버에서 한다(GET ?q=). 두 글자 이상은 기존 FTS 인덱스(2글자 조각)로 찾아 많이 맞은 것부터,
   한 글자는 2글자 조각 색인으로 찾을 수 없어 그 글자가 그대로 들어 있는 항목을 최근 것부터 보인다.
 - 책 만들기·이름 바꾸기·색 바꾸기·휴지통은 이 화면과 대화(category_* 도구) 양쪽에서 된다.
 - #97(오캄의 면도날, 2026-10-08): 화면에는 제목·버튼·입력칸 이름·날짜·개수만 둔다. 설명 문장은 도움말(docs/help, 웹의 '?')로 옮겼다.
   게시판의 글은 제목·본문·첨부만 보이고 쓴다(누가 = 저자). 칸·이유·위치·쓸 부분·태그는 파일에 그대로 두고 보이지 않을 뿐이다.
-  문헌 글에는 '원문 확인' 체크 하나(저자가 원문을 읽었다는 표시. 쓸 부분·서지는 그대로)가 있다. 원문 확인 거르기·넣기 폼은 없다(대화로 된다).
+  2026-10-09: 웹에서 글 고치기와 문헌 글의 '원문 확인' 체크를 없앴다(원문 확인 표시·쓸 부분·서지는 파일에 그대로, MCP 도구로 된다).
+  글 지우기는 글 보기의 🗑(화면 안 확인 창) → 휴지통, 되살리기는 프로젝트의 휴지통 화면(노드와 함께, magus.webmap).
   첨부는 글마다 여러 개(magus.attachments, magus.store.attachments). 본인 것만 보이고(경로는 세션의 사용자로 정한다), 그림·PDF만 바로 연다.
 - 책장 전용 색(책 색 격자·선반 나무색)은 이 파일과 magus.category.rules에만 있다. 다른 화면에는 쓰지 않는다
   (docs/decisions/web-style.md "책장 전용").
@@ -20,7 +21,7 @@
 - 모든 POST는 CSRF 토큰을 확인한다(Web._form). 카테고리 이름·항목 내용은 모든 출력에서 이스케이프한다.
 - 프로젝트(#93 층 → #95): 기본 책은 프로젝트마다 따로 있으므로 주소 이름이 "<종류>.<프로젝트 id>"다(ideas.book, styles.common).
   저자의 카테고리는 id 그대로. 예전 주소(/shelf/ideas, /shelf/ideas/<id>)는 그 항목·종류가 있는 프로젝트의 주소로 넘긴다.
-  프로젝트 목록·지도·노드의 책장(패널)·옮기기·되돌리기는 magus.webmap에 있다. 여기의 목록 화면은 패널 안에 게시판으로 뜬다.
+  프로젝트 목록·지도·노드의 책장(패널)·옮기기·되돌리기·휴지통은 magus.webmap에 있다.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ import html
 import re
 import urllib.parse
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any
 
 from starlette.concurrency import run_in_threadpool
@@ -38,17 +39,14 @@ from starlette.datastructures import UploadFile
 from starlette.requests import Request
 from starlette.responses import FileResponse, RedirectResponse, Response
 
-from magus.attachments import ACCEPT, MAX_FILES, clean_name, kind_of, mb, media_type, size_text
+from magus.attachments import MAX_FILES, clean_name, mb, media_type
 from magus.book_migrate import legacy_book_id
 from magus.contexts import band as context_band
 from magus.floors import COMMON
 from magus.category.rules import (
-    BUILTINS, COLOR_NAMES, CONTENT_MAX, HEX, MAX_CATEGORIES, MAX_MY_COLORS, NEW_COLOR_ORDER,
-    PALETTE, PALETTE_BY_NAME, TEMPLATE_BY_KEY, TITLE_MAX, check_name, name_key,
+    BUILTINS, COLOR_NAMES, HEX, MAX_CATEGORIES, MAX_MY_COLORS, NEW_COLOR_ORDER,
+    PALETTE, PALETTE_BY_NAME, TEMPLATE_BY_KEY, check_name, name_key,
 )
-from magus.ids import utcnow
-from magus.melchior.author_report import cite_label
-from magus.melchior.check import after_refs_changed
 from magus.store import Category, CategoryItem, ShelfSettings, Store
 from magus.webcontexts import CONTEXT_SCRIPT, CONTEXT_STYLE, context_fieldset, contexts_from_form, register_row
 from magus.store.base import Lane
@@ -501,9 +499,7 @@ class ShelfPages:
             ("/shelf/colors", ["POST"], self.shelf_colors),
             ("/shelf/{kind}", ["GET"], self.board_list),  # 책 = 게시판 페이지(webboard)
             ("/shelf/{kind}/{item}", ["GET"], self.post_view),  # 글 보기 페이지(webboard)
-            ("/shelf/{kind}/{item}/edit", ["GET", "POST"], self.shelf_item_edit),
-            ("/shelf/{kind}/{item}/trash", ["GET", "POST"], self.shelf_item_trash),
-            ("/shelf/{kind}/{item}/check", ["POST"], self.shelf_check),  # 문헌 글의 '원문 확인' 체크(#97)
+            ("/shelf/{kind}/{item}/trash", ["POST"], self.shelf_item_trash),  # 글 보기의 🗑(화면 안 확인 창, 2026-10-09)
             ("/shelf/{kind}/{item}/files/{att}", ["GET"], self.shelf_file),  # 첨부 보기·내려받기(#97)
             # 예전 주소(생각·문헌·문체 메뉴)는 책장의 같은 목록으로 넘긴다. 거르기 조건은 그대로 이어 간다.
             ("/ideas", ["GET"], self._moved("ideas")), ("/refs", ["GET"], self._moved("refs")),
@@ -523,8 +519,18 @@ class ShelfPages:
         return self._page(title, body, session, status, current="프로젝트", css=SHELF_STYLE + CONTEXT_STYLE + BOARD_STYLE, lead=lead)
 
     def _post_actions(self, uid: str, session: tuple[str, str], kind: Kind, obj: Any, link: str) -> str:
-        """글 보기 페이지 아래 단추들(글 지우기 🗑는 휴지통 단계에서)."""
-        return ""
+        """글 보기 아래 🗑과 화면 안의 작은 확인 창(노드 삭제와 같은 방식, confirm() 쓰지 않음). 문헌 글에는 없다."""
+        if not isinstance(obj, CategoryItem) or kind.category is None:
+            return ""
+        replies = sum(1 for i in self.store.list_category_items(uid, kind.category.id) if i.parent_id == obj.id)
+        files = len(self.store.list_attachments(uid, f"{kind.category.id}/{obj.id}"))
+        along = [f"응답한 글 {replies}개" if replies else "", f"첨부 {files}개" if files else ""]
+        ask = "이 글을 휴지통으로 옮길까요?" + (f" {'·'.join(a for a in along if a)}도 함께 옮깁니다." if any(along) else "")
+        close = '<button type="button" class="del-cancel" onclick="this.closest(\'details\').open=false">취소</button>'
+        return ('<div class="post-acts"><details class="del"><summary aria-label="글 휴지통으로" title="글 휴지통으로">🗑</summary>'
+                f'<div class="del-box" role="dialog" aria-label="글 휴지통으로"><p>{html.escape(ask)}</p>'
+                f'<form method="post" action="{html.escape(link)}/trash">{self._csrf_input(session)}'
+                f'<p><button class="primary">옮기기</button> {close}</p></form></div></details></div>')
 
     def _kind(self, uid: str, key: str) -> Kind | None:
         """주소 이름 → 책 화면. 옛 주소 이름 '<종류>.<프로젝트>'(ideas.book)는 이전으로 생긴 책(<종류>-<프로젝트>)으로 본다(#96)."""
@@ -854,7 +860,7 @@ class ShelfPages:
         )
         return self._shelf_page("휴지통", body, session, lead=await run_in_threadpool(self.trail, uid, category.id, "휴지통"))
 
-    # --- 글 고치기·휴지통·첨부·원문 확인(모든 책의 글. 자기 책장 안에서만, CSRF, 휴지통은 확인 한 번) ---
+    # --- 글 휴지통·첨부(모든 책의 글. 자기 책장 안에서만, CSRF). 웹에서 글 고치기·원문 확인 체크는 없앴다(2026-10-09) ---
     def _editable(self, uid: str, kind_key: str, item_id: str) -> tuple[Kind, Any] | None:
         """(책, 글 또는 문헌 글). 문헌 글은 그 책에 든 것만."""
         kind = self._kind_any(uid, kind_key, item_id)
@@ -874,111 +880,25 @@ class ShelfPages:
         assert kind.category is not None
         return f"{kind.category.id}/{obj.id}" if isinstance(obj, CategoryItem) else f"ref:{obj.key}"
 
-    async def shelf_item_edit(self, request: Request) -> Response:
-        session = self.user_of(request)
-        if not session:
-            return self._need_login(request)
-        uid = session[0]
-        found = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
-        if found is None:
-            return self._shelf_page("책장", '<p class="msg err">고칠 수 있는 글이 아닙니다. <a href="/shelf">프로젝트</a></p>',
-                                    session, 404)
-        kind, item = found
-        is_item = isinstance(item, CategoryItem)
-        owner = self._owner(kind, item)
-        link = f"/shelf/{kind.key}/{urllib.parse.quote(item.id if is_item else item.key)}"
-        title_text = (item.title or "") if is_item else cite_label(item, item.key)
-        old_text = item.content if is_item else str(item.bib.get("memo") or "")
-        error = ""
-        if request.method == "POST":
-            if self._too_big(request):
-                error = f'<p class="msg err">{self._write_error("big")}</p>'
-            else:
-                try:
-                    form = await self._form(request, session)
-                except PermissionError:
-                    return self._shelf_page("고치기", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-                content = str(form.get("content") or "").strip()[:CONTENT_MAX]
-                files, code = await self._read_files(uid, form)
-                drops = [str(v) for v in form.getlist("drop")]
-                if code:
-                    error = f'<p class="msg err">{self._write_error(code)}</p>'
-                elif is_item:
-                    title = one_line(str(form.get("title") or ""))[:TITLE_MAX] or None
-                    left = len(await run_in_threadpool(self.store.list_attachments, uid, owner)) - len(drops) + len(files)
-                    if content or title or item.fields or item.passages or left > 0:
-                        # 제목을 그대로 두면 누가 지었는지도 그대로, 저자가 새로 적으면 저자가 지은 제목, 지우면 없음.
-                        # 칸·이유·위치·쓸 부분·태그는 그대로 둔다(#97: 화면에 보이지 않을 뿐 지우지 않는다)
-                        title_by = item.title_by if title == item.title else ("author" if title else None)
-                        changed = content != item.content or title != item.title
-                        await run_in_threadpool(self.store.put_category_item, uid, replace(
-                            item, content=content, title=title, title_by=title_by,
-                            **({"edited_at": utcnow(), "edited_by": "author"} if changed else {})))
-                        await run_in_threadpool(self._apply_files, uid, owner, files, drops)
-                        return RedirectResponse(f"{link}?done=edited", status_code=303)
-                    error = f'<p class="msg err">{EMPTY_ITEM}</p>'
-                    old_text = content
-                else:  # 문헌 글: 본문(메모)과 첨부만. 서지·쓸 부분·원문 확인 표시는 그대로
-                    if content != old_text:
-                        bib = {k: v for k, v in item.bib.items() if k != "memo"} | ({"memo": content} if content else {})
-                        await run_in_threadpool(lambda: self.store.put_ref(uid, replace(item, bib=bib)))
-                    await run_in_threadpool(self._apply_files, uid, owner, files, drops)
-                    return RedirectResponse(f"{link}?done=edited", status_code=303)
-        files = await run_in_threadpool(self.store.list_attachments, uid, owner)
-        current = "".join(
-            f'<li><label><input type="checkbox" name="drop" value="{html.escape(a.id)}"> 빼기</label> '
-            f'{html.escape(a.name)} <small>{html.escape(kind_of(a.name))} · {size_text(a.size)}</small></li>' for a in files)
-        title_field = (f'<label class="block">제목 <input name="title" value="{html.escape(title_text)}" maxlength="{TITLE_MAX}"></label>'
-                       if is_item else f'<h2 class="ref-title">{html.escape(title_text)}</h2>')
-        body = (
-            f'<p class="crumb"><a href="{link}">← {html.escape(kind.name)}</a></p>{error}'
-            f'<form method="post" action="{link}/edit" enctype="multipart/form-data" class="card">{self._csrf_input(session)}'
-            f'{title_field}'
-            f'<label class="block">본문 <textarea name="content" rows="8" maxlength="{CONTENT_MAX}">{html.escape(old_text)}</textarea></label>'
-            + (f'<fieldset><legend>첨부</legend><ul class="files">{current}</ul>' if current else "<fieldset><legend>첨부</legend>")
-            + f'<input type="file" name="files" multiple accept="{ACCEPT}" aria-label="첨부 더하기"></fieldset>'
-            f'<p><button class="primary">저장</button> <a href="{link}">취소</a></p></form>'
-        )
-        return self._shelf_page("고치기", body, session, 400 if error else 200)
-
-    def _apply_files(self, uid: str, owner: str, files: list[tuple[str, bytes]], drops: list[str]) -> None:
-        for att in drops:  # 뺀 첨부는 지우지 않고 휴지통으로
-            try:
-                self.store.trash_attachment(uid, owner, att, "웹에서 뺌")
-            except ValueError:
-                continue
-        for name, data in files:
-            self.store.put_attachment(uid, owner, name, data)
-
     async def shelf_item_trash(self, request: Request) -> Response:
+        """글 보기의 🗑 → 확인 창의 '옮기기'(POST). 그 글에 응답한 글·첨부도 함께 휴지통으로(지우지 않는다).
+        문헌 글은 옮기지 않는다(인용 점검이 보는 기록). 되살리기는 그 프로젝트의 휴지통 화면에서."""
         session = self.user_of(request)
         if not session:
             return self._need_login(request)
         uid = session[0]
+        try:
+            await self._form(request, session)
+        except PermissionError:
+            return self._shelf_page("휴지통", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         found = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
-        if found is None or not isinstance(found[1], CategoryItem):  # 문헌 글은 휴지통으로 옮기지 않는다(인용 점검이 보는 기록)
+        if found is None or not isinstance(found[1], CategoryItem):
             return self._shelf_page("책장", '<p class="msg err">옮길 수 있는 글이 아닙니다. <a href="/shelf">프로젝트</a></p>',
                                     session, 404)
         kind, item = found
         assert kind.category is not None
-        link = f"/shelf/{kind.key}/{item.id}"
-        if request.method == "POST":
-            try:
-                await self._form(request, session)
-            except PermissionError:
-                return self._shelf_page("휴지통", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-            await run_in_threadpool(self.store.trash_item_with_replies, uid, kind.category.id, item.id, "웹 책장에서 옮김")
-            return RedirectResponse(f"/shelf/{kind.key}?done=trashed", status_code=303)
-        replies = sum(1 for i in await run_in_threadpool(self.store.list_category_items, uid, kind.category.id) if i.parent_id == item.id)
-        preview = one_line(item.title or item.content)
-        body = (
-            f'<p class="crumb"><a href="{link}">← {html.escape(kind.name)}</a></p>'
-            f'<div class="card"><p><b>{html.escape(preview[:80])}{"…" if len(preview) > 80 else ""}</b>'
-            + (f" · 응답한 글 {replies}" if replies else "") + "</p>"
-            f'<form method="post" action="{link}/trash">{self._csrf_input(session)}'
-            f'<p><button>휴지통으로 옮기기</button> <a href="{link}">취소</a></p></form></div>'
-        )
-        return self._shelf_page("휴지통", body, session)
+        await run_in_threadpool(self.store.trash_item_with_replies, uid, kind.category.id, item.id, "웹 게시판에서 옮김")
+        return RedirectResponse(f"/shelf/{kind.category.id}?done=trashed", status_code=303)
 
     async def shelf_file(self, request: Request) -> Response:
         """첨부 하나 보기·내려받기(#97). 로그인한 본인의 것만(경로는 세션의 사용자로 정한다). 그림·PDF만 바로 열고 나머지는 내려받기."""
@@ -1004,26 +924,3 @@ class ShelfPages:
         return FileResponse(path, media_type=media, filename=att.name, headers=headers,
                             content_disposition_type="inline" if inline else "attachment")
 
-    async def shelf_check(self, request: Request) -> Response:
-        """문헌 글의 '원문 확인' 체크(#97): 저자가 원문을 읽었다고 표시하거나 뺀다. 쓸 부분·서지는 그대로, 인용 점검 수는 다시 센다."""
-        session = self.user_of(request)
-        if not session:
-            return self._need_login(request)
-        uid = session[0]
-        try:
-            form = await self._form(request, session)
-        except PermissionError:
-            return self._shelf_page("책장", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-        found = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
-        if found is None or isinstance(found[1], CategoryItem):
-            return self._shelf_page("책장", '<p class="msg err">문헌 글이 아닙니다.</p>', session, 404)
-        kind, ref = found
-        on = form.get("checked") == "1"
-
-        def apply() -> None:
-            self.store.set_ref_status(uid, ref.key, "verified" if on else "unverified")
-            after_refs_changed(self.store, uid)
-
-        await run_in_threadpool(apply)
-        return RedirectResponse(f"/shelf/{kind.key}/{urllib.parse.quote(ref.key)}?done={'checked' if on else 'unchecked'}",
-                                status_code=303)
