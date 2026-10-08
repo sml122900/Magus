@@ -174,9 +174,31 @@ class CategoryMixin:
             raise ValueError(f"카테고리 {item.category_id}가 없다")
         path = cdir / "items" / f"{item.id}.json"
         now = utcnow()
-        created = read_json(path).get("created_at") if path.exists() else None
-        item = replace(item, created_at=created or item.created_at or now, updated_at=now)
-        write_json(path, _item_record(item))
+        old = read_json(path) if path.exists() else {}
+        item = replace(item, created_at=old.get("created_at") or item.created_at or now, updated_at=now)
+        # 이 코드가 모르는 칸(앞으로 더할 표시 등)은 그대로 둔다. 고쳐 저장해도 파일에 있던 것이 사라지지 않게(2026-10-09 글 고치기)
+        keep = {k: v for k, v in old.items() if k not in _ITEM_KEYS}
+        write_json(path, {**_item_record(item), **keep})
+        with self._db:
+            self._index_item(user_id, item)
+        return item
+
+    @locked
+    def patch_category_item(self, user_id: str, category_id: str, item_id: str, changes: dict[str, Any]) -> CategoryItem:
+        """글 파일에서 준 칸만 바꾼다(2026-10-09 웹의 글 고치기). 나머지 칸(누가·이유·위치·쓸 부분·태그·칸·장·응답 관계 등)은
+        파일에서 바이트까지 그대로 둔다. 값이 None이면 그 칸을 뺀다(제목·제목 지은 사람은 null로 남긴다: 원래 늘 있는 칸)."""
+        path = self._category_dir(user_id, category_id) / "items" / f"{safe_id(item_id, 'item id')}.json"
+        if not path.exists():
+            raise ValueError(f"글 {category_id}/{item_id}가 없다")
+        data = read_json(path)
+        for key, value in changes.items():
+            if value is None and key not in ("title", "title_by"):
+                data.pop(key, None)
+            else:
+                data[key] = value
+        data["updated_at"] = utcnow()
+        write_json(path, data)
+        item = _item_from_record(category_id, data)
         with self._db:
             self._index_item(user_id, item)
         return item
@@ -360,6 +382,9 @@ def _passages(raw: Any) -> tuple[Passage, ...]:
 
 # 글 파일에서 값이 없으면 쓰지 않는 칸(#96에서 더한 칸). 그래서 옛 칸만 쓴 글은 옛 형식 그대로다
 _OPTIONAL = ("reason", "where", "parent_id", "origin", "kind", "tags_by")
+# 이 코드가 글 파일에 쓰는 칸 전부. 이 밖의 칸은 put_category_item이 그대로 둔다
+_ITEM_KEYS = frozenset(("schema_version", "id", "title", "title_by", "content", "fields", "author", "tags", "chapters",
+                        "created_at", "updated_at", "edited_at", "edited_by", "passages", *_OPTIONAL))
 
 
 def _item_record(item: CategoryItem) -> dict[str, Any]:

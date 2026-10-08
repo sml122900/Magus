@@ -215,6 +215,25 @@ class ShelfMixin:
         assert found is not None
         return found
 
+    @locked
+    def set_ref_memo(self, user_id: str, key: str, memo: str) -> Ref:
+        """문헌 글의 본문(메모, bib.memo)만 바꾼다(2026-10-09 웹의 글 고치기). 서지·쓸 부분·전문·원문 확인 표시와
+        그 기록(status_by)·옮긴 기록은 파일에서 그대로다(put_ref는 bib.json을 다시 쓰므로 여기서는 쓰지 않는다)."""
+        path = self._melchior_dir(user_id) / safe_ref_key(key) / "bib.json"
+        if not path.exists():
+            raise ValueError(f"문헌 {key!r}가 없다")
+        data = read_json(path)
+        bib = dict(data.get("bib") or {})
+        if (bib.get("memo") or "") != memo:
+            bib.pop("memo", None)
+            data.update({"bib": {**bib, **({"memo": memo} if memo else {})}, "updated_at": utcnow()})
+            write_json(path, data)
+            with self._db:
+                self._index_ref(user_id, path.parent)
+        found = self.get_ref(user_id, key)
+        assert found is not None
+        return found
+
     def _index_ref(self, user_id: str, rdir: Path, floor: str | None = None) -> None:
         """floor: reindex가 배치에서 정해 준 프로젝트(파일에 없거나 모르는 프로젝트일 때). None이면 파일의 것."""
         record = read_json(rdir / "bib.json")
@@ -267,6 +286,9 @@ class ShelfMixin:
             books = len(data.get("books") or [])  # 책째 옮긴 노드(#97)면 책 수
             preview = "연결 노드" if data.get("link") else f"노드 「{data.get('name', '')}」" + (f" · 책 {books}권" if books else "")
             items.append(TrashItem("node", ref, mark.get("at", ""), mark.get("note", ""), preview))
+        for owner, att, mark in self._trashed_attachments(user_id):  # type: ignore[attr-defined]  # 글에서 뺀 첨부(2026-10-09)
+            items.append(TrashItem("attachment", f"{owner}/{att.id}", str(mark.get("at", "")), str(mark.get("note", "")), att.name,
+                                   owner=owner))
         return sorted(items, key=lambda i: i.trashed_at, reverse=True)
 
     @locked
@@ -277,6 +299,8 @@ class ShelfMixin:
             return self._restore_category_item(user_id, item_id)
         if kind == "node":
             return self._restore_node(user_id, item_id)  # type: ignore[attr-defined]
+        if kind == "attachment":
+            return self._restore_attachment(user_id, item_id)  # type: ignore[attr-defined]
         raise ValueError(f"휴지통 종류를 모른다: {kind!r}")
 
     def _reindex_shelf(self, user_id: str) -> None:

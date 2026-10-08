@@ -48,6 +48,7 @@ PROJECT_TITLE_MAX = 120
 WHEN = "%m-%d %H:%M"
 _NEXT = re.compile(r"/shelf(/[A-Za-z0-9_.\-/%]*)?")
 _ID = re.compile(r"[A-Za-z0-9_.\-]{1,80}")
+TRASH_FIELD = {"node": "node", "attachment": "attachment"}  # 휴지통 목록의 되살리기 폼 이름(그 밖은 글 item)
 MAP_DONE = ("node", "link", "rename", "color", "connect", "disconnect", "node_trash", "project", "contexts", "ctx_saved",
             "restored")  # 지도 바꾸기 뒤 한 줄의 종류
 
@@ -658,6 +659,18 @@ class MapPages:
                 form = await self._form(request, session)
             except PermissionError:
                 return self._map_page("휴지통", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            if att := str(form.get("attachment") or ""):  # 글에서 뺀 첨부 되살리기(2026-10-09) → 그 글로
+                owner = att.rpartition("/")[0]
+                if await run_in_threadpool(self._owner_floor, uid, owner) != floor.id:
+                    return RedirectResponse(with_query(here, err="missing"), status_code=303)
+                try:
+                    await run_in_threadpool(self.store.restore_trash, uid, "attachment", att)
+                except ValueError as e:
+                    return RedirectResponse(with_query(here, err="item" if len(e.args) > 1 else "missing"), status_code=303)
+                book, _, item = owner.partition("/")
+                link = (f"/shelf/{self.store.get_ref(uid, owner[4:]).book}/{urllib.parse.quote(owner[4:])}"  # type: ignore[union-attr]
+                        if owner.startswith("ref:") else f"/shelf/{book}/{item}")
+                return RedirectResponse(f"{link}?done=restored", status_code=303)
             if post := str(form.get("item") or ""):  # 글 되살리기
                 book = post.partition("/")[0]
                 try:
@@ -688,6 +701,8 @@ class MapPages:
         if params.get("err") == "name":
             message = (f'<p class="msg err">「{html.escape(params.get("name") or "")}」 책이 이미 있어 되살리지 못했습니다. '
                        "그 책 이름을 바꾼 뒤 되살려 주세요.</p>")
+        elif params.get("err") == "item":
+            message = '<p class="msg err">그 첨부의 글이 휴지통에 있어 되살리지 못했습니다. 글을 먼저 되살려 주세요.</p>'
         elif params.get("err"):
             message = '<p class="msg err">되살리지 못했습니다.</p>'
         elif code := params.get("maperr"):
@@ -697,7 +712,7 @@ class MapPages:
             f'<li><time datetime="{html.escape(t.trashed_at)}">{local_time(t.trashed_at, "%Y-%m-%d %H:%M")}</time> '
             f"<b>{html.escape(label)}</b>"
             f'<form method="post" action="{here}" class="inline">{csrf}'
-            f'<input type="hidden" name="{"node" if t.kind == "node" else "item"}" value="{html.escape(t.id)}">'
+            f'<input type="hidden" name="{TRASH_FIELD.get(t.kind, "item")}" value="{html.escape(t.id)}">'
             "<button>되살리기</button></form></li>" for t, label in items)
         from magus.webboard import SEP  # noqa: PLC0415
 
@@ -707,22 +722,58 @@ class MapPages:
         body = message + (f'<ol class="trash-list">{rows}</ol>' if rows else '<p class="empty">휴지통이 비었습니다.</p>')
         return self._map_page("휴지통", body, session, css=TRASH_STYLE, lead=lead)
 
+    def _owner_floor(self, uid: str, owner: str) -> str | None:
+        """첨부의 글(owner)이 있는 프로젝트. 글은 그 책의 프로젝트, 문헌 글은 그 문헌이 든 책의 프로젝트."""
+        if owner.startswith("ref:"):
+            ref = self.store.get_ref(uid, owner[4:])
+            book = ref.book if ref else None
+        else:
+            book = owner.partition("/")[0]
+        try:
+            found = self.store.get_category(uid, book) if book else None
+        except ValueError:
+            found = None
+        return found.floor if found else None
+
     def _trash_rows(self, uid: str, floor: Floor) -> list[tuple[Any, str]]:
-        """(휴지통 항목, 보일 이름). 이 프로젝트의 노드와, 이 프로젝트의 책에 든 글(함께 옮긴 응답 글은 빼고). 최근 것부터."""
+        """(휴지통 항목, 보일 이름). 이 프로젝트의 노드와, 이 프로젝트의 책에 든 글(함께 옮긴 응답 글은 빼고),
+        그 글에서 뺀 첨부(2026-10-09). 최근 것부터."""
         books = {c.id: c for c in self.store.list_categories(uid, floors=[floor.id])}
         out = []
-        for t in self.store.list_trash(uid):
+        trash = self.store.list_trash(uid)
+        for t in trash:
+            if t.kind == "attachment" and t.owner and self._owner_floor(uid, t.owner) == floor.id:
+                out.append((t, f"첨부 「{t.preview}」 · 글 「{self._post_name(uid, t.owner, trash)}」"))
+                continue
             if t.kind == "node" and t.id.startswith(f"{floor.id}/"):
                 out.append((t, t.preview))
             elif t.kind == "category_item" and not t.with_id and (book := books.get(t.id.partition("/")[0])) is not None:
                 replies = sum(1 for x in self.store.list_trash(uid) if x.kind == "category_item" and x.with_id
                               and x.id.partition("/")[0] == book.id and x.with_id == t.id.partition("/")[2])
-                title = one_line(t.preview) or "제목 없는 글"
+                title = one_line(t.preview) or "제목 없는 글"  # 휴지통 기록의 제목·본문 앞부분
                 files = self.store.trashed_item_attachments(uid, book.id, t.id.partition("/")[2])
                 along = [f"응답한 글 {replies}개" if replies else "", f"첨부 {files}개" if files else ""]  # 확인 창 문구와 같게
                 out.append((t, f"글 「{title[:60]}{'…' if len(title) > 60 else ''}」 · 책 「{book.name}」"
                             + (f" · {'·'.join(a for a in along if a)} 함께" if any(along) else "")))
         return out
+
+    def _post_name(self, uid: str, owner: str, trash: list[Any]) -> str:
+        """휴지통 목록에 보일 글 이름(60자). 글이 휴지통에 있으면 그 기록에서."""
+        from magus.melchior.author_report import cite_label  # noqa: PLC0415
+        from magus.webboard import item_preview  # noqa: PLC0415
+
+        if owner.startswith("ref:"):
+            ref = self.store.get_ref(uid, owner[4:])
+            name = cite_label(ref, ref.key) if ref else owner[4:]
+        else:
+            book, _, item_id = owner.partition("/")
+            item = self.store.get_category_item(uid, book, item_id)
+            if item is not None:
+                name = item.title or item_preview(item, self.store.list_attachments(uid, owner))
+            else:
+                name = next((one_line(x.preview) for x in trash if x.kind == "category_item" and x.id == owner), "")
+        name = name or "제목 없는 글"
+        return name[:60] + ("…" if len(name) > 60 else "")
 
     # ---- 책 옮기기·되돌리기 ---------------------------------------------------------------------
     def _move_form(self, session: tuple[str, str], here: str) -> str:

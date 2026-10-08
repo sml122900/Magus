@@ -5,8 +5,11 @@
 - 게시판(/shelf/<책>): 한 줄 = 제목 · 첨부 표시(📎, 그림이면 작은 미리보기) · 날짜. 최신 글이 위, 20개씩, 오른쪽 위 '글쓰기' 하나.
   문헌 글(서지가 있는 글)도 같은 목록에 섞인다(제목은 서지). 거르기(전체·나·AI)·찾기·책 설정(⚙)은 그대로.
 - 글쓰기(/shelf/write/<책>): 제목·본문·첨부. 파일을 끌어다 놓거나 '파일 고르기', 휴대폰은 '사진 찍기'(capture). 누가 = 저자.
-- 글 보기(/shelf/<책>/<글>): 제목·본문·그림(글 안에 바로)·파일 목록(이름을 누르면 내려받기)·🗑(화면 안 확인 창 → 휴지통.
-  응답한 글·첨부도 함께, 되살리기는 프로젝트의 휴지통 화면). 웹에서 글 고치기·원문 확인 체크는 없다(MCP 도구는 그대로).
+- 글 보기(/shelf/<책>/<글>): 제목·본문·그림(글 안에 바로)·파일 목록(이름을 누르면 내려받기)·고치기·🗑(화면 안 확인 창 → 휴지통.
+  응답한 글·첨부도 함께, 되살리기는 프로젝트의 휴지통 화면). 웹에서 원문 확인 체크는 없다(MCP 도구는 그대로).
+- 글 고치기(/shelf/<책>/<글>/edit, 2026-10-09 되돌림: 고칠 길이 없으면 불편): 글쓰기와 같은 화면에 제목·본문·첨부가 채워져 열린다.
+  기존 첨부마다 ✕(빼기 → 지우지 않고 휴지통, 프로젝트 휴지통에서 그 글로 되살린다), 새 첨부 더하기. 바꾼 칸(제목·본문·고친 시각)만
+  파일에서 고치고 나머지 칸(누가·이유·위치·쓸 부분·태그·칸 등)은 바이트까지 그대로 둔다. 문헌 글은 본문(메모)·첨부만.
   칸(인물·사례 등)은 본문 아래 "칸: 값" 줄. 이유·위치·쓸 부분(일반 글)·태그·원문 확인 표시는 파일에 그대로 있고 보이지 않는다.
 - 모든 출력은 이스케이프하고, 첨부 주소는 세션의 사용자 폴더에서만 찾는다(magus.webshelf.shelf_file).
 """
@@ -26,7 +29,7 @@ from starlette.responses import RedirectResponse, Response
 from magus.attachments import ACCEPT, MAX_FILES, kind_of, media_type, size_text
 from magus.book_migrate import legacy_book_id
 from magus.category.rules import BUILTINS, CONTENT_MAX, TITLE_MAX
-from magus.ids import local_time, new_id
+from magus.ids import local_time, new_id, utcnow
 from magus.melchior.author_report import cite_label
 from magus.store import Attachment, CategoryItem, Store
 from magus.store.formats import one_line
@@ -37,7 +40,8 @@ from magus.webshelf import (
 BOARD_SIZE = 20  # 게시판 한 쪽
 SEP = ' <span aria-hidden="true">›</span> '
 WHEN = "%Y-%m-%d %H:%M"
-DONE = {"made": "만들었습니다.", "edit": "저장했습니다.", "trashed": "휴지통으로 옮겼습니다.", "restored": "되살렸습니다."}
+DONE = {"made": "만들었습니다.", "edit": "저장했습니다.", "trashed": "휴지통으로 옮겼습니다.", "restored": "되살렸습니다.",
+        "edited": "고쳤습니다."}
 
 BOARD_STYLE = """
 .trail{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;margin:0 0 4px;color:var(--ink2);font-size:15px}
@@ -78,7 +82,10 @@ font-weight:600;padding:0 16px;cursor:pointer}.lightbox button:focus-visible{out
 .lightbox .lb-next{right:8px;top:50%;transform:translateY(-50%)}
 .lightbox .lb-count{position:absolute;bottom:16px;left:0;right:0;text-align:center;color:#fff;font-variant-numeric:tabular-nums}
 .board-bar a.gear.labeled{font-size:16px;padding:0 12px;min-height:44px;gap:4px;color:var(--ink)}
-.post-acts{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:12px 0}
+.post-acts{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-start;margin:12px 0}
+.post-acts a.act{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:44px;min-height:44px;padding:0 18px;
+border-radius:9999px;font-size:16px;font-weight:600;color:var(--ink);border:1px solid var(--mute);background:var(--canvas);text-decoration:none}
+.post-acts a.act:hover{background:var(--soft)}
 .post-acts details.del{position:relative}
 .post-acts details.del>summary{list-style:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:44px;min-height:44px;
 padding:0 18px;border-radius:9999px;cursor:pointer;font-size:16px;font-weight:600;color:var(--ink);border:1px solid var(--mute);background:var(--canvas)}
@@ -86,6 +93,16 @@ padding:0 18px;border-radius:9999px;cursor:pointer;font-size:16px;font-weight:60
 .post-acts .del-box{margin-top:8px;width:min(380px,100%);background:var(--canvas);border:1px solid var(--line);border-left:4px solid var(--ruby);
 border-radius:10px;padding:4px 16px;box-shadow:0 8px 24px rgb(0 0 0/.18)}.post-acts .del-box p{margin:10px 0}
 .write-form textarea{min-height:220px}
+ul.current{list-style:none;padding:0;margin:4px 0 12px;display:flex;flex-direction:column;gap:6px}
+ul.current li{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;background:var(--canvas);border:1px solid var(--line);border-radius:8px;
+padding:4px 6px 4px 12px}ul.current small{color:var(--ink2)}
+ul.current label.drop{position:relative;margin:0 0 0 auto;display:inline-flex;align-items:center;justify-content:center;min-width:44px;
+min-height:44px;padding:0 12px;border-radius:9999px;cursor:pointer;border:1px solid var(--mute);background:var(--canvas);font-weight:600}
+ul.current label.drop:focus-within{outline:3px solid var(--primary);outline-offset:2px}
+ul.current label.drop input{position:absolute;opacity:0;width:1px;height:1px}
+ul.current li:has(input:checked) .fname{text-decoration:line-through;color:var(--ink2)}
+ul.current li:has(input:checked) label.drop{background:var(--soft)}
+ul.current .undo{display:none}ul.current li:has(input:checked) .undo{display:inline}ul.current li:has(input:checked) .x{display:none}
 .dropzone{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:16px;border:2px dashed var(--mute);border-radius:12px;background:var(--soft)}
 .dropzone.over{border-color:var(--primary);background:#ecebff}
 .dropzone label.pick{display:inline-flex;align-items:center;min-height:44px;padding:8px 16px;border-radius:9999px;border:1px solid var(--primary);
@@ -209,6 +226,11 @@ class Post:
     text: str = ""  # 찾기의 맞은 곳 한 줄(제목 밖에서 맞았을 때)
 
 
+def item_preview(item: CategoryItem, files: list[Attachment] | tuple[Attachment, ...]) -> str:
+    """제목이 없을 때 보일 본문 앞부분(게시판 줄·글 보기·휴지통이 같은 규칙): 본문, 없으면 칸 값, 없으면 첨부 이름."""
+    return one_line(item.content or " · ".join(f"{k}: {v}" for k, v in item.fields.items() if v) or " · ".join(a.name for a in files))
+
+
 def _inline_image(name: str) -> bool:
     media, inline = media_type(name)
     return inline and media.startswith("image/")
@@ -251,7 +273,9 @@ class BoardPages:
     _read_files: Callable[[str, Any], Awaitable[tuple[list[tuple[str, bytes]], str]]]
     _too_big: Callable[[Request], bool]
     _write_error: Callable[[str], str]
-    _post_actions: Callable[..., str]  # 글 지우기(🗑, webshelf)
+    _post_actions: Callable[..., str]  # 글 고치기·지우기(🗑, webshelf)
+    _editable: Callable[[str, str, str], tuple[Kind, Any] | None]
+    _owner: Callable[[Kind, Any], str]
 
     # ---- 위치 표시 -----------------------------------------------------------------------------
     def trail(self, uid: str, key: str, here: str | None = None) -> str:
@@ -289,7 +313,7 @@ class BoardPages:
                 continue
             link = f"/shelf/{c.id}/{i.id}"
             files = tuple(self.store.list_attachments(uid, f"{c.id}/{i.id}"))
-            preview = i.content or " · ".join(f"{k}: {v}" for k, v in i.fields.items() if v) or " · ".join(a.name for a in files)
+            preview = item_preview(i, files)
             badge = (AI_MARK if i.author == "ai" else "") + (AI_TITLE if i.title and i.title_by == "ai" else "")
             text = "\n".join([i.content, i.reason or "", i.where or "", *(p.text for p in i.passages),
                               *(f"{k} {v}" for k, v in i.fields.items()), " ".join(i.tags)]) if q else ""
@@ -431,8 +455,7 @@ class BoardPages:
             link = f"/shelf/{kind.category.id}/{obj.id}"
             owner = f"{kind.category.id}/{obj.id}"
             files = self.store.list_attachments(uid, owner)
-            preview = one_line(obj.content or " · ".join(f"{k}: {v}" for k, v in obj.fields.items() if v)
-                               or " · ".join(a.name for a in files))  # 게시판 줄과 같은 규칙
+            preview = item_preview(obj, files)  # 게시판 줄과 같은 규칙
             title = obj.title or (preview[:40] + ("…" if len(preview) > 40 else "")) or "제목 없음"
             meta = ([local_time(obj.created_at, WHEN)] + (["AI가 쓴 글"] if obj.author == "ai" else [])
                     + (["제목은 AI가 지음"] if obj.title and obj.title_by == "ai" else []))
@@ -501,17 +524,102 @@ class BoardPages:
             item = await run_in_threadpool(save)
             return RedirectResponse(f"/shelf/{book}/{item.id}", status_code=303)
         error = self._write_error(request.query_params.get("error") or "")
-        body = (
-            (f'<p class="msg err">{error}</p>' if error else "")
-            + f'<form method="post" action="{here}" enctype="multipart/form-data" class="card write-form">{self._csrf_input(session)}'
-            f'<label class="block">제목 <input name="title" maxlength="{TITLE_MAX}"></label>'
-            f'<label class="block">본문 <textarea name="content" rows="10" maxlength="{CONTENT_MAX}"></textarea></label>'
-            '<fieldset><legend>첨부</legend><div class="dropzone" data-dropzone>'
+        body = (f'<p class="msg err">{error}</p>' if error else "") + self._write_form(session, here, f"/shelf/{book}")
+        lead = await run_in_threadpool(self.trail, uid, kind.key, "글쓰기")
+        return self._shelf_page("글쓰기", body, session, 400 if error else 200, lead=lead)
+
+    def _write_form(self, session: tuple[str, str], action: str, cancel: str, *, title: str = "", content: str = "",
+                    heading: str = "", current: list[Attachment] | tuple[Attachment, ...] = ()) -> str:
+        """글쓰기·고치기가 함께 쓰는 폼: 제목(문헌 글이면 서지 제목을 머리로)·본문·첨부(고치기면 기존 첨부마다 ✕ 빼기)."""
+        rows = "".join(
+            f'<li><span class="fname">{html.escape(a.name)}</span> <small>{html.escape(kind_of(a.name))} · {size_text(a.size)}</small>'
+            f'<label class="drop" title="첨부 빼기"><input type="checkbox" name="drop" value="{html.escape(a.id)}" '
+            f'aria-label="{html.escape(a.name)} 빼기"><span class="x" aria-hidden="true">✕ 빼기</span>'
+            '<span class="undo" aria-hidden="true">빼지 않기</span></label></li>' for a in current)
+        head = (f'<h2 class="ref-title">{html.escape(heading)}</h2>' if heading else
+                f'<label class="block">제목 <input name="title" value="{html.escape(title)}" maxlength="{TITLE_MAX}"></label>')
+        return (
+            f'<form method="post" action="{html.escape(action)}" enctype="multipart/form-data" class="card write-form">'
+            f'{self._csrf_input(session)}{head}'
+            f'<label class="block">본문 <textarea name="content" rows="10" maxlength="{CONTENT_MAX}">{html.escape(content)}</textarea></label>'
+            '<fieldset><legend>첨부</legend>'
+            + (f'<ul class="current" aria-label="지금 첨부">{rows}</ul>' if rows else "")
+            + '<div class="dropzone" data-dropzone>'
             f'<label class="pick">파일 고르기<input type="file" name="files" multiple accept="{ACCEPT}"></label>'
             '<label class="pick camera">사진 찍기<input type="file" name="files" accept="image/*" capture="environment"></label>'
             f'<span class="drop-word">끌어다 놓기 · {MAX_FILES}개까지</span></div>'
             '<ul class="chosen" aria-live="polite"></ul></fieldset>'
-            f'<p><button class="primary">저장</button> <a href="/shelf/{book}">취소</a></p></form>{WRITE_SCRIPT}'
+            f'<p><button class="primary">저장</button> <a href="{html.escape(cancel)}">취소</a></p></form>{WRITE_SCRIPT}'
         )
-        lead = await run_in_threadpool(self.trail, uid, kind.key, "글쓰기")
-        return self._shelf_page("글쓰기", body, session, 400 if error else 200, lead=lead)
+
+    # ---- 글 고치기(2026-10-09 되돌림) -------------------------------------------------------------
+    async def board_edit(self, request: Request) -> Response:
+        """글쓰기와 같은 화면(채워진 채). 저장하면 글 보기로 돌아가 '고쳤습니다.' 뺀 첨부는 휴지통으로(지우지 않는다).
+        글: 제목·본문만 파일에서 고치고(고친 시각·고친 사람=저자), 누가(author)·이유·위치·쓸 부분·태그·칸 등은 그대로.
+        문헌 글: 본문(메모)만. 서지·쓸 부분·원문 확인 표시는 그대로(인용 점검 수가 바뀌지 않는다)."""
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        found = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
+        if found is None:
+            return self._shelf_page("고치기", '<p class="msg err">고칠 수 있는 글이 아닙니다. <a href="/shelf">프로젝트</a></p>',
+                                    session, 404)
+        kind, obj = found
+        assert kind.category is not None
+        is_item = isinstance(obj, CategoryItem)
+        owner = self._owner(kind, obj)
+        link = f"/shelf/{kind.category.id}/{urllib.parse.quote(obj.id if is_item else obj.key)}"
+        here = f"{link}/edit"
+        title_text = (obj.title or "") if is_item else ""
+        text = obj.content if is_item else str(obj.bib.get("memo") or "")
+        error = ""
+        if request.method == "POST":
+            if self._too_big(request):
+                return RedirectResponse(f"{here}?error=big", status_code=303)
+            try:
+                form = await self._form(request, session)
+            except PermissionError:
+                return self._shelf_page("고치기", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            content = str(form.get("content") or "").strip()[:CONTENT_MAX]
+            title = one_line(str(form.get("title") or ""))[:TITLE_MAX] or None
+            files, code = await self._read_files(uid, form)
+            current = await run_in_threadpool(self.store.list_attachments, uid, owner)
+            asked = {str(v) for v in form.getlist("drop")}
+            drops = [a.id for a in current if a.id in asked]
+            left = len(current) - len(drops) + len(files)
+            if code:
+                return RedirectResponse(f"{here}?error={code}", status_code=303)
+            if is_item and not (content or title or any(obj.fields.values()) or obj.passages or left > 0):
+                error, title_text, text = self._write_error("empty"), title or "", content
+            else:
+                await run_in_threadpool(self._save_edit, uid, kind, obj, owner, title, content, files, drops)
+                return RedirectResponse(f"{link}?done=edited", status_code=303)
+        else:
+            error = self._write_error(request.query_params.get("error") or "")
+        current = await run_in_threadpool(self.store.list_attachments, uid, owner)
+        heading = "" if is_item else cite_label(obj, obj.key)
+        body = ((f'<p class="msg err">{error}</p>' if error else "")
+                + self._write_form(session, here, link, title=title_text, content=text, heading=heading, current=current))
+        lead = await run_in_threadpool(self.trail, uid, kind.key, "고치기")
+        return self._shelf_page("고치기", body, session, 400 if error else 200, lead=lead)
+
+    def _save_edit(self, uid: str, kind: Kind, obj: Any, owner: str, title: str | None, content: str,
+                   files: list[tuple[str, bytes]], drops: list[str]) -> None:
+        assert kind.category is not None
+        if isinstance(obj, CategoryItem):
+            changes: dict[str, Any] = {}
+            if title != obj.title:  # 제목을 그대로 두면 누가 지었는지도 그대로, 새로 적으면 저자가 지은 제목, 지우면 없음
+                changes |= {"title": title, "title_by": "author" if title else None}
+            if content != obj.content:
+                changes["content"] = content
+            if changes or files or drops:  # 고친 시각(목록 정렬은 그대로 만든 순서)
+                changes |= {"edited_at": utcnow(), "edited_by": "author"}
+                self.store.patch_category_item(uid, kind.category.id, obj.id, changes)
+        else:
+            self.store.set_ref_memo(uid, obj.key, content)
+        for att in drops:  # 뺀 첨부는 지우지 않고 휴지통으로(프로젝트 휴지통에서 되살린다)
+            self.store.trash_attachment(uid, owner, att, "웹에서 뺌")
+        for name, data in files:
+            att = self.store.put_attachment(uid, owner, name, data)
+            self.store.attachment_thumb(uid, owner, att.id)

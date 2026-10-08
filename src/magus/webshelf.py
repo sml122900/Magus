@@ -11,7 +11,8 @@
 - 책 만들기·이름 바꾸기·색 바꾸기·휴지통은 이 화면과 대화(category_* 도구) 양쪽에서 된다.
 - #97(오캄의 면도날, 2026-10-08): 화면에는 제목·버튼·입력칸 이름·날짜·개수만 둔다. 설명 문장은 도움말(docs/help, 웹의 '?')로 옮겼다.
   게시판의 글은 제목·본문·첨부만 보이고 쓴다(누가 = 저자). 칸·이유·위치·쓸 부분·태그는 파일에 그대로 두고 보이지 않을 뿐이다.
-  2026-10-09: 웹에서 글 고치기와 문헌 글의 '원문 확인' 체크를 없앴다(원문 확인 표시·쓸 부분·서지는 파일에 그대로, MCP 도구로 된다).
+  2026-10-09: 웹에서 문헌 글의 '원문 확인' 체크를 없앴다(원문 확인 표시·쓸 부분·서지는 파일에 그대로, MCP 도구로 된다).
+  글 고치기는 한 번 없앴다가 되돌렸다(저자 요청: 고칠 길이 없으면 불편, magus.webboard).
   글 지우기는 글 보기의 🗑(화면 안 확인 창) → 휴지통, 되살리기는 프로젝트의 휴지통 화면(노드와 함께, magus.webmap).
   첨부는 글마다 여러 개(magus.attachments, magus.store.attachments). 본인 것만 보이고(경로는 세션의 사용자로 정한다), 그림·PDF만 바로 연다.
 - 책장 전용 색(책 색 격자·선반 나무색)은 이 파일과 magus.category.rules에만 있다. 다른 화면에는 쓰지 않는다
@@ -481,6 +482,7 @@ class ShelfPages:
     board_list: Callable[[Request], Awaitable[Response]]
     post_view: Callable[[Request], Awaitable[Response]]
     board_write: Callable[[Request], Awaitable[Response]]
+    board_edit: Callable[[Request], Awaitable[Response]]
     trail: Callable[..., str]
     # BookPages(webbooks)가 구현한다
     book_routes: Callable[[], list[tuple[str, list[str], Callable[..., Any]]]]
@@ -500,6 +502,7 @@ class ShelfPages:
             ("/shelf/colors", ["POST"], self.shelf_colors),
             ("/shelf/{kind}", ["GET"], self.board_list),  # 책 = 게시판 페이지(webboard)
             ("/shelf/{kind}/{item}", ["GET"], self.post_view),  # 글 보기 페이지(webboard)
+            ("/shelf/{kind}/{item}/edit", ["GET", "POST"], self.board_edit),  # 글 고치기(webboard, 2026-10-09 되돌림)
             ("/shelf/{kind}/{item}/trash", ["POST"], self.shelf_item_trash),  # 글 보기의 🗑(화면 안 확인 창, 2026-10-09)
             ("/shelf/{kind}/{item}/files/{att}", ["GET"], self.shelf_file),  # 첨부 보기·내려받기(#97)
             ("/shelf/{kind}/{item}/thumbs/{att}", ["GET"], self.shelf_thumb),  # 사진 썸네일(없으면 만들고, 못 만들면 원본)
@@ -521,15 +524,18 @@ class ShelfPages:
         return self._page(title, body, session, status, current="프로젝트", css=SHELF_STYLE + CONTEXT_STYLE + BOARD_STYLE, lead=lead)
 
     def _post_actions(self, uid: str, session: tuple[str, str], kind: Kind, obj: Any, link: str) -> str:
-        """글 보기 아래 🗑과 화면 안의 작은 확인 창(노드 삭제와 같은 방식, confirm() 쓰지 않음). 문헌 글에는 없다."""
-        if not isinstance(obj, CategoryItem) or kind.category is None:
+        """글 보기 아래 '고치기'와 🗑(화면 안의 작은 확인 창, 노드 삭제와 같은 방식, confirm() 쓰지 않음). 문헌 글에는 🗑이 없다."""
+        edit = f'<a class="act" href="{html.escape(link)}/edit"><span aria-hidden="true">✎</span> 고치기</a>'
+        if kind.category is None:
             return ""
+        if not isinstance(obj, CategoryItem):
+            return f'<div class="post-acts">{edit}</div>'
         replies = sum(1 for i in self.store.list_category_items(uid, kind.category.id) if i.parent_id == obj.id)
         files = len(self.store.list_attachments(uid, f"{kind.category.id}/{obj.id}"))
         along = [f"응답한 글 {replies}개" if replies else "", f"첨부 {files}개" if files else ""]
         ask = "이 글을 휴지통으로 옮길까요?" + (f" {'·'.join(a for a in along if a)}도 함께 옮깁니다." if any(along) else "")
         close = '<button type="button" class="del-cancel" onclick="this.closest(\'details\').open=false">취소</button>'
-        return ('<div class="post-acts"><details class="del"><summary><span aria-hidden="true">🗑</span> 휴지통으로</summary>'
+        return (f'<div class="post-acts">{edit}<details class="del"><summary><span aria-hidden="true">🗑</span> 휴지통으로</summary>'
                 f'<div class="del-box" role="dialog" aria-label="글 휴지통으로"><p>{html.escape(ask)}</p>'
                 f'<form method="post" action="{html.escape(link)}/trash">{self._csrf_input(session)}'
                 f'<p><button class="primary">옮기기</button> {close}</p></form></div></details></div>')
@@ -863,7 +869,7 @@ class ShelfPages:
         )
         return self._shelf_page("휴지통", body, session, lead=await run_in_threadpool(self.trail, uid, category.id, "휴지통"))
 
-    # --- 글 휴지통·첨부(모든 책의 글. 자기 책장 안에서만, CSRF). 웹에서 글 고치기·원문 확인 체크는 없앴다(2026-10-09) ---
+    # --- 글 휴지통·첨부(모든 책의 글. 자기 책장 안에서만, CSRF). 웹의 원문 확인 체크는 없앴다(2026-10-09). 고치기는 webboard ---
     def _editable(self, uid: str, kind_key: str, item_id: str) -> tuple[Kind, Any] | None:
         """(책, 글 또는 문헌 글). 문헌 글은 그 책에 든 것만."""
         kind = self._kind_any(uid, kind_key, item_id)

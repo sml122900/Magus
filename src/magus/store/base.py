@@ -32,7 +32,7 @@ Lane = Literal["ref_picked", "ref_full", "idea_me", "idea_ai", "style", "style_p
 WEB_ONLY_LANES: tuple[str, ...] = ("style_passage", "ref_bib", "document")
 TagsBy = Literal["ai", "author"]  # 문체 태그를 누가 정했나: Claude가 뽑음(ai) / 저자가 말함(author). 기록 전 항목은 None
 # 휴지통에 옮길 수 있는 책장 항목(#88). 카테고리는 통째(category, id = 카테고리 id)와 항목(category_item, id = "<카테고리 id>/<항목 id>")
-TrashKind = Literal["category", "category_item", "node"]  # #96: 생각·문체 휴지통은 책의 글 휴지통(category_item)이 됐다
+TrashKind = Literal["category", "category_item", "node", "attachment"]  # #96: 생각·문체 휴지통은 책의 글 휴지통(category_item)이 됐다. attachment: 글에서 뺀 첨부 하나(2026-10-09)
 TitleBy = Literal["ai", "author"]  # 항목 제목을 누가 지었나(#92). 태그의 tags_by와 같은 방식
 TitleMode = Literal["ask", "ai", "none"]
 EditedBy = Literal["author", "ai"]  # 항목을 나중에 고친 사람(웹에서 저자가 고치면 author). 처음 쓴 사람(author 필드)은 그대로 둔다  # 저자가 제목을 말하지 않았을 때: 매번 묻기 / AI가 짓기 / 비워 두기
@@ -466,6 +466,7 @@ class TrashItem:
     note: str
     preview: str
     with_id: str | None = None  # 함께 옮겨진 AI 발화면 그 발화가 응답한 생각의 id
+    owner: str | None = None  # 첨부(attachment)면 그 글("<책 id>/<글 id>" 또는 "ref:<key>"). id는 "<owner>/<첨부 id>"
 
 
 @dataclass(frozen=True)
@@ -704,6 +705,9 @@ class Store(Protocol):
     def trash_node_with_books(self, user_id: str, floor: str, node_id: str, note: str) -> MapNode:
         """노드를 책·글·첨부·문서째 휴지통으로(#97, 웹). 되살리기는 restore_trash("node", …)."""
         ...
+    def set_ref_memo(self, user_id: str, key: str, memo: str) -> Ref:
+        """문헌 글의 본문(bib.memo)만 바꾼다(웹의 글 고치기). 서지·쓸 부분·원문 확인 표시와 그 기록은 그대로."""
+        ...
     def set_ref_status(self, user_id: str, key: str, status: str, via: str = "chat") -> Ref:
         """원문 확인 표시만 바꾼다(#97, 웹의 '원문 확인' 체크). 쓸 부분·전문·서지는 그대로. bib.json "status_by"에 누가·언제."""
         ...
@@ -749,6 +753,9 @@ class Store(Protocol):
         """category_id가 None이면 모든 카테고리. 항목 id 순(= 만든 순)."""
         ...
     def get_category_item(self, user_id: str, category_id: str, item_id: str) -> CategoryItem | None: ...
+    def patch_category_item(self, user_id: str, category_id: str, item_id: str, changes: dict[str, Any]) -> CategoryItem:
+        """글 파일에서 준 칸만 바꾼다(웹의 글 고치기·스크랩). 나머지 칸은 파일에서 그대로. 값이 None이면 그 칸을 뺀다. 없으면 ValueError."""
+        ...
     def trash_category_item(self, user_id: str, category_id: str, item_id: str, note: str) -> CategoryItem | None: ...
     def get_shelf_settings(self, user_id: str) -> ShelfSettings: ...
     def save_shelf_settings(self, user_id: str, settings: ShelfSettings) -> ShelfSettings:

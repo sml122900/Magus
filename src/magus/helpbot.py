@@ -51,7 +51,7 @@ PREAMBLE = """너는 Magus 웹 화면의 도움말이다. Magus는 책을 쓰는
 
 # 화면 이름(정해 둔 목록만 API로 보낸다. 주소에 든 프로젝트·책 이름이나 id는 보내지 않는다)
 SCREENS = {
-    "projects": "프로젝트 목록", "map": "프로젝트 지도", "board": "게시판", "post": "글 보기", "write": "글쓰기",
+    "projects": "프로젝트 목록", "map": "프로젝트 지도", "board": "게시판", "post": "글 보기", "write": "글쓰기", "edit": "글 고치기",
     "trash": "휴지통 확인", "new_book": "새 책", "book_settings": "책 설정",
     "doc_chapters": "올린 문서 · 장 목록", "doc_issues": "올린 문서 · 확인 요청", "doc_cites": "올린 문서 · 인용 상태",
     "doc_questions": "올린 문서 · 답해 주실 질문", "doc_editions": "올린 문서 · 수정본 이력", "made_doc": "올린 문서에서 만든 문서",
@@ -88,6 +88,8 @@ def screen_key(path: str, query: str = "") -> str:
         return _TABS.get(params.get("tab") or "", "doc_chapters")
     if head == "doc":
         return "made_doc"
+    if len(rest) == 3 and rest[2] == "edit":  # 글 고치기(2026-10-09 되돌림)
+        return "edit"
     return {1: "board", 2: "post"}.get(len(rest), "other")
 
 

@@ -53,10 +53,11 @@ def main(argv: list[str] | None = None) -> None:
     terms.add_argument("--add", nargs="*", default=[])
     terms.add_argument("--remove", nargs="*", default=[])
     trash = sub.add_parser("trash", help="책장 휴지통(운영자용, USER_ID 사용자): list | put category|category-item <id> --note … | "
-                                         "restore category|category-item|node <id> [--name 새 이름]")
+                                         "restore category|category-item|node|attachment <id> [--name 새 이름]")
     trash.add_argument("action", choices=["list", "put", "restore"])
-    trash.add_argument("kind", nargs="?", choices=["category", "category-item", "node"])
-    trash.add_argument("id", nargs="?", help="category-item은 <책 id>/<글 id>, node는 <프로젝트 id>/<노드 id>")
+    trash.add_argument("kind", nargs="?", choices=["category", "category-item", "node", "attachment"])
+    trash.add_argument("id", nargs="?", help="category-item은 <책 id>/<글 id>, node는 <프로젝트 id>/<노드 id>, "
+                                            "attachment는 <책 id>/<글 id>/<첨부 id>(문헌 글은 ref:<key>/<첨부 id>)")
     trash.add_argument("--note", default="", help="put: 휴지통으로 옮기는 이유")
     trash.add_argument("--name", default=None, help="restore category: 같은 이름이 이미 있으면 이 이름으로 되살린다")
     for name, about in (("maps", "프로젝트·지도 이전(#95, 운영자용): plan(미리보기) | apply --backup 폴더 | revert(옛 코드로 되돌리기 전)"),
@@ -224,8 +225,8 @@ def main(argv: list[str] | None = None) -> None:
             parser.exit(2, "put·restore에는 category|category-item|node와 id가 필요합니다\n")
         try:
             if args.action == "put":
-                if args.kind == "node":
-                    parser.exit(2, "노드는 지도(웹·대화)에서 휴지통으로 옮깁니다\n")
+                if args.kind in ("node", "attachment"):
+                    parser.exit(2, "노드·첨부는 웹(지도·글 고치기)에서 휴지통으로 옮깁니다\n")
                 if args.kind == "category":  # 책 통째(글 포함)
                     moved = [c.id for c in [store.trash_category(user, args.id, args.note)] if c]
                 else:  # 글 하나(응답한 글도 함께, #96: 옛 생각·문체도 글)

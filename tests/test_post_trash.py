@@ -1,4 +1,4 @@
-"""글 지우기 = 노드와 같은 휴지통 방식(2026-10-09 사용자 요청 3). 웹에서 글 고치기·원문 확인 체크는 없앴다.
+"""글 지우기 = 노드와 같은 휴지통 방식(2026-10-09 사용자 요청 3). 웹의 원문 확인 체크는 없앴다(글 고치기는 되돌렸다: test_post_edit).
 
 글 보기의 🗑 → 화면 안 확인 창(confirm() 쓰지 않음) → 그 글·응답한 글·첨부를 휴지통으로(지우지 않는다).
 프로젝트의 휴지통 화면에 노드와 글이 함께 보이고, 되살리면 그대로 돌아온다(파일 해시 왕복).
@@ -39,17 +39,15 @@ def test_post_trash_dialog_trash_page_and_restore(server_proc):  # noqa: F811
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         post = c.get(f"/login?next=/shelf/{notes}/{FIRST}").text
         csrf = _csrf(post)
-        # 글 보기: 🗑과 화면 안 확인 창(응답한 글·첨부도 함께라고 알린다). 고치기는 없다
+        # 글 보기: 고치기·🗑과 화면 안 확인 창(응답한 글·첨부도 함께라고 알린다)
         assert '<details class="del"><summary><span aria-hidden="true">🗑</span> 휴지통으로</summary>' in post  # 글자를 붙여 누르기 쉽게
         assert "이 글을 휴지통으로 옮길까요? 응답한 글 1개·첨부 1개도 함께 옮깁니다." in post
         assert f'<form method="post" action="/shelf/{notes}/{FIRST}/trash">' in post and 'class="del-cancel"' in post
-        assert "고치기" not in post and "/edit" not in post.split("<main>")[1] and "confirm(" not in post
+        assert f'<a class="act" href="/shelf/{notes}/{FIRST}/edit">' in post and "confirm(" not in post
         # 문헌 글: 🗑·체크 없음
         ref = c.get(f"/shelf/{refs_book}/clack2012").text
         assert 'class="del"' not in ref and "/check" not in ref and 'type="checkbox"' not in ref
-        # 없앤 주소: 고치기·원문 확인 체크, 휴지통은 POST만
-        assert c.get(f"/shelf/{notes}/{FIRST}/edit").status_code == 404
-        assert c.post(f"/shelf/{notes}/{FIRST}/edit", data={"csrf": csrf, "content": "고침"}).status_code in (404, 405)
+        # 없앤 주소: 원문 확인 체크, 휴지통은 POST만
         assert c.post(f"/shelf/{refs_book}/clack2012/check", data={"csrf": csrf, "set": "1"}).status_code in (404, 405)
         assert c.get(f"/shelf/{notes}/{FIRST}/trash").status_code == 405
         assert c.post(f"/shelf/{notes}/{FIRST}/trash", data={"csrf": "틀림"}).status_code == 403

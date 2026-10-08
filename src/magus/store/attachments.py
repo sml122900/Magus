@@ -8,6 +8,7 @@
 글·책을 휴지통으로 옮기면 첨부도 함께 간다(책은 폴더째, 글은 trash/shelf/category-items/<책 id>/files/<글 id>/).
 첨부 하나를 빼면 지우지 않고 옮긴다:
   data/users/<user_id>/trash/shelf/attachments/<책 id>/<글 id>/<첨부 id>/   (문헌 글은 attachments/ref/<key>/<첨부 id>/)
+  …/<첨부 id>.trash.json = {at, note}. 프로젝트 휴지통 화면에서 되살리면 그 글로 돌아간다(2026-10-09, 휴지통 종류 attachment).
 기존 파일 형식(category.json·items/*.json·bib.json)은 바꾸지 않는다. 옛 코드는 files/ 폴더를 읽지 않을 뿐이다.
 """
 
@@ -24,7 +25,7 @@ from pathlib import Path
 
 from magus.ids import new_id, safe_id, utcnow
 from magus.store.base import Attachment
-from magus.store.fileio import locked, write_json
+from magus.store.fileio import locked, read_json, write_json
 
 PART = ".part"  # 받는 도중의 임시 파일(목록에 보이지 않는다)
 
@@ -83,6 +84,7 @@ class AttachmentMixin:
         os.replace(tmp, target)  # 받는 도중에 끊겨도 반쪽 파일이 목록에 보이지 않는다
         found = self._one(target.parent)
         assert found is not None
+        self._attachments_changed(user_id, owner)
         return found
 
     @locked
@@ -112,12 +114,55 @@ class AttachmentMixin:
         src = folder / safe_id(attachment_id, "attachment id") if folder else None
         if src is None or self._one(src) is None:
             return False
-        rel = ["ref", owner[4:]] if owner.startswith("ref:") else owner.split("/", 1)
-        target = self._user_dir(user_id) / "trash" / "shelf" / "attachments" / Path(*rel) / attachment_id
+        target = self._attachment_trash_dir(user_id, owner) / attachment_id
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(target))
         write_json(target.parent / f"{attachment_id}.trash.json", {"at": utcnow(), "note": note})
+        self._attachments_changed(user_id, owner)
         return True
+
+    def _attachment_trash_dir(self, user_id: str, owner: str) -> Path:
+        """뺀 첨부가 가는 폴더(글: attachments/<책 id>/<글 id>, 문헌 글: attachments/ref/<key>)."""
+        from magus.store.shelf import safe_ref_key  # noqa: PLC0415
+
+        root = self._user_dir(user_id) / "trash" / "shelf" / "attachments"
+        if owner.startswith("ref:"):
+            return root / "ref" / safe_ref_key(owner[4:])
+        book, _, item = owner.partition("/")
+        return root / safe_id(book, "book id") / safe_id(item, "item id")
+
+    def _trashed_attachments(self, user_id: str) -> list[tuple[str, Attachment, dict]]:
+        """휴지통의 첨부(하나씩 뺀 것) (owner, 첨부, 기록{at, note}). 글째 옮긴 첨부는 글과 함께라 여기에 없다."""
+        root = self._user_dir(user_id) / "trash" / "shelf" / "attachments"
+        out: list[tuple[str, Attachment, dict]] = []
+        for mark in sorted(root.glob("*/*/*.trash.json")):
+            found = self._one(mark.with_name(mark.name.removesuffix(".trash.json")))
+            if found is None:
+                continue
+            first, second = mark.parent.parent.name, mark.parent.name
+            out.append((f"ref:{second}" if first == "ref" else f"{first}/{second}", found, read_json(mark)))
+        return out
+
+    def _restore_attachment(self, user_id: str, ref: str) -> list[str]:
+        """ref = "<owner>/<첨부 id>". 그 글로 돌려놓는다. 글이 없으면(휴지통에 있으면) ValueError — 글을 먼저 되살린다."""
+        owner, _, att = ref.rpartition("/")
+        att = safe_id(att, "attachment id")
+        src = self._attachment_trash_dir(user_id, owner) / att
+        if self._one(src) is None:
+            raise ValueError(f"휴지통에 첨부 {ref}가 없다")
+        folder = self._owner_dir(user_id, owner, must_exist=True)
+        if folder is None:
+            raise ValueError("그 첨부의 글이 없다(글을 먼저 되살린다)", "item")
+        if (folder / att).exists():
+            raise ValueError(f"첨부 {att}가 이미 그 글에 있다")
+        folder.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(folder / att))
+        src.with_name(f"{att}.trash.json").unlink(missing_ok=True)
+        self._attachments_changed(user_id, owner)
+        return [ref]
+
+    def _attachments_changed(self, user_id: str, owner: str) -> None:
+        """첨부가 늘거나 줄면 그 글의 색인을 다시 만든다(첨부 이름도 찾는다). CategoryMixin·ShelfMixin이 채운다."""
 
     @locked
     def file_attachments(self, user_id: str, suffixes: tuple[str, ...]) -> list[tuple[str, Attachment]]:
