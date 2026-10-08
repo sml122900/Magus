@@ -34,14 +34,17 @@
   응답 머리에 컨텍스트 전문. 이전은 `magus maps apply`에 합침(`docs/decisions/contexts.md`, 문구 전후 `contexts-texts.md`, status.md 0-19절). 2026-10-08 21:47 묶음 배포(`p1-contexts`).
   **사용자 답(2026-10-08 저녁)**: d·s는 바꿔서, 나머지 승인. d = 노드 → 책 순서로 컨텍스트를 이어 읽는다(합쳐 1,000자). s = 일반 기능의 '원고' → '올린 문서'
   (instructions 머리말·1·4·6·7·8·12, 화면·도구 응답·설명). 도구 목록 8,450토큰, instructions 2,259토큰. #93~#96 묶음은 사용자 확인 뒤 배포했다(status.md 0-20절).
-- 서버(2026-10-08 21:47부터): master `p1-contexts`(`efc19ac`: #93 층 + #94 책 종류 + #95 프로젝트·지도 + #96 컨텍스트 묶음, 데이터 이전 `magus maps apply --all-users`, status.md 0-20절).
+- **서버(2026-10-09 00:33부터): master `p1-razor`(`ed15ffb`, #97, 데이터 이전 없음, status.md 0-22절). 되돌리기 기준 `efc19ac`(이미지 `magus:rollback-efc19ac`, 이미지만 되돌리면 된다).**
+- 그 전 서버(2026-10-08 21:47부터): master `p1-contexts`(`efc19ac`: #93 층 + #94 책 종류 + #95 프로젝트·지도 + #96 컨텍스트 묶음, 데이터 이전 `magus maps apply --all-users`, status.md 0-20절).
   되돌리기 기준은 `ec6c40b`(`p1-profile-email`, 이미지 `magus:rollback-ec6c40b`, 그 앞 `magus:rollback-e08bb79`). **되돌릴 때는 먼저 새 코드로 `magus maps revert --all-users`**(서버 `/root/deploy-20261008-contexts/ROLLBACK.txt`).
   (그 전 서버 2026-10-06 18:28~: `p1-profile-email`. `74bbbf4`까지 갈 때는 코드로 빌드하고 생각 파일의 제목 키를 먼저 정리한다, status.md 0-10절.)
   - 다음 배포도 docs/deploy.md "업데이트" 절차(`git fetch … master && git checkout -B master FETCH_HEAD`)로 한다.
-- **오캄의 면도날 + 도움말(2026-10-08 밤, 사용자 요청 #97, 로컬만, 배포 승인 대기)**: 화면 글자는 최소로(제목·단추·입력칸 이름·날짜·개수), 설명은 `docs/help/`(01~05)와
+- **오캄의 면도날 + 도움말 + 노드 삭제(#97, 2026-10-09 00:33 서버 배포 `p1-razor`)**: 화면 글자는 최소로(제목·단추·입력칸 이름·날짜·개수), 설명은 `docs/help/`(01~05)와
   오른쪽 아래 '?' 도움말 챗봇(`magus/helpbot.py`, 서버에서만 Haiku 4.5, 하루 30회)이 맡는다. 게시판 = 제목·본문·첨부(`magus/attachments.py`·`store/attachments.py`),
   문헌 글에 '원문 확인' 체크 하나(원문 확인 넣기 폼 없앰). 데이터 형식 그대로(이전 없음). instructions 규칙 12 = 바로 book_document(커넥터 재연결 필요).
-  태그 `razor-c`·`razor-ab`·`razor-d`, 결정 문서 `docs/decisions/razor-help.md`, 배포 절차 `docs/deploy.md` 2-3절, status.md 0-21절. 서버 `.env`에 `ANTHROPIC_API_KEY`는 사용자가 넣는다.
+  도움말은 이어지는 질문(브라우저가 최근 3번을 함께, 3,000자, 저장 없음). 노드 삭제(웹만): 🗑 → 화면 안 확인 창 → 책·글·첨부·선째 휴지통,
+  지도의 '휴지통'(`/shelf/p/<프로젝트>/trash`)에서 되살리기(가운데·다른 프로젝트가 연결 중·문헌 책은 막음, 영구 삭제 없음, MCP 도구 그대로).
+  태그 `razor-c`·`razor-ab`·`razor-d`·`node-trash`·`p1-razor`, 결정 문서 `docs/decisions/razor-help.md`, 배포 `docs/deploy.md` 2-3절, status.md 0-21·0-22절.
 - (고침 2026-10-06 밤) `tests/test_http.py::test_request_size_limit`의 Windows 간헐 실패: 머리만 보내고 응답을 먼저 읽게 고쳤다(status.md 7절).
 - 대기 사항: 계정·키·결정·아버지 docx처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), 저자 보고서 답변. 상세는 status.md에만 적는다.
 
