@@ -42,13 +42,14 @@ from starlette.responses import FileResponse, RedirectResponse, Response
 from magus.attachments import MAX_FILES, clean_name, mb, media_type
 from magus.book_migrate import legacy_book_id
 from magus.contexts import band as context_band
+from magus.contexts import view_for_book
 from magus.floors import COMMON
 from magus.category.rules import (
     BUILTINS, COLOR_NAMES, HEX, MAX_CATEGORIES, MAX_MY_COLORS, NEW_COLOR_ORDER,
     PALETTE, PALETTE_BY_NAME, TEMPLATE_BY_KEY, check_name, name_key,
 )
 from magus.store import Category, CategoryItem, ShelfSettings, Store
-from magus.webcontexts import CONTEXT_SCRIPT, CONTEXT_STYLE, context_fieldset, contexts_from_form, register_row
+from magus.webcontexts import CONTEXT_SCRIPT, CONTEXT_STYLE, context_fieldset, contexts_from_form, contexts_view_html, register_row
 from magus.store.base import Lane
 from magus.store.formats import one_line
 from magus.textindex import match_query, tokens
@@ -501,6 +502,7 @@ class ShelfPages:
             ("/shelf/{kind}/{item}", ["GET"], self.post_view),  # 글 보기 페이지(webboard)
             ("/shelf/{kind}/{item}/trash", ["POST"], self.shelf_item_trash),  # 글 보기의 🗑(화면 안 확인 창, 2026-10-09)
             ("/shelf/{kind}/{item}/files/{att}", ["GET"], self.shelf_file),  # 첨부 보기·내려받기(#97)
+            ("/shelf/{kind}/{item}/thumbs/{att}", ["GET"], self.shelf_thumb),  # 사진 썸네일(없으면 만들고, 못 만들면 원본)
             # 예전 주소(생각·문헌·문체 메뉴)는 책장의 같은 목록으로 넘긴다. 거르기 조건은 그대로 이어 간다.
             ("/ideas", ["GET"], self._moved("ideas")), ("/refs", ["GET"], self._moved("refs")),
             ("/styles", ["GET"], self._moved("styles")),
@@ -527,7 +529,7 @@ class ShelfPages:
         along = [f"응답한 글 {replies}개" if replies else "", f"첨부 {files}개" if files else ""]
         ask = "이 글을 휴지통으로 옮길까요?" + (f" {'·'.join(a for a in along if a)}도 함께 옮깁니다." if any(along) else "")
         close = '<button type="button" class="del-cancel" onclick="this.closest(\'details\').open=false">취소</button>'
-        return ('<div class="post-acts"><details class="del"><summary aria-label="글 휴지통으로" title="글 휴지통으로">🗑</summary>'
+        return ('<div class="post-acts"><details class="del"><summary><span aria-hidden="true">🗑</span> 휴지통으로</summary>'
                 f'<div class="del-box" role="dialog" aria-label="글 휴지통으로"><p>{html.escape(ask)}</p>'
                 f'<form method="post" action="{html.escape(link)}/trash">{self._csrf_input(session)}'
                 f'<p><button class="primary">옮기기</button> {close}</p></form></div></details></div>')
@@ -802,8 +804,9 @@ class ShelfPages:
         # 문헌 글이 든 책은 휴지통으로 옮기지 않는다(인용 점검이 보는 기록). 그때는 휴지통 줄을 보이지 않는다
         trash = "" if category.sources else f'<p><a href="/shelf/trash/{kind.key}">휴지통</a></p>'
         place = await run_in_threadpool(self.location_form, uid, session, kind)  # 위치(#95: 프로젝트 · 노드, webmap)
+        reading = await run_in_threadpool(lambda: contexts_view_html(view_for_book(self.store, uid, kind.key)))  # 노드 → 이 책 읽는 순서
         body = (
-            f'{error}'
+            f'{error}{reading}'
             f'<form method="post" action="/shelf/edit/{kind.key}" class="colors">{self._csrf_input(session)}'
             f'<label class="block">이름 <input name="name" value="{html.escape(name)}" maxlength="12" required></label>'
             + context_fieldset(saved, attached)
@@ -900,7 +903,7 @@ class ShelfPages:
         await run_in_threadpool(self.store.trash_item_with_replies, uid, kind.category.id, item.id, "웹 게시판에서 옮김")
         return RedirectResponse(f"/shelf/{kind.category.id}?done=trashed", status_code=303)
 
-    async def shelf_file(self, request: Request) -> Response:
+    async def shelf_file(self, request: Request, thumb: bool = False) -> Response:
         """첨부 하나 보기·내려받기(#97). 로그인한 본인의 것만(경로는 세션의 사용자로 정한다). 그림·PDF만 바로 열고 나머지는 내려받기."""
         session = self.user_of(request)
         if not session:
@@ -910,17 +913,24 @@ class ShelfPages:
         if found is None:
             return Response("없는 파일입니다.", status_code=404, media_type="text/plain; charset=utf-8")
         kind, obj = found
+        owner = self._owner(kind, obj)
         try:
-            hit = await run_in_threadpool(self.store.attachment_path, uid, self._owner(kind, obj), request.path_params["att"])
+            hit = await run_in_threadpool(self.store.attachment_path, uid, owner, request.path_params["att"])
         except ValueError:
             hit = None
         if hit is None:
             return Response("없는 파일입니다.", status_code=404, media_type="text/plain; charset=utf-8")
         path, att = hit
         media, inline = media_type(att.name)
+        if thumb and (small := await run_in_threadpool(self.store.attachment_thumb, uid, owner, att.id)):
+            path, media = small, "image/jpeg"
         headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"}
         if inline and not media.startswith("application/pdf"):
             headers["Content-Security-Policy"] = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"
         return FileResponse(path, media_type=media, filename=att.name, headers=headers,
                             content_disposition_type="inline" if inline else "attachment")
+
+    async def shelf_thumb(self, request: Request) -> Response:
+        """사진 썸네일(긴 변 400px, magus.thumbs). 없으면 만들고, 만들지 못하면 원본을 준다. 본인 것만."""
+        return await self.shelf_file(request, thumb=True)
 

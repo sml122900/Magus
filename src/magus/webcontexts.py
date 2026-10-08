@@ -43,7 +43,7 @@ cursor:pointer;font-weight:600;list-style:none}
 .ctxs details.ctx>summary::-webkit-details-marker{display:none}
 .ctxs details.ctx[open]{display:block;flex-basis:100%}
 .ctxs details.ctx>p{margin:6px 0 4px;padding:8px 12px;background:var(--canvas);border-left:4px solid #b9b9f9;white-space:pre-line}
-.ctxs .none{color:var(--ink2);font-size:15px}
+.ctxs .none{color:var(--ink2);font-size:15px}.ctxs .nowrap{white-space:nowrap}
 .saved-ctx{border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin:12px 0;background:var(--canvas)}
 .saved-ctx textarea{min-height:88px}
 """
@@ -185,7 +185,7 @@ def contexts_view_html(view: View, edit_href: str | None = None) -> str:
     if view.contexts:
         parts.append(f'<span class="ctx-label">이 책</span>{_chips(view.contexts)}')
     elif view.node_contexts:
-        parts.append('<span class="ctx-label">이 책</span><span class="none">없음</span>')
+        parts.append('<span class="ctx-label nowrap">이 책 <span class="none">없음</span></span>')  # 줄바꿈으로 갈리지 않게
     order = '<span class="ctx-sep" aria-hidden="true">→</span>'.join(parts)
     cut = f'<span class="none">앞 {HEADER_MAX:,}자</span>' if view.too_long else ""
     return (f'<div class="ctxs" aria-label="컨텍스트(노드 다음 책 순서로 읽음)"><span class="ctx-label">컨텍스트</span>'

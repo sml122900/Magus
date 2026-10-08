@@ -197,9 +197,9 @@ class ShelfMixin:
         return found
 
     @locked
-    def set_ref_status(self, user_id: str, key: str, status: str) -> Ref:
-        """원문 확인 표시만 바꾼다(#97: 웹 글 보기의 '원문 확인' 체크, 저자가 한 것). 쓸 부분·전문·서지는 그대로.
-        누가 언제 바꿨는지 bib.json "status_by"에 남긴다(옛 코드는 이 키를 읽지 않는다)."""
+    def set_ref_status(self, user_id: str, key: str, status: str, via: str = "chat") -> Ref:
+        """원문 확인 표시만 바꾼다(저자가 한 것: #97 웹 체크 → 2026-10-09부터 대화의 category_edit checked). 쓸 부분·전문·서지는 그대로.
+        누가 언제 어디서 바꿨는지 bib.json "status_by"에 남긴다(옛 코드는 이 키를 읽지 않는다)."""
         if status not in ("verified", "unverified"):
             raise ValueError(f"status={status!r}")
         path = self._melchior_dir(user_id) / safe_ref_key(key) / "bib.json"
@@ -207,7 +207,7 @@ class ShelfMixin:
             raise ValueError(f"문헌 {key!r}가 없다")
         data = read_json(path)
         if data.get("status") != status:
-            data.update({"status": status, "updated_at": utcnow(), "status_by": {"by": "author", "at": utcnow(), "via": "web"}})
+            data.update({"status": status, "updated_at": utcnow(), "status_by": {"by": "author", "at": utcnow(), "via": via}})
             write_json(path, data)
             with self._db:
                 self._index_ref(user_id, path.parent)

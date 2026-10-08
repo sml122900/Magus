@@ -357,7 +357,8 @@ def test_shelf_books_and_board_lists(server_proc):
             assert moved.status_code == 302 and moved.headers["location"] == new
 
         ideas = c.get("/shelf/ideas").text  # 옛 주소 → 이전으로 생긴 책
-        assert '<details class="ctx"><summary>생각 메모</summary><p>떠오른 생각을 적어 둔 메모다.' in ideas  # 머리에 컨텍스트
+        assert '<details class="ctx">' not in ideas  # 컨텍스트는 책 설정 안에서만(2026-10-09)
+        assert '<details class="ctx"><summary>생각 메모</summary><p>떠오른 생각을 적어 둔 메모다.' in c.get("/shelf/edit/ideas-common").text
         assert '<nav class="trail" aria-label="위치">' in ideas and '<span aria-current="page">생각</span></nav>' in ideas
         assert ideas.index("긴 생각") < ideas.index("그 관점은") < ideas.index("물가는 궁지다")  # 최신 것부터
         assert '<a class="post" href="/shelf/ideas-common/20261001000000000-aaaaaa"><span class="pt none">물가는 궁지다</span>' in ideas

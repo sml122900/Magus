@@ -249,6 +249,7 @@ def _plain(text: str) -> str:
 # ---- 화면 부품(Web._page가 로그인한 화면에만 붙인다) ----------------------
 
 HELP_STYLE = """
+main{padding-bottom:92px}
 .help-btn{position:fixed;right:16px;bottom:16px;z-index:50;width:52px;height:52px;min-height:52px;padding:0;border-radius:50%;
 font-size:24px;font-weight:600;background:var(--primary);color:#fff;border:0;box-shadow:0 4px 12px rgb(0 0 0/.25)}
 .help-btn:hover{background:var(--deep)}
@@ -311,15 +312,20 @@ HELP_SCRIPT = """<script>
   var btn = root.querySelector(".help-btn"), box = root.querySelector(".help-box"), log = root.querySelector(".help-log");
   var form = root.querySelector(".help-form"), q = form.querySelector("textarea"), send = form.querySelector("button");
   var data = S.read(store, key, Date.now());
+  function bottom() {  // 새 답이 오거나 창을 다시 열면 대화 맨 아래로(2026-10-09)
+    log.scrollTop = log.scrollHeight;
+    if (window.requestAnimationFrame) requestAnimationFrame(function () { log.scrollTop = log.scrollHeight; });
+  }
   function add(cls, text) {
     var li = document.createElement("li"); li.className = cls; li.textContent = text; log.appendChild(li);
-    log.scrollTop = log.scrollHeight; return li;
+    bottom(); return li;
   }
   function render() { log.textContent = ""; data.turns.forEach(function (t) { add("me", t.q); add("bot", t.a); }); mark(); }
   function mark() { btn.classList.toggle("has-talk", data.turns.length > 0 && box.hidden); }
   function show(on, focus) {  // ✕는 접기: 대화는 그대로 둔다
     box.hidden = !on; btn.setAttribute("aria-expanded", on ? "true" : "false");
     data.open = on; S.write(store, key, data); mark();
+    if (on) bottom();
     if (on && focus) q.focus();
     if (!on && focus) btn.focus();
   }
@@ -345,8 +351,9 @@ HELP_SCRIPT = """<script>
       .then(function (res) {
         wait.className = "bot"; wait.textContent = res.ok ? res.answer : (res.error || "지금은 도움말을 쓸 수 없어요.");
         if (res.ok) data = S.add(store, key, data, text, res.answer, Date.now());
+        bottom();
       })
-      .catch(function () { wait.className = "bot"; wait.textContent = "지금은 도움말을 쓸 수 없어요."; })
+      .catch(function () { wait.className = "bot"; wait.textContent = "지금은 도움말을 쓸 수 없어요."; bottom(); })
       .then(function () { send.disabled = false; q.focus(); });
   });
   q.addEventListener("keydown", function (e) {

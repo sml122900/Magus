@@ -80,14 +80,15 @@ color:var(--ink);max-width:70%;z-index:8}
 .map-list{display:none}
 .nlist{list-style:none;padding:0;margin:0;background:var(--canvas);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
 .nlist>li{border-bottom:1px solid var(--line)}.nlist>li:last-child{border-bottom:0}
-.nlist summary{padding:12px 16px 12px 44px;min-height:48px;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;cursor:pointer;
+.nlist>li>details>summary{padding:12px 16px 12px 44px;min-height:48px;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;cursor:pointer;
 list-style:none;position:relative}
-.nlist summary::-webkit-details-marker{display:none}
-.nlist summary::before{content:"▸";position:absolute;left:16px;top:10px;color:var(--ink2);font-size:20px;line-height:1.4}
-.nlist details[open]>summary::before{content:"▾"}
-.nlist summary b{font-size:18px}
-.nlist details>p,.nlist details>.muted{margin:4px 16px 12px 40px}
-.nl-books{margin:0 16px 8px 40px;padding-left:16px}.nl-books li{margin:8px 0}.nl-books a{font-weight:600;font-size:17px}
+.nlist>li>details>summary::-webkit-details-marker{display:none}
+.nlist>li>details>summary::before{content:"▸";position:absolute;left:16px;top:10px;color:var(--ink2);font-size:20px;line-height:1.4}
+.nlist>li>details[open]>summary::before{content:"▾"}
+.nlist>li>details>summary b{font-size:18px}
+.nlist>li>details>p,.nlist>li>details>.muted{margin:4px 16px 12px 40px}
+.nl-books{margin:0 16px 8px 40px;padding-left:16px}
+.nlist>li>.pm-panel{margin:0 8px 12px;box-shadow:none}.nl-books li{margin:8px 0}.nl-books a{font-weight:600;font-size:17px}
 .sr-title{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;margin:0}
 .pm[data-view=list] .map-view,.pm[data-view=list] .map-hint,.pm[data-view=list] [data-act=link],.pm[data-view=list] [data-act=fit]{display:none!important}
 .pm[data-view=list] .map-list{display:block}
@@ -154,7 +155,7 @@ MAP_SCRIPT = r"""<script>
   var pos = {};
   D.nodes.forEach(function (n) { pos[n.id] = {x: n.x, y: n.y}; });
   var V = {x: 0, y: 0, k: 1}, KEY = "magus-map-" + D.project;
-  var MIN = 0.35, MAX = 2;
+  var MIN = 0.2, MAX = 2;
 
   function nodeEl(id) { return world.querySelector('.node[data-node="' + CSS.escape(id) + '"]'); }
   function apply() { world.style.transform = "translate(" + V.x + "px," + V.y + "px) scale(" + V.k + ")"; }
@@ -168,7 +169,8 @@ MAP_SCRIPT = r"""<script>
       b.x0 = Math.min(b.x0, p.x); b.x1 = Math.max(b.x1, p.x); b.y0 = Math.min(b.y0, p.y); b.y1 = Math.max(b.y1, p.y); });
     return b;
   }
-  function fit() {  // 노드 상자(지도 좌표)가 모두 들어오게. 글자가 읽히게 0.6배 아래로는 줄이지 않는다
+  function fit() {  // 노드 상자(지도 좌표)가 모두 들어오게. 넓은 화면은 글자가 읽히게 0.6배 아래로 줄이지 않고,
+    // 휴대폰은 처음에 노드가 모두 보이는 것이 먼저다(그다음 손가락으로 확대, 2026-10-09)
     var w = viewEl.clientWidth, h = viewEl.clientHeight, b = {x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity};
     if (!w) return;
     world.querySelectorAll(".node").forEach(function (el) {
@@ -177,7 +179,7 @@ MAP_SCRIPT = r"""<script>
       b.x0 = Math.min(b.x0, p.x - hw); b.x1 = Math.max(b.x1, p.x + hw); b.y0 = Math.min(b.y0, p.y - hh); b.y1 = Math.max(b.y1, p.y + hh);
     });
     if (!isFinite(b.x0)) return;
-    V.k = Math.max(w < 600 ? 0.45 : 0.6, Math.min(1, (w - 24) / (b.x1 - b.x0), (h - 24) / (b.y1 - b.y0)));
+    V.k = Math.max(w < 600 ? MIN : 0.6, Math.min(1, (w - 24) / (b.x1 - b.x0), (h - 24) / (b.y1 - b.y0)));
     V.x = w / 2 - (b.x0 + b.x1) / 2 * V.k; V.y = h / 2 - (b.y0 + b.y1) / 2 * V.k;
     apply(); save();
   }
@@ -250,6 +252,15 @@ MAP_SCRIPT = r"""<script>
     var el = id && nodeEl(id);
     if (el) { el.classList.add("on"); el.setAttribute("aria-current", "true"); }
   }
+  // 휴대폰 목록 보기: 패널(그 노드의 책장)을 목록의 그 노드 바로 아래로 옮긴다. 지도 보기·넓은 화면에서는 제자리
+  var listEl = document.querySelector(".map-list"), home = panel.parentNode, homeNext = panel.nextSibling;
+  function inList() { return window.matchMedia("(max-width:767px)").matches && pm.getAttribute("data-view") !== "map"; }
+  function placePanel(id) {
+    var d = listEl && id ? listEl.querySelector('details[data-node="' + CSS.escape(id) + '"]') : null;
+    if (d && inList()) { d.open = true; d.parentNode.appendChild(panel); return d.parentNode; }
+    if (panel.parentNode !== home) home.insertBefore(panel, homeNext);
+    return null;
+  }
   function openNode(id, opts) {
     opts = opts || {};
     markNode(id);
@@ -260,9 +271,10 @@ MAP_SCRIPT = r"""<script>
         box.insertAdjacentHTML("beforebegin", h); box.remove(); wirePanel();
         if (opts.refresh) return;
         push({node: id});
-        var t = document.getElementById("pp-title");
+        var spot = placePanel(id), t = document.getElementById("pp-title");
         if (t) t.focus({preventScroll: true});
-        if (window.matchMedia("(max-width:1199px)").matches) panel.scrollIntoView({block: "start", behavior: reduce ? "auto" : "smooth"});
+        if (spot) spot.scrollIntoView({block: "start", behavior: reduce ? "auto" : "smooth"});
+        else if (window.matchMedia("(max-width:1199px)").matches) panel.scrollIntoView({block: "start", behavior: reduce ? "auto" : "smooth"});
       });
   }
 
@@ -319,6 +331,22 @@ MAP_SCRIPT = r"""<script>
     });
   }
   wirePanel();
+  // 좁은 화면(패널이 지도·목록 아래): 노드가 열린 채로 들어오면(새로 고침·위치 표시의 노드 링크) 그 노드의 책장이 바로 보이게
+  var spot0 = placePanel(state.node);
+  if (spot0) spot0.scrollIntoView({block: "start"});
+  else if (state.node && !location.hash && window.matchMedia("(max-width:1199px)").matches) panel.scrollIntoView({block: "start"});
+  if (listEl) {  // 목록에서 노드를 펼치면(휴대폰) 그 노드의 책장을 바로 아래에. '열기'도 다시 읽지 않고 같은 일을 한다
+    listEl.querySelectorAll("details[data-node]").forEach(function (d) {
+      d.addEventListener("toggle", function () {
+        var id = d.getAttribute("data-node");
+        if (!d.open || !inList()) return;
+        if (id === state.node) { placePanel(id); return; }
+        openNode(id);
+      });
+      var go = d.querySelector('a[href*="#panel"]');
+      if (go) go.addEventListener("click", function (e) { e.preventDefault(); openNode(d.getAttribute("data-node")); });
+    });
+  }
   // 링크(노드·책)를 끌면 브라우저가 링크 끌기(drag and drop)를 시작해 포인터 이벤트를 끊는다. 지도 화면에서는 막는다
   document.addEventListener("dragstart", function (e) { if (e.target.closest && e.target.closest(".pm")) e.preventDefault(); });
 
@@ -471,6 +499,7 @@ MAP_SCRIPT = r"""<script>
     a.addEventListener("click", function (e) {
       e.preventDefault();
       pm.setAttribute("data-view", a.getAttribute("data-view-to"));
+      placePanel(state.node);  // 목록 ↔ 지도: 패널을 그 보기의 자리로
       push(state, true);
       if (a.getAttribute("data-view-to") === "map" && !saved) fit();
     });

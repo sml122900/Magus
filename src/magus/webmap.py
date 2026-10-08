@@ -433,7 +433,8 @@ class MapPages:
                 for b in books)
             sub = node_sub(n, books)
             title = ("가운데 · " + found.title) if n.center else node_label(n)
-            items.append(f'<li><details{" open" if node is not None and node.id == n.id else ""}><summary><b>{html.escape(title)}</b> '
+            items.append(f'<li><details data-node="{html.escape(n.id)}"{" open" if node is not None and node.id == n.id else ""}>'
+                         f'<summary><b>{html.escape(title)}</b> '
                          f'<small>{html.escape(sub)}</small></summary>'
                          + (f'<ul class="nl-books">{links}</ul>' if links else '<p class="muted">책 없음</p>')
                          + f'<p><a href="{html.escape(state_url(floor.id, node=n.id))}#panel">열기</a></p></details></li>')
@@ -717,8 +718,10 @@ class MapPages:
                 replies = sum(1 for x in self.store.list_trash(uid) if x.kind == "category_item" and x.with_id
                               and x.id.partition("/")[0] == book.id and x.with_id == t.id.partition("/")[2])
                 title = one_line(t.preview) or "제목 없는 글"
+                files = self.store.trashed_item_attachments(uid, book.id, t.id.partition("/")[2])
+                along = [f"응답한 글 {replies}개" if replies else "", f"첨부 {files}개" if files else ""]  # 확인 창 문구와 같게
                 out.append((t, f"글 「{title[:60]}{'…' if len(title) > 60 else ''}」 · 책 「{book.name}」"
-                            + (f" · 응답한 글 {replies}개 함께" if replies else "")))
+                            + (f" · {'·'.join(a for a in along if a)} 함께" if any(along) else "")))
         return out
 
     # ---- 책 옮기기·되돌리기 ---------------------------------------------------------------------

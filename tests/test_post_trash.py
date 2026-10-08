@@ -40,7 +40,7 @@ def test_post_trash_dialog_trash_page_and_restore(server_proc):  # noqa: F811
         post = c.get(f"/login?next=/shelf/{notes}/{FIRST}").text
         csrf = _csrf(post)
         # 글 보기: 🗑과 화면 안 확인 창(응답한 글·첨부도 함께라고 알린다). 고치기는 없다
-        assert '<details class="del"><summary aria-label="글 휴지통으로" title="글 휴지통으로">🗑</summary>' in post
+        assert '<details class="del"><summary><span aria-hidden="true">🗑</span> 휴지통으로</summary>' in post  # 글자를 붙여 누르기 쉽게
         assert "이 글을 휴지통으로 옮길까요? 응답한 글 1개·첨부 1개도 함께 옮깁니다." in post
         assert f'<form method="post" action="/shelf/{notes}/{FIRST}/trash">' in post and 'class="del-cancel"' in post
         assert "고치기" not in post and "/edit" not in post.split("<main>")[1] and "confirm(" not in post
@@ -63,7 +63,7 @@ def test_post_trash_dialog_trash_page_and_restore(server_proc):  # noqa: F811
         # 노드도 하나 지운다 → 휴지통 화면에 노드와 글이 함께(응답 글은 따로 보이지 않는다)
         c.post("/shelf/p/book/map", data={"csrf": csrf, "action": "trash", "node": ids["other"]})
         trash = c.get("/shelf/p/book/trash").text
-        assert "노드 「강」" in trash and "글 「강가 장날의 소금 장수」 · 책 「장날 메모」 · 응답한 글 1개 함께" in trash
+        assert "노드 「강」" in trash and "글 「강가 장날의 소금 장수」 · 책 「장날 메모」 · 응답한 글 1개·첨부 1개 함께" in trash
         assert trash.count("<button>되살리기</button>") == 2 and "AI의 답" not in trash
         assert "강가 장날" not in c.get("/shelf/p/common/trash").text  # 다른 프로젝트의 휴지통에는 없다
         wrong = c.post("/shelf/p/common/trash", data={"csrf": csrf, "item": f"{notes}/{FIRST}"}, follow_redirects=False)

@@ -56,7 +56,10 @@ check("✕는 접기: 대화는 남고, 접힌 '?'에 표시", await js(
 await js(`localStorage.setItem(${KEY}, JSON.stringify({turns: Array.from({length: 20}, (_, i) => ({q: "질문" + i, a: "답" + i})), last: Date.now(), open: true}))`);
 await go("/shelf");
 check("저장된 20턴이 보인다", await js("document.querySelectorAll('.help-log li').length === 40"));
+const AT_BOTTOM = "(function(l){return l.scrollHeight > l.clientHeight && l.scrollTop + l.clientHeight >= l.scrollHeight - 2;})(document.querySelector('.help-log'))";
+check("창을 다시 열면 대화 맨 아래가 보인다", await until(AT_BOTTOM, 3000));
 check("21번째 질문", await ask("하나 더"));
+check("새 답이 오면 맨 아래로", await until(AT_BOTTOM, 3000));
 check("20턴을 넘으면 가장 오래된 것부터 지운다", await js(`${stored}.turns.length === 20 && ${stored}.turns[0].q === "질문1" && ${stored}.turns[19].q === "하나 더"`));
 await js(`(function(){var d=${stored}; d.last = Date.now() - 25*3600*1000; localStorage.setItem(${KEY}, JSON.stringify(d));})()`);
 await go("/shelf");

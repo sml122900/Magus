@@ -26,14 +26,12 @@ from starlette.responses import RedirectResponse, Response
 from magus.attachments import ACCEPT, MAX_FILES, kind_of, media_type, size_text
 from magus.book_migrate import legacy_book_id
 from magus.category.rules import BUILTINS, CONTENT_MAX, TITLE_MAX
-from magus.contexts import view_for_book
 from magus.ids import local_time, new_id
 from magus.melchior.author_report import cite_label
 from magus.store import Attachment, CategoryItem, Store
 from magus.store.formats import one_line
-from magus.webcontexts import contexts_view_html
 from magus.webshelf import (
-    AI_MARK, AI_TITLE, GEAR, Book, Kind, clean_query, find, mark, paragraphs, snippet, state_url,
+    AI_MARK, AI_TITLE, Book, Kind, clean_query, find, mark, paragraphs, snippet, state_url,
 )
 
 BOARD_SIZE = 20  # 게시판 한 쪽
@@ -54,7 +52,7 @@ ol.posts>li{border-bottom:1px solid var(--line)}ol.posts>li:last-child{border-bo
 a.post{display:grid;grid-template-columns:minmax(0,1fr) auto 10.5em;gap:4px 16px;align-items:center;padding:10px 16px;min-height:52px;
 text-decoration:none;color:var(--ink)}
 a.post:hover .pt,a.post:focus-visible .pt{text-decoration:underline}
-.pt{font-weight:600;font-size:17px;overflow:hidden;text-overflow:ellipsis}.pt.none{font-weight:400;color:var(--mute)}
+.pt{font-weight:600;font-size:17px;overflow:hidden;text-overflow:ellipsis}.pt.none{font-weight:400;color:var(--ink)}
 .pt .tag{font-size:13px;font-weight:400;margin-left:8px;vertical-align:1px}
 .pa{display:flex;gap:6px;align-items:center;color:var(--ink2);white-space:nowrap}
 .pa img.thumb{width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--line);background:var(--soft)}
@@ -66,11 +64,24 @@ text-decoration:none;padding:0 10px}.pages [aria-current]{background:var(--prima
 .post-meta{color:var(--ink2);display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}
 .post-body{background:var(--canvas);border:1px solid var(--line);border-radius:12px;padding:8px 20px;margin:12px 0;box-shadow:var(--shadow)}
 .post-body blockquote{margin:8px 0;padding:4px 12px;border-left:3px solid var(--line);color:var(--ink2)}
-.pics{display:grid;gap:12px;margin:12px 0}.pics img{display:block;max-width:100%;height:auto;border-radius:8px;border:1px solid var(--line)}
+.pics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}
+.pics a{display:block;border-radius:8px;overflow:hidden;border:1px solid var(--line);background:var(--soft)}
+.pics img{display:block;width:100%;aspect-ratio:1;object-fit:cover}
+.pics.one{grid-template-columns:minmax(0,400px)}.pics.one img{aspect-ratio:auto;height:auto;object-fit:contain}
+@media (min-width:768px){.pics{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (min-width:1100px){.pics{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.lightbox{position:fixed;inset:0;z-index:80;background:rgb(0 0 0/.88);display:flex;align-items:center;justify-content:center;padding:56px 8px 64px}
+.lightbox[hidden]{display:none}.lightbox img{max-width:100%;max-height:100%;object-fit:contain;border-radius:4px;background:#222}
+.lightbox button{position:absolute;min-width:48px;min-height:48px;border:0;border-radius:9999px;background:rgb(255 255 255/.92);color:#111;font-size:18px;
+font-weight:600;padding:0 16px;cursor:pointer}.lightbox button:focus-visible{outline:3px solid #ffd34d}
+.lightbox .lb-close{top:8px;right:8px}.lightbox .lb-prev{left:8px;top:50%;transform:translateY(-50%)}
+.lightbox .lb-next{right:8px;top:50%;transform:translateY(-50%)}
+.lightbox .lb-count{position:absolute;bottom:16px;left:0;right:0;text-align:center;color:#fff;font-variant-numeric:tabular-nums}
+.board-bar a.gear.labeled{font-size:16px;padding:0 12px;min-height:44px;gap:4px;color:var(--ink)}
 .post-acts{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:12px 0}
 .post-acts details.del{position:relative}
-.post-acts details.del>summary{list-style:none;display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;
-border-radius:9999px;cursor:pointer;font-size:20px;border:1px solid var(--line);background:var(--canvas)}
+.post-acts details.del>summary{list-style:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:44px;min-height:44px;
+padding:0 18px;border-radius:9999px;cursor:pointer;font-size:16px;font-weight:600;color:var(--ink);border:1px solid var(--mute);background:var(--canvas)}
 .post-acts details.del>summary::-webkit-details-marker{display:none}.post-acts details.del>summary:hover{background:var(--soft)}
 .post-acts .del-box{margin-top:8px;width:min(380px,100%);background:var(--canvas);border:1px solid var(--line);border-left:4px solid var(--ruby);
 border-radius:10px;padding:4px 16px;box-shadow:0 8px 24px rgb(0 0 0/.18)}.post-acts .del-box p{margin:10px 0}
@@ -90,6 +101,54 @@ ul.chosen img{width:40px;height:40px;object-fit:cover;border-radius:4px}
 .trail>a,.trail>span[aria-current]{max-width:11em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
 """
+
+# 글 보기의 사진: 누르면 화면 안에서 크게(원본). 닫기·이전·다음, Esc·←·→, 밀어 넘기기. 스크립트가 없으면 링크로 원본이 새 창에 열린다
+LIGHTBOX = """<div class="lightbox" role="dialog" aria-modal="true" aria-label="사진 크게 보기" hidden>
+<img alt=""><button type="button" class="lb-close">닫기 ✕</button><button type="button" class="lb-prev" aria-label="이전 사진">‹</button>
+<button type="button" class="lb-next" aria-label="다음 사진">›</button><p class="lb-count" aria-live="polite"></p></div>
+<script>
+(function () {
+  var box = document.querySelector(".lightbox"), links = Array.prototype.slice.call(document.querySelectorAll(".pics a[data-full]"));
+  if (!box || !links.length) return;
+  var img = box.querySelector("img"), count = box.querySelector(".lb-count"), at = 0, back = null, startX = null;
+  var prev = box.querySelector(".lb-prev"), next = box.querySelector(".lb-next");
+  function show(i) {
+    at = (i + links.length) % links.length;
+    img.src = links[at].href; img.alt = links[at].querySelector("img").alt;
+    count.textContent = links.length > 1 ? (at + 1) + " / " + links.length : "";
+    prev.hidden = next.hidden = links.length < 2;
+  }
+  function open(i) { back = document.activeElement; show(i); box.hidden = false; document.body.style.overflow = "hidden"; box.querySelector(".lb-close").focus(); }
+  function close() { box.hidden = true; img.removeAttribute("src"); document.body.style.overflow = ""; if (back) back.focus(); }
+  links.forEach(function (a, i) {
+    a.addEventListener("click", function (e) {
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+      e.preventDefault(); open(i);
+    });
+  });
+  box.querySelector(".lb-close").addEventListener("click", close);
+  prev.addEventListener("click", function () { show(at - 1); });
+  next.addEventListener("click", function () { show(at + 1); });
+  box.addEventListener("click", function (e) { if (e.target === box) close(); });
+  document.addEventListener("keydown", function (e) {
+    if (box.hidden) return;
+    if (e.key === "Escape") close();
+    else if (e.key === "ArrowLeft") show(at - 1);
+    else if (e.key === "ArrowRight") show(at + 1);
+    else if (e.key === "Tab") {  // 창 안에서만 돈다
+      var f = Array.prototype.filter.call(box.querySelectorAll("button"), function (b) { return !b.hidden; });
+      var i = f.indexOf(document.activeElement);
+      e.preventDefault(); f[(i + (e.shiftKey ? f.length - 1 : 1)) % f.length].focus();
+    }
+  });
+  box.addEventListener("pointerdown", function (e) { startX = e.clientX; });
+  box.addEventListener("pointerup", function (e) {
+    if (startX === null || links.length < 2) return;
+    var dx = e.clientX - startX; startX = null;
+    if (Math.abs(dx) > 50) show(at + (dx < 0 ? 1 : -1));
+  });
+})();
+</script>"""
 
 # 글 보기의 🗑 확인 창: 열면 첫 단추로 초점, Esc로 닫는다(스크립트가 없어도 details라 열고 닫힌다)
 DEL_SCRIPT = """<script>
@@ -166,9 +225,9 @@ def post_row_html(post: Post, q: str = "") -> str:
         head = f'<span class="pt none">{shown}{post.badge}</span>'
     hit = snippet(post.text, q) if q and "<mark>" not in shown else ""  # 제목 밖에서 맞았으면 맞은 곳 한 줄
     pic = next((a for a in post.files if _inline_image(a.name)), None)
-    thumb = (f'<img class="thumb" src="{html.escape(post.link)}/files/{html.escape(pic.id)}" alt="" loading="lazy">' if pic else "")
+    thumb = (f'<img class="thumb" src="{html.escape(post.link)}/thumbs/{html.escape(pic.id)}" alt="" loading="lazy">' if pic else "")
     count = len(post.files)
-    clip = (f'<span aria-label="첨부 {count}개" title="첨부 {count}개">📎{count if count > 1 else ""}</span>' if count else "")
+    clip = f'<span class="clip" aria-label="첨부 {count}개" title="첨부 {count}개">📎 {count}</span>' if count else ""
     return (f'<li><a class="post" href="{html.escape(post.link)}">{head}<span class="pa">{thumb}{clip}</span>'
             f'<time class="pd" datetime="{html.escape(post.at)}">{local_time(post.at, WHEN)}</time></a>'
             + (f'<small class="hit">{hit}</small>' if hit else "") + "</li>")
@@ -299,10 +358,9 @@ class BoardPages:
             links = [f'<a href="{base}">전체</a>', f'<a href="{base}?author=me">나</a>', f'<a href="{base}?author=ai">AI</a>']
         if tag := filters.get("tag", ""):
             links = [f'<span class="tag">{html.escape(tag)}</span>', f'<a href="{base}">전체</a>']
-        context = contexts_view_html(view_for_book(self.store, uid, c.id))
         bar = (f'<div class="board-bar"><p class="sum">글 {len(items) + c.sources}' + (f' · {" · ".join(links)}' if links else "") + "</p>"
-               + GEAR.format(href=f"/shelf/edit/{c.id}", label="책 설정")
-               + f'<a class="button write-btn" href="/shelf/write/{c.id}">글쓰기</a></div>')
+               f'<a class="gear labeled" href="/shelf/edit/{c.id}"><span aria-hidden="true">⚙</span> 책 설정</a>'
+               f'<a class="button write-btn" href="/shelf/write/{c.id}">글쓰기</a></div>')
         search = (f'<form method="get" action="{base}" class="search" role="search">'
                   f'<input type="search" name="q" value="{html.escape(q)}" aria-label="{html.escape(c.name)}에서 찾기">'
                   + "".join(f'<input type="hidden" name="{k}" value="{html.escape(v)}">' for k, v in filters.items() if v)
@@ -331,7 +389,7 @@ class BoardPages:
             prev = [link(page - 1, "이전")] if page > 1 else []
             nxt = [link(page + 1, "다음")] if page < pages else []
             pager = f'<nav class="pages" aria-label="쪽">{"".join([*prev, *out, *nxt])}</nav>'
-        return f"{message}{context}{bar}{search}{found}{board}{pager}"
+        return f"{message}{bar}{search}{found}{board}{pager}"
 
     # ---- 글 보기 -------------------------------------------------------------------------------
     def _find_post(self, uid: str, kind: Kind, item_id: str) -> Any:
@@ -393,8 +451,8 @@ class BoardPages:
         pics = [a for a in files if _inline_image(a.name)]
         rest = [a for a in files if not _inline_image(a.name)]
         pictures = "".join(
-            f'<a href="{html.escape(link)}/files/{html.escape(a.id)}" target="_blank" rel="noopener">'
-            f'<img src="{html.escape(link)}/files/{html.escape(a.id)}" alt="{html.escape(a.name)}" loading="lazy"></a>' for a in pics)
+            f'<a href="{html.escape(link)}/files/{html.escape(a.id)}" target="_blank" rel="noopener" data-full>'
+            f'<img src="{html.escape(link)}/thumbs/{html.escape(a.id)}" alt="{html.escape(a.name)}" loading="lazy"></a>' for a in pics)
         others = "".join(
             f'<li><a href="{html.escape(link)}/files/{html.escape(a.id)}" download>{html.escape(a.name)}</a> '
             f'<small>{html.escape(kind_of(a.name))} · {size_text(a.size)}</small></li>' for a in rest)
@@ -402,7 +460,7 @@ class BoardPages:
         body = ((f'<p class="msg">{done}</p>' if done else "")
                 + f'<p class="post-meta">{html.escape(" · ".join(meta))}</p>'
                 + (f'<div class="post-body">{text}</div>' if text.strip() else "")
-                + (f'<div class="pics">{pictures}</div>' if pictures else "")
+                + (f'<div class="pics{" one" if len(pics) == 1 else ""}">{pictures}</div>{LIGHTBOX}' if pictures else "")
                 + (f'<ul class="files" aria-label="첨부">{others}</ul>' if others else "")
                 + self._post_actions(uid, session, kind, obj, link) + DEL_SCRIPT)
         return title, body
@@ -436,7 +494,8 @@ class BoardPages:
             def save() -> CategoryItem:
                 item = self.store.put_category_item(uid, CategoryItem(new_id(), book, content, "me", title, "author" if title else None))
                 for name, data in files:
-                    self.store.put_attachment(uid, f"{book}/{item.id}", name, data)
+                    att = self.store.put_attachment(uid, f"{book}/{item.id}", name, data)
+                    self.store.attachment_thumb(uid, f"{book}/{item.id}", att.id)  # 사진이면 썸네일(못 만들면 화면이 원본을 쓴다)
                 return item
 
             item = await run_in_threadpool(save)

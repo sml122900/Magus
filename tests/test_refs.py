@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -150,3 +151,35 @@ async def test_refs_are_user_scoped(settings: Settings, imported: LocalStore):
         assert "결과 없음" in _text(await client.call_tool("category_search", {"query": "Clack", "full": True}))
         assert (await client.call_tool("ref_check", {"chapter_number": 1, "project_id": "synth"})).is_error
     assert imported.list_refs("bob") == []
+
+
+async def test_category_edit_toggles_checked_and_numbers_return(settings: Settings, imported: LocalStore):
+    """원문 확인 표시 떼기·붙이기(2026-10-09, 새 도구 없이 category_edit). 붙이기 → 떼기 왕복 뒤 ref_check·전체 현황 수치가 처음과 같다.
+    쓸 부분·서지는 지우지 않고, 쓸 부분이 없으면 붙이지 않는다(원문 확인 = 쓸 부분 하나 이상)."""
+    async with Client(build_server(settings, imported)) as client:
+        base = await _json(client, "ref_check", {"chapter_number": 1})
+        outline = _text(await client.call_tool("book_outline", {}))
+        unchecked = re.search(r"미확인 문헌 (\d+)편", outline).group(1)
+        none = await client.call_tool("category_edit", {"item_id": "clack2012", "checked": True})
+        assert none.is_error and "쓸 부분이 없다" in none.content[0].text
+        assert (await client.call_tool("category_edit", {"checked": False})).is_error  # item_id 없이
+        assert (await client.call_tool("category_edit", {"item_id": "없는문헌1999", "checked": False})).is_error
+        # 붙이기(저자가 고른 쓸 부분과 함께) → 떼기
+        _text(await client.call_tool("category_put", {
+            "book": "참고문헌", "author": "me", "source": {"key": "clack2012"}, "checked": True,
+            "parts": [{"text": "네발동물은 물에서 먼저 다리를 얻었다.", "reason": "1장 근거", "where": "p.45"}]}))
+        on = await _json(client, "ref_check", {"chapter_number": 1})
+        assert "clack2012" in _keys(on["verified"]) and "clack2012" not in _keys(on["unverified"])
+        off_text = _text(await client.call_tool("category_edit", {"item_id": "clack2012", "checked": False}))
+        assert "원문 확인 표시를 뗐다" in off_text and "쓸 부분·서지는 그대로" in off_text
+        assert await _json(client, "ref_check", {"chapter_number": 1}) == base
+        assert f"미확인 문헌 {unchecked}편" in _text(await client.call_tool("book_outline", {}))
+        # 다시 붙이기(쓸 부분이 남아 있어 된다) → 또 떼기. 같은 것을 두 번 떼면 바꾸지 않는다
+        assert "원문 확인 표시를 붙였다" in _text(await client.call_tool("category_edit", {"item_id": "clack2012", "checked": True, "book": "참고문헌"}))
+        assert "clack2012" in _keys((await _json(client, "ref_check", {"chapter_number": 1}))["verified"])
+        _text(await client.call_tool("category_edit", {"item_id": "clack2012", "checked": False}))
+        assert "이미 떨어져" in _text(await client.call_tool("category_edit", {"item_id": "clack2012", "checked": False}))
+        assert await _json(client, "ref_check", {"chapter_number": 1}) == base
+    assert [p.text for p in imported.get_passages(settings.user_id, "clack2012")] == ["네발동물은 물에서 먼저 다리를 얻었다."]
+    bib = json.loads((settings.data_dir / "users" / settings.user_id / "shelf" / "melchior" / "clack2012" / "bib.json").read_text(encoding="utf-8"))
+    assert bib["status"] == "unverified" and bib["status_by"]["via"] == "chat" and bib["status_by"]["by"] == "author"

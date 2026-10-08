@@ -11,6 +11,7 @@ dependencies = [
     "anthropic>=1.12.1",
     "mcp>=2.2.0",
     "numpy>=2.5.3",
+    "pillow>=12.3.0",
     "pyjwt[crypto]>=2.15.1",
     "pymupdf>=1.28.2",
     "pypandoc-binary>=1.17",

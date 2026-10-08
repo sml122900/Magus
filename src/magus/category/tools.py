@@ -34,6 +34,7 @@ from magus.ids import local_time, new_id
 from magus.inbox import FileResolver, ResolveFile
 from magus.maps import LIBRARY, LIBRARY_NAME
 from magus.maps import name_key as node_key
+from magus.melchior.author_report import cite_label
 from magus.melchior.check import after_refs_changed, chapters_citing
 from magus.melchior.refs import add_ref
 from magus.project_args import (
@@ -232,8 +233,10 @@ def build_tools(
     def category_edit(book: str | None = None, new_name: str | None = None, color: str | None = None,
                       context: list[str] | None = None, project: str | None = None, move_to: str | None = None,
                       undo_move: bool = False, node: str | None = None, link: str | None = None,
-                      unlink: str | None = None) -> str:
+                      unlink: str | None = None, item_id: str | None = None, checked: bool | None = None) -> str:
         user = current_user()
+        if checked is not None:  # 문헌 글의 원문 확인 표시 켜고 끄기(2026-10-09). 쓸 부분·서지·전문은 그대로
+            return set_checked(user, book, project, item_id, checked)
         if node and not book:
             return edit_node(user, node, project, new_name, color, context, link, unlink)
         if not book:
@@ -282,6 +285,26 @@ def build_tools(
                 raise ToolError(" · ".join([*done, error_message(e, polite=False)])) from e
         head = view_for_book(store, user, found.key).header() + "\n" if context is not None else ""
         return head + (f"책 「{found.name}」을 고침: " + " · ".join(done) + ".").replace("..", ".")
+
+    def set_checked(user: str, book: str | None, project: str | None, key: str | None, checked: bool) -> str:
+        if not key:
+            raise ToolError("checked에는 item_id(문헌 글의 key, 예: clack2012)를 함께 준다.")
+        ref = store.get_ref(user, key.strip())
+        if ref is None:
+            raise ToolError(f"문헌 글 {key!r}이 없다. category_search로 key를 확인한다.")
+        if book and ref.book and find_book(user, book, project).key != ref.book:
+            raise ToolError(f"그 문헌 글은 「{book}」 책에 있지 않다.")
+        label = cite_label(ref, ref.key)
+        if checked and ref.status != "verified" and not store.get_passages(user, ref.key):
+            raise ToolError(f"{label}에는 쓸 부분이 없다. 원문 확인 글로 넣으려면 저자가 고른 대목을 parts에 담아 "
+                            "category_put(source, checked=true)로 넣는다.")
+        before = ref.status == "verified"
+        store.set_ref_status(user, ref.key, "verified" if checked else "unverified", via="chat")
+        after_refs_changed(store, user)  # 장별 미확인 수·확인 요청 연결을 다시 센다
+        if before == checked:
+            return f"{label}: 원문 확인 표시는 이미 {'붙어' if checked else '떨어져'} 있다(바꾸지 않음)."
+        return (f"{label}: 원문 확인 표시를 {'붙였다' if checked else '뗐다'}(쓸 부분·서지는 그대로). "
+                "인용 점검 수를 다시 셌다.")
 
     def move_target(user: str, source: str, text: str) -> tuple[str, str | None]:
         """move_to → (프로젝트, 노드 또는 None). 프로젝트 이름이면 그 프로젝트(이름이 같은 노드), 아니면 이 프로젝트의 노드."""
@@ -597,9 +620,11 @@ def build_tools(
         Tool.from_function(
             category_edit, name="category_edit",
             description=(
-                "저자가 책·노드의 이름·색·컨텍스트·위치나 선을 바꾸라고 분명히 말했을 때만 부른다. book(책 이름) 또는 node(노드 이름). "
+                "저자가 책·노드의 이름·색·컨텍스트·위치나 선, 또는 문헌 글의 원문 확인 표시를 바꾸라고 분명히 말했을 때만 부른다. "
+                "book(책 이름) 또는 node(노드 이름). "
                 "context: 새 컨텍스트 목록(자주 쓰는 컨텍스트 이름이나 글, []이면 뗀다). move_to: 책을 옮길 노드('프로젝트 · 노드'나 프로젝트). "
-                "undo_move=true: 마지막 옮기기 되돌리기. node와 함께 link=이을 노드, unlink=끊을 노드. 같은 이름이 여러 프로젝트에 있으면 project."
+                "undo_move=true: 마지막 옮기기 되돌리기. node와 함께 link=이을 노드, unlink=끊을 노드. 같은 이름이 여러 프로젝트에 있으면 project. "
+                "checked=true|false와 item_id(문헌 글 key): 원문 확인 표시를 붙이거나 뗀다(저자가 그렇게 말했을 때만. 쓸 부분·서지는 그대로)."
             ),
             structured_output=False,
         ),

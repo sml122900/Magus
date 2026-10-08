@@ -73,6 +73,9 @@ def main(argv: list[str] | None = None) -> None:
     outline = sub.add_parser("outline", help="book_outline과 같은 출력(USER_ID 사용자). 복구 확인에 쓴다")
     outline.add_argument("--project-id")
     sub.add_parser("alert-test", help="운영자 알림 채널로 시험 메시지를 보낸다")
+    thumbs = sub.add_parser("thumbs", help="이미 올라간 사진 첨부의 썸네일을 한 번에 만든다(배포 때, 원본은 읽기만)")
+    thumbs.add_argument("--user", action="append", default=None, help="사용자(여러 번 줄 수 있다). 없으면 USER_ID")
+    thumbs.add_argument("--all-users", action="store_true", help="데이터 폴더의 모든 사용자")
     args = parser.parse_args(argv)
 
     # stdio 전송에서 stdout은 MCP 프로토콜 전용이다. 로그는 반드시 stderr로 보낸다. 내용은 로그에 남기지 않는다(logsafe).
@@ -246,6 +249,24 @@ def main(argv: list[str] | None = None) -> None:
         for t in items:
             print(f"- {t.kind} {t.id} · {t.trashed_at} · {t.note or '-'}" + (f" · 함께 옮긴 글 {t.with_id}" if t.with_id else "")
                   + f" · “{t.preview[:40]}”")
+    elif args.cmd == "thumbs":  # 사진 썸네일(2026-10-09). 첨부 폴더 안 .thumb/에 쓰고 원본은 건드리지 않는다
+        from magus.thumbs import THUMB_DIR, THUMB_NAME, thumbnailable
+
+        folders = store.root / "users"  # 첨부는 파일에만 있으므로 사용자도 폴더에서 찾는다(색인의 users는 프로젝트가 있는 사람만)
+        everyone = sorted(p.name for p in folders.iterdir() if p.is_dir()) if folders.is_dir() else []
+        for user in everyone if args.all_users else (args.user or [settings.user_id]):
+            made = have = failed = 0
+            for owner, att in store.file_attachments(user, (".png", ".jpg", ".jpeg", ".gif", ".webp")):
+                if not thumbnailable(att.name):
+                    continue
+                hit = store.attachment_path(user, owner, att.id)
+                if hit and (hit[0].parent / THUMB_DIR / THUMB_NAME).is_file():
+                    have += 1
+                elif store.attachment_thumb(user, owner, att.id):
+                    made += 1
+                else:
+                    failed += 1  # 화면은 원본을 쓴다
+            print(f"{user}: 만듦 {made} · 이미 있음 {have} · 못 만듦(원본으로 보임) {failed}")
     elif args.cmd in ("maps", "floors"):  # 프로젝트·지도 이전(#95, 층 이전 #93을 포함). 실행은 백업 뒤에, 전후 비교를 보인다
         from magus import map_migrate as floor_migrate
 

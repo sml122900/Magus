@@ -3,6 +3,7 @@
 원본(사용자 폴더 안이라 백업(restic)에 그대로 들어간다. 인덱스는 없고 폴더를 읽는다):
   data/users/<user_id>/shelf/categories/<책 id>/files/<글 id>/<첨부 id>/<파일 이름>   # 글
   data/users/<user_id>/shelf/melchior/<key>/files/<첨부 id>/<파일 이름>              # 문헌 글
+  …/<첨부 id>/.thumb/thumb.jpg   # 사진의 썸네일(2026-10-09, magus.thumbs). 파생값이라 지워도 다시 만든다. 첨부 목록은 파일만 센다
 첨부 id(new_id, 시간순)는 서버가 만든다. 경로에는 이름이 아니라 이 id로 들어가므로 이름으로 다른 곳을 가리킬 수 없다.
 글·책을 휴지통으로 옮기면 첨부도 함께 간다(책은 폴더째, 글은 trash/shelf/category-items/<책 id>/files/<글 id>/).
 첨부 하나를 빼면 지우지 않고 옮긴다:
@@ -92,6 +93,19 @@ class AttachmentMixin:
         found = self._one(folder / safe_id(attachment_id, "attachment id"))
         return (folder / found.id / found.name, found) if found else None
 
+    def attachment_thumb(self, user_id: str, owner: str, attachment_id: str) -> Path | None:
+        """사진 첨부의 썸네일 경로(없으면 그 자리에서 만든다). 사진이 아니거나 만들지 못하면 None(화면은 원본을 쓴다).
+        그림을 줄이는 동안 저장소 잠금을 잡지 않는다(파일 하나를 읽고 다른 이름으로 쓸 뿐이다)."""
+        from magus.thumbs import THUMB_DIR, THUMB_NAME, make_thumb, thumbnailable  # noqa: PLC0415
+
+        hit = self.attachment_path(user_id, owner, attachment_id)
+        if hit is None or not thumbnailable(hit[1].name):
+            return None
+        thumb = hit[0].parent / THUMB_DIR / THUMB_NAME
+        if thumb.is_file() or make_thumb(hit[0], thumb):
+            return thumb
+        return None
+
     @locked
     def trash_attachment(self, user_id: str, owner: str, attachment_id: str, note: str) -> bool:
         folder = self._owner_dir(user_id, owner, must_exist=True)
@@ -117,6 +131,11 @@ class AttachmentMixin:
             if (folder.parents[1] / "bib.json").is_file() and (a := self._one(folder)):
                 found.append((f"ref:{folder.parents[1].name}", a))
         return sorted(((o, a) for o, a in found if Path(a.name).suffix.lower() in suffixes), key=lambda x: x[1].id, reverse=True)
+
+    def trashed_item_attachments(self, user_id: str, book: str, item: str) -> int:
+        """휴지통에 있는 글의 첨부 수(프로젝트 휴지통 화면의 '첨부 N개 함께')."""
+        folder = self._user_dir(user_id) / "trash" / "shelf" / "category-items" / safe_id(book, "book id") / "files" / safe_id(item, "item id")
+        return sum(1 for d in folder.iterdir() if d.is_dir() and self._one(d)) if folder.is_dir() else 0
 
     # 글 휴지통·되살리기 때 첨부도 함께(CategoryMixin이 부른다)
     def _move_item_files(self, user_id: str, book: str, item: str, *, to_trash: bool) -> None:

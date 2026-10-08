@@ -55,7 +55,9 @@ def test_board_write_view_and_attachments(server_proc):  # noqa: F811
                       files=[("files", ("C:\\fakepath\\시장.png", PNG, "image/png")), ("files", ("표.pdf", b"%PDF-1.4 x", "application/pdf"))])
         item = re.search(rf"/shelf/{NOTES}/(\d{{17}}-[0-9a-f]{{6}})$", str(made.url)).group(1)
         assert "<h1>답사</h1>" in made.text and "<p>시장 사진</p>" in made.text
-        assert re.search(rf'<div class="pics"><a href="/shelf/{NOTES}/{item}/files/[^"]+"[^>]*><img src="[^"]+" alt="시장.png"', made.text)
+        assert re.search(rf'<div class="pics one"><a href="/shelf/{NOTES}/{item}/files/[^"]+" [^>]*data-full>'
+                         rf'<img src="/shelf/{NOTES}/{item}/thumbs/[^"]+" alt="시장.png" loading="lazy">', made.text)  # 썸네일, 누르면 원본
+        assert '<div class="lightbox" role="dialog" aria-modal="true"' in made.text
         assert re.search(r'download>표.pdf</a> <small>PDF · 1 KB</small>', made.text)
         links = list(dict.fromkeys(re.findall(rf'href="(/shelf/{NOTES}/{item}/files/[^"]+)"', made.text)))
         assert len(links) == 2
@@ -82,7 +84,8 @@ def test_board_write_view_and_attachments(server_proc):  # noqa: F811
         rows = re.findall(r'<li><a class="post" href="(/shelf/[^"]+)">(.*?)</a>', board)
         assert [href for href, _ in rows][:2] == [f"/shelf/{NOTES}/{re.search(r'[^/]+$', str(only.url)).group(0)}", f"/shelf/{NOTES}/{item}"]
         assert '<span class="pt none">녹취.txt</span>' in rows[0][1] and '📎' in rows[0][1]
-        assert '<img class="thumb" src="' in rows[1][1] and '📎2' in rows[1][1] and '<span class="pt">답사</span>' in rows[1][1]
+        assert f'<img class="thumb" src="/shelf/{NOTES}/{item}/thumbs/' in rows[1][1] and '📎 2</span>' in rows[1][1]
+        assert '<span class="pt">답사</span>' in rows[1][1] and '📎 1</span>' in rows[0][1]  # 하나여도 개수
         assert rows[-1][0] == f"/shelf/{NOTES}/20261008000000000-aaaaaa"  # 가장 오래된 글이 아래
         # 문헌 글도 같은 게시판에(제목은 서지), 글 보기에는 쓸 부분만(이유·체크는 보이지 않는다)
         refs = c.get("/shelf/refs-b").text

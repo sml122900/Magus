@@ -523,6 +523,12 @@ class Store(Protocol):
     def trash_attachment(self, user_id: str, owner: str, attachment_id: str, note: str) -> bool:
         """지우지 않고 trash/shelf/attachments/로 옮긴다. 없으면 False."""
         ...
+    def attachment_thumb(self, user_id: str, owner: str, attachment_id: str) -> Path | None:
+        """사진 첨부의 썸네일(긴 변 400px JPEG, 첨부 폴더 안 .thumb/, 없으면 만든다). 사진이 아니거나 만들지 못하면 None. 원본은 바꾸지 않는다."""
+        ...
+    def trashed_item_attachments(self, user_id: str, book: str, item: str) -> int:
+        """휴지통에 있는 글의 첨부 수."""
+        ...
     def file_attachments(self, user_id: str, suffixes: tuple[str, ...]) -> list[tuple[str, Attachment]]:
         """모든 글·문헌 글의 첨부 중 이름이 suffixes(소문자 확장자)로 끝나는 것 (owner, 첨부). 새것부터.
         게시판에 첨부한 문서를 files_list가 보이고 도구의 파일 인자('첨부:<id>')로 읽게 한다(2026-10-09)."""
@@ -698,7 +704,7 @@ class Store(Protocol):
     def trash_node_with_books(self, user_id: str, floor: str, node_id: str, note: str) -> MapNode:
         """노드를 책·글·첨부·문서째 휴지통으로(#97, 웹). 되살리기는 restore_trash("node", …)."""
         ...
-    def set_ref_status(self, user_id: str, key: str, status: str) -> Ref:
+    def set_ref_status(self, user_id: str, key: str, status: str, via: str = "chat") -> Ref:
         """원문 확인 표시만 바꾼다(#97, 웹의 '원문 확인' 체크). 쓸 부분·전문·서지는 그대로. bib.json "status_by"에 누가·언제."""
         ...
 

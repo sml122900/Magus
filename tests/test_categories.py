@@ -313,12 +313,13 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         assert '<p class="empty">글이 없습니다.</p>' in empty and f'<a class="button write-btn" href="/shelf/write/{cid}">글쓰기</a>' in empty
         write = c.get(f"/shelf/write/{cid}").text
         assert 'name="f:시기"' not in write and 'name="reason"' not in write and 'name="files" multiple' in write
-        assert '<details class="ctx"><summary>논문</summary><p>원문을 읽고 모은 논문과 책이다.' in empty  # 머리에 컨텍스트(누르면 전문)
+        assert '<details class="ctx">' not in empty  # 컨텍스트 줄은 게시판에 없고 책 설정 안에만(2026-10-09)
+        assert '<details class="ctx"><summary>논문</summary><p>원문을 읽고 모은 논문과 책이다.' in c.get(f"/shelf/edit/{cid}").text
         store = LocalStore(data_dir)  # 노드에도 컨텍스트가 있으면 노드 → 책 순서로 보인다(#96-d)
         floor, node = store.node_of_book("alice", cid)
         store.set_node_contexts("alice", floor, node, (Context("현장", "현장에서 본 것만 적는다."),))
         store.close()
-        both = c.get(f"/shelf/{cid}").text
+        both = c.get(f"/shelf/edit/{cid}").text  # 책 설정: 노드 → 이 책 읽는 순서
         assert both.index("<summary>현장</summary>") < both.index('<span class="ctx-sep"') < both.index("<summary>논문</summary>")
         assert '<span class="ctx-label">노드 「사례」</span>' in both and '<span class="ctx-label">이 책</span>' in both
         # 바로 적기(누가 = 저자, CSRF)
@@ -409,7 +410,7 @@ def test_web_category_list_search_and_titles(server_proc):  # noqa: F811
         assert ('<span class="pt">장날<span class="tag" title="AI가 쓴 글">AI</span>'  # 누가: Claude가 쓴 글, 지은 제목
                 '<span class="tag" title="AI가 지은 제목">AI 제목</span></span>') in listed
         assert '<span class="pt none">제목 없는 글 물결</span>' in listed
-        assert '<p class="sum">글 2 · <a href=' in listed and 'aria-label="책 설정"' in listed
+        assert '<p class="sum">글 2 · <a href=' in listed and '<span aria-hidden="true">⚙</span> 책 설정</a>' in listed
         assert 'class="ctxs"' not in listed  # 컨텍스트가 없으면 아무것도 보이지 않는다(#97)
         assert "물결" not in c.get(f"/shelf/{c1.id}?author=ai").text
         found = c.get(f"/shelf/{c1.id}", params={"q": "장날"}).text
@@ -441,7 +442,8 @@ def test_web_categories_are_per_user(server_proc, fake_issuer):  # noqa: F811
         assert _login(alice, issuer_state, "sub-alice").status_code == 303
         csrf = _csrf(alice.get("/shelf").text)
         mine = alice.get(f"/shelf/{ids['alice']}").text
-        assert "앨리스의 바다" in mine and "밥의" not in mine and "앨리스의 컨텍스트" in mine
+        assert "앨리스의 바다" in mine and "밥의" not in mine
+        assert "앨리스의 컨텍스트" in alice.get(f"/shelf/edit/{ids['alice']}").text
         shelf = alice.get("/shelf/p/common", params={"node": f"b-{ids['alice']}"}).text
         assert "--c:#123456;" in shelf and "#654321" not in shelf
         assert "밥의" not in alice.get("/shelf", params={"q": "바다"}).text
