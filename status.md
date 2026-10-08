@@ -18,7 +18,7 @@
 
 ## 0-19. 종류를 없애고 '컨텍스트'로(2026-10-08, 사용자 요청 #96, 확인 대기, 로컬만)
 
-- **서버 접속·배포 없음.** 서버는 여전히 `p1-profile-email`(ec6c40b). 배포는 #93·#94·#95·#96 묶음 한 번(`docs/deploy.md` 2-2절, 승인 대기). 커밋 `9cf1cb3`(master). 태그·push 안 함(origin보다 4개 앞섬).
+- **서버 접속·배포 없음.** 서버는 여전히 `p1-profile-email`(ec6c40b). 배포는 #93·#94·#95·#96 묶음 한 번(`docs/deploy.md` 2-2절, 승인 대기). 커밋 `9cf1cb3`(master). 태그·push 안 함(origin보다 6개 앞섬: 0-16~0-19절 커밋과 status 기록).
 - 결정 문서 `docs/decisions/contexts.md`, 용어집·instructions 전후·처음 제공 컨텍스트·도구 토큰·화면 문구 전후·도구 설명 전문 `docs/decisions/contexts-texts.md`
   (생성 `private/tmp/gen_contexts_texts.py`), 화면 값 `docs/decisions/web-style.md` "컨텍스트". 검토 대기 표 4절 #96.
 - 구조: 책에는 글이 쌓이거나 올린 문서가 들어 있다. 종류(원고 책·모음 책·문서 책, 생각·문체·문헌)는 저자에게 보이지 않고, AI가 읽는 법은 노드·책의 컨텍스트(사본)다.
