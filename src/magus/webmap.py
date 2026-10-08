@@ -139,13 +139,14 @@ class MapPages:
             ("/shelf/undo", ["POST"], self.shelf_undo),
         ]
 
-    def _map_page(self, title: str, body: str, session: tuple[str, str], status: int = 200, css: str = "") -> Response:
+    def _map_page(self, title: str, body: str, session: tuple[str, str], status: int = 200, css: str = "", lead: str = "") -> Response:
         from magus.webbooks import BOOK_STYLE  # noqa: PLC0415  (올리기 진행 막대)
         from magus.webshelf import SHELF_STYLE  # noqa: PLC0415
 
         from magus.webboard import BOARD_STYLE  # noqa: PLC0415
 
-        return self._page(title, body, session, status, current="프로젝트", css=SHELF_STYLE + BOOK_STYLE + CONTEXT_STYLE + BOARD_STYLE + css)
+        return self._page(title, body, session, status, current="프로젝트", css=SHELF_STYLE + BOOK_STYLE + CONTEXT_STYLE + BOARD_STYLE + css,
+                          lead=lead)
 
     # ---- 프로젝트 목록 ------------------------------------------------------------------------
     async def project_list(self, request: Request) -> Response:
@@ -697,9 +698,13 @@ class MapPages:
             f'<form method="post" action="{here}" class="inline">{csrf}'
             f'<input type="hidden" name="{"node" if t.kind == "node" else "item"}" value="{html.escape(t.id)}">'
             "<button>되살리기</button></form></li>" for t, label in items)
-        body = (f'<p class="crumb"><a href="{html.escape(state_url(floor.id))}">← 「{html.escape(project_name(floor))}」</a></p>{message}'
-                + (f'<ol class="trash-list">{rows}</ol>' if rows else '<p class="empty">휴지통이 비었습니다.</p>'))
-        return self._map_page("휴지통", body, session, css=TRASH_STYLE)
+        from magus.webboard import SEP  # noqa: PLC0415
+
+        lead = (f'<nav class="trail" aria-label="위치"><a href="/shelf">프로젝트</a>{SEP}'
+                f'<a href="{html.escape(state_url(floor.id))}">{html.escape(project_name(floor))}</a>{SEP}'
+                '<span aria-current="page">휴지통</span></nav>')
+        body = message + (f'<ol class="trash-list">{rows}</ol>' if rows else '<p class="empty">휴지통이 비었습니다.</p>')
+        return self._map_page("휴지통", body, session, css=TRASH_STYLE, lead=lead)
 
     def _trash_rows(self, uid: str, floor: Floor) -> list[tuple[Any, str]]:
         """(휴지통 항목, 보일 이름). 이 프로젝트의 노드와, 이 프로젝트의 책에 든 글(함께 옮긴 응답 글은 빼고). 최근 것부터."""

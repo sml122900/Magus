@@ -46,7 +46,7 @@ BOARD_STYLE = """
 .trail a{text-decoration:none}.trail a:hover{text-decoration:underline}.trail [aria-current]{color:var(--ink);font-weight:600}
 .board-bar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin:8px 0}
 .board-bar .sum{margin:0;color:var(--ink2);display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}
-.board-bar .write-btn{margin-left:auto}
+.board-bar .write-btn{margin-left:auto}.board-bar a.gear{margin-left:0}
 a.button{display:inline-flex;align-items:center;min-height:44px;padding:8px 18px;border-radius:9999px;background:var(--primary);color:#fff;
 text-decoration:none;font-weight:600}a.button:hover{background:var(--press);color:#fff}
 ol.posts{list-style:none;margin:8px 0;padding:0;background:var(--canvas);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
@@ -87,7 +87,8 @@ ul.chosen{list-style:none;padding:0;margin:8px 0;display:flex;flex-wrap:wrap;gap
 ul.chosen li{display:flex;gap:6px;align-items:center;background:var(--canvas);border:1px solid var(--line);border-radius:8px;padding:4px 8px}
 ul.chosen img{width:40px;height:40px;object-fit:cover;border-radius:4px}
 @media (max-width:767px){a.post{grid-template-columns:minmax(0,1fr) auto;padding:10px 12px}.pd{grid-column:1/-1;text-align:left;font-size:14px}
-.board-bar .write-btn{margin-left:0}}
+.trail>a,.trail>span[aria-current]{max-width:11em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+}
 """
 
 # 글 보기의 🗑 확인 창: 열면 첫 단추로 초점, Esc로 닫는다(스크립트가 없어도 details라 열고 닫힌다)
