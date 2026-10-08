@@ -170,6 +170,29 @@ sudo docker tag magus:rollback-ec6c40b magus:latest && sudo docker compose up -d
 | 2026-10-06 01:38 | `p1-reupload`(#69~#77 임포트 보완, #76 다시 올리기, #79 포함) | `896633c`(`p1-auth-audience`) → `4df2720` | 반영 전 백업 스냅샷 `a3322693`(798개, 오류 없음). 인덱스 v12 자동 재생성(01:39:52), healthy, `/healthz` ok, `/mcp` 401 + resource_metadata, data 798개 해시 같음(index 제외), `.env` 해시 같음, default outline 수치 같음. 메모리 magus 123MiB, 호스트 available 440MB. 되돌리기 이미지 `magus:rollback-896633c`, 옛 `rollback-21b4e2a` 삭제. 서버 기록 `/root/deploy-20261006-reupload/`(ROLLBACK.txt) |
 | 2026-10-06 00:53 | `p1-auth-audience`(토큰 aud 검사, 결정 #79) + 이력 교체 | `21b4e2a`(옛 이력) → `896633c`. 같은 상태의 새 이력 커밋은 `78c9668` | `/healthz` ok, `/mcp` 401 + resource_metadata, 컨테이너 안에서 trip_ai·섞인 aud 거부, 다른 `AUTH_AUDIENCE`로 시작 실패(종료 2), data 798개 해시 같음, `docs/reports` 객체 없음. 서버 기록은 `/root/deploy-20261006-auth-audience/`(ROLLBACK.txt) |
 
+### 2-3. 오캄의 면도날 + 도움말(#97) — 사용자 승인 뒤
+
+반영 전 서버는 `p1-contexts`(`efc19ac`), 반영할 것은 master 끝(태그 `razor-c`·`razor-ab`·`razor-d` 뒤). **데이터 이전 없음**: 기존 파일 형식은 그대로이고
+새 폴더(`files/`·`trash/shelf/attachments/`)와 bib.json의 선택 키 `status_by`만 새로 생긴다(쓰기가 있을 때만). 인덱스 버전 그대로(v20).
+바뀌는 것: 웹 화면 문구(설명 → 도움말), 게시판 새 글·고치기 = 제목·본문·첨부, 문헌 글의 '원문 확인' 체크, 원문 확인 넣기 폼(`/shelf/refs/register`) 없음,
+첨부 보기 `/shelf/<책>/<글>/files/<id>`, 도움말 `POST /help/ask`, instructions 규칙 12(커넥터 재연결), 의존성 `anthropic`(이미지 다시 빌드).
+
+0. **사용자 할 일(배포 전)**: 서버 `/opt/magus/deploy/.env`에 `ANTHROPIC_API_KEY=<키>`를 직접 넣는다(대화창에 붙이지 않는다. `=` 앞뒤 공백 없이).
+   없으면 도움말만 "지금은 도움말을 쓸 수 없어요."이고 다른 기능은 그대로다. 선택: `MAX_ATTACH_MB`(기본 20)·`HELP_DAILY_LIMIT`(기본 30).
+   넣은 뒤 확인은 값 없이 개수만: `grep -c '^ANTHROPIC_API_KEY=sk-ant-' /opt/magus/deploy/.env` → 1.
+1. **기록·백업**: `git rev-parse HEAD`(= `efc19ac`), data 해시 목록(index 제외), `.env` 해시, 손 백업 스냅샷, 실행 중 이미지를 `magus:rollback-efc19ac`로 태그.
+   옛 코드 전체 현황 머리 4줄(사용자·프로젝트마다 `magus outline`): default 미확인 문헌 297·열린 확인 요청 86, father 335편·미연결 5·확인 요청 129·수정본 E3.
+2. **코드 반영·빌드**: `git fetch /root/magus.bundle master && git checkout -B master FETCH_HEAD`(`git merge-base --is-ancestor p1-contexts FETCH_HEAD`) → `docker compose build magus`.
+3. **올리기**: `docker compose up -d` → healthy·재시작 0, 허용 2명, `/healthz` ok, `/mcp` 401 + resource_metadata. 이전 명령은 없다.
+4. **확인**: data 해시가 반영 전과 같음(index 제외. 아직 아무도 쓰지 않았으므로), 전체 현황 머리 4줄이 1단계와 같음, 문헌 수(father 337·default 299)·확인 요청 수·수정본 수 같음.
+   컨테이너 안 임시 서버(/tmp, 인증 끔, 실데이터 안 씀)로 게시판 새 글(첨부 하나)·원문 확인 체크·첨부 보기·'?' 창 확인 뒤 정리.
+   키를 넣었으면 운영자 계정으로 '?'에서 질문 하나 → 로그 `help ok … cache_write=…` 한 줄(질문·답이 로그에 없는지).
+5. **커넥터 재연결 한 번**(instructions 규칙 12가 바뀜). 도구 23개 그대로.
+
+**되돌리기**: 데이터 이전이 없으므로 이미지만 되돌린다. `docker tag magus:rollback-efc19ac magus:latest && docker compose up -d --no-build`(또는 `efc19ac`로 reset --hard 뒤 build).
+옛 코드는 첨부 폴더(`files/`)·`status_by`를 읽지 않고 무시한다(로컬 사본에서 확인: reindex·전체 현황 정상, 체크한 원문 확인은 그대로 확인으로 보인다).
+배포 뒤 웹에서 붙인 첨부는 옛 화면에 보이지 않을 뿐 폴더에 그대로 있다.
+
 ## 3. 알림 확인
 
 ```sh

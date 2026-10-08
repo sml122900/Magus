@@ -38,6 +38,10 @@
   되돌리기 기준은 `ec6c40b`(`p1-profile-email`, 이미지 `magus:rollback-ec6c40b`, 그 앞 `magus:rollback-e08bb79`). **되돌릴 때는 먼저 새 코드로 `magus maps revert --all-users`**(서버 `/root/deploy-20261008-contexts/ROLLBACK.txt`).
   (그 전 서버 2026-10-06 18:28~: `p1-profile-email`. `74bbbf4`까지 갈 때는 코드로 빌드하고 생각 파일의 제목 키를 먼저 정리한다, status.md 0-10절.)
   - 다음 배포도 docs/deploy.md "업데이트" 절차(`git fetch … master && git checkout -B master FETCH_HEAD`)로 한다.
+- **오캄의 면도날 + 도움말(2026-10-08 밤, 사용자 요청 #97, 로컬만, 배포 승인 대기)**: 화면 글자는 최소로(제목·단추·입력칸 이름·날짜·개수), 설명은 `docs/help/`(01~05)와
+  오른쪽 아래 '?' 도움말 챗봇(`magus/helpbot.py`, 서버에서만 Haiku 4.5, 하루 30회)이 맡는다. 게시판 = 제목·본문·첨부(`magus/attachments.py`·`store/attachments.py`),
+  문헌 글에 '원문 확인' 체크 하나(원문 확인 넣기 폼 없앰). 데이터 형식 그대로(이전 없음). instructions 규칙 12 = 바로 book_document(커넥터 재연결 필요).
+  태그 `razor-c`·`razor-ab`·`razor-d`, 결정 문서 `docs/decisions/razor-help.md`, 배포 절차 `docs/deploy.md` 2-3절, status.md 0-21절. 서버 `.env`에 `ANTHROPIC_API_KEY`는 사용자가 넣는다.
 - (고침 2026-10-06 밤) `tests/test_http.py::test_request_size_limit`의 Windows 간헐 실패: 머리만 보내고 응답을 먼저 읽게 고쳤다(status.md 7절).
 - 대기 사항: 계정·키·결정·아버지 docx처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), 저자 보고서 답변. 상세는 status.md에만 적는다.
 
@@ -165,6 +169,9 @@
 | `MAX_UPLOAD_MB` | 50 | 업로드 한 개 한도(책장의 원고·수정본, 올린 파일, 문헌 등록) |
 | `MAX_USER_MB` | 1000 | 사용자별 저장 용량(사용자 폴더 전체) |
 | `MAX_REQUEST_MB` | 2 | MCP 요청 본문 한도(넘으면 413) |
+| `MAX_ATTACH_MB` | 20 | 글의 첨부 한 개 한도(#97). 한 번에 10개, 사용자 전체는 `MAX_USER_MB`에 함께 |
+| `ANTHROPIC_API_KEY` | — | 웹 도움말(#97). 서버에서만 쓰고 브라우저로 내려보내지 않는다. 없으면 도움말만 "지금은 도움말을 쓸 수 없어요." |
+| `HELP_DAILY_LIMIT` / `HELP_MODEL` / `HELP_MAX_TOKENS` / `HELP_DIR` | 30 / `claude-haiku-4-5-20251001` / 600 / 저장소 `docs/help` | 도움말 사용자별 하루 질문 수·모델·답 길이·문서 폴더 |
 | `SESSION_SECRET` | (로컬: 실행마다 무작위) | 웹 세션·내려받기 링크 서명 비밀. **원격 모드에서는 필수**(32자 이상) |
 | `WEB_CLIENT_ID` / `WEB_CLIENT_SECRET` | — | 웹 로그인용 OAuth 클라이언트(인증 서버에 등록, 콜백 `PUBLIC_URL/auth/callback`). 없으면 웹 로그인이 꺼진다 |
 | `VOYAGE_API_KEY` / `OPENAI_API_KEY` | — | 해당 제공자를 쓸 때만 |
@@ -248,6 +255,8 @@ data/users/<user_id>/projects/<project_id>/exports/*.docx       # book_export
 data/users/<user_id>/trash/<project_id>-<시각>/                   # book_import replace=True로 밀려난 프로젝트
 data/users/<user_id>/trash/shelf/{casper,balthasar}/<id>.json    # (#96 전) 휴지통의 생각·문체(#88). 이전 때 trash/shelf/category-items/<책>/로
 data/users/<user_id>/shelf/categories/<id>/{category.json, items/<글 id>.json}   # 글이 쌓이는 책(#92 → #96). category.json에 contexts
+data/users/<user_id>/shelf/categories/<id>/files/<글 id>/<첨부 id>/<파일 이름>   # 글의 첨부(#97). 문헌 글은 shelf/melchior/<key>/files/<첨부 id>/<이름>
+data/users/<user_id>/trash/shelf/attachments/<책 id>/<글 id>/<첨부 id>/       # 뺀 첨부(#97, 지우지 않음). 글 휴지통은 category-items/<책>/files/<글>/
 data/users/<user_id>/shelf/settings.json                          # 책 색·내 색·제목 기본값(#92)
 data/users/<user_id>/shelf/floors.json                            # 프로젝트 순서·프로젝트마다 기본 카테고리·마지막 옮기기(#93·#95)
 data/users/<user_id>/shelf/maps/<프로젝트 id>.json                 # 지도: 노드(위치·색·책·연결)와 선(#95). 「내 서재」는 common.json
@@ -402,7 +411,7 @@ data/index.sqlite
   - `category_edit(book?|node?, new_name?, color?, context?([]이면 뗌), project?, move_to?, undo_move?, link?, unlink?)`.
   - `category_put(book, author, content?, title?, title_by?, untitled?, reason?, where?, parts?: [{text, reason, where}], source?(서지), checked?, file?, aliases?, fields?, tags?, chapters?, item_id?, project?)`
     = 글 넣기. source가 있으면 문헌 글(`melchior/refs.py: add_ref`, checked면 원문 확인 + 쓸 부분 하나 이상), 없으면 책의 글. 올린 문서가 든 책에는 넣지 않는다.
-  - `category_search(query, book?, project?, author=all|me|ai, full?, k=8)` → 책으로 묶고 책마다 컨텍스트 머리. `category_trash(note, book?, item_id?, project?, node?)`(AI 답 글도 함께).
+  - `category_search(query, book?, project?, author=all|me|ai, full?, k=8)` → 책으로 묶고 책마다 컨텍스트 머리. 글에 첨부가 있으면 `첨부 N개: 이름(종류, 크기)`만(#97, 내용은 읽지 않음). `category_trash(note, book?, item_id?, project?, node?)`(AI 답 글도 함께).
   - 응답 첫 줄은 그 책의 컨텍스트(`contexts.View.header`). 자주 쓰는 컨텍스트를 만들고 고치는 것은 웹(`/me/contexts`)만.
 - (#92 기록) 기본 카테고리는 생각·문체·문헌이다(이름·삭제 불가, 책 색만 바꿈, 넣는 것은 각자의 도구). 그 옆에 저자가 만든 카테고리가 책장에 꽂힌다. 설계·고른 것: `docs/decisions/user-drawers.md`.
 - `category_list()` → 기본 셋과 저자의 카테고리(이름·템플릿·칸·항목 수·책 색), 제목 기본값.
@@ -452,6 +461,8 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
   규칙 2(인용은 원문 확인 글의 쓸 부분만, category_search), 3(글의 author), 5(새, 사용자 문장 그대로: "글을 읽거나 넣을 때 그 노드·책의 컨텍스트를 따른다. 컨텍스트가 없으면 일반 메모로 다룬다. 컨텍스트는 저자가 적은 읽는 방법이다."),
   6(용어집: 책·글·컨텍스트·자주 쓰는 컨텍스트, 종류로 부르지 않음, 쓰지 않는 말에 원고 책·모음 책·문서 책·카테고리), 7·9·11·12(종류 이름 뺌), 8(넣을 곳: 대화에서 분명하면 그 책, 아니면 책 이름·컨텍스트 이름을 보여 주며 묻기)를 바꾸고,
   옛 5·6(style_search·style_add 태그)을 뺐다. 규칙은 12개. 전후 전문은 `docs/decisions/contexts-texts.md` 3절.
+- 예외: **2026-10-08 밤 사용자 요청(#97 C)**: 마지막 규칙(12, 문서 만들기)을 "저자가 '…로 만들어 이 노드에 넣어 줘'처럼 올린 문서에서 읽기용 문서를 만들어 달라고 하면 바로 book_document를 부른다."로.
+  점검 도구(book_questions·ref_check·book_issues)를 먼저 부르지 않는다(book_document가 서버에서 데이터를 만든다). 나머지 문장 그대로. 2,225토큰.
 - 예외: **#96 답(2026-10-08 저녁, 승인)**: 머리말 "…와 올린 문서를 관리한다.", 규칙 1 "올린 문서 작업은 항상 book_outline로 시작하고, … 올린 문서 전체를 요구하지 않는다.",
   규칙 4 "올린 문서의 원본은 저자의 파일(Word 등)이다. 장 수정안은 대화에서 제안하고, 저자가 원본 파일에 반영한다. book_write_chapter는 저자가 Magus의 올린 문서에 저장하라고 명시했을 때만 쓰고, …",
   규칙 6에 '올린 문서'(새)와 '컨텍스트 … 책은 꽂힌 노드의 것을 먼저, 책의 것을 이어 읽는다', 쓰지 않는 말에 '올린 원고'. 규칙 7·8·12의 '원고' → '올린 문서'. 규칙 5는 그대로.
@@ -514,11 +525,13 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
   - **책 종류(#94, `magus/webbooks.py`)**: 노드 책장의 점선 '책 추가' → `/shelf/add?project=&node=`(원고 올리기 `POST /shelf/manuscript`(진행 막대, XHR) · 모음 책 만들기 `/shelf/new` · 문서 책 안내).
     원고 책 `/shelf/book/<작업물>?tab=chapters|issues|cites|editions`(인용 상태 안에 `view=questions`, 수정본 이력 안에 `POST …/edition`과 리포트 `report=N`).
     문서 책 `/shelf/doc/<id>`(`?v=N` 이력, `POST …/redo` 다시 만들기, `…/docx`, 인쇄 CSS로 PDF). 책 설정 `/shelf/edit/ms.<id>`·`doc.<id>`(이름·색·위치), 휴지통 `/shelf/trash/ms.…`·`doc.…`.
-    원고 책은 옮기지 않는다(가운데 노드 자체). 원고 책 휴지통은 원고만 옮기고 같은 id의 원고 없는 프로젝트를 남긴다. 문헌 등록 `POST /shelf/refs/register`(문헌 목록 안 접힌 칸).
+    원고 책은 옮기지 않는다(가운데 노드 자체). 원고 책 휴지통은 원고만 옮기고 같은 id의 원고 없는 프로젝트를 남긴다. (#97에서 문헌 등록 폼 `POST /shelf/refs/register`를 없앴다.)
   - **컨텍스트(#96, `magus/webcontexts.py`)**: '+ 노드'·노드 설정·새 책·책 설정(올린 문서·만든 문서 포함)에 컨텍스트 칸(자주 쓰는 컨텍스트 단추: 누르면 붙고 다시 누르면 떨어짐,
     붙인 사본은 그 자리에서 고침, 줄마다 '자주 쓰는 컨텍스트로 등록'·'떼기', 직접 적기). 노드 패널·게시판(노드 「…」 → 이 책)·올린 문서·만든 문서 머리에 컨텍스트 이름(누르면 전문).
     책등 위 띠 = 컨텍스트 이름(첫 이름 + 외 N). 내 정보 → 자주 쓰는 컨텍스트 `/me/contexts`(고치기·지우기·새로 더하기). 책 추가 = 새 책 / 문서 올리기 / 올린 문서에서 만든 문서.
-    '원고 책' → '올린 문서'(#96 답 s), '문서 책' → '올린 문서에서 만든 문서', '항목' → '글', 일반 기능의 '원고' → '올린 문서'(본문·원본 파일). 게시판은 하나(글 뒤에 문헌 글, 거르기 나·AI·원문 확인), 바로 적기에 이유·위치. 문헌 넣기 `POST /shelf/refs/register`(폼의 book = 넣을 책).
+    '원고 책' → '올린 문서'(#96 답 s), '문서 책' → '올린 문서에서 만든 문서', '항목' → '글', 일반 기능의 '원고' → '올린 문서'(본문·원본 파일). 게시판은 하나(글 뒤에 문헌 글, 거르기 나·AI).
+  - **#97(오캄의 면도날)**: 화면에는 제목·단추·입력칸 이름·날짜·개수만(설명은 `docs/help`와 '?' 도움말 `POST /help/ask`). 새 글·고치기 = 제목·본문·첨부(`/shelf/<책>/<글>/files/<id>`, 본인 것만),
+    문헌 글에 '원문 확인' 체크(`POST /shelf/<책>/<key>/check`). 원문 확인 거르기·넣기 폼은 없다(쓸 부분은 대화로). 화면마다 `<body data-screen>`(도움말에 보낼 정해 둔 화면 이름).
     옛 주소 `/shelf/ideas…`·`ideas.<프로젝트>`는 이전으로 생긴 책으로 넘긴다. 값은 web-style.md "컨텍스트".
   - (#95로 걷어 냄) 한 화면 3D 책장(`/shelf?floor=&book=&at=`)·층 확대·3D 장(#93, 2026-10-07~08). 기록은 web-style.md "책장 3D", status.md 0-16·0-17절.
   - **책장**(`magus/webshelf.py`, #92·#95): 노드를 열면 보이는 양장본 책장(정면 2D, 한 줄 여섯 권, 책등 세로쓰기·위 띠·아래 항목 수·두께는 항목 수 단계, 점선 "책 추가"). 책을 누르면 게시판형 목록 `/shelf/{ideas|styles|refs|카테고리 id}`(한 줄 = 제목·작성 시각·보조 정보, 누르면 펼침, 100개씩, 기존 거르기 유지), 항목 고유 주소 `/shelf/<…>/<항목 id>`(펼친 채 열림). 검색 `?q=`(두 글자 이상 FTS, 한 글자는 그대로 포함, `<mark>`), `/shelf?q=`는 카테고리별로 묶는다. 예전 `/ideas`·`/refs`·`/styles`는 넘긴다.
