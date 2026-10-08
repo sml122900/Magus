@@ -9,7 +9,8 @@
 - 로그인한 허용 사용자만(웹이 확인한다). 사용자별 하루 질문 수 HELP_DAILY_LIMIT(기본 30, 서버 시간대의 날짜 기준, 프로세스 메모리).
 - 키가 없거나 API 오류면 "지금은 도움말을 쓸 수 없어요."만 준다. 다른 기능과는 상관없다.
 - 로그에는 질문·답·메일을 남기지 않는다. 호출 수·토큰 수·응답 시간·오류 코드만.
-- 대화는 저장하지 않는다(브라우저 창의 메모리에만 있고, 창을 닫으면 사라진다).
+- 대화는 서버에 저장하지 않는다. 브라우저 localStorage(로그인한 사용자별 열쇠)에만 두어 페이지를 옮겨도 남고,
+  '새 대화'·20턴 넘음(오래된 것부터)·마지막 질문 뒤 24시간·로그아웃 때 지운다(2026-10-09 사용자 요청).
 """
 
 from __future__ import annotations
@@ -253,6 +254,8 @@ HELP_STYLE = """
 .help-btn{position:fixed;right:16px;bottom:16px;z-index:50;width:52px;height:52px;min-height:52px;padding:0;border-radius:50%;
 font-size:24px;font-weight:600;background:var(--primary);color:#fff;border:0;box-shadow:0 4px 12px rgb(0 0 0/.25)}
 .help-btn:hover{background:var(--deep)}
+.help-btn.has-talk::after{content:"";position:absolute;top:4px;right:4px;width:12px;height:12px;border-radius:50%;background:#ffd34d;border:2px solid #fff}
+.help-acts{display:flex;gap:4px;align-items:center}
 .help-box{position:fixed;right:16px;bottom:80px;z-index:51;width:min(380px,calc(100vw - 32px));max-height:min(70vh,560px);
 display:flex;flex-direction:column;background:var(--canvas);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgb(0 0 0/.2)}
 .help-box[hidden]{display:none}
@@ -268,44 +271,82 @@ display:flex;flex-direction:column;background:var(--canvas);border:1px solid var
 @media print{.help-btn,.help-box{display:none!important}}
 """
 
+# 대화 보관(2026-10-09 사용자 요청): 브라우저 localStorage에 로그인한 사용자별 열쇠로 둔다(서버에는 저장하지 않는다).
+# 페이지를 옮기거나 창을 접었다 펴도 그대로. 사라지는 때: '새 대화', 20턴(질문 + 답 20쌍)을 넘으면 오래된 것부터, 마지막 질문 뒤 24시간, 로그아웃.
+# 순수 함수만 모았다(시험: tests/test_help_store_js.py가 node로 이 문자열을 돌린다).
+HELP_STORE_JS = """var MagusHelpStore = (function () {
+  var TTL = 24 * 3600 * 1000, MAX = 20, PREFIX = "magus-help:";
+  function empty() { return {turns: [], last: 0, open: false}; }
+  function read(storage, key, now) {
+    var data = null;
+    try { data = JSON.parse(storage.getItem(key) || "null"); } catch (e) { data = null; }
+    if (!data || !Array.isArray(data.turns)) return empty();
+    if (data.last && now - data.last > TTL) { try { storage.removeItem(key); } catch (e) { /* 막힌 저장소 */ } return empty(); }
+    var turns = data.turns.filter(function (t) { return t && typeof t.q === "string" && typeof t.a === "string"; }).slice(-MAX);
+    return {turns: turns, last: Number(data.last) || 0, open: !!data.open};
+  }
+  function write(storage, key, data) {
+    try { storage.setItem(key, JSON.stringify({turns: data.turns, last: data.last, open: data.open})); } catch (e) { /* 막힌 저장소 */ }
+  }
+  function add(storage, key, data, q, a, now) {
+    var next = {turns: data.turns.concat([{q: q, a: a}]).slice(-MAX), last: now, open: data.open};
+    write(storage, key, next);
+    return next;
+  }
+  function clear(storage, key) { try { storage.removeItem(key); } catch (e) { /* 막힌 저장소 */ } return empty(); }
+  function clearAll(storage) {
+    try {
+      for (var i = storage.length - 1; i >= 0; i--) { var k = storage.key(i); if (k && k.indexOf(PREFIX) === 0) storage.removeItem(k); }
+    } catch (e) { /* 막힌 저장소 */ }
+  }
+  return {TTL: TTL, MAX: MAX, PREFIX: PREFIX, read: read, write: write, add: add, clear: clear, clearAll: clearAll};
+})();"""
+
 HELP_SCRIPT = """<script>
+""" + HELP_STORE_JS + """
 (function () {
   var root = document.querySelector(".help");
   if (!root) return;
+  var S = MagusHelpStore, key = S.PREFIX + root.getAttribute("data-user"), store = null;
+  try { store = window.localStorage; } catch (e) { store = null; }
+  if (!store) store = {getItem: function () { return null; }, setItem: function () {}, removeItem: function () {}, key: function () { return null; }, length: 0};
   var btn = root.querySelector(".help-btn"), box = root.querySelector(".help-box"), log = root.querySelector(".help-log");
   var form = root.querySelector(".help-form"), q = form.querySelector("textarea"), send = form.querySelector("button");
-  var turns = [];  // 최근 3번 주고받은 질문·답(이어지는 질문용). 이 창의 메모리에만 있다
-  function show(on) {  // 닫으면 대화를 지운다(저장하지 않는다)
-    box.hidden = !on; btn.setAttribute("aria-expanded", on ? "true" : "false");
-    if (on) { q.focus(); } else { log.textContent = ""; q.value = ""; turns = []; btn.focus(); }
-  }
-  btn.addEventListener("click", function () { show(box.hidden); });
-  root.querySelector(".help-close").addEventListener("click", function () { show(false); });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !box.hidden) show(false); });
+  var data = S.read(store, key, Date.now());
   function add(cls, text) {
     var li = document.createElement("li"); li.className = cls; li.textContent = text; log.appendChild(li);
     log.scrollTop = log.scrollHeight; return li;
   }
-  function inner() {  // 지도 화면이면 패널(게시판 자리)에 열린 화면 이름도
-    try {
-      var f = document.querySelector("iframe.bp-frame"), panel = f && f.closest("#book-panel");
-      if (!f || (panel && panel.hidden)) return "";
-      var d = f.contentDocument; return d && d.body ? (d.body.getAttribute("data-screen") || "") : "";
-    } catch (e) { return ""; }
+  function render() { log.textContent = ""; data.turns.forEach(function (t) { add("me", t.q); add("bot", t.a); }); mark(); }
+  function mark() { btn.classList.toggle("has-talk", data.turns.length > 0 && box.hidden); }
+  function show(on, focus) {  // ✕는 접기: 대화는 그대로 둔다
+    box.hidden = !on; btn.setAttribute("aria-expanded", on ? "true" : "false");
+    data.open = on; S.write(store, key, data); mark();
+    if (on && focus) q.focus();
+    if (!on && focus) btn.focus();
   }
+  btn.addEventListener("click", function () { show(box.hidden, true); });
+  root.querySelector(".help-close").addEventListener("click", function () { show(false, true); });
+  root.querySelector(".help-new").addEventListener("click", function () {  // 새 대화: 이 사용자의 대화를 지운다
+    data = S.clear(store, key); data.open = !box.hidden; S.write(store, key, data); render(); q.focus();
+  });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !box.hidden) show(false, true); });
+  document.querySelectorAll('form[action="/logout"]').forEach(function (f) {  // 로그아웃하면 지운다
+    f.addEventListener("submit", function () { S.clearAll(store); });
+  });
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     var text = q.value.trim();
     if (!text || send.disabled) return;
+    var history = data.turns.slice(-3);  // API로는 최근 3번만(서버가 3,000자로 다시 자른다)
     add("me", text); q.value = "";
     var wait = add("bot wait", "…"); send.disabled = true;
     fetch("/help/ask", {method: "POST", credentials: "same-origin", headers: {"content-type": "application/json", "accept": "application/json"},
-      body: JSON.stringify({csrf: root.getAttribute("data-csrf"), q: text, screen: document.body.getAttribute("data-screen") || "", sub: inner(),
-                            history: turns.slice(-3)})})
+      body: JSON.stringify({csrf: root.getAttribute("data-csrf"), q: text, screen: document.body.getAttribute("data-screen") || "", history: history})})
       .then(function (r) { return r.json().catch(function () { return {ok: false}; }); })
       .then(function (res) {
         wait.className = "bot"; wait.textContent = res.ok ? res.answer : (res.error || "지금은 도움말을 쓸 수 없어요.");
-        if (res.ok) { turns.push({q: text, a: res.answer}); turns = turns.slice(-3); }
+        if (res.ok) data = S.add(store, key, data, text, res.answer, Date.now());
       })
       .catch(function () { wait.className = "bot"; wait.textContent = "지금은 도움말을 쓸 수 없어요."; })
       .then(function () { send.disabled = false; q.focus(); });
@@ -313,17 +354,31 @@ HELP_SCRIPT = """<script>
   q.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit ? form.requestSubmit() : send.click(); }
   });
+  render();
+  if (data.open) show(true, false);  // 페이지를 옮겨도 펼친 채(초점은 빼앗지 않는다)
 })();
 </script>"""
 
+# 로그아웃 화면: 이 브라우저의 도움말 대화를 모두 지운다(스크립트가 꺼져 있으면 저장된 것도 없다)
+CLEAR_SCRIPT = "<script>" + HELP_STORE_JS + "MagusHelpStore.clearAll(window.localStorage);</script>"
 
-def widget(csrf: str) -> str:
-    """오른쪽 아래 '?' 단추와 작은 대화창. 대화는 이 창의 메모리에만 있다."""
+
+def user_key(uid: str) -> str:
+    """localStorage 열쇠에 쓰는 사용자 표시(내부 이름의 해시 앞 16자). 다른 사람으로 로그인하면 다른 열쇠라 앞 사람의 대화가 보이지 않는다."""
+    import hashlib  # noqa: PLC0415
+
+    return hashlib.sha256(f"magus-help:{uid}".encode()).hexdigest()[:16]
+
+
+def widget(csrf: str, user: str) -> str:
+    """오른쪽 아래 '?' 단추와 작은 대화창. 대화는 이 브라우저에만 보관한다(서버 저장 없음)."""
     return (
-        f'<div class="help" data-csrf="{csrf}">'
+        f'<div class="help" data-csrf="{csrf}" data-user="{user}">'
         '<button type="button" class="help-btn" aria-label="도움말" title="도움말" aria-expanded="false" aria-controls="help-box">?</button>'
         '<section class="help-box" id="help-box" role="dialog" aria-label="도움말" hidden>'
-        '<div class="help-head"><b>도움말</b><button type="button" class="help-close" aria-label="닫기" title="닫기">✕</button></div>'
+        '<div class="help-head"><b>도움말</b><span class="help-acts">'
+        '<button type="button" class="help-new">새 대화</button>'
+        '<button type="button" class="help-close" aria-label="접기" title="접기">✕</button></span></div>'
         '<ol class="help-log" aria-live="polite"></ol>'
         f'<form class="help-form"><textarea name="q" rows="2" maxlength="{QUESTION_MAX}" aria-label="질문" placeholder="질문"></textarea>'
         '<button class="primary">묻기</button></form></section></div>' + HELP_SCRIPT

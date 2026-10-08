@@ -36,7 +36,7 @@ from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Redire
 from magus.auth import JwtVerifier
 from magus.book.export import export_docx
 from magus.config import Settings
-from magus.helpbot import HELP_STYLE, HelpBot, screen_key, screen_label, widget
+from magus.helpbot import CLEAR_SCRIPT, HELP_STYLE, HelpBot, screen_key, screen_label, user_key, widget
 from magus.ids import local_time, utcnow
 from magus.inbox import LimitError, mb, save_upload, size_text
 from magus.signing import sign, unsign
@@ -355,7 +355,8 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
 <main><h1>{html.escape(title)}</h1>{body}</main></body></html>""",
                 status_code=status,
             )
-        helper = widget(self.csrf(session[1])) if session and self.helpbot is not None else ""  # 오른쪽 아래 '?'(#97 D)
+        helper = (widget(self.csrf(session[1]), user_key(session[0]))  # 오른쪽 아래 '?'(#97 D), 대화는 이 사용자 열쇠로 브라우저에
+                  if session and self.helpbot is not None else "")
         return HTMLResponse(
             f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)} · Magus</title><style>{STYLE}{css}{HELP_STYLE if helper else ""}</style></head><body data-screen="{screen}">
@@ -532,7 +533,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
                 await self._form(request, session)
             except PermissionError:
                 return self._page("로그아웃", '<p class="msg err">잘못된 요청입니다.</p>', status=403)
-        response = self._page("로그아웃", '<p><a href="/login">로그인</a></p>')
+        response = self._page("로그아웃", f'<p><a href="/login">로그인</a></p>{CLEAR_SCRIPT}')  # 도움말 대화도 지운다
         response.delete_cookie(SESSION_COOKIE, path="/")
         return response
 
