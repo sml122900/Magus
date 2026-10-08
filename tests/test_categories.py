@@ -378,7 +378,7 @@ def test_web_saved_contexts_page(server_proc):  # noqa: F811
         assert page.count('class="saved-ctx"') == 4 and ">문학적 부분이 마음에 드는 구절을 모아놓은것. 내 문장 표현을 다듬을때 사용</textarea>" in page
         assert c.post("/me/contexts", data={"csrf": "틀림", "action": "add", "name": "x", "text": "y"}).status_code == 403
         added = c.post("/me/contexts", data={"csrf": csrf, "action": "add", "name": "<b>신문</b>", "text": "신문 기사 <script>"}).text
-        assert "더했습니다." in added and "&lt;b&gt;신문&lt;/b&gt;" in added and "<script>" not in added.split("<main>")[1]
+        assert "더했습니다." in added and "&lt;b&gt;신문&lt;/b&gt;" in added and "<script>" not in added.split("<main>")[1].split("</main>")[0]
         dup = c.post("/me/contexts", data={"csrf": csrf, "action": "add", "name": "문체", "text": "x"})
         assert dup.status_code == 400 and "이미 있다" in dup.text
         saved = c.post("/me/contexts", data={"csrf": csrf, "action": "save", "id": "ctx-note", "name": "생각 메모", "text": "고친 생각 메모"}).text

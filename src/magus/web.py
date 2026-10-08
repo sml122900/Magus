@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import base64
+import contextvars
 import hashlib
 import hmac
 import html
@@ -30,11 +31,12 @@ from mcp.server.mcpserver import MCPServer
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from starlette.requests import Request
-from starlette.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from magus.auth import JwtVerifier
 from magus.book.export import export_docx
 from magus.config import Settings
+from magus.helpbot import HELP_STYLE, HelpBot, screen_key, screen_label, widget
 from magus.ids import local_time, utcnow
 from magus.inbox import LimitError, mb, save_upload, size_text
 from magus.signing import sign, unsign
@@ -45,6 +47,8 @@ from magus.webmap import MapPages
 from magus.webshelf import EMBED, ShelfPages, is_panel_request, safe_at, state_url
 
 log = logging.getLogger("magus.web")
+SCREEN: contextvars.ContextVar[str] = contextvars.ContextVar("magus_screen", default="other")  # 도움말에 보낼 화면 이름 열쇠(#97)
+HELP_BODY_MAX = 8_000  # 도움말 질문 요청 본문 한도(바이트)
 SESSION_COOKIE, OAUTH_COOKIE = "magus_session", "magus_oauth"
 DISPLAY_NAME_MAX = 40  # 상단 바 표시 이름 길이 한도
 SESSION_TTL, OAUTH_TTL, DOWNLOAD_TTL = 12 * 3600, 600, 24 * 3600
@@ -238,13 +242,15 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
     oauth: OAuthClient | None = None
     local_user: str | None = None  # 로컬(인증 없는 HTTP) 개발용 자동 로그인
     _allowed: set[str] = field(default_factory=set)
+    helpbot: HelpBot | None = None  # 웹 도움말(#97 D). 키가 없어도 단추는 보이고, 물으면 '지금은 쓸 수 없어요'
 
     @classmethod
     def create(cls, store: Store, settings: Settings, base_url: str, verifier: JwtVerifier | None) -> Web:
         auth = settings.auth
         if auth is None:
             secret = (settings.session_secret or secrets.token_hex(32)).encode()
-            return cls(store, settings, base_url.rstrip("/"), secret, local_user=settings.user_id)
+            return cls(store, settings, base_url.rstrip("/"), secret, local_user=settings.user_id,
+                       helpbot=HelpBot.from_settings(settings))
         if not settings.session_secret or len(settings.session_secret) < 32:
             raise ValueError("원격 모드에는 SESSION_SECRET(32자 이상 무작위 문자열)이 필요하다")
         oauth = (
@@ -253,7 +259,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
             if settings.web_client_id else None
         )
         return cls(store, settings, auth.public_url, settings.session_secret.encode(), verifier, oauth,
-                   _allowed=set(auth.allowed.values()))
+                   _allowed=set(auth.allowed.values()), helpbot=HelpBot.from_settings(settings))
 
     # --- 세션 ---
     def user_of(self, request: Request) -> tuple[str, str] | None:
@@ -265,6 +271,14 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
         if self.local_user is not None:
             return (uid, str(data.get("sid"))) if uid == self.local_user else None
         return (uid, str(data.get("sid"))) if uid in self._allowed else None
+
+    def session_state(self, request: Request) -> tuple[str, tuple[str, str] | None]:
+        """도움말 API용: ("ok", 세션) | ("forbidden", None: 서명은 맞지만 허용 목록 밖) | ("none", None: 로그인 안 함)."""
+        session = self.user_of(request)
+        if session:
+            return "ok", session
+        data = unsign(request.cookies.get(SESSION_COOKIE, ""), self.secret, "session")
+        return ("forbidden" if data and data.get("uid") else "none"), None
 
     def csrf(self, sid: str) -> str:
         return hmac.new(self.secret, f"csrf.{sid}".encode(), hashlib.sha256).hexdigest()[:32]
@@ -286,6 +300,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
             ("/logout", ["POST"], self.logout), ("/me", ["GET", "POST"], self.me), ("/me/files", ["GET"], self.inbox),
             ("/inbox/upload", ["POST"], self.upload), ("/inbox/delete", ["POST"], self.delete),
             ("/book/export", ["POST"], self.do_export), ("/download/{token}", ["GET"], self.download),
+            ("/help/ask", ["POST"], self.help_ask),  # 웹 도움말(#97 D)
             # 옛 주소는 책장의 새 화면으로(#94)
             ("/inbox", ["GET"], self.files_moved), ("/book", ["GET"], self._old_page("chapters", ())),
             ("/issues", ["GET"], self._old_page("issues", ("status", "kind"))),
@@ -310,10 +325,12 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
                 if at:
                     return RedirectResponse(state_url(at=at), status_code=303)
             token = EMBED.set(is_panel_request(request))
+            screen = SCREEN.set(screen_key(path, request.url.query))
             try:
                 return await handler(request)
             finally:
                 EMBED.reset(token)
+                SCREEN.reset(screen)
 
         return run
 
@@ -330,18 +347,20 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
             nav = (f'<nav>{links}<a href="/me" class="me" aria-label="내 정보, {shown}">{shown}</a>'
                    f'<form method="post" action="/logout" class="inline">{self._csrf_input(session)}<button>로그아웃</button></form></nav>')
         body = body.replace("<table>", '<div class="table-wrap"><table>').replace("</table>", "</table></div>")
+        screen = html.escape(SCREEN.get())  # 도움말이 보낼 화면 이름 열쇠(정해 둔 목록, #97)
         if EMBED.get():  # 책장 패널(iframe) 안: 머리(메뉴) 없이, 제목은 패널 머리가 보인다
             return HTMLResponse(
                 f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(title)} · Magus</title><style>{STYLE}{css}{EMBED_STYLE}</style></head><body class="embed">
+<title>{html.escape(title)} · Magus</title><style>{STYLE}{css}{EMBED_STYLE}</style></head><body class="embed" data-screen="{screen}">
 <main><h1>{html.escape(title)}</h1>{body}</main></body></html>""",
                 status_code=status,
             )
+        helper = widget(self.csrf(session[1])) if session and self.helpbot is not None else ""  # 오른쪽 아래 '?'(#97 D)
         return HTMLResponse(
             f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(title)} · Magus</title><style>{STYLE}{css}</style></head><body>
+<title>{html.escape(title)} · Magus</title><style>{STYLE}{css}{HELP_STYLE if helper else ""}</style></head><body data-screen="{screen}">
 <header class="site"><div class="site-in"><span class="brand">Magus</span>{nav}</div></header>
-<main><h1>{html.escape(title)}</h1>{body}</main></body></html>""",
+<main><h1>{html.escape(title)}</h1>{body}</main>{helper}</body></html>""",
             status_code=status,
         )
 
@@ -357,6 +376,27 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
     def _need_login(self, request: Request) -> Response:
         here = request.url.path + (f"?{request.url.query}" if request.url.query else "")  # 프로젝트 지도의 노드·책 상태도 이어서
         return RedirectResponse(f"/login?next={urllib.parse.quote(here)}", status_code=303)
+
+    # --- 도움말(#97 D) ---
+    async def help_ask(self, request: Request) -> Response:
+        """질문 하나 → 답. 로그인한 허용 사용자만(401·403), CSRF 확인. API로는 질문·도움말 문서·화면 이름만 보낸다."""
+        state, session = self.session_state(request)
+        if session is None:
+            return JSONResponse({"ok": False, "error": "로그인이 필요합니다." if state == "none" else "허용 목록에 없습니다."},
+                                status_code=401 if state == "none" else 403)
+        if int(request.headers.get("content-length") or 0) > HELP_BODY_MAX:
+            return JSONResponse({"ok": False, "error": "질문이 너무 깁니다."}, status_code=413)
+        try:
+            data = json.loads((await request.body())[:HELP_BODY_MAX] or b"{}")
+        except ValueError:
+            data = None
+        if not isinstance(data, dict) or not hmac.compare_digest(str(data.get("csrf", "")).encode(), self.csrf(session[1]).encode()):
+            return JSONResponse({"ok": False, "error": "잘못된 요청입니다. 화면을 새로 고쳐 주세요."}, status_code=403)
+        if self.helpbot is None:
+            return JSONResponse({"ok": False, "error": "지금은 도움말을 쓸 수 없어요."}, status_code=503)
+        screen = screen_label(str(data.get("screen") or ""), str(data.get("sub") or ""))
+        status, body = await run_in_threadpool(self.helpbot.ask, session[0], str(data.get("q") or ""), screen)
+        return JSONResponse(body, status_code=status)
 
     # --- 로그인 ---
     async def home(self, request: Request) -> Response:

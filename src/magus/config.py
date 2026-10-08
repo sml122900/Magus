@@ -39,6 +39,7 @@ class Settings:
     help_model: str = "claude-haiku-4-5-20251001"
     help_max_tokens: int = 600
     help_daily_limit: int = 30  # 사용자별 하루 질문 수
+    help_dir: Path | None = None  # 도움말 문서 폴더(없으면 저장소의 docs/help)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -66,6 +67,7 @@ class Settings:
             help_model=(env.get("HELP_MODEL") or "").strip() or "claude-haiku-4-5-20251001",
             help_max_tokens=_count(env, "HELP_MAX_TOKENS", 600),
             help_daily_limit=_count(env, "HELP_DAILY_LIMIT", 30),
+            help_dir=Path(env["HELP_DIR"]).resolve() if env.get("HELP_DIR") else None,
         )
 
 

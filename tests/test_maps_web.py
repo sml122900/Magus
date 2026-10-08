@@ -125,7 +125,7 @@ def test_old_addresses_and_panel_requests(server_proc):  # noqa: F811
         assert c.get(f"/shelf/{ids['person']}").status_code == 200  # Sec-Fetch 머리가 없는 브라우저는 예전처럼
         # 게시판 자리(iframe) 안: 머리(메뉴) 없이. 그 안에서 프로젝트 화면이 열리면 바깥 화면을 그 주소로
         panel = c.get(f"/shelf/{ids['person']}", headers={"sec-fetch-dest": "iframe"}).text
-        assert '<body class="embed">' in panel and '<header class="site">' not in panel
+        assert '<body class="embed" data-screen="board">' in panel and "help-btn" not in panel and '<header class="site">' not in panel
         out = c.get("/shelf/p/city?done=trash", headers={"sec-fetch-dest": "iframe"}).text
         assert '<a id="go" href="/shelf/p/city?done=trash" target="_top">' in out and "window.top.location.replace" in out
         edited = c.post(f"/shelf/edit/{ids['person']}", data={"csrf": _csrf(c.get("/shelf").text), "name": "사람", "color": "#7a4e2d"})

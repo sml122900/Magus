@@ -4,6 +4,7 @@ data
 fixtures
 tests
 docs
+!docs/help
 deploy
 **/__pycache__
 *.pyc

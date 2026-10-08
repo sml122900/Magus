@@ -13,6 +13,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
+# 웹 도움말(#97)의 시스템 프롬프트. magus.helpbot이 /app/docs/help를 읽는다
+COPY docs/help ./docs/help
 RUN uv sync --frozen --no-dev
 
 USER magus
