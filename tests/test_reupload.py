@@ -127,7 +127,7 @@ def test_reupload_replaces_only_changed_chapters_and_keeps_history(store: LocalS
     assert [(e["number"], e["file"], e.get("changed"), e.get("removed")) for e in editions] == [(1, "e1.docx", 5, None), (2, "e2.docx", 3, 1)]
     text = report.full()
     assert "장: 본문 바뀜 2 · 그대로 2 · 새 장 1(제6장) · 빠진 장 1(제5장, removed/에 보관)" in text
-    assert "해결됐을 수 있음 2(원고에서 코멘트가 지워짐 1 · 걸린 문장이 원고에 없음 1) — 닫지 않았다" in text
+    assert "해결됐을 수 있음 2(올린 문서에서 코멘트가 지워짐 1 · 걸린 문장이 올린 문서에 없음 1) — 닫지 않았다" in text
 
     # 인덱스는 파일에서 다시 만들어도 같다
     snapshot = (store.list_chapters(U, P), store.list_issues(U, P, None), store.list_editions(U, P))
@@ -137,7 +137,7 @@ def test_reupload_replaces_only_changed_chapters_and_keeps_history(store: LocalS
 
 def test_outline_shows_edition_and_asks_for_latest_upload(store: LocalStore, tmp_path: Path, e1):
     outline = build_outline(store, U, P).splitlines()
-    assert outline[3].startswith("처음 올린 원고 E1 · 마지막 업로드 ") and outline[3].endswith("(e1.docx) · 그 뒤 Magus에서 고친 장 1")
+    assert outline[3].startswith("처음 올린 문서 E1 · 마지막 업로드 ") and outline[3].endswith("(e1.docx) · 그 뒤 Magus에서 고친 장 1")
     reupload_manuscript(store, U, edition(tmp_path / "e2.docx", 2), P)
     text = build_outline(store, U, P)
     assert "(e2.docx) · 그 뒤 Magus에서 고친 장 0" in text and "지남" not in text
@@ -156,7 +156,7 @@ def test_same_file_again_changes_nothing(store: LocalStore, tmp_path: Path, e1):
 
 def test_different_book_needs_force(store: LocalStore, tmp_path: Path, e1):
     other = Manuscript().heading("제1장 전혀 다른").para("글.").heading("제2장 책").para("글.").bibliography().save(tmp_path / "x.docx")
-    with pytest.raises(ValueError, match="장 제목이 기존 원고.*0%만 겹친다"):
+    with pytest.raises(ValueError, match="장 제목이 기존 문서.*0%만 겹친다"):
         reupload_manuscript(store, U, other, P)
     assert reupload_manuscript(store, U, other, P, force=True).edition == 2
 
@@ -190,7 +190,7 @@ async def test_book_import_new_edition_tool(settings, store: LocalStore, tmp_pat
     assert refused.is_error and "new_edition=true" in refused.content[0].text
     assert done.startswith("컨텍스트: 없음(일반 메모로 다룬다) — 책 「가상 책」\n\n## 수정본 E2 — 가상 책 (b)") and "### 바뀐 장" in done
     assert stale.split("\n", 1)[1].startswith("확인 요청 2건 (status=open, 해결됐을 수 있음만)")  # 첫 줄은 컨텍스트(#96)
-    assert "해결됐을 수 있음(원고에서 코멘트가 지워짐, E2)" in stale and "해결됐을 수 있음(걸린 문장이 원고에 없음, E2)" in stale
+    assert "해결됐을 수 있음(올린 문서에서 코멘트가 지워짐, E2)" in stale and "해결됐을 수 있음(걸린 문장이 올린 문서에 없음, E2)" in stale
 
 
 def test_pdf_comments_without_author_are_linked_by_text(store: LocalStore, tmp_path: Path, e1):

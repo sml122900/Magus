@@ -1,6 +1,6 @@
 """책 이름 → 책(#96). 도구(category_*·idea_add_conversation·ref_import_bibliography)가 함께 쓴다.
 
-책은 셋 중 하나로 보인다: 글이 쌓이는 책(카테고리), 올린 문서가 든 책(가운데 노드, 이름 = 프로젝트 제목), 원고에서 만든 문서.
+책은 셋 중 하나로 보인다: 글이 쌓이는 책(카테고리), 올린 문서가 든 책(가운데 노드, 이름 = 프로젝트 제목), 올린 문서에서 만든 문서.
 종류 이름은 저자에게 쓰지 않는다. 같은 이름이 여러 프로젝트에 있으면 project(그 프로젝트, 그다음 그 지도의 연결 노드가 가리키는 책)로
 가린다. 못 찾으면 책 이름과 컨텍스트 이름을 보여 주며 묻게 하는 오류를 낸다(instructions의 넣을 곳 묻기 규칙).
 """
@@ -29,7 +29,7 @@ class BookRef:
 
     @property
     def upload(self) -> bool:
-        """올린 문서가 든 책이나 원고에서 만든 문서인가(글을 넣지 않는다)."""
+        """올린 문서가 든 책이나 올린 문서에서 만든 문서인가(글을 넣지 않는다)."""
         return self.category is None
 
 
@@ -48,7 +48,8 @@ def books_text(store: Store, user: str, books: list[BookRef], limit: int = 15) -
     parts = []
     for b in books[:limit]:
         view = view_for_book(store, user, b.key)
-        tag = f"[{view.contexts[0].name or one_line(view.contexts[0].text)[:12]}]" if view.contexts else ""
+        names = [c.name or one_line(c.text)[:12] for c in view.all]  # 읽는 순서: 노드 → 책(#96-d)
+        tag = f"[{'·'.join(names[:3])}{' 외' if len(names) > 3 else ''}]" if names else ""
         parts.append(f"「{short(b.name, 14)}」{tag}" + (f"({floor_name(store, user, b.floor)})" if multi else ""))
     return " · ".join(parts) + (f" 외 {len(books) - limit}권" if len(books) > limit else "")
 

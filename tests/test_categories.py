@@ -186,13 +186,31 @@ async def test_category_tools_round_trip(settings: Settings, store: LocalStore):
         assert "컨텍스트를 뗌" in _text(await c.call_tool("category_edit", {"book": "옛 사례", "context": []}))
         bad = await c.call_tool("category_edit", {"book": "옛 사례", "color": "red;background:url(//x)"})
         assert bad.is_error and store.list_categories("alice")[0].color == "#b22222"
-        # 노드의 컨텍스트: 책에 없으면 노드의 것을 따른다
+        # 노드의 컨텍스트(#96-d): 노드 → 책 순서로 이어 읽는다. 책에 없으면 노드의 것만
         await c.call_tool("category_edit", {"node": "사례", "project": "book", "context": ["생각 메모"]})
         follows = _text(await c.call_tool("category_put", {"book": "옛 사례", "author": "ai", "content": "요약", "untitled": True}))
-        assert follows.startswith("컨텍스트(책 「옛 사례」, 노드 「사례」의 것): 「생각 메모」")
+        assert follows.startswith("컨텍스트(노드 「사례」의 것. 책 「옛 사례」에는 없음): 「생각 메모」")
+        both = _text(await c.call_tool("category_edit", {"book": "옛 사례", "context": ["현장 사진은 따로 본다."]}))
+        assert both.startswith("컨텍스트(노드 「사례」 → 책 「옛 사례」 순서): 「생각 메모」 떠오른 생각을")
+        assert both.splitlines()[0].endswith(" → 현장 사진은 따로 본다.")
+        asked = await c.call_tool("category_put", {"book": "없는것", "author": "me", "content": "x", "untitled": True})
+        assert "「옛 사례」[생각 메모·현장 사진은 따로 본다]" in _text(asked)  # 묻게 할 때도 노드 → 책 순서의 컨텍스트 이름
         # 휴지통: 글 하나, 책 통째
         gone = _text(await c.call_tool("category_trash", {"book": "옛 사례", "note": "시험"}))
         assert "책 「옛 사례」 통째(글 2개)" in gone and store.list_categories("alice") == []
+
+
+def test_context_header_order_and_limit():
+    """#96-d: 응답 머리는 노드 → 책 순서, 합쳐서 HEADER_MAX자까지이고 넘으면 잘렸다고 적는다."""
+    from magus.contexts import HEADER_MAX, View
+
+    view = View((Context("책 것", "나" * 600),), "책", "노드", (Context("노드 것", "가" * 600),))
+    head = view.header()
+    assert head.startswith("컨텍스트(노드 「노드」 → 책 「책」 순서): 「노드 것」 가가")
+    assert head.endswith(f"…(잘림: 노드·책 컨텍스트를 합쳐 {HEADER_MAX:,}자까지 싣는다)") and view.too_long
+    assert len(head) < HEADER_MAX + 100
+    assert View((), "책", "노드").header() == "컨텍스트: 없음(일반 메모로 다룬다) — 책 「책」"
+    assert View((Context("", "짧다"),), "책", "노드").header() == "컨텍스트(책 「책」): 짧다"
 
 
 async def test_title_default_is_kept_on_server(settings: Settings, store: LocalStore):
@@ -290,6 +308,13 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         empty = c.get(f"/shelf/{cid}").text
         assert '<details class="card write" open>' in empty and 'name="f:시기"' in empty and "아직 적은 글이 없습니다." in empty
         assert '<details class="ctx"><summary>논문</summary><p>원문을 읽고 모은 논문과 책이다.' in empty  # 머리에 컨텍스트(누르면 전문)
+        store = LocalStore(data_dir)  # 노드에도 컨텍스트가 있으면 노드 → 책 순서로 보인다(#96-d)
+        floor, node = store.node_of_book("alice", cid)
+        store.set_node_contexts("alice", floor, node, (Context("현장", "현장에서 본 것만 적는다."),))
+        store.close()
+        both = c.get(f"/shelf/{cid}").text
+        assert both.index("<summary>현장</summary>") < both.index('<span class="ctx-sep"') < both.index("<summary>논문</summary>")
+        assert '<span class="ctx-label">노드 「사례」</span>' in both and '<span class="ctx-label">이 책</span>' in both
         # 바로 적기(누가 = 저자, CSRF)
         assert c.post(f"/shelf/write/{cid}", data={"csrf": "틀림", "content": "x"}).status_code == 403
         assert "error=empty" in str(c.post(f"/shelf/write/{cid}", data={"csrf": csrf, "content": "  "}).url)

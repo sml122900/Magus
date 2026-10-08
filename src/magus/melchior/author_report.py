@@ -191,7 +191,7 @@ def gather(store: Store, user_id: str, project_id: str) -> ReportParts:
 
 
 def summary_line(p: ReportParts) -> str:
-    return (f"원고 전체 인용 **{p.occurrences}곳**, 문헌 **{p.documents}편**, "
+    return (f"문서 전체 인용 **{p.occurrences}곳**, 문헌 **{p.documents}편**, "
             f"원문 대조 완료 **{p.verified}편**입니다.")
 
 
@@ -262,9 +262,9 @@ def fact_lines(store: Store, user_id: str, project_id: str) -> tuple[int, list[s
     by_ai = [i for i in fact_issues if i.by_ai]
     ai_names = "·".join(sorted({i.author for i in by_ai if i.author})) or "AI"
     lines = [
-        "특정 문헌이 아니라 사실이나 수치를 확인해 달라는 원고 메모입니다. 장별로 모아 앞 40자만 옮겼습니다. "
+        "특정 문헌이 아니라 사실이나 수치를 확인해 달라는 본문 메모입니다. 장별로 모아 앞 40자만 옮겼습니다. "
         "괄호 속 번호(I3 등)로 말씀하시면 해당 메모를 바로 찾습니다.",
-        *([f"이 중 {len(by_ai)}건은 {ai_names}(AI)가 원고에 단 확인 요청입니다(괄호 속 'AI')."] if by_ai else []),
+        *([f"이 중 {len(by_ai)}건은 {ai_names}(AI)가 본문에 단 확인 요청입니다(괄호 속 'AI')."] if by_ai else []),
         "",
     ]
     order = {m.display: n for n, m in enumerate(store.list_chapters(user_id, project_id))}  # 읽는 순서
@@ -287,7 +287,7 @@ def build_author_report(store: Store, user_id: str, project_id: str, date: str) 
     count, facts = fact_lines(store, user_id, project_id)
     lines = [
         f"# 『{p.project.title}』 인용 점검 보고서",
-        f"{date} · Magus가 원고 전체를 읽고 정리했습니다.",
+        f"{date} · Magus가 올린 문서 전체를 읽고 정리했습니다.",
         "",
         "## 1. 한 줄 요약",
         summary_line(p),

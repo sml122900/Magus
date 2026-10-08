@@ -5,7 +5,7 @@
 - 장 대응: 같은 번호 = 같은 장. 제목이 바뀌면 리포트에 적는다. 본문 유사도·이동·분할 판정은 뒤로 미뤘다.
 - 본문이 바뀐 장만 다시 쓴다(이전본은 versions/). 그대로인 장은 버전을 올리지 않고 판 번호만 적는다.
   새 판에 없는 장은 removed/로 옮긴다(지우지 않는다).
-- 원고 코멘트 → 미해결: 지문(작성자 + 날짜 + 본문)이 같으면 새로 만들지 않는다. 판 기록 전(PDF 등) 미해결은 코멘트 본문으로 잇는다.
+- 문서 코멘트 → 미해결: 지문(작성자 + 날짜 + 본문)이 같으면 새로 만들지 않는다. 판 기록 전(PDF 등) 미해결은 코멘트 본문으로 잇는다.
   원고에서 코멘트가 지워졌거나 걸린 문장이 없으면 "해결됐을 수 있음"으로 표시만 한다. 자동으로 닫지 않는다.
 - 결정·직접 남긴 미해결·책장(영감·문헌·문체)은 건드리지 않는다. 참고문헌은 새 문헌만 더한다(key는 문헌을 따라간다).
 """
@@ -134,15 +134,15 @@ class ReuploadReport:
             *(["  - 제목이 바뀐 장: " + ", ".join(f"{c.display} '{c.title_from}' → '{c.title}'" for c in renamed)] if renamed else []),
             *([f"- ⚠ Magus에서 고친 뒤 이번 수정본으로 덮인 장: {', '.join(self.overwritten_magus)} (이전본은 versions/에 있다)"]
               if self.overwritten_magus else []),
-            f"- 원고 코멘트 {self.comments_total}건 → 이어진 확인 요청 {self.issues_kept}(장을 옮긴 것 {self.issues_moved}) · 새 확인 요청 {self.issues_new}"
+            f"- 문서 코멘트 {self.comments_total}건 → 이어진 확인 요청 {self.issues_kept}(장을 옮긴 것 {self.issues_moved}) · 새 확인 요청 {self.issues_new}"
             + (f" · 해결됐을 수 있음 {sum(self.stale.values())}({stale}) — 닫지 않았다" if self.stale else ""),
-            *([f"  - Magus에서 닫았지만 원고에 코멘트가 남아 있는 것 {self.closed_but_in_file}건(닫힌 채 둔다)"]
+            *([f"  - Magus에서 닫았지만 올린 문서에 코멘트가 남아 있는 것 {self.closed_but_in_file}건(닫힌 채 둔다)"]
               if self.closed_but_in_file else []),
             f"- 그대로 둔 것: 결정 {self.decisions}건, 직접 남긴 확인 요청 {self.direct_issues}건, 생각·문헌·문체",
             f"- {self.bib.render().splitlines()[0]}",
             *(f"  {line}" for line in self.bib.render().splitlines()[1:]),
             f"- 답해 주실 질문: 새로 생김 {len(self.questions_new)} · 저절로 닫힘 {len(self.questions_closed)} · "
-            f"답했지만 원고에 아직 그대로 {len(self.questions_waiting)}",
+            f"답했지만 올린 문서에 아직 그대로 {len(self.questions_waiting)}",
             *(f"  - {label}: {kind} — {text[:100]}" for label, rows in (
                 ("새로 생김", self.questions_new), ("저절로 닫힘", self.questions_closed),
                 ("아직 그대로", self.questions_waiting)) for kind, text in rows[:QUESTION_LINES]),
@@ -193,13 +193,13 @@ def reupload_manuscript(
     manuscript = read_manuscript(path)
     split = split_manuscript(manuscript.blocks)
     if not split.chapters:
-        raise ValueError("'제N장' 제목을 하나도 찾지 못했다. 원고의 장 제목 표기를 확인해 주세요.")
+        raise ValueError("'제N장' 제목을 하나도 찾지 못했다. 문서의 장 제목 표기를 확인해 주세요.")
     old_list = store.list_chapters(user_id, project.id)
     questions_before = {q.id: q for q in build_questions(store, user_id, project.id)}  # 올리기 전 질문(비교용)
     overlap = title_overlap([c.title for c in old_list], [c.title for c in split.chapters])
     if overlap < SAME_BOOK_MIN and not force:
         raise ValueError(
-            f"장 제목이 기존 원고({project.title})와 {overlap:.0%}만 겹친다. 다른 책 같다. "
+            f"장 제목이 기존 문서({project.title})와 {overlap:.0%}만 겹친다. 다른 책 같다. "
             "같은 책의 수정본이 맞으면 force=true로 다시 올리고, 다른 책이면 새 project_id로 임포트한다."
         )
 

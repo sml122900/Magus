@@ -7,7 +7,7 @@
              {"id": "l-…", "x": …, "y": …, "link": {"project": "common", "node": "b-styles"}}],
    "edges": [["b-ideas", "center"], …]}
 책 이름(지도 파일): ms(원고 책) · ideas|styles|refs(기본 책, #96 전에만) · <카테고리 id> · doc.<문서 id>.
-노드의 "contexts"(#96): [{"name", "text"}] — 그 노드의 컨텍스트(책에 컨텍스트가 없으면 이것을 따른다). 연결 노드는 원본의 것.
+노드의 "contexts"(#96): [{"name", "text"}] — 그 노드의 컨텍스트(그 노드의 책은 이것 → 책의 것 순서로 읽는다, #96-d). 연결 노드는 원본의 것.
 
 지도 파일이 없는 프로젝트는 지금 배치에서 계산한 지도로 보인다(_reconcile): 가운데 노드에 원고 책·문서 책,
 기본 책·카테고리는 이름이 같은 노드 하나씩(가운데와 이음), 「내 서재」의 문헌(과, 자기 문체가 없으면 문체)으로 가는 연결 노드.
@@ -588,7 +588,7 @@ class MapMixin:
             raise MapError("link_node", "연결 노드에는 책을 놓지 않는다(원본 노드에 놓는다)")
         _, local = local_key(key)
         if local == "ms" and node_id != CENTER:
-            raise MapError("ms_center", "원고 책은 가운데 노드에만 둔다")
+            raise MapError("ms_center", "올린 문서는 가운데 노드에만 둔다")
         before = next((n for n in data["nodes"] if local in n.get("books", [])), None)
         if before is None:
             raise MapError("unknown_book", f"이 프로젝트에 책 {key!r}가 없다")

@@ -88,7 +88,7 @@ def floor_name(store: Store, user: str, floor_id: str) -> str:
 def shared_reason(store: Store, user: str, before: str | None, now: str) -> str:
     """두 프로젝트가 같은 문헌을 쓰게 되어 「내 서재」로 옮길 때 남기는 이유(#93-a, #95)."""
     names = [floor_name(store, user, f) for f in dict.fromkeys(f for f in (before, now) if f and f != LIBRARY)]
-    return f"{'·'.join(names)} 원고가 함께 쓰는 문헌이라 「{LIBRARY_NAME}」로 옮김"
+    return f"{'·'.join(names)} 올린 문서가 함께 쓰는 문헌이라 「{LIBRARY_NAME}」로 옮김"
 
 
 def share_ref(store: Store, user: str, key: str, before: str | None, now: str) -> Ref:

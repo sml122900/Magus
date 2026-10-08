@@ -65,7 +65,7 @@ def source_label(issue: Issue) -> str:
     if issue.origin != "import_comment":
         return issue.origin
     who = f"({issue.author})" if issue.author else ""
-    return f"AI 확인 요청{who}" if issue.by_ai else f"원고 코멘트{who}"
+    return f"AI 확인 요청{who}" if issue.by_ai else f"문서 코멘트{who}"
 
 
 def is_citation_comment(text: str) -> bool:

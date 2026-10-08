@@ -60,7 +60,7 @@ def test_report_sections_without_keys(store: LocalStore, tmp_path: Path):
     text = build_author_report(store, "alice", "book", "2026-10-03")
     for n in range(1, 8):
         assert f"## {n}. " in text
-    assert "원고 전체 인용 **4곳**, 문헌 **3편**, 원문 대조 완료 **0편**" in text
+    assert "문서 전체 인용 **4곳**, 문헌 **3편**, 원문 대조 완료 **0편**" in text
     assert "제1장 본문 Brook(2008) ↔ 참고문헌 Brook(2010) 『The Troubled Empire』" in text
     assert "Graunt(1662) 『Natural and Political Observations Made upon the Bills…』 — 본문에는 이름만 나옵니다: '존 그랜트'(제2장)" in text
     assert "제1장 케인스(1930): Keynes(1930a) 『A Treatise on Money』, Keynes(1930b)" in text

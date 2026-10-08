@@ -174,8 +174,8 @@ class Issue:
 
 
 STALE_REASONS: dict[str, str] = {
-    "comment_removed": "원고에서 코멘트가 지워짐",
-    "anchor_missing": "걸린 문장이 원고에 없음",
+    "comment_removed": "올린 문서에서 코멘트가 지워짐",
+    "anchor_missing": "걸린 문장이 올린 문서에 없음",
 }
 
 
@@ -184,7 +184,7 @@ class Edition:
     """원고 업로드 한 번 = 판 하나(E1, E2…). project.json의 editions에 쌓인다(#76)."""
 
     number: int
-    file: str  # 올린 원고 파일 이름. 사본은 original/에 있다
+    file: str  # 올린 문서 파일 이름. 사본은 original/에 있다
     uploaded_at: str
     sha256: str = ""
     changed: int = 0  # 본문이 바뀐 장(새 장 포함)
@@ -273,7 +273,7 @@ class Category:
     updated_at: str = ""
     items: int = 0  # 글 수(목록에서 채운다). 문헌·참고문헌 항목(sources)은 따로 센다
     floor: str = "common"  # 그 책이 있는 프로젝트(#93 층 → #95)
-    contexts: tuple[Context, ...] = ()  # 컨텍스트(#96). 없으면 꽂힌 노드의 것을 따른다
+    contexts: tuple[Context, ...] = ()  # 컨텍스트(#96). 읽을 때는 꽂힌 노드의 것 다음에 이것(#96-d)
     sources: int = 0  # 이 책에 든 문헌·참고문헌 항목 수(#96, refs.book). 목록에서 채운다
     verified: int = 0  # 그중 원문 확인 수
 

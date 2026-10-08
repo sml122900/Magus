@@ -17,7 +17,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from magus.contexts import CONTEXT_MAX, CONTEXT_NAME_MAX, MAX_ATTACHED, MAX_SAVED, Context, SavedContext, View, clean_contexts
+from magus.contexts import CONTEXT_MAX, CONTEXT_NAME_MAX, HEADER_MAX, MAX_ATTACHED, MAX_SAVED, Context, SavedContext, View, clean_contexts
 from magus.store import Store
 
 CONTEXT_STYLE = """
@@ -36,6 +36,7 @@ fieldset.ctx textarea{min-height:72px}
 ol.ctx-rows .drop{margin-left:auto}
 .ctxs{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:baseline;margin:6px 0 10px}
 .ctxs .ctx-label{color:var(--ink2);font-size:15px}
+.ctxs .ctx-sep{color:var(--ink2);font-weight:600}
 .ctxs details.ctx{display:inline-block}
 .ctxs details.ctx>summary{display:inline-block;padding:2px 12px;border-radius:999px;background:#eef0fb;border:1px solid #b9b9f9;
 cursor:pointer;font-weight:600;list-style:none}
@@ -164,20 +165,39 @@ def register_row(store: Store, uid: str, form: Any) -> str:
     return f'<p class="msg">「{html.escape(name)}」을(를) 자주 쓰는 컨텍스트에 등록했습니다. 아래에서 저장해야 이 화면의 다른 것이 저장됩니다.</p>'
 
 
-def contexts_view_html(view: View, edit_href: str | None = None) -> str:
-    """노드 패널 머리·책 게시판 머리: 붙은 컨텍스트 이름(누르면 전문). 없으면 '일반 메모로 읽습니다'."""
-    edit = f' <a href="{html.escape(edit_href)}">컨텍스트 바꾸기</a>' if edit_href else ""
-    if not view.contexts:
-        none = ("없음 — 컨텍스트가 없는 책은 AI가 일반 메모로 읽습니다." if view.node and not view.book
-                else "없음 — AI는 일반 메모로 읽습니다.")
-        return f'<div class="ctxs"><span class="ctx-label">컨텍스트</span><span class="none">{none}</span>{edit}</div>'
-    where = f'(노드 「{html.escape(view.node)}」의 것)' if view.from_node and view.node else ""
-    items = "".join(
+def _chips(contexts: tuple[Context, ...]) -> str:
+    return "".join(
         f'<details class="ctx"><summary>{html.escape(c.name or c.text.splitlines()[0][:16] + ("…" if len(c.text) > 16 else ""))}</summary>'
         f"<p>{html.escape(c.text)}</p></details>"
-        for c in view.contexts
+        for c in contexts
     )
-    return f'<div class="ctxs" aria-label="컨텍스트"><span class="ctx-label">컨텍스트{where}</span>{items}{edit}</div>'
+
+
+def contexts_view_html(view: View, edit_href: str | None = None) -> str:
+    """노드 패널 머리·책 게시판 머리: 붙은 컨텍스트 이름(누르면 전문). 책은 노드의 것 → 책의 것 순서(#96-d).
+    없으면 '일반 메모로 읽습니다'."""
+    edit = f' <a href="{html.escape(edit_href)}">컨텍스트 바꾸기</a>' if edit_href else ""
+    if not view.book:  # 노드만
+        if not view.contexts:
+            none = "없음 — 이 노드의 책은 책에 붙인 컨텍스트만으로 읽습니다(그것도 없으면 일반 메모)."
+            return f'<div class="ctxs"><span class="ctx-label">컨텍스트</span><span class="none">{none}</span>{edit}</div>'
+        return (f'<div class="ctxs" aria-label="컨텍스트"><span class="ctx-label">컨텍스트</span>{_chips(view.contexts)}{edit}'
+                '<span class="none">이 노드의 책은 이것을 먼저 읽고 책의 것을 이어 읽습니다.</span></div>')
+    if not view.all:
+        return (f'<div class="ctxs"><span class="ctx-label">컨텍스트</span><span class="none">없음 — AI는 일반 메모로 읽습니다.</span>'
+                f"{edit}</div>")
+    parts = []
+    if view.node_contexts:
+        parts.append(f'<span class="ctx-label">노드 「{html.escape(view.node)}」</span>{_chips(view.node_contexts)}')
+    if view.contexts:
+        parts.append(f'<span class="ctx-label">이 책</span>{_chips(view.contexts)}')
+    elif view.node_contexts:
+        parts.append('<span class="ctx-label">이 책</span><span class="none">없음</span>')
+    order = '<span class="ctx-sep" aria-hidden="true">→</span>'.join(parts)
+    cut = (f'<span class="none">합쳐서 {HEADER_MAX:,}자를 넘어 AI에게는 앞 {HEADER_MAX:,}자만 보입니다.</span>'
+           if view.too_long else "")
+    return (f'<div class="ctxs" aria-label="컨텍스트(노드 다음 책 순서로 읽음)"><span class="ctx-label">컨텍스트</span>'
+            f"{order}{edit}{cut}</div>")
 
 
 class ContextPages:

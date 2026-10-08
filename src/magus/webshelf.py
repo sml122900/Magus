@@ -94,7 +94,7 @@ def safe_color(value: str | None, fallback: str) -> str:
 
 @dataclass(frozen=True)
 class Book:
-    """책장에 꽂힌 책 하나(#96: 종류 없음). 글이 쌓이는 책(카테고리), 올린 원고가 든 책, 원고에서 만든 문서."""
+    """책장에 꽂힌 책 하나(#96: 종류 없음). 글이 쌓이는 책(카테고리), 올린 문서가 든 책, 올린 문서에서 만든 문서."""
 
     key: str  # 주소에 쓰는 이름: 카테고리 id | ms.<작업물 id> | doc.<문서 id>
     name: str
@@ -434,7 +434,7 @@ def paragraphs(text: str, q: str = "") -> str:
 
 @dataclass
 class Kind:
-    """목록 화면 하나 = 책 하나(#96: 종류 없음). 올린 원고·문서의 설정 화면은 base("ms"·"doc")로 이것을 함께 쓴다."""
+    """목록 화면 하나 = 책 하나(#96: 종류 없음). 올린 문서·문서의 설정 화면은 base("ms"·"doc")로 이것을 함께 쓴다."""
 
     key: str  # 주소 이름: 카테고리 id(ms.<프로젝트>·doc.<id>는 설정 화면에서만)
     name: str
@@ -442,7 +442,7 @@ class Kind:
     empty: str  # 빈 목록 안내
     category: Category | None = None
     floor: str = COMMON  # 그 책이 있는 프로젝트(#93 층 → #95)
-    base: str = ""  # 올린 원고(ms)·문서(doc) 설정 화면에서만
+    base: str = ""  # 올린 문서(ms)·문서(doc) 설정 화면에서만
 
 
 def category_kind(c: Category) -> Kind:
@@ -602,7 +602,7 @@ class ShelfPages:
         out = []
         for key in keys:
             base, _, rest = key.partition(".")
-            if base == "ms":  # 올린 원고가 든 책: 가운데 노드 자체라 옮기지 않는다
+            if base == "ms":  # 올린 문서가 든 책: 가운데 노드 자체라 옮기지 않는다
                 project = self.store.get_project(uid, rest)
                 if project is None:
                     continue
@@ -610,9 +610,9 @@ class ShelfPages:
                 band = context_band(project.contexts)
                 out.append(Book(key, short_name(project.title), band, chapters, project.color or MANUSCRIPT_COLOR,
                                 f"/shelf/book/{rest}", note=f"{chapters}장",
-                                label=f"{project.title}" + (f", 컨텍스트 {band}" if band else "") + f", 올린 원고 {chapters}장",
+                                label=f"{project.title}" + (f", 컨텍스트 {band}" if band else "") + f", 올린 문서 {chapters}장",
                                 movable=False))
-            elif base == "doc":  # 원고에서 만든 문서: 기준 원고에 새 수정본이 오면 '옛 판 기준'
+            elif base == "doc":  # 올린 문서에서 만든 문서: 기준 원고에 새 수정본이 오면 '옛 판 기준'
                 d = self.store.get_document(uid, rest)
                 if d is None:
                     continue
@@ -640,7 +640,7 @@ class ShelfPages:
         except ValueError:
             category = None
         shown = category.name if category else ""
-        if cid.startswith(("ms.", "doc.")):  # 올린 원고·문서의 이름
+        if cid.startswith(("ms.", "doc.")):  # 올린 문서·문서의 이름
             ident = cid.partition(".")[2]
             book = self.store.get_project(uid, ident) if cid.startswith("ms.") else self.store.get_document(uid, ident)
             shown = book.title if book else ""
@@ -663,7 +663,7 @@ class ShelfPages:
         if not session:
             return self._need_login(request)
         uid = session[0]
-        if kind_key.startswith(("ms.", "doc.")):  # 올린 원고·문서는 각자의 화면(#94)
+        if kind_key.startswith(("ms.", "doc.")):  # 올린 문서·문서는 각자의 화면(#94)
             kind_name, _, ident = kind_key.partition(".")
             return RedirectResponse(f"/shelf/{'book' if kind_name == 'ms' else 'doc'}/{urllib.parse.quote(ident)}", status_code=302)
         if kind_key in BUILTINS or kind_key.partition(".")[0] in BUILTINS:  # 예전 주소: 이전으로 생긴 책의 주소로(#93·#95·#96)
@@ -773,7 +773,7 @@ class ShelfPages:
             links += [f'<a href="{base}?status=verified">{LIGHTS["verified"][0]} {LIGHTS["verified"][1]}</a>',
                       f'<a href="{base}?status=unverified">{LIGHTS["unverified"][0]} {LIGHTS["unverified"][1]}</a>']
         project = self._ref_project(uid, kind, filters) if c.sources else None
-        checklist = (f' · 인용 현황은 원고의 <a href="/shelf/book/{urllib.parse.quote(project.id)}?tab=cites">인용 상태</a>'
+        checklist = (f' · 인용 현황은 올린 문서의 <a href="/shelf/book/{urllib.parse.quote(project.id)}?tab=cites">인용 상태</a>'
                      if project else "")
         return (f"<p>글 {len(items)}개" + (f"(나 {mine} · AI {len(items) - mine})" if items else "") + sources + fields
                 + (f" · {html.escape(template.name)}" if template and template.fields else "") + only + checklist
@@ -1019,7 +1019,7 @@ class ShelfPages:
         return ""
 
     async def shelf_edit(self, request: Request) -> Response:
-        if request.path_params["kind"].startswith(("ms.", "doc.")):  # 올린 원고·문서 설정(#94)
+        if request.path_params["kind"].startswith(("ms.", "doc.")):  # 올린 문서·문서 설정(#94)
             return await self.book_edit(request, request.path_params["kind"])
         session = self.user_of(request)
         if not session:
@@ -1102,7 +1102,7 @@ class ShelfPages:
         return RedirectResponse(nxt if re.fullmatch(r"/shelf(/[A-Za-z0-9_/-]*)?", nxt) else "/shelf", status_code=303)
 
     async def shelf_trash(self, request: Request) -> Response:
-        if request.path_params["kind"].startswith(("ms.", "doc.")):  # 올린 원고·문서 휴지통(#94)
+        if request.path_params["kind"].startswith(("ms.", "doc.")):  # 올린 문서·문서 휴지통(#94)
             return await self.book_trash(request, request.path_params["kind"])
         session = self.user_of(request)
         if not session:

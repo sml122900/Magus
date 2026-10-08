@@ -54,7 +54,7 @@ class DocumentMixin:
         node: 꽂을 노드(#95, 없으면 가운데 노드)."""
         floor = self._check_floor(user_id, self._layout(user_id), doc.floor)
         if floor == COMMON:
-            raise ValueError("「내 서재」에는 문서 책을 둘 수 없다(원고가 있는 프로젝트에만)")
+            raise ValueError("「내 서재」에는 올린 문서에서 만든 문서를 둘 수 없다(올린 문서가 있는 프로젝트에만)")
         self.ensure_maps(user_id)  # type: ignore[attr-defined]
         if not HEX.fullmatch(doc.color):
             raise ValueError(f"색은 #RRGGBB: {doc.color!r}")

@@ -73,7 +73,7 @@ def _node(store: LocalStore, floor: str, name: str, user: str = "alice") -> str:
 # ---- 계산한 지도 -------------------------------------------------------------------------------
 
 def test_new_users_have_no_kind_books(store: LocalStore):
-    """#96: 새 사용자에게는 기본 책이 없다. 지도에는 가운데 노드(올린 원고 자리)만."""
+    """#96: 새 사용자에게는 기본 책이 없다. 지도에는 가운데 노드(올린 문서 자리)만."""
     assert _names(store, COMMON) == [("가운데", ())]
     _book(store)
     floors = store.list_floors("alice")
@@ -296,11 +296,11 @@ def test_shared_refs_go_to_the_library_with_links(store: LocalStore):
         assert ("연결 참고문헌", (library,)) in _names(store, floor)
     assert _gate(store, "alice", "book")["unverified"] == ["clack2012", "daeschler2006"]
     assert _gate(store, "alice", "second", 1)["unverified"] == ["clack2012"]
-    assert ("- 「내 서재」로 옮긴 문헌 1편(다른 프로젝트의 원고도 쓰는 문헌. 두 지도에 연결 노드를 붙이고, 각 문헌에 옮긴 시각과 이유를 남김): "
+    assert ("- 「내 서재」로 옮긴 문헌 1편(다른 프로젝트의 올린 문서도 쓰는 문헌. 두 지도에 연결 노드를 붙이고, 각 문헌에 옮긴 시각과 이유를 남김): "
             "clack2012") in report.render()
     moved = store.get_ref("alice", "clack2012").moved
     assert moved["from"] == "book" and moved["to"] == COMMON
-    assert moved["reason"] == "「물에서 뭍으로」·「둘째」 원고가 함께 쓰는 문헌이라 「내 서재」로 옮김"
+    assert moved["reason"] == "「물에서 뭍으로」·「둘째」 올린 문서가 함께 쓰는 문헌이라 「내 서재」로 옮김"
 
 
 # ---- 이전 ---------------------------------------------------------------------------------
@@ -441,7 +441,7 @@ async def test_tools_project_args_and_map(settings: Settings, store: LocalStore)
         created = _text(await c.call_tool("category_create", {"name": "생각", "context": ["생각 메모"]}))
         assert "「물에서 뭍으로」 · 노드 「생각」에 꽂혔다." in created  # 프로젝트가 하나면 그것
         made = _text(await c.call_tool("book_import", {"title": "도시의 시간"}))
-        assert made.startswith("원고 없는 프로젝트를 만듦: 「도시의 시간」(") and "지도에 가운데 노드가 있다" in made
+        assert made.startswith("올린 문서가 없는 프로젝트를 만듦: 「도시의 시간」(") and "지도에 가운데 노드가 있다" in made
         second = next(f.id for f in store.list_floors("alice") if f.title == "도시의 시간")
         ask = await c.call_tool("category_create", {"name": "어디"})
         assert ask.is_error and "프로젝트가 2개라 어디에 넣을지 모른다" in _text(ask) and "저자에게 묻는다" in _text(ask)
@@ -542,7 +542,7 @@ async def test_ref_add_tells_when_moved_to_library(settings: Settings, store: Lo
     async with Client(build_server(settings, store)) as c:
         added = _text(await c.call_tool("category_put", {"book": "읽은 것", "author": "me", "source": {"key": "clack2012"}, "checked": True,
                                                           "parts": [{"text": "네발동물의 기원", "reason": "둘째 1장의 근거"}]}))
-        assert ("책 「참고문헌」(「내 서재」) · 옮김: 「물에서 뭍으로」·「둘째」 원고가 함께 쓰는 문헌이라 「내 서재」로 옮김(저자에게 알린다)"
+        assert ("책 「참고문헌」(「내 서재」) · 옮김: 「물에서 뭍으로」·「둘째」 올린 문서가 함께 쓰는 문헌이라 「내 서재」로 옮김(저자에게 알린다)"
                 in added)
         again = _text(await c.call_tool("category_put", {"book": "읽은 것", "author": "me", "source": {"key": "clack2012"}, "checked": True,
                                                           "parts": [{"text": "더 고른 문장", "reason": "보탬"}]}))

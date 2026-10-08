@@ -52,7 +52,7 @@ class BibReport:
         out += [f"- 중복 서지(목록에 두 번): {d}" for d in self.duplicates]
         out += [f"- 기존 서지와 다름(갱신하지 않음): {d}" for d in self.differs]
         if self.shared:  # 저자 모르게 배치가 바뀌지 않게 언제나 한 줄로 알린다(#93-a 더함)
-            out.append(f"- 「내 서재」로 옮긴 문헌 {len(self.shared)}편(다른 프로젝트의 원고도 쓰는 문헌. 두 지도에 연결 노드를 붙이고, 각 문헌에 옮긴 시각과 이유를 남김): "
+            out.append(f"- 「내 서재」로 옮긴 문헌 {len(self.shared)}편(다른 프로젝트의 올린 문서도 쓰는 문헌. 두 지도에 연결 노드를 붙이고, 각 문헌에 옮긴 시각과 이유를 남김): "
                        + ", ".join(self.shared[:20]) + (f" 외 {len(self.shared) - 20}편" if len(self.shared) > 20 else ""))
         return "\n".join(out)
 

@@ -52,9 +52,9 @@ def build_source_check(store: Store, user_id: str, project_id: str, title: str, 
     lines = [
         f"# {title}",
         "",
-        f"기준 원고: 『{project.title}』 {basis} · 만든 시각: {local_time(made, '%Y-%m-%d %H:%M')}",
+        f"기준 문서: 『{project.title}』 {basis} · 만든 시각: {local_time(made, '%Y-%m-%d %H:%M')}",
         "",
-        "만든 방법: 이 문서의 질문·수치·문헌 목록은 Magus가 원고·문헌·확인 요청 데이터에서 그대로 만들었습니다(Claude가 옮겨 쓴 것이 아닙니다).",
+        "만든 방법: 이 문서의 질문·수치·문헌 목록은 Magus가 올린 문서·문헌·확인 요청 데이터에서 그대로 만들었습니다(Claude가 옮겨 쓴 것이 아닙니다).",
     ]
     if preface and preface.strip():
         who = "Claude(AI)가 쓴 머리말입니다." if preface_by != "author" else "저자가 말한 머리말입니다."
@@ -63,29 +63,29 @@ def build_source_check(store: Store, user_id: str, project_id: str, title: str, 
         "", "## 한눈에",
         f"- {summary_line(p)}",
         f"- 열린 확인 요청 **{len(open_issues)}건**, 답해 주실 질문 **{len(questions)}건**"
-        + (f"(1절 {len(asked)}건 · 2절 원고 불일치 {len(questions) - len(asked)}건)" if len(questions) > len(asked) else "")
+        + (f"(1절 {len(asked)}건 · 2절 본문 불일치 {len(questions) - len(asked)}건)" if len(questions) > len(asked) else "")
         + f", 사실·수치 확인 요청 **{fact_count}건**",
         "", f"## 1. 답해 주실 질문 {len(asked)}건",
-        "답은 원고 책의 확인 요청이나 Claude와의 대화에서 해 주세요. 이 문서는 읽기용입니다. "
+        "답은 올린 문서의 확인 요청이나 Claude와의 대화에서 해 주세요. 이 문서는 읽기용입니다. "
         "연도가 맞지 않는 것과 참고문헌에만 있는 것은 2절에 있습니다.",
         "",
     ]
     for q in asked[:QUESTIONS_SHOWN]:
         choices = " / ".join(label.replace("(그 key)", "") for _, label in q.options)
-        waiting = " (답함 · 원고 반영 대기)" if q.state == "waiting" else ""
+        waiting = " (답함 · 원본 반영 대기)" if q.state == "waiting" else ""
         lines.append(f"- **{QUESTION_TYPES.get(q.type, q.type)}**{waiting} — {q.text}" + (f" 고를 수 있는 답: {choices}" if choices else ""))
     if len(asked) > QUESTIONS_SHOWN:
-        lines.append(f"- … 외 {len(asked) - QUESTIONS_SHOWN}건(원고 책의 인용 상태에서 모두 볼 수 있습니다)")
+        lines.append(f"- … 외 {len(asked) - QUESTIONS_SHOWN}건(올린 문서의 인용 상태에서 모두 볼 수 있습니다)")
     if not asked:
         lines.append("- 없습니다.")
-    lines += ["", "## 2. 원고 불일치", *mismatch_lines(p),
+    lines += ["", "## 2. 본문 불일치", *mismatch_lines(p),
               "", f"## 3. 사실·수치 확인 요청 {fact_count}건", *facts,
               "", "## 4. 원문 확인 우선 문헌", "가장 많이 인용된 문헌부터 원문을 확인하시면 한 번에 여러 곳이 해결됩니다.", "",
               *(ranked_lines(p) or ["없습니다."]),
               "", "## 5. 장별 미확인 문헌 수", "", *per_chapter_lines(p),
               "", "## 6. 이전 수정본 대비 바뀐 점", *changes_lines(editions, previous, stats),
               "", "---",
-              f"이 문서는 {local_time(made, '%Y-%m-%d %H:%M')}의 사진입니다. 원고에 새 수정본이 오면 책장에서 '{STALE_WORDS}'으로 표시되고, "
+              f"이 문서는 {local_time(made, '%Y-%m-%d %H:%M')}의 사진입니다. 올린 문서에 새 수정본이 오면 책장에서 '{STALE_WORDS}'으로 표시되고, "
               "문서 화면에서 다시 만들 수 있습니다(이전 판은 이력으로 남습니다)."]
     version = DocVersion(0, made, edition.number if edition else None, "server+preface" if preface and preface.strip() else "server",
                          (preface_by or "ai") if preface and preface.strip() else None, stats)
@@ -105,7 +105,7 @@ def changes_lines(editions: list, previous: DocVersion | None, stats: dict[str, 
         moved = " · ".join(f"{name} {old.get(key, 0)} → {stats.get(key, 0)}{unit}" for name, key, unit in pairs)
         base = f"E{previous.edition} 기준" if previous.edition else "수정본 기록 없음"
         out.append(f"- 이 문서의 이전 판(v{previous.number}, {base}, {local_time(previous.at, '%Y-%m-%d')}) 대비: {moved}")
-    return out or ["- 견줄 이전 수정본이 없습니다(처음 올린 원고)."]
+    return out or ["- 견줄 이전 수정본이 없습니다(처음 올린 문서)."]
 
 
 def default_title(store: Store, user_id: str, project_id: str, doc_type: str) -> str:

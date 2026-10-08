@@ -531,7 +531,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
 <input type="file" name="files" multiple accept=".docx,.pdf,.md,.txt"> <button class="primary">올리기</button></form>
 <table><tr><th>이름</th><th class="num">크기</th><th class="num">올린 시각</th><th>쓰임</th><th></th></tr>{rows}</table>
 <p><a href="/me">← 내 정보</a></p>
-<p>원고는 책장의 가운데 노드에서, 논문은 그 논문을 둘 책에서 올리면 바로 쓰입니다. 여기서 올린 파일은 Claude에게 파일 이름으로 말씀하세요.
+<p>문서는 책장의 가운데 노드에서, 논문은 그 논문을 둘 책에서 올리면 바로 쓰입니다. 여기서 올린 파일은 Claude에게 파일 이름으로 말씀하세요.
 예: "올린 파일 kremer1993.pdf를 「읽은 논문」 책에 원문 확인으로 넣어 줘. 쓸 부분은 「…」, 이유는 …"</p>
 {UPLOAD_SCRIPT}"""
         return self._page("올린 파일", body, session, current="")
@@ -610,10 +610,10 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
         try:
             form = await self._form(request, session)
         except PermissionError:
-            return self._page("원고", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            return self._page("올린 문서", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         project = self.store.get_project(session[0], str(form.get("project_id", "")))
         if project is None or not self.store.list_chapters(session[0], project.id):  # 원고 없는 프로젝트에는 원고 책이 없다
-            return self._page("원고", '<p class="msg err">올린 원고가 없습니다. <a href="/shelf">프로젝트</a>로 돌아가세요.</p>', session, 404)
+            return self._page("올린 문서", '<p class="msg err">올린 문서가 없습니다. <a href="/shelf">프로젝트</a>로 돌아가세요.</p>', session, 404)
         location = await run_in_threadpool(export_docx, self.store, session[0], project)
         return RedirectResponse(self.export_link(session[0], location).removeprefix(self.base_url), status_code=303)
 

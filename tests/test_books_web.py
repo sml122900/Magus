@@ -1,5 +1,5 @@
-"""모든 동작을 책장에서(#94 → #96 종류 없음): 책 추가(새 책·문서 올리기·원고에서 만든 문서), 올린 원고 화면(탭),
-원고에서 만든 문서(옛 판 기준·다시 만들기·내려받기), 컨텍스트(올린 원고 「원고」·문서의 설명), 옛 주소, 격리.
+"""모든 동작을 책장에서(#94 → #96 종류 없음): 책 추가(새 책·문서 올리기·올린 문서에서 만든 문서), 올린 문서 화면(탭),
+올린 문서에서 만든 문서(옛 판 기준·다시 만들기·내려받기), 컨텍스트(올린 문서 「원고」·문서의 설명), 옛 주소, 격리.
 
 시나리오(사용자 요청 6절, #95부터 프로젝트·지도): 프로젝트 만들기 → 원고 책 만들기(파일 올리기) → 대화 없이 웹에서 원고 책 열기
 → 문서 책 만들기 도구 호출(Claude 역할은 시험에서 대신) → 문서 책이 그 프로젝트의 가운데 노드에 꽂힘 → 수정본 올리기 → '옛 판 기준' 표시.
@@ -53,34 +53,34 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
         # 1. 프로젝트 만들기(원고 없이 제목만)
         floor_page = c.post("/shelf/projects", data={"csrf": csrf, "title": "닿으려는 종"})
         floor_id = urllib.parse.urlparse(str(floor_page.url)).path.split("/")[-1]  # /shelf/p/<프로젝트>
-        assert "새 프로젝트를 만들었습니다. 원고는 가운데 노드의 '책 추가 → 문서 올리기'로 올립니다." in floor_page.text
+        assert "새 프로젝트를 만들었습니다. 문서는 가운데 노드의 '책 추가 → 문서 올리기'로 올립니다." in floor_page.text
         assert f'<a class="book add" href="/shelf/add?project={floor_id}&amp;node=center" aria-label="책 추가">' in floor_page.text
         # 2. 책 추가: 종류 고르기
         add = c.get(f"/shelf/add?project={floor_id}&node=center").text
-        assert "<h2>새 책</h2>" in add and "<h2>문서 올리기</h2>" in add and "<h2>원고에서 만든 문서</h2>" in add
-        assert "원고 책" not in add and "모음 책" not in add and "문서 책" not in add  # 종류 이름을 쓰지 않는다(#96)
+        assert "<h2>새 책</h2>" in add and "<h2>문서 올리기</h2>" in add and "<h2>올린 문서에서 만든 문서</h2>" in add
+        assert "원고 책" not in add and "모음 책" not in add and "문서 책" not in add and "올린 원고" not in add  # 종류 이름·옛 이름을 쓰지 않는다(#96, #96-s)
         assert 'action="/shelf/manuscript" enctype="multipart/form-data" data-progress=' in add
-        assert "「내 서재」에는 원고를 두지 않습니다." in c.get("/shelf/add?project=common").text
+        assert "「내 서재」에는 올린 문서를 두지 않습니다." in c.get("/shelf/add?project=common").text
         # 3. 원고 책 만들기: 파일을 고르면 바로 올라가고 가져온다(받은함을 거치지 않음)
         assert c.post("/shelf/manuscript", data={"csrf": "틀림", "floor": floor_id},
                       files={"file": (manuscript.name, manuscript.read_bytes(), DOCX)}).status_code == 403
         bad = c.post("/shelf/manuscript", data={"csrf": csrf, "floor": floor_id}, files={"file": ("메모.txt", b"x", "text/plain")})
-        assert bad.status_code == 400 and "원고는 docx 또는 pdf 파일이어야 합니다." in bad.text
+        assert bad.status_code == 400 and "올릴 문서는 docx 또는 pdf 파일이어야 합니다." in bad.text
         made = c.post("/shelf/manuscript", data={"csrf": csrf, "floor": floor_id},
                       files={"file": (manuscript.name, manuscript.read_bytes(), DOCX)})
         assert str(made.url).endswith(f"/shelf/book/{floor_id}?done=imported")
-        assert re.search(r"원고를 올렸습니다: 7장 · 부 3개 · 확인 요청 \d+건\(원고 코멘트에서\) · 문헌 \d+편\(참고문헌에서\)", made.text)
+        assert re.search(r"문서를 올렸습니다: 7장 · 부 3개 · 확인 요청 \d+건\(문서의 코멘트에서\) · 문헌 \d+편\(참고문헌에서\)", made.text)
         assert '<details class="ctx"><summary>원고</summary><p>내가 쓰고 있는 책의 원고다.' in made.text  # 「원고」 컨텍스트가 붙는다
         assert c.get("/me/files").text.count("<tr><td>") == 0  # 올린 파일에는 남지 않는다
         # 4. 원고 책 화면: 탭
         tabs = {tab: c.get(f"/shelf/book/{floor_id}?tab={tab}").text for tab in ("chapters", "issues", "cites", "editions")}
-        assert '<nav class="tabs" aria-label="올린 원고">' in tabs["chapters"] and "aria-current=page>장 목록</a>" in tabs["chapters"]
+        assert '<nav class="tabs" aria-label="올린 문서">' in tabs["chapters"] and "aria-current=page>장 목록</a>" in tabs["chapters"]
         assert "<td>제4장</td><td>닿으려는 손</td>" in tabs["chapters"] and "docx로 내려받기" in tabs["chapters"]
         assert "확인 요청" in tabs["issues"] and "<th>번호</th>" in tabs["issues"]
         assert "답해 주실 질문" in tabs["cites"] and "<h2>장별</h2>" in tabs["cites"]
         assert "<h2>답해 주실 질문" in c.get(f"/shelf/book/{floor_id}?tab=cites&view=questions").text
-        assert "수정본 올리기" in tabs["editions"] and "처음 올린 원고 E1" in tabs["editions"]
-        assert "리포트 — 처음 올린 원고" in c.get(f"/shelf/book/{floor_id}?tab=editions&report=1").text
+        assert "수정본 올리기" in tabs["editions"] and "처음 올린 문서 E1" in tabs["editions"]
+        assert "리포트 — 처음 올린 문서" in c.get(f"/shelf/book/{floor_id}?tab=editions&report=1").text
         # 옛 주소는 새 화면으로
         for old, new in (("/book", "tab=chapters"), (f"/issues?project={floor_id}&kind=fact", "tab=issues&kind=fact"),
                          (f"/checklist?project={floor_id}&status=unknown", "tab=cites&status=unknown"),
@@ -97,11 +97,11 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
         assert f'data-key="doc.{doc_id}"' in floor and '<span class="band bottom" aria-hidden="true"><span class="line">E1 기준</span>' in floor
         assert f'data-key="ms.{floor_id}"' in floor and '<span class="band top" aria-hidden="true">원고</span>' in floor
         doc = c.get(f"/shelf/doc/{doc_id}").text
-        assert "원고에서 만든 문서 · 출처 확인 문서 · 기준 원고" in doc and "(머리말은 Claude가 씀)" in doc
+        assert "올린 문서에서 만든 문서 · 출처 확인 문서 · 기준 문서" in doc and "(머리말은 Claude가 씀)" in doc
         assert '<details class="ctx"><summary>출처 확인 문서</summary>' in doc  # 문서의 설명이 컨텍스트로 붙는다(#96)
         assert "<h2>닿으려는 종 출처 확인 문서</h2>" in doc and "<i>Claude(AI)가 쓴 머리말입니다.</i>" in doc
         assert "<h3>1. 답해 주실 질문" in doc and "<h3>6. 이전 수정본 대비 바뀐 점</h3>" in doc and "만든 이력 1" in doc
-        assert "window.print()" in doc and f"{STALE}: 기준 원고에 새 수정본" not in doc
+        assert "window.print()" in doc and f"{STALE}: 기준 문서에 새 수정본" not in doc
         got = c.get(f"/shelf/doc/{doc_id}/docx")
         assert got.status_code == 200 and got.content[:2] == b"PK" and "attachment" in got.headers["content-disposition"]
         # 6. 수정본 올리기 → 문서 책은 옛 판 기준
@@ -113,27 +113,27 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
         assert '<span class="band bottom stale" aria-hidden="true"><span class="line">옛 판</span><span class="line">기준</span>' in floor
         assert f"닿으려는 종 출처 확인 문서, 컨텍스트 출처 확인 문서, {STALE}" in floor
         doc = c.get(f"/shelf/doc/{doc_id}").text
-        assert f"{STALE}: 기준 원고에 새 수정본(E2)이 올라왔습니다. 이 문서는 E1 기준입니다." in doc and "다시 만들기</button>" in doc
+        assert f"{STALE}: 기준 문서에 새 수정본(E2)이 올라왔습니다. 이 문서는 E1 기준입니다." in doc and "다시 만들기</button>" in doc
         redo = c.post(f"/shelf/doc/{doc_id}/redo", data={"csrf": csrf})
-        assert "다시 만들었습니다." in redo.text and f"{STALE}: 기준 원고에 새 수정본" not in redo.text and "만든 이력 2" in redo.text
+        assert "다시 만들었습니다." in redo.text and f"{STALE}: 기준 문서에 새 수정본" not in redo.text and "만든 이력 2" in redo.text
         assert "이 문서의 이전 판(v1, E1 기준" in redo.text  # 이전 것과 견준 수치
         assert "지금 보고 있는 것은 이력(1번째" in c.get(f"/shelf/doc/{doc_id}?v=1").text
         # 7. 문서 책 설정: 이름·색, 위치는 원고가 있는 프로젝트의 노드만
         edit = c.get(f"/shelf/edit/doc.{doc_id}").text
-        assert '<option value="common:' not in edit and "원고에서 만든 문서는 원고가 있는 프로젝트에만 둘 수 있습니다." in edit
-        assert 'name="ctx_text"' in edit and ">원고의 인용과 사실 확인 상태를 서버가 정리한 읽기용 문서다." in edit  # 그 자리에서 고친다
+        assert '<option value="common:' not in edit and "올린 문서에서 만든 문서는 올린 문서가 있는 프로젝트에만 둘 수 있습니다." in edit
+        assert 'name="ctx_text"' in edit and ">올린 문서의 인용과 사실 확인 상태를 서버가 정리한 읽기용 문서다." in edit  # 그 자리에서 고친다
         assert re.search(rf'<option value="{floor_id}:center" selected>[^<]+ · 가운데 노드</option>', edit)
         blocked = c.post("/shelf/move", data={"csrf": csrf, "book": f"doc.{doc_id}", "to": "common", "next": f"/shelf/p/{floor_id}"})
-        assert "원고에서 만든 문서는 원고가 있는 프로젝트에만 둘 수 있습니다." in blocked.text
+        assert "올린 문서에서 만든 문서는 올린 문서가 있는 프로젝트에만 둘 수 있습니다." in blocked.text
         renamed = c.post(f"/shelf/edit/doc.{doc_id}", data={"csrf": csrf, "name": "출처 확인", "color": "#2f6db5"})
         assert "「출처 확인」 책을 고쳤습니다." in renamed.text and "--c:#2f6db5;" in renamed.text
-        assert "올린 원고는 가운데 노드 자체라 옮기지 않습니다." in c.get(f"/shelf/edit/ms.{floor_id}").text
-        # 올린 원고의 컨텍스트도 책 설정에서: 단추를 끄면 뗀다(#96)
+        assert "올린 문서는 가운데 노드 자체라 옮기지 않습니다." in c.get(f"/shelf/edit/ms.{floor_id}").text
+        # 올린 문서의 컨텍스트도 책 설정에서: 단추를 끄면 뗀다(#96)
         c.post(f"/shelf/edit/ms.{floor_id}", data={"csrf": csrf, "name": "닿으려는 종", "color": "#4b2e1e"})
         assert '<span class="band top" aria-hidden="true"></span>' in c.get(f"/shelf/p/{floor_id}?node=center").text.split(f'data-key="ms.{floor_id}"')[1][:400]
         # 8. 원고 책 휴지통: 프로젝트는 원고 없는 프로젝트로 남고 문서 책은 그대로
         confirm = c.get(f"/shelf/trash/ms.{floor_id}").text
-        assert "장 7개" in confirm and "이 프로젝트는 원고 없는 프로젝트가 됩니다." in confirm
+        assert "장 7개" in confirm and "이 프로젝트는 올린 문서가 없는 프로젝트가 됩니다." in confirm
         gone = c.post(f"/shelf/trash/ms.{floor_id}", data={"csrf": csrf})
         assert "책을 휴지통으로 옮겼습니다." in gone.text and str(gone.url).startswith(f"{base}/shelf/p/{floor_id}")
         assert f'data-key="doc.{doc_id}"' in c.get(f"/shelf/p/{floor_id}?node=center").text
@@ -204,6 +204,6 @@ async def test_books_are_per_user(server_proc, fake_issuer, tmp_path):  # noqa: 
         assert "moveerr=unknown_category" in bob.post("/shelf/move", data={"csrf": csrf, "book": f"doc.{doc_id}", "to": "common",
                                                                             "next": "/shelf"}).headers["location"]
         moved = bob.get("/book", follow_redirects=False)
-        assert moved.headers["location"] == "/shelf"  # 밥에게는 올린 원고가 없다
+        assert moved.headers["location"] == "/shelf"  # 밥에게는 올린 문서가 없다
     after = {p: p.read_bytes() for p in (data_dir / "users" / "alice").rglob("*") if p.is_file()}
     assert before == after

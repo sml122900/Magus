@@ -113,7 +113,7 @@ async def test_all_tools_over_http_and_log_has_no_content(http_server, data_dir:
         item = out["category_put"].split("「사례」 ")[1].split()[0]
         deletes = [put, ("category_trash", {"book": "사례", "item_id": item, "note": "시험"}),  # 옮긴 내용도 로그에 없다
                    ("category_trash", {"book": "사례", "note": "시험"}),
-                   ("book_document", {"title": SECRET[0], "title_by": "author", "preface": SECRET[1]})]  # 원고에서 만든 문서(#94)
+                   ("book_document", {"title": SECRET[0], "title_by": "author", "preface": SECRET[1]})]  # 올린 문서에서 만든 문서(#94)
         for name, args in deletes:
             _text(await client.call_tool(name, args))
         calls += deletes

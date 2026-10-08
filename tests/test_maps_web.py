@@ -50,7 +50,7 @@ def test_project_list_and_new_project(server_proc):  # noqa: F811
         csrf = _csrf(listed)
         names = re.findall(r'<span class="pname">([^<]+)</span>', listed)
         assert names[-1] == "내 서재" and set(names[:-1]) == {"도시는 어떻게 태어났나", "강과 사람"}  # 「내 서재」는 끝에
-        assert listed.count("최근 수정 ") >= 3 and "노드 4 · 올린 원고 1장" in listed and "노드 1 · 원고 없음" in listed
+        assert listed.count("최근 수정 ") >= 3 and "노드 4 · 올린 문서 1장" in listed and "노드 1 · 올린 문서 없음" in listed
         assert '<h2>+ 프로젝트</h2>' in listed and 'name="project" value="new"' in listed and 'action="/shelf/projects"' in listed
         assert c.post("/shelf/projects", data={"csrf": "틀림", "title": "x"}).status_code == 403
         assert "projecterr=empty" in str(c.post("/shelf/projects", data={"csrf": csrf, "title": "  "}).url)
@@ -83,7 +83,7 @@ def test_project_page_map_panel_and_board(server_proc):  # noqa: F811
         assert 'aria-current="true"' in node and 'aria-label="인물, 글 1개"' in node
         assert f'data-key="{ids["person"]}"' in node and f'href="/shelf/add?project=city&amp;node={ids["person_node"]}"' in node
         assert "<summary>노드 설정(이름·색·컨텍스트·선)</summary>" in node and "<h3>선</h3>" in node and "<h3>컨텍스트</h3>" in node
-        assert '<span class="none">없음 — 컨텍스트가 없는 책은 AI가 일반 메모로 읽습니다.</span>' in node  # 노드 머리의 컨텍스트(#96)
+        assert '<span class="none">없음 — 이 노드의 책은 책에 붙인 컨텍스트만으로 읽습니다(그것도 없으면 일반 메모).</span>' in node  # 노드 머리의 컨텍스트(#96)
         thoughts = c.get("/shelf/p/city", params={"node": ids["ideas_node"]}).text
         assert 'aria-label="생각, 컨텍스트 생각 메모, 글 1개"' in thoughts
         assert '<span class="band top" aria-hidden="true">생각 메모</span>' in thoughts  # 책등 위 띠 = 컨텍스트 이름
@@ -101,6 +101,7 @@ def test_project_page_map_panel_and_board(server_proc):  # noqa: F811
         # 목록 보기(휴대폰·키보드): 노드 → 책
         listed = c.get("/shelf/p/city", params={"view": "list"}).text
         assert '<div class="pm" data-view="list">' in listed and f'<a href="/shelf/p/city?node={ids["person_node"]}&amp;book={ids["person"]}#book-panel">인물</a>' in listed
+        assert " 책 · " not in listed and "원고 책" not in listed  # 책 옆 작은 글은 '컨텍스트 · 수'(#96, 종류 이름 없음)
         assert c.get("/shelf/p/nothing").status_code == 404
         # 프로젝트 화면 안에서 찾기: 노드 이름·책 이름·게시판 내용
         found = c.get("/shelf/p/city", params={"q": "제이콥스"}).text
@@ -222,7 +223,7 @@ def test_move_books_between_nodes_and_undo(server_proc):  # noqa: F811
         c.get("/login?next=/shelf")
         library = LocalStore(data_dir).source_book("alice", COMMON)
         refs = c.get(f"/shelf/{library}").text  # 「내 서재」의 문헌 책(없어서 만든 「참고문헌」)
-        assert "「도시는 어떻게 태어났나」·「강과 사람」 원고가 함께 쓰는 문헌이라 「내 서재」로 옮김" in refs
+        assert "「도시는 어떻게 태어났나」·「강과 사람」 올린 문서가 함께 쓰는 문헌이라 「내 서재」로 옮김" in refs
 
 
 def test_export_zip(server_proc):  # noqa: F811
@@ -235,7 +236,7 @@ def test_export_zip(server_proc):  # noqa: F811
         assert "attachment" in got.headers["content-disposition"] and "UTF-8''" in got.headers["content-disposition"]
         names = zipfile.ZipFile(io.BytesIO(got.content)).namelist()
         assert "README.md" in names and "도시는 어떻게 태어났나/지도.json" in names
-        assert "도시는 어떻게 태어났나/가운데 노드/원고/장/001 장날.md" in names
+        assert "도시는 어떻게 태어났나/가운데 노드/올린 문서/장/001 장날.md" in names
         assert any(n.startswith("도시는 어떻게 태어났나/인물/인물/") and n.endswith(" 제이콥스.md") for n in names)
         assert "도시는 어떻게 태어났나/생각/생각/컨텍스트.md" in names  # 책의 컨텍스트(#96)
         assert "도시는 어떻게 태어났나/연결 · 문체/연결.md" in names

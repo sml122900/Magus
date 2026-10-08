@@ -108,7 +108,7 @@ async def test_delete_tools_and_tags_by(settings: Settings, store: LocalStore):
                                                      "여러 개면 목록을 보여 주고 확인받는다.")
     assert descriptions["category_put"].startswith("글 넣기. 저자가 그 책에 넣으라고 분명히 말했을 때만 부른다. "
                                                    "넣을 책이 대화에서 분명하지 않으면 부르지 말고 책 이름과 컨텍스트를 보여 주며 묻는다")
-    assert descriptions["book_write_chapter"].startswith("저자가 'Magus 원고에 저장'하라고 분명히 말했을 때만 부른다. 넣을 곳을 되묻는 선택지에도 원고를 넣지 않는다.")
+    assert descriptions["book_write_chapter"].startswith("저자가 'Magus의 올린 문서에 저장'하라고 분명히 말했을 때만 부른다. 넣을 곳을 되묻는 선택지에도 올린 문서를 넣지 않는다.")
     assert {i.id for i in store.list_category_items("bob", IDEAS)} == {ME, AI, OTHER}  # 밥의 같은 id는 그대로
     assert len(store.list_category_items("bob", STYLES)) == 1
 

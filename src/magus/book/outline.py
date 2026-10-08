@@ -65,14 +65,14 @@ def _fit(head: str, items: list[str], budget: int, more: Callable[[int], str]) -
 
 
 def edition_line(store: Store, user_id: str, project: Project, chapters: list[ChapterMeta], now: datetime | None = None) -> str:
-    """'수정본 E2 · 마지막 업로드 10-06 14:20(원고.docx) · 그 뒤 Magus에서 고친 장 0'(#76). 첫 업로드는 '처음 올린 원고 E1'.
+    """'수정본 E2 · 마지막 업로드 10-06 14:20(원고.docx) · 그 뒤 Magus에서 고친 장 0'(#76). 첫 업로드는 '처음 올린 문서 E1'.
     원고 본문의 원본은 저자 파일이다(#68). 마지막 업로드가 STALE_UPLOAD_DAYS보다 오래되면 최신본을 올렸는지 묻게 한다.
     서버는 Word 파일이 바뀌었는지 알 수 없어 시각만 알리고 판단은 저자에게 묻는다."""
     editions = store.list_editions(user_id, project.id)
     edited = sum(1 for c in chapters if (c.edition is None if editions else c.version > 1))
     if editions:
         last = editions[-1]
-        name = f"수정본 E{last.number}" if last.number > 1 else "처음 올린 원고 E1"  # 저자에게 보이는 이름(용어집)
+        name = f"수정본 E{last.number}" if last.number > 1 else "처음 올린 문서 E1"  # 저자에게 보이는 이름(용어집)
         line = f"{name} · 마지막 업로드 {local_time(last.uploaded_at)}({_clip(last.file, 40)})"
         at = last.uploaded_at
     else:
@@ -96,7 +96,7 @@ def build_outline(
     if project is None:
         if project_id:
             return f"프로젝트 {project_id!r}가 없습니다."
-        return "프로젝트가 없습니다. book_import(path)로 원고를 가져오세요."
+        return "프로젝트가 없습니다. book_import(path)로 문서를 가져오세요."
 
     parts = {p.number: p.title for p in store.list_parts(user_id, project.id)}
     chapters = store.list_chapters(user_id, project.id)
@@ -157,7 +157,7 @@ def build_outline(
         kinds = Counter(i.kind for i in issues if i.origin == "import_comment")
         split = " · ".join(f"{k} {kinds[k]}" for k in ("citation", "fact", "general") if kinds[k])
         by_ai = sum(1 for i in issues if i.origin == "import_comment" and i.by_ai)  # 누가 말했는지 보존한다(#71)
-        ai = f" · 그중 AI 확인 요청 {by_ai}건(AI가 원고에 단 코멘트)" if by_ai else ""
+        ai = f" · 그중 AI 확인 요청 {by_ai}건(AI가 문서에 단 코멘트)" if by_ai else ""
         issue_head += f"\n- 코멘트 유래 확인 요청 {from_comments}건({split}){ai} — book_issues(kind)로 조회"
         if stale := sum(1 for i in issues if i.stale):  # 다시 올린 뒤 원고에서 코멘트·걸린 문장이 사라진 것(#76). 닫지 않았다
             issue_head += f"\n- 그중 해결됐을 수 있음 {stale}건(수정본에서 코멘트나 걸린 문장이 사라짐) — book_issues(possibly_resolved=true)로 확인"

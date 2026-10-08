@@ -141,7 +141,7 @@ async def test_issue_lines_name_part_intro(settings, store: LocalStore, tmp_path
         text = (await client.call_tool("book_issues", {"project_id": "b"})).content[0].text
         added = (await client.call_tool("book_issue_add", {"text": "도입 다듬기", "chapter_number": 102, "project_id": "b"})).content[0].text
         read = (await client.call_tool("book_read_chapter", {"number": 102, "project_id": "b"})).content[0].text
-    assert "- I1 · open · 제2부 들어가며 ¶1 · 원고 코멘트(편집자) · fact" in text
+    assert "- I1 · open · 제2부 들어가며 ¶1 · 문서 코멘트(편집자) · fact" in text
     assert added.startswith("I2 열림 (b · 제2부 들어가며 · user)")
     assert '"label": "제2부 들어가며"' in read
 
@@ -178,7 +178,7 @@ def test_comment_author_is_kept_in_file_and_index(store: LocalStore, tmp_path: P
     assert "- author: Claude\n- author_kind: ai\n- comment_date: 2026-10-02T01:02:03Z" in issues_md
     store.reindex()
     assert [i.author_kind for i in store.list_issues("alice", "b")] == ["ai", "person"]
-    assert "코멘트 유래 확인 요청 2건(citation 1 · general 1) · 그중 AI 확인 요청 1건(AI가 원고에 단 코멘트)" in build_outline(store, "alice", "b")
+    assert "코멘트 유래 확인 요청 2건(citation 1 · general 1) · 그중 AI 확인 요청 1건(AI가 문서에 단 코멘트)" in build_outline(store, "alice", "b")
 
 
 @pytest.mark.anyio
@@ -188,7 +188,7 @@ async def test_ai_comments_are_marked_in_tools(settings, store: LocalStore, tmp_
         lines = (await client.call_tool("book_issues", {"project_id": "b"})).content[0].text
         read = (await client.call_tool("book_read_chapter", {"number": 1, "project_id": "b"})).content[0].text
     assert "- I1 · open · 1장 ¶1 · AI 확인 요청(Claude) · citation→daeschler2006" in lines
-    assert "- I2 · open · 1장 ¶2 · 원고 코멘트(편집자) · general" in lines
+    assert "- I2 · open · 1장 ¶2 · 문서 코멘트(편집자) · general" in lines
     assert '"I1 ¶1 [AI 확인 요청] 인용 확인 필요' in read and '"I2 ¶2 문단 줄이기' in read
 
 
@@ -200,13 +200,13 @@ def test_web_marks_ai_comments(server_proc, tmp_path: Path):  # noqa: F811 - tes
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         csrf = re.search(r'name="csrf" value="([0-9a-f]+)"', c.get("/login?next=/shelf").text).group(1)
         made = c.post("/shelf/manuscript", data={"csrf": csrf, "floor": "new"}, files={"file": ("원고.docx", docx_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")})
-        page = made.text  # 올린 원고(#94 → #96)
-        assert "1장 + " not in page and "올린 원고 · 1장 ·" in page  # outline과 같은 장 수 표기
+        page = made.text  # 올린 문서(#94 → #96)
+        assert "1장 + " not in page and "올린 문서 · 1장 ·" in page  # outline과 같은 장 수 표기
         assert "열린 확인 요청 2건" in page
         issues = c.get(str(made.url).split("?")[0] + "?tab=issues").text
-    assert "그중 🤖 AI 확인 요청 1건(AI가 원고에 단 코멘트입니다)" in issues
+    assert "그중 🤖 AI 확인 요청 1건(AI가 문서에 단 코멘트입니다)" in issues
     assert '<td><span class="tag">🤖 AI 확인 요청(Claude)</span></td><td>문헌 확인</td>' in issues  # 문구는 그대로, 알약 태그
-    assert "<td>원고 코멘트(편집자)</td><td>기타</td>" in issues
+    assert "<td>문서 코멘트(편집자)</td><td>기타</td>" in issues
 
 
 # ---- #73 걸린 문장 전문과 문단 번호 -------------------------------------------------------------------

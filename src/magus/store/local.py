@@ -64,7 +64,7 @@ log = logging.getLogger("magus.store")
 NON_CITATION_TERMS = "non_citation_terms.txt"
 AI_AUTHORS = "ai_authors.txt"  # 이 프로젝트에서 AI로 볼 코멘트 작성자 이름(기본 목록에 더한다, #71)
 ANSWERS = "answers.md"  # 저자 확인 질문지의 답(#84). 질문은 매번 계산하고 답만 쌓인다
-ANSWERS_HEADER = ("# 저자 답\n\n질문은 매번 원고와 문헌에서 계산하고, 답만 여기에 쌓인다(book_answer). "
+ANSWERS_HEADER = ("# 저자 답\n\n질문은 매번 올린 문서와 문헌에서 계산하고, 답만 여기에 쌓인다(book_answer). "
                   "같은 질문에 다시 답하면 아래 것이 이긴다. 사람이 고쳐도 된다.\n")
 _CHAPTER_FILE = re.compile(r"ch-(\d+)\.md")
 _VERSION_FILE = re.compile(r"ch-(\d+)\.v(\d+)\.md")
@@ -260,7 +260,7 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
     def set_ai_authors(self, user_id: str, project_id: str, names: list[str]) -> None:
         path = self._require_project(user_id, project_id) / "book" / AI_AUTHORS
         clean = list(dict.fromkeys(n.strip() for n in names if n.strip()))
-        header = "# AI로 볼 원고 코멘트 작성자 이름(기본 목록에 더한다). 한 줄에 하나. 예: 우리 편집 AI\n"
+        header = "# AI로 볼 문서 코멘트 작성자 이름(기본 목록에 더한다). 한 줄에 하나. 예: 우리 편집 AI\n"
         _write_text(path, header + "".join(f"{n}\n" for n in clean))
 
     @_locked

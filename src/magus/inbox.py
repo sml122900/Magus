@@ -19,7 +19,7 @@ from magus.paths import resolve_input
 from magus.store import Store
 from magus.store.base import InboxFile
 
-INBOX_TYPES = {".docx": "원고(book_import)", ".pdf": "원고·논문(book_import, category_put file)",
+INBOX_TYPES = {".docx": "올린 문서(book_import)", ".pdf": "올린 문서·논문(book_import, category_put file)",
                ".md": "대화 기록(idea_add_conversation)", ".txt": "논문 전문(category_put file)"}
 _BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 _RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)), *(f"LPT{n}" for n in range(1, 10))}
@@ -95,7 +95,7 @@ def describe(files: list[InboxFile], used: int, limit: int) -> str:
         f"- {f.name} · {size_text(f.size)} · {local_time(f.modified)} · {INBOX_TYPES.get(Path(f.name).suffix.lower(), '')}"
         for f in files
     ]
-    return "\n".join([head, *lines, "도구에는 파일 이름만 준다(예: book_import(path=\"원고.docx\"))."])
+    return "\n".join([head, *lines, "도구에는 파일 이름만 준다(예: book_import(path=\"문서.docx\"))."])
 
 
 ResolveFile = Callable[[str, str], tuple[Path, str]]

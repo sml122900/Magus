@@ -4,7 +4,7 @@
 종류별 넣기·찾기 도구(idea_add·style_add·ref_add·idea_search·style_search·ref_search)는 여기 둘로 합쳤다:
 category_put = 글 넣기(어느 책에든. 서지·원문 확인을 주면 문헌 글이 된다), category_search = 찾기(글 + 문헌의 쓸 부분·원문).
 지우기는 category_trash 하나. 자주 쓰는 컨텍스트 보기는 category_list, 붙이기는 category_create·category_edit의 context.
-책을 읽거나 넣는 응답의 머리에는 그 책(없으면 노드)의 컨텍스트 전문을 싣는다(View.header).
+책을 읽거나 넣는 응답의 머리에는 꽂힌 노드 → 그 책의 컨텍스트 전문을 싣는다(View.header, #96-d).
 지도(#95): category_list = 지도 보기, category_create(template=노드|연결 노드) = 노드 만들기, category_edit(node, link, unlink) =
 노드 이름·색·컨텍스트·선, category_edit(move_to) = 책 옮기기, category_trash(node) = 노드 휴지통.
 책 이름은 프로젝트마다 하나라서, 같은 이름이 여러 프로젝트에 있으면 project로 가린다.
@@ -122,7 +122,7 @@ def build_tools(
         user = current_user()
         project = store.get_project(user, project_id)
         if project is None:
-            raise ToolError(f"프로젝트 {project_id!r}에 원고가 없다." if project_id else "원고가 없어 장을 이을 수 없다.")
+            raise ToolError(f"프로젝트 {project_id!r}에 올린 문서가 없다." if project_id else "올린 문서가 없어 장을 이을 수 없다.")
         known = {c.number for c in store.list_chapters(user, project.id)}
         if missing := sorted(set(chapters) - known):
             raise ToolError(f"『{project.title}』에 없는 장 번호: {missing}. book_outline의 장 번호를 쓴다.")
@@ -528,7 +528,7 @@ def build_tools(
                 gone, lost = trash_node(store, user, floor, target.id, note.strip())
             except MapError as e:
                 raise _map_error(e) from e
-            warn = f" 주의: {scope_names(store, user, lost)} 원고의 인용 점검은 이제 그 문헌을 보지 않는다." if lost else ""
+            warn = f" 주의: {scope_names(store, user, lost)} 올린 문서의 인용 점검은 이제 그 문헌을 보지 않는다." if lost else ""
             return (f"휴지통으로 옮김: {floor_name(store, user, floor)} 지도의 " + (f"연결 노드 「{gone.name}」(원본은 그대로)" if gone.link
                     else f"노드 「{gone.name}」") + f". {KEPT}{warn}")
         if not book:

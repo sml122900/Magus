@@ -76,7 +76,7 @@ def test_local_round_trip_upload_import_checklist_download(server_proc):
         page = c.post("/inbox/upload", data={"csrf": csrf}, files=[("files", ("원고.docx", data)), ("files", ("나쁜.exe", b"x"))]).text
         assert "올림: 원고.docx" in page and "나쁜.exe: 받을 수 있는 형식은" in page
         made = c.post("/shelf/manuscript", data={"csrf": csrf, "floor": "new"}, files={"file": ("원고.docx", data, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")})
-        assert "원고를 올렸습니다: 7장" in made.text
+        assert "문서를 올렸습니다: 7장" in made.text
         pid = str(made.url).split("/shelf/book/")[1].split("?")[0]
         page = c.get(f"/shelf/book/{pid}?tab=cites").text
         assert "🔴 참고문헌에 없음" in page and "🟡 미확인" in page and "<h2>장별</h2>" in page
@@ -281,8 +281,8 @@ def test_add_book_choices_follow_the_floor(server_proc):
         assert 'name="project" value="empty"' in empty and '<button class="primary">올리기</button>' in empty
         assert c.get("/shelf/add?floor=empty").text.count('name="project" value="empty"') == 1  # 옛 주소 이름(floor)도 받는다
         full = c.get("/shelf/add?project=full").text
-        assert "이 프로젝트에는 올린 원고가 이미 있습니다(가운데 노드)." in full and 'action="/shelf/manuscript"' not in full
-        assert "<h2>새 책</h2>" in empty and "<h2>문서 올리기</h2>" in empty and "<h2>원고에서 만든 문서</h2>" in empty
+        assert "이 프로젝트에는 올린 문서가 이미 있습니다(가운데 노드)." in full and 'action="/shelf/manuscript"' not in full
+        assert "<h2>새 책</h2>" in empty and "<h2>문서 올리기</h2>" in empty and "<h2>올린 문서에서 만든 문서</h2>" in empty
         common = c.get("/shelf/add?project=common").text
         assert 'name="project" value="new"' in common and "새 프로젝트로 올리기" in common
         assert c.get("/shelf/add?project=nothing").status_code == 404
@@ -375,7 +375,7 @@ def test_shelf_books_and_board_lists(server_proc):
         assert listed.index("Clack(2012) 『Gaining ground』") < listed.index("Diamond(1997)")  # 원문 확인 글부터
         assert "🟢 원문 확인 · 인용된 장 1" in refs and "<p>인용된 장: 제1장</p>" in refs
         assert '<p>쓸 부분 「tetrapods came ashore」<br><span class="muted">1장의 근거 · p.45</span></p>' in refs
-        assert '인용 현황은 원고의 <a href="/shelf/book/b?tab=cites">인용 상태</a>' in refs
+        assert '인용 현황은 올린 문서의 <a href="/shelf/book/b?tab=cites">인용 상태</a>' in refs
         assert "글 0개 · 문헌 글 2개(원문 확인 1)" in refs
         assert "Gaining ground" not in c.get("/shelf/refs-common?status=unverified").text
         styles = c.get("/shelf/styles").text

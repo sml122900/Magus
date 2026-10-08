@@ -22,7 +22,7 @@ from magus.store import LocalStore
 
 pytestmark = pytest.mark.anyio
 
-FORBIDDEN = re.compile(r"Casper|Melchior|Balthasar|영감|책 지도|미해결|이슈|새 판|원고 책|모음 책|문서 책|카테고리|refs")  # #96: 책 종류 이름
+FORBIDDEN = re.compile(r"Casper|Melchior|Balthasar|영감|책 지도|미해결|이슈|새 판|원고 책|모음 책|문서 책|카테고리|refs|올린 원고|원고에서 만든")  # #96: 책 종류 이름, #96-s: 올린 원고
 SYNTH = Path(__file__).parent / "fixtures" / "synthetic"
 
 
@@ -92,7 +92,7 @@ async def test_author_facing_text_has_no_old_or_core_names(settings: Settings, s
         await call("category_put", {"book": "옛 사례", "author": "me", "content": "1850년대 항구", "fields": {"시기": "1850년대"},
                                     "chapters": [1]}, "category_put 오류(제목을 묻게 함)")
         item = await call("category_put", {"book": "옛 사례", "author": "me", "content": "1850년대 항구", "untitled": True})
-        await call("category_put", {"book": "닿으려는 종 (합성)", "author": "me", "content": "x"}, "category_put 오류(올린 원고)")
+        await call("category_put", {"book": "닿으려는 종 (합성)", "author": "me", "content": "x"}, "category_put 오류(올린 문서)")
         await call("category_search", {"query": "항구"})
         await call("category_title_default", {"mode": "ai"})
         await call("category_put", {"book": "옛 사례", "author": "ai", "content": "요약"}, "category_put 오류(AI가 짓기)")

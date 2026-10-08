@@ -3,7 +3,9 @@
 - 책의 종류(원고 책·모음 책·문서 책, 생각·문체·문헌)를 없앴다. 책에는 글이 쌓이거나 올린 문서가 들어 있고,
   그 책을 어떻게 읽을지는 저자가 적은 컨텍스트가 정한다(예: "이 문서는 논문으로서 학술적인 문서야.").
   컨텍스트가 없으면 일반 메모다.
-- 붙이는 곳은 노드와 책이다. 책에 컨텍스트가 없으면 그 책이 꽂힌 노드의 것을 따른다. 여럿이면 붙인 순서대로 잇는다.
+- 붙이는 곳은 노드와 책이다. 책을 읽을 때는 그 책이 꽂힌 노드의 것 → 책의 것 순서로 이어 읽는다(사용자 결정 #96-d 변경, 2026-10-08).
+  둘 다 없으면 일반 메모다. 한 곳 안에서는 붙인 순서대로 잇는다. 연결 노드로 보는 책도 원본 노드 → 책이다(책은 원본 노드에 꽂혀 있다).
+  응답 머리에 싣는 길이는 노드·책을 합쳐 HEADER_MAX자까지이고, 넘으면 잘렸다고 적는다.
 - 붙인 컨텍스트는 사본이다: 그 자리에서 고쳐도 자주 쓰는 컨텍스트(등록해 둔 원본)는 그대로다.
 - 자주 쓰는 컨텍스트는 사람마다 목록(이름 + 내용, shelf/contexts.json)이다. 파일이 없으면 처음 제공하는 넷(DEFAULTS)이다.
   「문체」는 사용자가 준 문장 그대로다.
@@ -42,6 +44,7 @@ class SavedContext:
 
 CONTEXT_NAME_MAX = 20  # 이름(한 줄)
 CONTEXT_MAX = 500  # 내용 하나. 도구 응답마다 실리므로 짧게
+HEADER_MAX = 1000  # 응답 머리에 싣는 노드·책 컨텍스트 합계(넘으면 잘렸다고 적는다)
 MAX_ATTACHED = 4  # 노드·책 하나에 붙이는 수
 MAX_SAVED = 20  # 자주 쓰는 컨텍스트 수
 CONTEXTS_SCHEMA = 1
@@ -64,7 +67,7 @@ LEGACY_CONTEXT = {"ms": "ctx-manuscript", "ideas": "ctx-note", "styles": "ctx-st
 # 출처 확인 문서(서버가 만드는 읽기용 문서)에 붙이는 설명. 자주 쓰는 컨텍스트에는 넣지 않는다(문서를 만들 때·이전 때 붙인다)
 SOURCE_CHECK = Context(
     "출처 확인 문서",
-    "원고의 인용과 사실 확인 상태를 서버가 정리한 읽기용 문서다. 만든 때의 사진이라 새 수정본이 오면 옛 판 기준이 된다. "
+    "올린 문서의 인용과 사실 확인 상태를 서버가 정리한 읽기용 문서다. 만든 때의 사진이라 새 수정본이 오면 옛 판 기준이 된다. "
     "문서의 질문·수치·문헌 목록은 서버가 만든 것이라 다시 세거나 고쳐 쓰지 않는다.",
 )
 NONE = "컨텍스트: 없음(일반 메모로 다룬다)"
@@ -141,22 +144,44 @@ def joined(contexts: tuple[Context, ...]) -> str:
 
 @dataclass(frozen=True)
 class View:
-    """책 하나(또는 노드 하나)에 지금 걸린 컨텍스트. from_node: 책에 없어 노드의 것을 따랐다."""
+    """책 하나(또는 노드 하나)에 지금 걸린 컨텍스트. 책을 볼 때는 node_contexts(꽂힌 노드의 것)를 먼저, contexts(책의 것)를 다음에
+    읽는다(#96-d). 노드만 볼 때는 contexts가 그 노드의 것이고 node_contexts는 비어 있다."""
 
     contexts: tuple[Context, ...]
     book: str = ""  # 책 이름(노드만 볼 때는 "")
     node: str = ""  # 노드 이름(가운데 노드면 "가운데")
-    from_node: bool = False
+    node_contexts: tuple[Context, ...] = ()
+
+    @property
+    def all(self) -> tuple[Context, ...]:
+        """읽는 순서: 노드 → 책."""
+        return self.node_contexts + self.contexts
+
+    @property
+    def too_long(self) -> bool:
+        return len(_body(self)) > HEADER_MAX
 
     def header(self) -> str:
         """도구 응답 머리 한 줄: 'AI가 이 글을 읽는 방법'. 없으면 '없음(일반 메모로 다룬다)'."""
-        if not self.contexts:
+        if not self.all:
             return NONE + (f" — 책 「{self.book}」" if self.book else f" — 노드 「{self.node}」" if self.node else "")
-        if self.book:
-            where = f"책 「{self.book}」" + (f", 노드 「{self.node}」의 것" if self.from_node else "")
-        else:
+        if not self.book:
             where = f"노드 「{self.node}」"
-        return f"컨텍스트({where}): {joined(self.contexts)}"
+        elif self.node_contexts and self.contexts:
+            where = f"노드 「{self.node}」 → 책 「{self.book}」 순서"
+        elif self.node_contexts:
+            where = f"노드 「{self.node}」의 것. 책 「{self.book}」에는 없음"
+        else:
+            where = f"책 「{self.book}」"
+        body = _body(self)
+        if len(body) > HEADER_MAX:
+            body = body[:HEADER_MAX].rstrip() + f"…(잘림: 노드·책 컨텍스트를 합쳐 {HEADER_MAX:,}자까지 싣는다)"
+        return f"컨텍스트({where}): {body}"
+
+
+def _body(view: View) -> str:
+    """노드의 것 → 책의 것. 두 쪽이 다 있으면 ' → '로 가른다(한 쪽 안은 ' / ')."""
+    return " → ".join(joined(part) for part in (view.node_contexts, view.contexts) if part)
 
 
 def _clip(text: str, width: int) -> str:
@@ -198,15 +223,13 @@ def book_contexts(store: Any, user: str, key: str) -> tuple[tuple[Context, ...],
 
 
 def view_for_book(store: Any, user: str, key: str) -> View:
-    """책에 걸린 컨텍스트: 책의 것, 없으면 그 책이 꽂힌 노드의 것(from_node)."""
+    """책에 걸린 컨텍스트: 그 책이 꽂힌 노드의 것 → 책의 것(#96-d)."""
     own, name = book_contexts(store, user, key)
     where = store.node_of_book(user, key)
     found = store.get_map(user, where[0]) if where else None
     node = found.node(where[1]) if found and where else None
     node_name = ("가운데" if node.center else node.name) if node else ""
-    if own or node is None or not node.contexts:
-        return View(own, name, node_name)
-    return View(node.contexts, name, node_name, True)
+    return View(own, name, node_name, node.contexts if node else ())
 
 
 def view_for_node(store: Any, user: str, floor: str, node_id: str) -> View:
@@ -218,7 +241,7 @@ def view_for_node(store: Any, user: str, floor: str, node_id: str) -> View:
 
 
 def attach_manuscript_context(store: Any, user: str, project_id: str) -> bool:
-    """처음 올린 원고(가운데 노드의 책)에 자주 쓰는 컨텍스트 「원고」를 붙인다(#96). 이미 컨텍스트가 있거나 저자가 「원고」를
+    """처음 올린 문서(가운데 노드의 책)에 자주 쓰는 컨텍스트 「원고」를 붙인다(#96). 이미 컨텍스트가 있거나 저자가 「원고」를
     지웠으면 붙이지 않는다. 저자는 책 설정에서 떼거나 고칠 수 있다."""
     project = store.get_project(user, project_id)
     if project is None or project.contexts:

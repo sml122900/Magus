@@ -223,7 +223,7 @@ def test_web_pages_are_per_user_even_with_same_project_id(server_proc, fake_issu
         assert "파일 이름으로 쓸 수 없다" in page
         assert "x.pdf" not in [p.name for p in (data_dir / "users" / "alice" / "inbox").iterdir()]
         assert (data_dir / "users" / "alice" / "inbox" / "원고.docx").exists()
-        assert "올린 원고가 없습니다" in bob.post("/book/export", data={"csrf": b_csrf, "project_id": "synth"}).text  # 밥의 층은 아직 비었다
+        assert "올린 문서가 없습니다" in bob.post("/book/export", data={"csrf": b_csrf, "project_id": "synth"}).text  # 밥의 층은 아직 비었다
         # 밥도 같은 id(synth)의 자기 층에 원고 책을 올린다
         bob.post("/inbox/upload", data={"csrf": b_csrf}, files={"files": ("밥.docx", b"x")})
         made = bob.post("/shelf/manuscript", data={"csrf": b_csrf, "floor": "synth"},

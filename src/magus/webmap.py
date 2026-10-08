@@ -3,7 +3,7 @@
 - 첫 화면(/shelf): 프로젝트 목록(이름·최근 수정·노드 수)과 '+ 프로젝트'(원고 올리기 또는 제목만). 검색은 모든 프로젝트에서.
 - 프로젝트 화면(/shelf/p/<프로젝트>)에서 끝낸다: 지도(마인드맵) + 패널. 상태는 주소에 둔다(?node=…&book=…&at=…, pushState).
   노드를 누르면 패널에 그 노드의 정면 2D 책장, 책을 누르면 같은 패널 아래(게시판 자리, iframe)에 그 책 화면
-  (책은 게시판, 올린 원고는 탭, 원고에서 만든 문서는 본문)이 뜬다. #96: 노드 머리에 노드의 컨텍스트, '+ 노드'와 노드 설정에서 컨텍스트를 붙인다. 데스크톱(1200px 이상)은 패널이 지도 오른쪽, 좁으면 아래.
+  (책은 게시판, 올린 문서는 탭, 올린 문서에서 만든 문서는 본문)이 뜬다. #96: 노드 머리에 노드의 컨텍스트, '+ 노드'와 노드 설정에서 컨텍스트를 붙인다. 데스크톱(1200px 이상)은 패널이 지도 오른쪽, 좁으면 아래.
 - 지도 조작(스크립트, magus.webmap_assets): 노드 끌어 옮기기(위치 저장), 빈 곳 두 번 누르기·'+ 노드'로 만들기, 노드 가장자리의 ＋를
   다른 노드로 끌거나 '선 잇기'로 선 잇기, 선을 눌러 끊기, 휠·핀치·끌기로 확대·축소·이동, '가운데로'.
   패널의 책을 지도의 노드로 끌어 놓으면 그 노드로 옮긴다(키보드는 책 설정의 '위치').
@@ -59,7 +59,7 @@ def done_text(done: str, name: str) -> str:
         "rename": f"노드 이름을 {josa(name, '으로/로')} 바꿨습니다." if name else "노드 이름을 바꿨습니다.",
         "color": "노드 색을 바꿨습니다.", "connect": "선을 이었습니다.", "disconnect": "선을 끊었습니다.",
         "node_trash": "노드를 휴지통으로 옮겼습니다. 지운 것이 아니라 운영자가 되살릴 수 있습니다.",
-        "project": "새 프로젝트를 만들었습니다. 원고는 가운데 노드의 '책 추가 → 문서 올리기'로 올립니다.",
+        "project": "새 프로젝트를 만들었습니다. 문서는 가운데 노드의 '책 추가 → 문서 올리기'로 올립니다.",
         "contexts": "노드의 컨텍스트를 바꿨습니다.",
         "ctx_saved": "자주 쓰는 컨텍스트에 등록했습니다(노드의 컨텍스트는 저장하지 않았습니다. 필요하면 다시 저장해 주세요).",
     }[done]
@@ -220,8 +220,8 @@ class MapPages:
         for f in [*works, *library]:
             found = self.store.get_map(uid, f.id)
             nodes = len(found.nodes) if found else 0
-            what = (f"올린 원고 {len(self.store.list_chapters(uid, f.id))}장" if f.has_manuscript
-                    else "여러 프로젝트가 함께 쓰는 자료" if f.common else "원고 없음")
+            what = (f"올린 문서 {len(self.store.list_chapters(uid, f.id))}장" if f.has_manuscript
+                    else "여러 프로젝트가 함께 쓰는 자료" if f.common else "올린 문서 없음")
             cards.append(f'<li class="pcard{" library" if f.common else ""}"><a href="{html.escape(state_url(f.id))}">'
                          f'<span class="pname">{html.escape(project_name(f))}</span>'
                          f'<span class="pmeta">{when_text(f.updated_at)}</span>'
@@ -231,13 +231,13 @@ class MapPages:
         limit = f"파일 한 개 {self.settings.max_upload_bytes // 1_000_000}MB까지(docx 또는 pdf)."
         new = (
             '<li class="pcard new"><h2>+ 프로젝트</h2>'
-            "<p>원고 파일을 고르면 그 원고가 가운데 노드에 꽂힌 새 프로젝트가 됩니다.</p>"
+            "<p>문서 파일을 고르면 그 문서가 가운데 노드에 꽂힌 새 프로젝트가 됩니다.</p>"
             f'<form method="post" action="/shelf/manuscript" enctype="multipart/form-data" data-progress="{IMPORTING}">{csrf}'
             '<input type="hidden" name="project" value="new">'
-            f'<label>원고 파일 <input type="file" name="file" accept=".docx,.pdf" required></label><p class="muted">{limit}</p>'
-            f'<p><button class="primary">원고 올리기</button></p>{progress_box()}</form>'
+            f'<label>문서 파일 <input type="file" name="file" accept=".docx,.pdf" required></label><p class="muted">{limit}</p>'
+            f'<p><button class="primary">문서 올리기</button></p>{progress_box()}</form>'
             f'<form method="post" action="/shelf/projects">{csrf}'
-            f'<label class="block">원고 없이 제목만 <input name="title" maxlength="{PROJECT_TITLE_MAX}" required></label>'
+            f'<label class="block">문서 없이 제목만 <input name="title" maxlength="{PROJECT_TITLE_MAX}" required></label>'
             '<p><button>만들기</button></p></form></li>'
             if room else f'<li class="pcard new"><p class="muted">프로젝트는 「내 서재」 빼고 {MAX_FLOORS}개까지 만들 수 있습니다.</p></li>'
         )
@@ -276,7 +276,7 @@ class MapPages:
             text = done_text(done, f"「{node.name}」" if node and not node.center else "")
             if lost := [p for p in (params.get("lost") or "").split(",") if p and _ID.fullmatch(p)]:
                 names = "·".join(f"「{f.label}」" for f in self.store.list_floors(uid) if f.id in lost)
-                text += f" {names} 원고의 인용 점검은 이제 그 문헌을 보지 않습니다." if names else ""
+                text += f" {names} 올린 문서의 인용 점검은 이제 그 문헌을 보지 않습니다." if names else ""
             out += f'<p class="msg">{html.escape(text, quote=False)}</p>'
         if err := {"empty": "프로젝트 제목을 적어 주세요.", "full": f"프로젝트는 「내 서재」 빼고 {MAX_FLOORS}개까지 만들 수 있습니다."}.get(
                 params.get("projecterr") or ""):
@@ -486,7 +486,8 @@ class MapPages:
             links = "".join(
                 f'<li><a href="{html.escape(state_url(floor.id, b.key, node=n.id))}#book-panel"'
                 + (' aria-current="true"' if b.key == here else "") + ">"
-                f'{html.escape(b.name)}</a> <small>{html.escape(b.band)} 책 · {html.escape(_count_text(b))}</small></li>' for b in books)
+                f'{html.escape(b.name)}</a> <small>{html.escape(b.band + " · " if b.band else "")}{html.escape(_count_text(b))}</small></li>'  # 컨텍스트 · 수(#96)
+                for b in books)
             sub = node_sub(n, books)
             title = ("가운데 · " + found.title) if n.center else node_label(n)
             items.append(f'<li><details{" open" if node is not None and node.id == n.id else ""}><summary><b>{html.escape(title)}</b> '
@@ -523,7 +524,7 @@ class MapPages:
             intro = ""
             kind = "가운데 노드" if node.center else "노드"
         title = found.title if node.center else node.name
-        hint = ("" if not books else '<p class="pp-hint">책을 누르면 아래에 열립니다. 올린 원고 말고는 지도의 다른 노드로 끌어 놓으면 '
+        hint = ("" if not books else '<p class="pp-hint">책을 누르면 아래에 열립니다. 올린 문서 말고는 지도의 다른 노드로 끌어 놓으면 '
                 "그 노드로 옮겨집니다(책 설정의 '위치'로도 옮길 수 있습니다).</p>")
         settings = self._node_settings(uid, session, floor, found, node)
         context = "" if node.missing else contexts_view_html(View(node.contexts, node=node.name))  # 노드의 컨텍스트(#96)
@@ -573,7 +574,7 @@ class MapPages:
             saved = self.store.list_saved_contexts(uid)
             contexts = (f'<form method="post" action="{post}" class="pm-form">{hidden}<input type="hidden" name="action" value="contexts">'
                         + context_fieldset(saved, node.contexts, what="이 노드") +
-                        '<p class="muted">책에 컨텍스트가 없으면 그 책은 이 노드의 컨텍스트를 따릅니다.</p>'
+                        '<p class="muted">이 노드의 책은 이 컨텍스트를 먼저 읽고, 책에 붙인 컨텍스트를 이어 읽습니다.</p>'
                         '<p><button>컨텍스트 저장</button></p></form>')
         return (f'<details class="pp-set"><summary>노드 설정(이름·색·컨텍스트·선)</summary>{rename}{color}'
                 f'<h3>컨텍스트</h3>{contexts}'
@@ -687,7 +688,7 @@ class MapPages:
                 f'<input type="hidden" name="next" value="{html.escape(here)}"></form>')
 
     def location_form(self, uid: str, session: tuple[str, str], kind: Kind) -> str:
-        """책 설정의 '위치': 프로젝트 · 노드를 고른다(키보드로 옮기는 길). 원고에서 만든 문서는 원고가 있는 프로젝트에만."""
+        """책 설정의 '위치': 프로젝트 · 노드를 고른다(키보드로 옮기는 길). 올린 문서에서 만든 문서는 올린 문서가 있는 프로젝트에만."""
         here = self.store.node_of_book(uid, kind.key)
         groups = []
         for f in self.store.list_floors(uid):
@@ -699,9 +700,9 @@ class MapPages:
                 f'{html.escape(project_name(f))} · {html.escape("가운데 노드" if n.center else n.name)}</option>'
                 for n in (found.nodes if found else ()) if not n.link)
             groups.append(f'<optgroup label="{html.escape(project_name(f))}">{options}</optgroup>')
-        rule = ("원고에서 만든 문서는 원고가 있는 프로젝트에만 둘 수 있습니다." if kind.base == "doc"
+        rule = ("올린 문서에서 만든 문서는 올린 문서가 있는 프로젝트에만 둘 수 있습니다." if kind.base == "doc"
                 else "다른 프로젝트로 옮길 때 그 프로젝트에 같은 이름의 책이 있으면 옮기지 않습니다.")
-        refs = (" 원고의 인용 점검은 그 프로젝트의 문헌 글과 연결 노드가 가리키는 문헌 글만 봅니다."
+        refs = (" 올린 문서의 인용 점검은 그 프로젝트의 문헌 글과 연결 노드가 가리키는 문헌 글만 봅니다."
                 if kind.category is not None and kind.category.sources else "")
         return (f'<h2>위치</h2><form method="post" action="/shelf/move" class="card">{self._csrf_input(session)}'
                 f'<input type="hidden" name="book" value="{html.escape(kind.key)}"><input type="hidden" name="next" value="dest">'
@@ -847,7 +848,7 @@ def node_sub(n: MapNode, books: list[Book]) -> str:
     if n.center:
         ms = next((b for b in books if b.key.startswith("ms.")), None)
         rest = len(books) - (1 if ms else 0)
-        return " · ".join(x for x in (f"원고 {ms.count}장" if ms else "", f"책 {rest}권" if rest else "") if x) or "가운데 노드"
+        return " · ".join(x for x in (f"문서 {ms.count}장" if ms else "", f"책 {rest}권" if rest else "") if x) or "가운데 노드"
     if len(books) == 1:
         return _count_text(books[0]) if books[0].name == n.name else f"{books[0].name} {_count_text(books[0])}"
     return f"책 {len(books)}권" if books else "빈 노드"

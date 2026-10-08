@@ -360,7 +360,7 @@ class FloorMixin:
             raise MoveError("unknown_category", f"문서 {doc_id}가 없다")
         has_ms = self._db.execute("SELECT 1 FROM chapters WHERE user_id = ? AND project_id = ? LIMIT 1", (user_id, to_floor)).fetchone()
         if to_floor == COMMON or not has_ms:
-            raise MoveError("common_only", "문서 책은 원고가 있는 프로젝트에만 둔다", name=row["title"])
+            raise MoveError("common_only", "올린 문서에서 만든 문서는 올린 문서가 있는 프로젝트에만 둔다", name=row["title"])
         if row["floor"] == to_floor:
             raise MoveError("same", "이미 그 층에 있다", name=row["title"])
         at = utcnow()

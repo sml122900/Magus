@@ -6,7 +6,7 @@ zip 안:
   <프로젝트 이름>/<노드 이름>/         노드 = 폴더(가운데 노드는 '가운데 노드')
       <모음 책 이름>/<날짜 시각 제목>.md   게시판 항목 하나 = 마크다운 파일(머리에 날짜·제목·작성자)
       문헌/<key 저자 연도>.md            문헌 하나 = 파일(서지·상태·발췌)
-      원고/<원본 원고 파일>, 원고/장/<NN 제목>.md, 원고/확인 요청.md, 원고/결정.md
+      올린 문서/<원본 파일>, 올린 문서/장/<NN 제목>.md, 올린 문서/확인 요청.md, 올린 문서/결정.md
       <문서 책 제목>.md                  문서 책 = 파일(지금 판)
       연결.md                          연결 노드면 원본을 가리키는 메모(내용은 원본 폴더에 한 번만 담는다)
 시각은 한국 시간(KST)이다.
@@ -116,8 +116,8 @@ def _book_folder(store: Store, user: str, z: _Zip, folder: str, key: str) -> str
     if local == "ms" and floor:
         project = store.get_project(user, floor)
         if project and project.contexts:
-            z.text(f"{folder}/원고", "컨텍스트.md", _contexts_md(project.contexts))
-        return _manuscript(store, user, z, f"{folder}/원고", floor)
+            z.text(f"{folder}/올린 문서", "컨텍스트.md", _contexts_md(project.contexts))
+        return _manuscript(store, user, z, f"{folder}/올린 문서", floor)
     if local.startswith("doc."):
         doc = store.get_document(user, local[4:])
         if doc is None:
@@ -174,7 +174,7 @@ def _manuscript(store: Store, user: str, z: _Zip, folder: str, project_id: str) 
     if decisions:
         z.text(folder, "결정.md", "# 결정\n\n" + "\n".join(
             f"- D{d.id} · {local_time(d.created_at, '%Y-%m-%d')} · {' '.join(d.text.split())}" for d in decisions) + "\n")
-    return "원고/"
+    return "올린 문서/"
 
 
 def _node_folder(node: MapNode, title: str) -> str:
@@ -230,7 +230,7 @@ def _book_title(store: Store, user: str, key: str) -> str:
         return BOOK_NAMES[local]
     if local == "ms" and floor:
         project = store.get_project(user, floor)
-        return project.title if project else "원고"
+        return project.title if project else "올린 문서"
     if local.startswith("doc."):
         doc = store.get_document(user, local[4:])
         return doc.title if doc else ""
@@ -262,8 +262,8 @@ Magus 서버 없이도 읽을 수 있는 마크다운 파일입니다. 아무 �
 - 노드 하나 = 폴더 하나(가운데 노드는 `가운데 노드`).
 - 책 = 노드 폴더 안의 폴더. 게시판의 글 하나가 마크다운 파일 하나이고, 파일 머리에 날짜·제목·작성자가 있습니다.
   책에 컨텍스트(AI가 그 책을 읽는 방법)가 있으면 `컨텍스트.md`에, 서지가 있는 문헌 글은 `문헌 글` 폴더에 파일 하나씩(서지·원문 확인·쓸 부분) 있습니다.
-- 올린 원고 = `원고` 폴더. 올린 원고 파일(docx·pdf) 원본, 장마다 마크다운, 확인 요청·결정 목록.
-- 원고에서 만든 문서 = 마크다운 파일 하나(지금 판).
+- 올린 문서 = `올린 문서` 폴더. 올린 파일(docx·pdf) 원본, 장마다 마크다운, 확인 요청·결정 목록.
+- 올린 문서에서 만든 문서 = 마크다운 파일 하나(지금 판).
 - 연결 노드 = `연결.md`(원본을 가리키는 메모). 내용은 원본 프로젝트 폴더에 한 번만 들어 있습니다.
 
 시각은 한국 시간입니다.

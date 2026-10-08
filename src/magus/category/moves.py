@@ -171,7 +171,7 @@ def tool_message(store: Store, user: str, move: FloorMove, undone: bool = False,
         out = f"옮김: 「{move.name}」 {src} → {_where(store, user, move.to_floor, move.to_node)}{merged}."
     out += " 되돌리려면 저자에게 확인하고 같은 책으로 category_edit(undo_move=true)."
     if lost:
-        out += f" 주의: {scope_names(store, user, lost)} 원고의 인용 점검은 이제 이 문헌을 보지 않는다(자기 문헌과 연결 노드가 가리키는 문헌만 본다)."
+        out += f" 주의: {scope_names(store, user, lost)} 올린 문서의 인용 점검은 이제 이 문헌을 보지 않는다(자기 문헌과 연결 노드가 가리키는 문헌만 본다)."
     return out
 
 
@@ -186,7 +186,7 @@ def web_message(store: Store, user: str, move: FloorMove, undone: bool = False, 
     else:
         out = f"{josa(name, '을/를')} {josa(_where(store, user, move.to_floor, move.to_node), '으로/로')} 옮겼습니다."
     if lost:
-        out += f" {scope_names(store, user, lost)} 원고의 인용 점검은 이제 이 문헌을 보지 않습니다(자기 문헌과 연결된 문헌만 봅니다)."
+        out += f" {scope_names(store, user, lost)} 올린 문서의 인용 점검은 이제 이 문헌을 보지 않습니다(자기 문헌과 연결된 문헌만 봅니다)."
     return out
 
 
@@ -204,8 +204,8 @@ def error_message(e: MoveError | MapError, polite: bool) -> str:
         "unknown_floor": ("없는 프로젝트입니다.", "없는 프로젝트다."),
         "no_builtin": ("그 프로젝트에 그 책이 없습니다.", "그 프로젝트에 그 책이 없다."),
         "unknown_category": ("없는 책입니다.", "없는 책이다."),
-        "common_only": ("원고에서 만든 문서는 원고가 있는 프로젝트에만 둘 수 있습니다.", "원고에서 만든 문서는 원고가 있는 프로젝트에만 둔다."),
-        "fixed": ("올린 문서가 든 책은 가운데 노드 자체라 옮길 수 없습니다. 다른 원고면 새 프로젝트를 만들어 올려 주세요.",
+        "common_only": ("올린 문서에서 만든 문서는 올린 문서가 있는 프로젝트에만 둘 수 있습니다.", "올린 문서에서 만든 문서는 올린 문서가 있는 프로젝트에만 둔다."),
+        "fixed": ("올린 문서가 든 책은 가운데 노드 자체라 옮길 수 없습니다. 다른 문서면 새 프로젝트를 만들어 올려 주세요.",
                   "올린 문서가 든 책은 가운데 노드 자체라 옮기지 않는다."),
         "unknown_node": ("없는 노드입니다.", "없는 노드다."),
         "center": ("가운데 노드는 휴지통으로 옮길 수 없습니다.", "가운데 노드는 휴지통으로 옮기지 않는다."),

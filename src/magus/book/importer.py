@@ -360,7 +360,7 @@ def import_manuscript(
     manuscript = read_manuscript(path)
     split = split_manuscript(manuscript.blocks)
     if not split.chapters:
-        raise ValueError("'제N장' 제목을 하나도 찾지 못했다. 원고의 장 제목 표기를 확인해 주세요.")
+        raise ValueError("'제N장' 제목을 하나도 찾지 못했다. 문서의 장 제목 표기를 확인해 주세요.")
 
     terms: list[str] = []
     ai_names: list[str] = []
