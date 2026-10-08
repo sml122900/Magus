@@ -50,39 +50,45 @@ def test_edit_and_trash_on_the_shelf(server_proc):  # noqa: F811
         listed, ideas = opened.text, opened.url.path
         csrf = _csrf(listed)
         assert ideas == f"/shelf/{IDEAS}"
-        assert f'<a href="{ideas}/{AI}/edit">고치기</a> · <a href="{ideas}/{AI}/trash">휴지통으로</a>' in listed
+        assert f'<a href="{ideas}/{AI}/edit">고치기</a> <a href="{ideas}/{AI}/trash">휴지통</a>' in listed
         form = c.get(f"/shelf/ideas/{AI}/edit").text  # 옛 주소의 고치기도 그 책으로
-        assert "처음 쓴 사람: Claude(AI)." in form and ">그 관점은 흥미롭습니다</textarea>" in form
+        assert ">그 관점은 흥미롭습니다</textarea>" in form and 'name="files" multiple' in form  # 제목·본문·첨부(#97)
+        assert 'name="reason"' not in form and 'name="where"' not in form
         assert c.post(f"{ideas}/{AI}/edit", data={"csrf": "틀림", "content": "x"}).status_code == 403
         assert c.post(f"{ideas}/{AI}/edit", data={"csrf": csrf, "title": "", "content": "  "}).status_code == 400
         done = c.post(f"{ideas}/{AI}/edit", data={"csrf": csrf, "title": "관점", "content": "그 관점은 <b>새롭다</b>",
                                                   "reason": "다시 볼 것"})
-        assert str(done.url).endswith(f"{ideas}/{AI}?done=edited") and "<p class=\"msg\">고쳤습니다.</p>" in done.text
-        assert "그 관점은 &lt;b&gt;새롭다&lt;/b&gt;" in done.text and "저자가 고침(" in done.text and "이유: 다시 볼 것" in done.text
-        # 문체도 여느 책의 글이라 고칠 수 있다(#96)
-        style_form = c.get(f"/shelf/{_book_id(data_dir, '문체')}/20261006000000003-dddddd/edit")
-        assert style_form.status_code == 200 and 'value="짧은 호흡"' in style_form.text
-        # 책의 글: 칸까지 고치고, AI가 지은 제목을 그대로 두면 'AI가 지은 제목'도 그대로
+        assert str(done.url).endswith(f"{ideas}/{AI}?done=edited") and "<p class=\"msg\">저장했습니다.</p>" in done.text
+        assert "그 관점은 &lt;b&gt;새롭다&lt;/b&gt;" in done.text and "다시 볼 것" not in done.text  # 웹은 제목·본문만 고친다
+        # 문체도 여느 책의 글이라 고칠 수 있다(#96). 이유는 화면에 없어도 파일에 그대로(#97)
+        style_book = _book_id(data_dir, '문체')
+        style_form = c.get(f"/shelf/{style_book}/20261006000000003-dddddd/edit")
+        assert style_form.status_code == 200 and "짧은 호흡" not in style_form.text
+        c.post(f"/shelf/{style_book}/20261006000000003-dddddd/edit", data={"csrf": csrf, "title": "", "content": "짧다. 아주."})
+        # 책의 글: 칸은 화면에서 고치지 않아도 그대로, AI가 지은 제목을 그대로 두면 'AI 제목'도 그대로
         item = c.post(f"/shelf/{cid}/20261006000000002-cccccc/edit",
                       data={"csrf": csrf, "title": "요약", "content": "저자가 다듬은 요약", "f:시기": "1860년대", "f:장소": "강가"}).text
-        assert "<dt>시기</dt><dd>1860년대</dd><dt>장소</dt><dd>강가</dd>" in item and "누가: Claude가 쓴 글" in item
-        assert '<span class="t">요약<span class="tag">AI가 지은 제목</span></span>' in item and "저자가 고침(" in item
+        assert "<p>시기: 1850년대</p>" in item and "장소: 강가" not in item  # 칸은 본문의 일부로 보이고, 웹에서는 바꾸지 않는다
+        assert '<span class="t">요약<span class="tag" title="AI가 지은 제목">AI 제목</span></span>' in item
         # 휴지통: 확인 화면 한 번, 이 글에 응답한 글도 함께
         confirm = c.get(f"{ideas}/{ME}/trash").text
-        assert "이 글을 휴지통으로 옮길까요?" in confirm and "이 글에 응답한 글 1개도 함께 옮겨집니다." in confirm
+        assert "물가는 궁지다" in confirm and "응답한 글 1" in confirm
         assert c.post(f"{ideas}/{ME}/trash", data={"csrf": "틀림"}).status_code == 403
         gone = c.post(f"{ideas}/{ME}/trash", data={"csrf": csrf})
-        assert str(gone.url).endswith(f"{ideas}?done=trashed") and "글을 휴지통으로 옮겼습니다." in gone.text
+        assert str(gone.url).endswith(f"{ideas}?done=trashed") and "휴지통으로 옮겼습니다." in gone.text
         assert c.get(f"{ideas}/{AI}").status_code == 404
         c.post(f"/shelf/{cid}/20261006000000002-cccccc/trash", data={"csrf": csrf})
         assert c.get(f"/shelf/{cid}/20261006000000002-cccccc").status_code == 404
     folder = data_dir / "users" / "alice"
     reply = json.loads((folder / "trash" / "shelf" / "category-items" / IDEAS / f"{AI}.json").read_text(encoding="utf-8"))
     assert reply["author"] == "ai" and reply["edited_by"] == "author" and reply["title_by"] == "author" and reply["edited_at"]
-    assert reply["_trash"]["with"] == ME and reply["reason"] == "다시 볼 것"
+    assert reply["_trash"]["with"] == ME and reply["origin"] == "대화" and reply["parent_id"] == ME  # 화면에 없는 칸도 그대로
     trashed = json.loads((folder / "trash" / "shelf" / "category-items" / cid / "20261006000000002-cccccc.json").read_text(encoding="utf-8"))
     assert trashed["author"] == "ai" and trashed["edited_by"] == "author" and trashed["title_by"] == "ai"
-    assert trashed["fields"] == {"시기": "1860년대", "장소": "강가"}
+    assert trashed["fields"] == {"시기": "1850년대"}  # 웹에서 고쳐도 칸은 지우지 않는다(#97)
+    style = json.loads((folder / "shelf" / "categories" / _book_id(data_dir, "문체") / "items" / "20261006000000003-dddddd.json")
+                       .read_text(encoding="utf-8"))
+    assert style["content"] == "짧다. 아주." and style["reason"] == "짧은 호흡"
     store = LocalStore(data_dir)  # 되살리면 함께 옮긴 응답 글도 함께
     assert store.restore_trash("alice", "category_item", f"{IDEAS}/{ME}") == [f"{IDEAS}/{ME}", f"{IDEAS}/{AI}"]
     store.close()

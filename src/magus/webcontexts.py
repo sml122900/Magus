@@ -17,7 +17,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from magus.contexts import CONTEXT_MAX, CONTEXT_NAME_MAX, HEADER_MAX, MAX_ATTACHED, MAX_SAVED, Context, SavedContext, View, clean_contexts
+from magus.contexts import CONTEXT_MAX, CONTEXT_NAME_MAX, HEADER_MAX, MAX_SAVED, Context, SavedContext, View, clean_contexts
 from magus.store import Store
 
 CONTEXT_STYLE = """
@@ -93,13 +93,13 @@ def _row(index: int, ctx: Context, from_id: str, csrf_ok: bool = True) -> str:
         f'<li data-from="{html.escape(from_id)}"><div class="row-head">'
         f'<label>이름 <input name="ctx_name" value="{html.escape(ctx.name)}" maxlength="{CONTEXT_NAME_MAX}"></label>'
         f'<input type="hidden" name="ctx_from" value="{html.escape(from_id)}">'
-        f'<button name="register" value="{index}">자주 쓰는 컨텍스트로 등록</button>'
+        f'<button name="register" value="{index}" aria-label="자주 쓰는 컨텍스트로 등록" title="자주 쓰는 컨텍스트로 등록">등록</button>'
         f'<label class="drop"><input type="checkbox" name="ctx_drop" value="{index}"> 떼기</label></div>'
         f'<label class="block">내용 <textarea name="ctx_text" maxlength="{CONTEXT_MAX}" rows="3">{html.escape(ctx.text)}</textarea></label></li>'
     )
 
 
-def context_fieldset(saved: list[SavedContext], attached: tuple[Context, ...], *, what: str = "이 책") -> str:
+def context_fieldset(saved: list[SavedContext], attached: tuple[Context, ...]) -> str:
     """노드·책 만들기와 설정 화면의 컨텍스트 칸. attached: 지금 붙은 것(사본)."""
     by_name = {s.name: s for s in saved}
     picked = {by_name[c.name].id for c in attached if c.name in by_name and by_name[c.name].text == c.text}
@@ -112,16 +112,12 @@ def context_fieldset(saved: list[SavedContext], attached: tuple[Context, ...], *
                    for i, c in enumerate(attached))
     template = _row(0, Context("", ""), "")
     return (
-        f'<fieldset class="ctx"><legend>컨텍스트 — AI가 {html.escape(what)}의 글을 읽는 방법</legend>'
-        f'<p class="muted">자주 쓰는 컨텍스트를 누르면 붙고, 다시 누르면 떨어집니다. 붙인 뒤에는 이 자리에서 고칠 수 있습니다'
-        f'(등록해 둔 원본은 그대로). 붙이지 않으면 AI는 일반 메모로 읽습니다. {MAX_ATTACHED}개까지, 하나에 {CONTEXT_MAX}자까지.</p>'
-        + (f'<div class="chips" role="group" aria-label="자주 쓰는 컨텍스트">{chips}</div>' if chips
-           else '<p class="muted">자주 쓰는 컨텍스트가 없습니다. <a href="/me/contexts">내 정보 → 자주 쓰는 컨텍스트</a>에서 만듭니다.</p>')
-        + f'<ol class="ctx-rows">{rows}</ol><p class="muted ctx-empty"{" hidden" if attached else ""}>붙인 컨텍스트가 없습니다.</p>'
+        '<fieldset class="ctx"><legend>컨텍스트</legend>'
+        + (f'<div class="chips" role="group" aria-label="자주 쓰는 컨텍스트">{chips}</div>' if chips else "")
+        + f'<ol class="ctx-rows">{rows}</ol>'
         f'<template class="ctx-row">{template}</template>'
-        f'<details><summary>직접 적기</summary><label class="block">내용 <textarea name="ctx_new" maxlength="{CONTEXT_MAX}" rows="3" '
-        'placeholder="예: 이 문서는 논문으로서 학술적인 문서야."></textarea></label></details>'
-        '<p class="muted"><a href="/me/contexts">자주 쓰는 컨텍스트 고치기</a></p></fieldset>'
+        f'<details><summary>직접 적기</summary><label class="block">내용 <textarea name="ctx_new" maxlength="{CONTEXT_MAX}" rows="3">'
+        "</textarea></label></details></fieldset>"
     )
 
 
@@ -155,14 +151,14 @@ def register_row(store: Store, uid: str, form: Any) -> str:
         texts, names = form.getlist("ctx_text"), form.getlist("ctx_name")
         text, name = str(texts[index]).strip(), " ".join(str(names[index]).split())
     except (ValueError, IndexError):
-        return '<p class="msg err">등록할 컨텍스트를 찾지 못했습니다.</p>'
+        return '<p class="msg err">등록하지 못했습니다.</p>'
     if not name:
-        return '<p class="msg err">자주 쓰는 컨텍스트로 등록하려면 이름을 적어 주세요.</p>'
+        return '<p class="msg err">이름을 적어 주세요.</p>'
     try:
         store.save_saved_context(uid, SavedContext("", name, text))
     except ValueError as e:
         return f'<p class="msg err">{html.escape(str(e))}</p>'
-    return f'<p class="msg">「{html.escape(name)}」을(를) 자주 쓰는 컨텍스트에 등록했습니다. 아래에서 저장해야 이 화면의 다른 것이 저장됩니다.</p>'
+    return f'<p class="msg">「{html.escape(name)}」 등록했습니다.</p>'
 
 
 def _chips(contexts: tuple[Context, ...]) -> str:
@@ -175,17 +171,14 @@ def _chips(contexts: tuple[Context, ...]) -> str:
 
 def contexts_view_html(view: View, edit_href: str | None = None) -> str:
     """노드 패널 머리·책 게시판 머리: 붙은 컨텍스트 이름(누르면 전문). 책은 노드의 것 → 책의 것 순서(#96-d).
-    없으면 '일반 메모로 읽습니다'."""
-    edit = f' <a href="{html.escape(edit_href)}">컨텍스트 바꾸기</a>' if edit_href else ""
+    없으면 아무것도 보이지 않는다(#97: 읽는 순서·없을 때의 뜻은 도움말)."""
+    edit = f' <a href="{html.escape(edit_href)}">바꾸기</a>' if edit_href else ""
     if not view.book:  # 노드만
         if not view.contexts:
-            none = "없음 — 이 노드의 책은 책에 붙인 컨텍스트만으로 읽습니다(그것도 없으면 일반 메모)."
-            return f'<div class="ctxs"><span class="ctx-label">컨텍스트</span><span class="none">{none}</span>{edit}</div>'
-        return (f'<div class="ctxs" aria-label="컨텍스트"><span class="ctx-label">컨텍스트</span>{_chips(view.contexts)}{edit}'
-                '<span class="none">이 노드의 책은 이것을 먼저 읽고 책의 것을 이어 읽습니다.</span></div>')
+            return ""
+        return f'<div class="ctxs" aria-label="컨텍스트"><span class="ctx-label">컨텍스트</span>{_chips(view.contexts)}{edit}</div>'
     if not view.all:
-        return (f'<div class="ctxs"><span class="ctx-label">컨텍스트</span><span class="none">없음 — AI는 일반 메모로 읽습니다.</span>'
-                f"{edit}</div>")
+        return ""
     parts = []
     if view.node_contexts:
         parts.append(f'<span class="ctx-label">노드 「{html.escape(view.node)}」</span>{_chips(view.node_contexts)}')
@@ -194,8 +187,7 @@ def contexts_view_html(view: View, edit_href: str | None = None) -> str:
     elif view.node_contexts:
         parts.append('<span class="ctx-label">이 책</span><span class="none">없음</span>')
     order = '<span class="ctx-sep" aria-hidden="true">→</span>'.join(parts)
-    cut = (f'<span class="none">합쳐서 {HEADER_MAX:,}자를 넘어 AI에게는 앞 {HEADER_MAX:,}자만 보입니다.</span>'
-           if view.too_long else "")
+    cut = f'<span class="none">앞 {HEADER_MAX:,}자</span>' if view.too_long else ""
     return (f'<div class="ctxs" aria-label="컨텍스트(노드 다음 책 순서로 읽음)"><span class="ctx-label">컨텍스트</span>'
             f"{order}{edit}{cut}</div>")
 
@@ -234,8 +226,7 @@ class ContextPages:
                 return RedirectResponse(f"/me/contexts?done={'saved' if action == 'save' else 'added'}", status_code=303)
             except ValueError as e:
                 message = f'<p class="msg err">{html.escape(str(e))}</p>'
-        done = {"saved": "고쳤습니다. 이미 붙여 둔 노드·책의 컨텍스트(사본)는 그대로입니다.", "added": "더했습니다.",
-                "deleted": "지웠습니다. 이미 붙여 둔 노드·책의 컨텍스트(사본)는 그대로입니다."}.get(request.query_params.get("done") or "")
+        done = {"saved": "저장했습니다.", "added": "더했습니다.", "deleted": "지웠습니다."}.get(request.query_params.get("done") or "")
         message = message or (f'<p class="msg">{done}</p>' if done else "")
         items = await run_in_threadpool(self.store.list_saved_contexts, uid)
         csrf = self._csrf_input(session)
@@ -244,23 +235,20 @@ class ContextPages:
             f'<input type="hidden" name="id" value="{html.escape(c.id)}">'
             f'<label class="block">이름 <input name="name" value="{html.escape(c.name)}" maxlength="{CONTEXT_NAME_MAX}" required></label>'
             f'<label class="block">내용 <textarea name="text" maxlength="{CONTEXT_MAX}" rows="3" required>{html.escape(c.text)}</textarea></label>'
-            '<p><button name="action" value="save">고치기</button> '
+            '<p><button name="action" value="save">저장</button> '
             '<button name="action" value="delete">지우기</button></p></form></section>'
             for c in items
-        ) or '<p class="msg">자주 쓰는 컨텍스트가 없습니다.</p>'
+        ) or '<p class="empty">없습니다.</p>'
         room = len(items) < MAX_SAVED
         add = (
             f'<h2>새로 더하기</h2><form method="post" action="/me/contexts" class="card">{csrf}'
-            f'<label class="block">이름 <input name="name" maxlength="{CONTEXT_NAME_MAX}" required placeholder="예: 신문 기사"></label>'
-            f'<label class="block">내용 <textarea name="text" maxlength="{CONTEXT_MAX}" rows="3" required '
-            'placeholder="예: 신문 기사를 모은 것이다. 날짜와 신문 이름을 함께 본다."></textarea></label>'
+            f'<label class="block">이름 <input name="name" maxlength="{CONTEXT_NAME_MAX}" required></label>'
+            f'<label class="block">내용 <textarea name="text" maxlength="{CONTEXT_MAX}" rows="3" required></textarea></label>'
             '<p><button name="action" value="add" class="primary">더하기</button></p></form>'
-            if room else f'<p class="muted">자주 쓰는 컨텍스트는 {MAX_SAVED}개까지입니다. 하나를 지운 뒤 더합니다.</p>'
+            if room else f'<p class="muted">{MAX_SAVED}개 가득</p>'
         )
         body = (
             f'<p class="crumb"><a href="/me">← 내 정보</a></p>{message}'
-            "<p>컨텍스트는 AI가 노드·책의 글을 읽는 방법입니다. 여기 모아 둔 것은 노드·책을 만들거나 고칠 때 단추로 붙입니다. "
-            "붙인 것은 사본이라, 여기서 고치거나 지워도 이미 붙인 곳은 그대로입니다.</p>"
             f"{cards}{add}"
         )
         from magus.webshelf import SHELF_STYLE  # noqa: PLC0415  # 입력칸·글 상자 모양(책장 화면과 같다)

@@ -192,7 +192,7 @@ MAP_SCRIPT = r"""<script>
     return fetch(D.post, {method: "POST", body: fd, headers: {"Accept": "application/json"}, credentials: "same-origin", keepalive: true})
       .then(function (r) { return r.json().catch(function () { return {ok: false, error: "저장하지 못했습니다."}; }); })
       .then(function (res) { if (!res.ok) tell(res.error || "저장하지 못했습니다."); return res; })
-      .catch(function () { tell("저장하지 못했습니다. 연결을 확인해 주세요."); return {ok: false}; });
+      .catch(function () { tell("저장하지 못했습니다."); return {ok: false}; });
   }
   function reload() { save(); location.reload(); }
 
@@ -218,7 +218,7 @@ MAP_SCRIPT = r"""<script>
     unselect(); selected = g; g.classList.add("sel");
     var a = pos[g.getAttribute("data-a")], b = pos[g.getAttribute("data-b")];
     cut.style.left = (a.x + b.x) / 2 + "px"; cut.style.top = (a.y + b.y) / 2 + "px"; cut.hidden = false;
-    tell("선을 골랐습니다. '선 끊기'를 누르면 끊깁니다.");
+    tell("선을 골랐습니다.");
   }
   cut.addEventListener("click", function (e) {
     e.stopPropagation();
@@ -308,7 +308,7 @@ MAP_SCRIPT = r"""<script>
       function lift(ev) {
         lifted = true; ghost = document.createElement("div"); ghost.className = "ghost"; ghost.appendChild(a.cloneNode(true));
         document.body.appendChild(ghost); a.classList.add("lifting"); place(ev);
-        tell("옮길 노드 위에 놓으세요.");
+        tell("노드 위에 놓으세요.");
       }
       function place(ev) { ghost.style.left = ev.clientX + "px"; ghost.style.top = ev.clientY + "px"; }
       if (touch) timer = setTimeout(function () { lift(e); }, 350);
@@ -364,7 +364,7 @@ MAP_SCRIPT = r"""<script>
     linkMode = on; linkButton.setAttribute("aria-pressed", on ? "true" : "false");
     if (linkFirst) { var el = nodeEl(linkFirst); if (el) el.classList.remove("pick"); }
     linkFirst = null; stopBand();
-    tell(on ? "선을 이을 첫 노드를 누르세요(그만두려면 Esc)." : "");
+    tell(on ? "첫 노드를 누르세요." : "");
   }
   linkButton.addEventListener("click", function () { setLinkMode(!linkMode); });
   world.addEventListener("pointerdown", function (e) {
@@ -373,7 +373,7 @@ MAP_SCRIPT = r"""<script>
     if (e.target.closest(".knob") && el) {
       e.preventDefault(); e.stopPropagation(); unselect();
       startBand(el.getAttribute("data-node")); viewEl.setPointerCapture(e.pointerId);
-      tell("이을 노드 위에 놓으세요.");
+      tell("노드 위에 놓으세요.");
       return;
     }
     if (el) {
@@ -428,7 +428,7 @@ MAP_SCRIPT = r"""<script>
     if (suppress) return;
     var id = el.getAttribute("data-node");
     if (linkMode) {
-      if (!linkFirst) { linkFirst = id; el.classList.add("pick"); startBand(id); tell("이을 둘째 노드를 누르세요."); return; }
+      if (!linkFirst) { linkFirst = id; el.classList.add("pick"); startBand(id); tell("둘째 노드를 누르세요."); return; }
       var a = linkFirst; setLinkMode(false); connect(a, id);
       return;
     }
@@ -482,7 +482,7 @@ MAP_SCRIPT = r"""<script>
     var name = box.querySelector("input[name=name]");
     box.scrollIntoView({block: "nearest", behavior: reduce ? "auto" : "smooth"});
     if (name) name.focus();
-    tell("두 번 누른 자리에 새 노드를 만듭니다. 위에서 이름을 적어 주세요.");
+    tell("새 노드 이름을 적으세요.");
   });
   document.querySelectorAll(".zoom [data-act]").forEach(function (b) {
     b.addEventListener("click", function () {

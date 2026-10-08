@@ -68,7 +68,7 @@ def test_local_round_trip_upload_import_checklist_download(server_proc):
         assert c.get("/me/files", follow_redirects=False).headers["location"].startswith("/login")  # 로그인 전
         assert c.get("/inbox", follow_redirects=False).headers["location"].startswith("/login")
         page = c.get("/login?next=/me/files").text  # 로컬 개발: USER_ID로 바로 로그인
-        assert "<h1>올린 파일</h1>" in page and "비어 있습니다" in page
+        assert "<h1>올린 파일</h1>" in page and '<p class="empty">파일이 없습니다.</p>' in page
         csrf = _csrf(page)
         assert c.post("/inbox/upload", data={"csrf": "틀림"}, files={"files": ("x.md", b"a")}).status_code == 403
         with (FIXTURES / "닿으려는_종_합성.docx").open("rb") as f:
@@ -76,7 +76,7 @@ def test_local_round_trip_upload_import_checklist_download(server_proc):
         page = c.post("/inbox/upload", data={"csrf": csrf}, files=[("files", ("원고.docx", data)), ("files", ("나쁜.exe", b"x"))]).text
         assert "올림: 원고.docx" in page and "나쁜.exe: 받을 수 있는 형식은" in page
         made = c.post("/shelf/manuscript", data={"csrf": csrf, "floor": "new"}, files={"file": ("원고.docx", data, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")})
-        assert "문서를 올렸습니다: 7장" in made.text
+        assert "올렸습니다: 7장" in made.text
         pid = str(made.url).split("/shelf/book/")[1].split("?")[0]
         page = c.get(f"/shelf/book/{pid}?tab=cites").text
         assert "🔴 참고문헌에 없음" in page and "🟡 미확인" in page and "<h2>장별</h2>" in page
@@ -201,7 +201,7 @@ def test_remote_web_login_with_oauth(server_proc, fake_issuer):
         assert alice.get("/auth/callback?code=x&state=y").status_code == 400
     with httpx2.Client(base_url=base, timeout=60) as bob:
         assert _login(bob, issuer_state, "sub-bob").status_code == 303
-        assert "비어 있습니다" in bob.get("/me/files").text  # 앨리스가 올린 파일이 보이지 않는다
+        assert '<p class="empty">파일이 없습니다.</p>' in bob.get("/me/files").text  # 앨리스가 올린 파일이 보이지 않는다
         assert bob.get(link).status_code == 403  # 앨리스의 내려받기 링크
     with httpx2.Client(base_url=base, timeout=60) as carol:
         denied = _login(carol, issuer_state, "sub-carol")
@@ -281,10 +281,10 @@ def test_add_book_choices_follow_the_floor(server_proc):
         assert 'name="project" value="empty"' in empty and '<button class="primary">올리기</button>' in empty
         assert c.get("/shelf/add?floor=empty").text.count('name="project" value="empty"') == 1  # 옛 주소 이름(floor)도 받는다
         full = c.get("/shelf/add?project=full").text
-        assert "이 프로젝트에는 올린 문서가 이미 있습니다(가운데 노드)." in full and 'action="/shelf/manuscript"' not in full
-        assert "<h2>새 책</h2>" in empty and "<h2>문서 올리기</h2>" in empty and "<h2>올린 문서에서 만든 문서</h2>" in empty
+        assert "수정본 올리기</a>" in full and 'action="/shelf/manuscript"' not in full  # 올린 문서가 있으면 수정본으로
+        assert "<h2>새 책</h2>" in empty and "<h2>문서 올리기</h2>" in empty and "올린 문서에서 만든 문서" not in empty
         common = c.get("/shelf/add?project=common").text
-        assert 'name="project" value="new"' in common and "새 프로젝트로 올리기" in common
+        assert 'name="project" value="new"' in common and '<button class="primary">올리기</button>' in common
         assert c.get("/shelf/add?project=nothing").status_code == 404
         assert c.get("/book", follow_redirects=False).headers["location"] == "/shelf/book/full?tab=chapters"
     assert "aria-current=page>프로젝트</a>" in empty  # 메뉴는 프로젝트 하나(#95)
@@ -359,10 +359,10 @@ def test_shelf_books_and_board_lists(server_proc):
         assert ideas.index("긴 생각") < ideas.index("그 관점은") < ideas.index("물가는 궁지다")  # 최신 것부터
         assert '<span class="t none">물가는 궁지다</span>' in ideas  # 제목이 없으면 내용 앞부분을 흐리게
         when = local_time("2026-10-01T05:07:00.000Z", "%Y-%m-%d %H:%M")
-        assert f'<time class="when" datetime="2026-10-01T05:07:00.000Z">{when}</time><span class="aux">나</span>' in ideas
-        assert '<span class="aux"><span class="tag">AI</span></span>' in ideas
-        assert 'AI의 답입니다. <a href="/shelf/ideas-common/20261001000000000-aaaaaa">응답한 글</a>' in ideas
-        assert '<a href="/shelf/ideas-common/20261001000000000-aaaaaa">이 항목의 주소</a>' in ideas
+        assert f'<time class="when" datetime="2026-10-01T05:07:00.000Z">{when}</time><span class="aux"></span>' in ideas  # 저자의 글
+        assert '<span class="aux"><span class="tag" title="AI가 쓴 글">AI</span></span>' in ideas
+        assert 'AI의 답입니다.' not in ideas  # 보기는 제목·본문·첨부만(#97). 응답 관계는 파일에 그대로
+        assert '<a href="/shelf/ideas-common/20261001000000000-aaaaaa" aria-label="이 글의 주소" title="이 글의 주소">🔗</a>' in ideas
         first = ideas.split('<ol class="board">')[1].split("</summary>")[0]
         assert "가" * 70 in first and "가" * 80 not in first and "가" * 400 in ideas  # 줄에는 앞부분만, 펼치면 전부
         assert "1–100 / 123" in ideas and "다음</a>" in ideas and "오래된 생각 0<" not in ideas
@@ -371,18 +371,18 @@ def test_shelf_books_and_board_lists(server_proc):
         assert "그 관점은" in only_ai and "물가는 궁지다" not in only_ai
 
         refs = c.get("/shelf/refs").text
-        listed = refs.split('<ol class="board">')[1]  # 위의 '원문 확인 글 넣기' 선택지가 아니라 목록
+        listed = refs.split('<ol class="board">')[1]  # 목록
         assert listed.index("Clack(2012) 『Gaining ground』") < listed.index("Diamond(1997)")  # 원문 확인 글부터
-        assert "🟢 원문 확인 · 인용된 장 1" in refs and "<p>인용된 장: 제1장</p>" in refs
-        assert '<p>쓸 부분 「tetrapods came ashore」<br><span class="muted">1장의 근거 · p.45</span></p>' in refs
-        assert '인용 현황은 올린 문서의 <a href="/shelf/book/b?tab=cites">인용 상태</a>' in refs
-        assert "글 0개 · 문헌 글 2개(원문 확인 1)" in refs
-        assert "Gaining ground" not in c.get("/shelf/refs-common?status=unverified").text
+        # 문헌 글(#97): 제목(서지)·본문(쓸 부분)·첨부와 '원문 확인' 체크 하나. 원문 확인 거르기·넣기 폼은 없다
+        assert '<span class="aux"><span class="tag" title="원문 확인">원문 확인</span></span>' in refs
+        assert '<blockquote>「tetrapods came ashore」</blockquote>' in refs and "1장의 근거" not in refs
+        assert re.search(r'action="/shelf/refs-common/clack2012/check" class="check">.*?name="checked" value="1" checked> 원문 확인', refs)
+        assert re.search(r'action="/shelf/refs-common/diamond1997/check" class="check">.*?name="checked" value="1"> 원문 확인', refs)
+        assert "status=verified" not in refs and "인용 상태</a>" not in refs and '<p class="sum">글 2 ' in refs
         styles = c.get("/shelf/styles").text
-        assert '<a class="tag" href="/shelf/styles-common?tag=%ED%98%B8%ED%9D%A1%3A%20%EC%A7%A7%EC%9D%8C">호흡: 짧음</a>' in styles
-        assert "위치: 유홍준" in styles and "<p>이유: 짧은 호흡</p>" in styles and '<span class="t none">짧다. 끊긴다.</span>' in styles
-        short = c.get("/shelf/styles-common?tag=호흡: 짧음").text
-        assert "짧다. 끊긴다." in short and "길게 이어지는" not in short and "태그 「호흡: 짧음」만" in short
+        assert "위치: 유홍준" not in styles and "이유: 짧은 호흡" not in styles and '<span class="t none">짧다. 끊긴다.</span>' in styles
+        short = c.get("/shelf/styles-common?tag=호흡: 짧음").text  # 태그 거르기는 주소로 그대로 된다(태그는 파일에 그대로)
+        assert "짧다. 끊긴다." in short and "길게 이어지는" not in short and '<span class="tag">호흡: 짧음</span>' in short
 
         # 고유 주소: 그 항목이 있는 쪽을 열고, 그 항목을 펼친 채 보인다
         oldest = "2026090000000" + "00000-bbbbbb"  # 오래된 생각 0(둘째 쪽)
@@ -392,8 +392,9 @@ def test_shelf_books_and_board_lists(server_proc):
         assert '<details id="i-clack2012" open data-here>' in c.get("/shelf/refs/clack2012").text
         assert c.get("/shelf/ideas/20260101000000000-ffffff").status_code == 404
         assert c.get("/shelf/nothing").status_code == 404
-        for page in (styles, refs, ideas):  # 로그아웃 · 바로 적기 · 원문 확인 글 넣기(#96: 어느 책에든)
-            assert page.count('method="post"') == 3
+        for page in (styles, ideas):  # 로그아웃 · 새 글
+            assert page.count('method="post"') == 2
+        assert refs.count('method="post"') == 4  # 로그아웃 · 새 글 · 문헌 글마다 원문 확인 체크(#97)
         assert shelf.count('method="post"') == 3  # 로그아웃 · 끌어 옮기기(숨은 폼) · 새 프로젝트 만들기
         assert "<h1>생각</h1>" in ideas and 'aria-current=page>프로젝트</a>' in styles
 
@@ -414,10 +415,10 @@ def test_shelf_search_marks_hits(server_proc):
         store.close()
         fish = c.get("/shelf/ideas-common", params={"q": "물고기"}).text
         assert "<mark>물고기</mark>가 강을 거슬러 오른다" in fish and "물가는 궁지다" not in fish
-        assert "「물고기」 찾은 글 1개 · 많이 맞은 것부터" in fish and 'value="물고기"' in fish
+        assert "「물고기」 1 · " in fish and 'value="물고기"' in fish
         one = c.get("/shelf/ideas-common", params={"q": "물"}).text  # 한 글자: 2글자 조각 색인으로는 못 찾는다
-        assert "<mark>물</mark>고기가" in one and "<mark>물</mark>가는 궁지다" in one and "한 글자는 그 글자가 들어간" in one
-        assert "찾는 말이 들어간 글이 없습니다." in c.get("/shelf/ideas-common", params={"q": "없는말"}).text
+        assert "<mark>물</mark>고기가" in one and "<mark>물</mark>가는 궁지다" in one
+        assert '<p class="msg">없음</p>' in c.get("/shelf/ideas-common", params={"q": "없는말"}).text
         assert "<mark>물결</mark>이 길게" in c.get("/shelf/styles-common", params={"q": "물결"}).text  # 본문(구절)
         assert "<mark>유홍준</mark>" in c.get("/shelf/styles-common", params={"q": "유홍준"}).text  # 위치(출전)
         assert "<mark>Gaining</mark> ground" in c.get("/shelf/refs-common", params={"q": "gaining"}).text  # 서지
@@ -426,7 +427,7 @@ def test_shelf_search_marks_hits(server_proc):
         both = c.get("/shelf", params={"q": "물"}).text  # 프로젝트 → 노드 · 책으로 묶는다(#95). 책 옆에 컨텍스트 이름(#96)
         assert re.search(r'<a href="/shelf/p/common\?node=b-ideas-common&amp;book=ideas-common">생각</a> <small>생각 메모 · \d+개</small>', both)
         assert '<a href="/shelf/p/common?node=b-styles-common&amp;book=styles-common">문체</a> <small>문체 · 1개</small>' in both
-        assert "찾은 프로젝트 1곳" in both and ">문헌</a>" not in both and '<h2><a href="/shelf/p/common">내 서재</a>' in both
+        assert "<p>「물」 1</p>" in both and ">문헌</a>" not in both and '<h2><a href="/shelf/p/common">내 서재</a>' in both
         evil = c.get("/shelf/ideas-common", params={"q": "<script>"}).text
         assert "<script>alert" not in evil and "&lt;script&gt;alert(1)&lt;/script&gt;" in c.get("/shelf/ideas-common").text
         assert 'value="&lt;script&gt;"' in evil
@@ -447,7 +448,7 @@ def test_display_name_from_email_and_editable(server_proc, fake_issuer):
         _login(alice, issuer_state, "sub-alice")
         _login(bob, issuer_state, "sub-bob")
         me = alice.get("/me").text
-        assert "<h1>내 정보</h1>" in me and "<p>메일: sub-alice@example.com</p>" in me and 'name="display_name" value=""' in me
+        assert "<h1>내 정보</h1>" in me and "<p>메일 sub-alice@example.com</p>" in me and 'name="display_name" value=""' in me
         csrf = _csrf(me)
         assert alice.post("/me", data={"csrf": "틀림", "display_name": "x"}).status_code == 403
         too_long = alice.post("/me", data={"csrf": csrf, "display_name": "가" * 41})
@@ -482,4 +483,4 @@ def test_local_mode_shows_internal_name_and_me_page(server_proc):
     base, _, _ = server_proc({})
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         page = c.get("/login?next=/me").text
-        assert ">alice</a>" in page and "메일: 아직 모릅니다(웹에서 로그인하면 채워집니다)." in page
+        assert ">alice</a>" in page and "<p>메일 —</p>" in page

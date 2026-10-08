@@ -50,16 +50,16 @@ def test_project_list_and_new_project(server_proc):  # noqa: F811
         csrf = _csrf(listed)
         names = re.findall(r'<span class="pname">([^<]+)</span>', listed)
         assert names[-1] == "내 서재" and set(names[:-1]) == {"도시는 어떻게 태어났나", "강과 사람"}  # 「내 서재」는 끝에
-        assert listed.count("최근 수정 ") >= 3 and "노드 4 · 올린 문서 1장" in listed and "노드 1 · 올린 문서 없음" in listed
+        assert listed.count("최근 수정 ") >= 3 and '<span class="pmeta">노드 4 · 1장</span>' in listed and '<span class="pmeta">노드 1</span>' in listed
         assert '<h2>+ 프로젝트</h2>' in listed and 'name="project" value="new"' in listed and 'action="/shelf/projects"' in listed
         assert c.post("/shelf/projects", data={"csrf": "틀림", "title": "x"}).status_code == 403
         assert "projecterr=empty" in str(c.post("/shelf/projects", data={"csrf": csrf, "title": "  "}).url)
         made = c.post("/shelf/projects", data={"csrf": csrf, "title": "다음 책 <b>메모</b>"})
         assert re.search(r"/shelf/p/[0-9a-f]{8}\?node=center&done=project$", str(made.url))
-        assert "새 프로젝트를 만들었습니다." in made.text and '<h1 class="pm-title">다음 책 &lt;b&gt;메모&lt;/b&gt;</h1>' in made.text
+        assert "프로젝트를 만들었습니다." in made.text and '<h1 class="pm-title">다음 책 &lt;b&gt;메모&lt;/b&gt;</h1>' in made.text
         # 모든 프로젝트에서 찾기: 프로젝트 → 노드 · 책으로 묶는다. 누르면 그 노드·책이 열린 지도로
         found = c.get("/shelf", params={"q": "제이콥스"}).text
-        assert '<h2><a href="/shelf/p/city">도시는 어떻게 태어났나</a>' in found and "찾은 프로젝트 1곳" in found
+        assert '<h2><a href="/shelf/p/city">도시는 어떻게 태어났나</a>' in found and "<p>「제이콥스」 1</p>" in found
         assert re.search(r'<a href="/shelf/p/city\?node=[^"]+&amp;book=\d{17}-[0-9a-f]{6}">인물</a>', found)
 
 
@@ -77,13 +77,13 @@ def test_project_page_map_panel_and_board(server_proc):  # noqa: F811
         assert '<section class="map-list" aria-label="노드 목록">' in page and 'id="map-data"' in page
         assert '<details class="pm-new" id="new-node"><summary class="btn primary-ish">+ 노드</summary>' in page
         assert '<optgroup label="내 서재">' in page and '<optgroup label="강과 사람">' in page  # 연결 노드로 고를 다른 프로젝트의 노드
-        assert '<h2 class="pp-title" id="pp-title" tabindex="-1">노드를 골라 주세요</h2>' in page and 'id="book-panel"' in page
+        assert '<h2 class="pp-title" id="pp-title" tabindex="-1">노드를 고르세요</h2>' in page and 'id="book-panel"' in page
         # 노드를 열면 패널에 그 노드의 정면 책장, 책을 열면 그 아래 게시판(iframe)
         node = c.get("/shelf/p/city", params={"node": ids["person_node"]}).text
         assert 'aria-current="true"' in node and 'aria-label="인물, 글 1개"' in node
         assert f'data-key="{ids["person"]}"' in node and f'href="/shelf/add?project=city&amp;node={ids["person_node"]}"' in node
-        assert "<summary>노드 설정(이름·색·컨텍스트·선)</summary>" in node and "<h3>선</h3>" in node and "<h3>컨텍스트</h3>" in node
-        assert '<span class="none">없음 — 이 노드의 책은 책에 붙인 컨텍스트만으로 읽습니다(그것도 없으면 일반 메모).</span>' in node  # 노드 머리의 컨텍스트(#96)
+        assert "<summary>⚙ 설정</summary>" in node and "<h3>선</h3>" in node and "<h3>컨텍스트</h3>" in node
+        assert "없음 — " not in node  # 노드에 컨텍스트가 없으면 머리에 아무것도 보이지 않는다(#97)
         thoughts = c.get("/shelf/p/city", params={"node": ids["ideas_node"]}).text
         assert 'aria-label="생각, 컨텍스트 생각 메모, 글 1개"' in thoughts
         assert '<span class="band top" aria-hidden="true">생각 메모</span>' in thoughts  # 책등 위 띠 = 컨텍스트 이름
@@ -97,7 +97,7 @@ def test_project_page_map_panel_and_board(server_proc):  # noqa: F811
         # 연결 노드: 원본의 책이 보이고, 책 추가는 원본 노드로
         link = next(n for n in LocalStore(data_dir).get_map("alice", "city").nodes if n.link)
         linked = c.get("/shelf/p/city", params={"node": link.id}).text
-        assert "연결 노드: 「내 서재」의 「문체」 노드를 가리킵니다." in linked and 'href="/shelf/add?project=common&amp;node=' in linked
+        assert "→ 「내 서재」의 「문체」" in linked and 'href="/shelf/add?project=common&amp;node=' in linked
         # 목록 보기(휴대폰·키보드): 노드 → 책
         listed = c.get("/shelf/p/city", params={"view": "list"}).text
         assert '<div class="pm" data-view="list">' in listed and f'<a href="/shelf/p/city?node={ids["person_node"]}&amp;book={ids["person"]}#book-panel">인물</a>' in listed
@@ -159,14 +159,14 @@ def test_map_edits_with_forms_and_script(server_proc):  # noqa: F811
         field = _query(with_ctx)["node"]
         changed = c.post(post, data={"csrf": csrf, "action": "contexts", "node": field, "ctx_name": "", "ctx_text": "고친 현장 메모",
                                      "ctx_from": ""})
-        assert "노드의 컨텍스트를 바꿨습니다." in changed.text and "<p>고친 현장 메모</p>" in changed.text
+        assert "컨텍스트를 저장했습니다." in changed.text and "<p>고친 현장 메모</p>" in changed.text
         too_long = c.post(post, data={"csrf": csrf, "action": "contexts", "node": field, "ctx_new": "가" * 501})
         assert "컨텍스트를 저장하지 못했습니다." in too_long.text
         c.post(post, data={"csrf": csrf, "action": "trash", "node": field})
         busy = c.post(post, data={"csrf": csrf, "action": "trash", "node": ids["person_node"]})
         assert "책이 꽂힌 노드는 휴지통으로 옮길 수 없습니다." in busy.text
         linked = c.post(post, data={"csrf": csrf, "action": "add_link", "target": "river:center"})
-        assert "연결 노드 「강과 사람」을 만들었습니다. 여기서 보거나 넣으면 원본에 들어갑니다." in linked.text
+        assert "연결 노드 「강과 사람」을 만들었습니다." in linked.text
         gone = c.post(post, data={"csrf": csrf, "action": "trash", "node": node})
         assert "노드를 휴지통으로 옮겼습니다." in gone.text and 'data-node="' + node not in gone.text
         # 스크립트(fetch, JSON): 노드 옮기기는 위치만 저장, 잘못되면 저자에게 보일 문장

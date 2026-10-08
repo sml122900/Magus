@@ -36,7 +36,7 @@ from magus.auth import JwtVerifier
 from magus.book.export import export_docx
 from magus.config import Settings
 from magus.ids import local_time, utcnow
-from magus.inbox import INBOX_TYPES, LimitError, mb, save_upload, size_text
+from magus.inbox import LimitError, mb, save_upload, size_text
 from magus.signing import sign, unsign
 from magus.store import Profile, Store
 from magus.webbooks import BookPages
@@ -107,6 +107,8 @@ label{display:inline-block;margin:4px 16px 4px 0;max-width:100%}select{width:aut
 label.off{color:var(--mute)}
 .qlist{list-style:none;padding:0;margin:12px 0}.qlist .card{margin:12px 0}.qlist .muted{color:var(--ink2)}
 details{margin:12px 0}summary{cursor:pointer;color:var(--ink2);padding:4px 0}
+ul.links{list-style:none;padding:0;margin:16px 0;display:grid;gap:8px}ul.links a{font-size:17px}
+.empty{font-size:17px;margin:16px 0 8px}
 form.inline{display:inline}
 form.busy{pointer-events:none}
 form.busy button::after{content:"";display:inline-block;width:14px;height:14px;margin-left:8px;vertical-align:-2px;
@@ -303,7 +305,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
             path = request.url.path
             if (request.method == "GET" and request.headers.get("sec-fetch-dest") == "document"
                     and request.headers.get("sec-fetch-mode") == "navigate" and path.startswith("/shelf/")
-                    and not path.startswith("/shelf/floor/") and not path.endswith("/docx")):
+                    and not path.startswith("/shelf/floor/") and not path.endswith("/docx") and "/files/" not in path):
                 at = safe_at(path + (f"?{request.url.query}" if request.url.query else ""))
                 if at:
                     return RedirectResponse(state_url(at=at), status_code=303)
@@ -370,8 +372,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
                          SESSION_TTL)
             return response
         if self.oauth is None:
-            return self._page("로그인", '<p class="msg err">웹 로그인이 설정되지 않았습니다(WEB_CLIENT_ID). 운영자에게 문의하세요.</p>',
-                              status=503)
+            return self._page("로그인", '<p class="msg err">로그인을 쓸 수 없습니다(운영자 설정).</p>', status=503)
         state, (verifier, challenge) = secrets.token_urlsafe(24), _pkce()
         try:
             target = await run_in_threadpool(self.oauth.authorize_url, state, challenge)
@@ -386,7 +387,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
         pending = unsign(request.cookies.get(OAUTH_COOKIE, ""), self.secret, "oauth")
         code, state = request.query_params.get("code"), request.query_params.get("state")
         if not pending or not code or not state or not hmac.compare_digest(str(pending.get("s")).encode(), state.encode()):
-            return self._page("로그인", '<p class="msg err">로그인 요청이 만료됐거나 맞지 않습니다. <a href="/login">다시 로그인</a></p>',
+            return self._page("로그인", '<p class="msg err">로그인 요청이 만료됐습니다. <a href="/login">다시 로그인</a></p>',
                               status=400)
         assert self.oauth is not None and self.verifier is not None
         try:
@@ -398,23 +399,14 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
         claims, reason = await run_in_threadpool(self.verifier.check, token)
         if claims is None:  # 토큰을 받아들이지 못함(서버 설정 문제일 가능성이 크다). 원인은 서버 로그에만
             log.warning("web login: token rejected (%s)", reason)
-            return self._page(
-                "로그인",
-                '<p class="msg err">로그인은 됐지만 Magus가 로그인 토큰을 받아들이지 못했습니다(401). '
-                "서버 설정 문제일 수 있습니다. 운영자에게 알려 주세요. 원인은 서버 로그에 있습니다.</p>"
-                '<p><a href="/login">다시 로그인</a></p>',
-                status=401,
-            )
+            return self._page("로그인", '<p class="msg err">로그인 토큰을 받아들이지 못했습니다(401).</p>'
+                              '<p><a href="/login">다시 로그인</a></p>', status=401)
         uid = self.verifier.user_of(claims)
         if uid is None:  # 토큰은 유효하지만 허용 목록 밖. 본인의 사용자 id를 보여 준다(운영자가 목록에 넣을 값)
             sub = str(claims.get("sub", ""))
             log.warning("web login: not allowed sub_hash=%s", hashlib.sha256(sub.encode()).hexdigest()[:10])
-            return self._page(
-                "로그인",
-                '<p class="msg err">로그인은 됐지만 이 계정은 Magus 허용 목록에 없습니다(403).</p>'
-                f"<p>운영자에게 아래 사용자 id를 알려 주세요.</p><p><code>{html.escape(sub)}</code></p>",
-                status=403,
-            )
+            return self._page("로그인", '<p class="msg err">허용 목록에 없습니다(403).</p>'
+                              f"<p>사용자 id <code>{html.escape(sub)}</code></p>", status=403)
         await run_in_threadpool(self._remember_email, uid, str(claims.get("sub", "")), tokens)
         response = RedirectResponse(str(pending.get("n") or "/shelf"), status_code=303)
         self._cookie(response, SESSION_COOKIE, sign({"uid": uid, "sid": secrets.token_hex(8)}, self.secret, "session",
@@ -483,19 +475,13 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
                 return RedirectResponse("/me?done=1", status_code=303)
         elif request.query_params.get("done") == "1":
             message = '<p class="msg">저장했습니다.</p>'
-        email = (f"<p>메일: {html.escape(profile.email)}</p>" if profile.email
-                 else "<p>메일: 아직 모릅니다(웹에서 로그인하면 채워집니다).</p>")
         body = (
             f'{message}<form method="post" action="/me" class="card">{self._csrf_input(session)}'
             f'<p><label>표시 이름 <input name="display_name" value="{html.escape(profile.display_name or "")}" '
             f'maxlength="{DISPLAY_NAME_MAX}"></label></p>'
-            "<p>위쪽 막대에 보이는 이름입니다. 비우고 저장하면 메일이 보입니다.</p>"
-            f'{email}<p class="muted">메일은 로그인한 계정의 것이라 여기서 바꾸지 않습니다.</p>'
+            f"<p>메일 {html.escape(profile.email or '—')}</p>"
             '<p><button class="primary">저장</button></p></form>'
-            '<h2>자주 쓰는 컨텍스트</h2><p><a href="/me/contexts">자주 쓰는 컨텍스트 보기·고치기·더하기</a> — '
-            "노드·책을 만들 때 단추로 붙이는, AI가 글을 읽는 방법입니다.</p>"
-            '<h2>올린 파일</h2><p><a href="/me/files">올린 파일 보기·올리기·지우기</a> — 책장에서 바로 올린 것 말고, '
-            "Claude에게 파일 이름으로 건넬 파일을 둡니다.</p>"
+            '<ul class="links"><li><a href="/me/contexts">자주 쓰는 컨텍스트</a></li><li><a href="/me/files">올린 파일</a></li></ul>'
         )
         return self._page("내 정보", body, session, 400 if message.startswith('<p class="msg err">') else 200)
 
@@ -506,7 +492,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
                 await self._form(request, session)
             except PermissionError:
                 return self._page("로그아웃", '<p class="msg err">잘못된 요청입니다.</p>', status=403)
-        response = self._page("로그아웃", '<p>로그아웃했습니다. <a href="/login">다시 로그인</a></p>')
+        response = self._page("로그아웃", '<p><a href="/login">로그인</a></p>')
         response.delete_cookie(SESSION_COOKIE, path="/")
         return response
 
@@ -519,20 +505,18 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
         files = self.store.list_inbox(uid)
         rows = "".join(
             f'<tr><td>{html.escape(f.name)}</td><td class="num">{size_text(f.size)}</td><td class="num">{local_time(f.modified)}</td>'
-            f"<td>{html.escape(INBOX_TYPES.get(Path(f.name).suffix.lower(), ''))}</td>"
             f'<td><form method="post" action="/inbox/delete" class="inline">{self._csrf_input(session)}'
             f'<input type="hidden" name="name" value="{html.escape(f.name)}"><button>지우기</button></form></td></tr>'
             for f in files
-        ) or '<tr><td colspan="5">비어 있습니다.</td></tr>'
+        )
         message = f'<p class="msg{" err" if error else ""}">{html.escape(flash)}</p>' if flash else ""
-        body = f"""{message}
-<p>사용 {mb(self.store.usage_bytes(uid))} / 한도 {mb(self.settings.max_user_bytes)} · 파일 한 개 한도 {mb(self.settings.max_upload_bytes)}</p>
+        table = (f'<table><tr><th>이름</th><th class="num">크기</th><th class="num">올린 시각</th><th></th></tr>{rows}</table>'
+                 if rows else '<p class="empty">파일이 없습니다.</p>')
+        body = f"""<p class="crumb"><a href="/me">← 내 정보</a></p>{message}
+<p>{mb(self.store.usage_bytes(uid))} / {mb(self.settings.max_user_bytes)}</p>
 <form method="post" action="/inbox/upload" enctype="multipart/form-data" class="card upload">{self._csrf_input(session)}
-<input type="file" name="files" multiple accept=".docx,.pdf,.md,.txt"> <button class="primary">올리기</button></form>
-<table><tr><th>이름</th><th class="num">크기</th><th class="num">올린 시각</th><th>쓰임</th><th></th></tr>{rows}</table>
-<p><a href="/me">← 내 정보</a></p>
-<p>문서는 책장의 가운데 노드에서, 논문은 그 논문을 둘 책에서 올리면 바로 쓰입니다. 여기서 올린 파일은 Claude에게 파일 이름으로 말씀하세요.
-예: "올린 파일 kremer1993.pdf를 「읽은 논문」 책에 원문 확인으로 넣어 줘. 쓸 부분은 「…」, 이유는 …"</p>
+<input type="file" name="files" multiple accept=".docx,.pdf,.md,.txt" aria-label="올릴 파일"> <button class="primary">올리기</button></form>
+{table}
 {UPLOAD_SCRIPT}"""
         return self._page("올린 파일", body, session, current="")
 

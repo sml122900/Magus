@@ -186,7 +186,7 @@ def web_message(store: Store, user: str, move: FloorMove, undone: bool = False, 
     else:
         out = f"{josa(name, '을/를')} {josa(_where(store, user, move.to_floor, move.to_node), '으로/로')} 옮겼습니다."
     if lost:
-        out += f" {scope_names(store, user, lost)} 올린 문서의 인용 점검은 이제 이 문헌을 보지 않습니다(자기 문헌과 연결된 문헌만 봅니다)."
+        out += f" {scope_names(store, user, lost)} 인용 점검에서 빠짐."
     return out
 
 

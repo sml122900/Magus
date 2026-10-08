@@ -145,4 +145,8 @@ def test_web_hides_trash_and_shows_who_chose_tags(server_proc):  # noqa: F811
         ideas = c.get("/ideas").text  # 예전 주소 → 이전으로 생긴 책
         styles = c.get("/styles").text
     assert "바다는 모든" in ideas and "도시는 만남의 밀도" not in ideas
-    assert styles.count('<p class="muted">AI가 뽑은 태그</p>') == 1 and styles.count('<p class="muted">저자가 정한 태그</p>') == 1
+    # 누가 태그를 정했나는 파일에 그대로 있고(#89), 게시판에는 제목·본문·첨부만 보인다(#97)
+    assert "AI가 뽑은 태그" not in styles and "저자가 정한 태그" not in styles and "끊는다" in styles
+    store = LocalStore(data_dir)
+    assert store.get_category_item("alice", STYLES, "20261005180731313-cccccc").tags_by == "author"
+    store.close()

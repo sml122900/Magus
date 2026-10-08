@@ -157,12 +157,12 @@ def test_questions_web_page(tmp_path):
             with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
                 cites = c.get("/login?next=/shelf/book/book").text  # 원고 책(#94): 인용 상태 탭 안에서 연다
                 cites = c.get("/shelf/book/book?tab=cites").text
-                assert '<a href="/shelf/book/book?tab=cites&view=questions"><b>답해 주실 질문 9건</b></a>' in cites
+                assert '<a href="/shelf/book/book?tab=cites&view=questions"><b>답해 주실 질문 9</b></a>' in cites
                 moved = c.get("/questions?project=book", follow_redirects=False)  # 옛 주소
                 assert moved.headers["location"] == "/shelf/book/book?tab=cites&view=questions"
                 page = c.get("/shelf/book/book?tab=cites&view=questions").text
-                assert "<h2>답해 주실 질문 9건</h2>" in page and "열림 9 · 원본 반영 대기 0 · 답함 0" in page
-                assert "<b>연도 불일치</b> · 열림" in page and "고를 수 있는 답: 맞다 / 다른 문헌 / 참고문헌에 없음" in page
+                assert "<h2>답해 주실 질문 9</h2>" in page and "열림 9 · 원본 반영 대기 0 · 답함 0" in page
+                assert "<b>연도 불일치</b> · 열림" in page and ">맞다 / 다른 문헌 / 참고문헌에 없음</p>" in page
                 assert "ref:" not in page and "fix_text" not in page  # 저자에게는 코드가 보이지 않는다
                 assert "<script>alert" not in page and "Evil &lt;script&gt;alert(1)&lt;/script&gt; title" in page
                 only = c.get("/shelf/book/book?tab=cites&view=questions&type=ab").text
