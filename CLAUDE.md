@@ -45,6 +45,10 @@
   도움말은 이어지는 질문(브라우저가 최근 3번을 함께, 3,000자, 저장 없음). 노드 삭제(웹만): 🗑 → 화면 안 확인 창 → 책·글·첨부·선째 휴지통,
   지도의 '휴지통'(`/shelf/p/<프로젝트>/trash`)에서 되살리기(가운데·다른 프로젝트가 연결 중·문헌 책은 막음, 영구 삭제 없음, MCP 도구 그대로).
   태그 `razor-c`·`razor-ab`·`razor-d`·`node-trash`·`p1-razor`, 결정 문서 `docs/decisions/razor-help.md`, 배포 `docs/deploy.md` 2-3절, status.md 0-21·0-22절.
+- **웹 수정 3건(2026-10-09, 사용자 요청 #98, 로컬만, 배포는 사용자 데모 확인 뒤)**: 도움말 대화를 브라우저(localStorage, 사용자별 열쇠)에 보관,
+  책 = 별도 페이지의 게시판(`magus/webboard.py`: 위치 표시·20개씩·글쓰기·글 보기, 지도 옆 iframe 없앰), 문서·수정본은 게시판 첨부 → files_list `첨부:<id>` → book_import,
+  웹의 글 고치기·원문 확인 체크 없앰, 글 🗑 → 프로젝트 휴지통에서 되살리기. instructions 규칙 7 수정본 문장 바꿈(커넥터 재연결). 태그 `board-1-help`·`board-2-pages`·`board-3-trash`
+  (status.md 0-23절, `docs/decisions/board-pages.md`, 검토 대기 4절 #98).
 - (고침 2026-10-06 밤) `tests/test_http.py::test_request_size_limit`의 Windows 간헐 실패: 머리만 보내고 응답을 먼저 읽게 고쳤다(status.md 7절).
 - 대기 사항: 계정·키·결정·아버지 docx처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), 저자 보고서 답변. 상세는 status.md에만 적는다.
 
@@ -302,7 +306,8 @@ data/index.sqlite
 ## MCP 도구 (이름 고정)
 
 ### 받은함 (`magus/inbox.py`) — P1
-- `files_list()` → 올린 파일(옛 받은함) 목록(이름·크기·올린 시각·쓰임)과 사용량/한도. *(P1에서 추가된 도구. 휴지통 도구 둘(#88), 카테고리 도구 일곱(#92), 저자 확인 질문지 둘(#84)까지 30개였고, #94에서 idea_delete·style_delete를 category_trash에 합치고 book_document를 더해 29개, #96에서 idea_add·style_add·ref_add를 category_put에, idea_search·style_search·ref_search를 category_search에 합쳐 **23개**(8,416토큰))*
+- `files_list()` → 올린 파일(옛 받은함) 목록(이름·크기·올린 시각·쓰임)과 사용량/한도, 그리고 게시판 글에 첨부한 문서(docx·pdf·md·txt, 새것부터 20개)를
+  `첨부:<첨부 id> · 이름 · 크기 · 시각 · 「책」 책의 글 「제목」`으로(#98). 파일 인자에 `첨부:<id>`를 주면 FileResolver가 그 첨부를 읽는다(`inbox.attached_file`, `Store.file_attachments`). *(P1에서 추가된 도구. 휴지통 도구 둘(#88), 카테고리 도구 일곱(#92), 저자 확인 질문지 둘(#84)까지 30개였고, #94에서 idea_delete·style_delete를 category_trash에 합치고 book_document를 더해 29개, #96에서 idea_add·style_add·ref_add를 category_put에, idea_search·style_search·ref_search를 category_search에 합쳐 **23개**(8,416토큰))*
   - 도구 문장에서는 '받은함' 대신 '올린 파일'이라고 쓴다(#94). 코드·폴더 이름(inbox)은 그대로.
 - 파일 인자(book_import의 path, category_put의 file, idea_add_conversation의 path)는 **받은함 파일 이름**을 받는다.
   - 원격(HTTP)에서는 이름만 받는다. 경로를 주면 "받은함에 없다" 오류다(서버 파일을 읽지 못하게).
@@ -470,6 +475,9 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
   규칙 4 "올린 문서의 원본은 저자의 파일(Word 등)이다. 장 수정안은 대화에서 제안하고, 저자가 원본 파일에 반영한다. book_write_chapter는 저자가 Magus의 올린 문서에 저장하라고 명시했을 때만 쓰고, …",
   규칙 6에 '올린 문서'(새)와 '컨텍스트 … 책은 꽂힌 노드의 것을 먼저, 책의 것을 이어 읽는다', 쓰지 않는 말에 '올린 원고'. 규칙 7·8·12의 '원고' → '올린 문서'. 규칙 5는 그대로.
   전후 전문은 `docs/decisions/contexts-texts.md` 0절.
+- 예외: **#98(2026-10-09, 사용자 지시 "규칙 7이 맞는지 확인하고 바꾸면 보고")로 규칙 7의 수정본 문장을 바꿨다**: "'수정본 올렸어'·'수정본 올려 줘'는 저자가 고친 문서(.docx·.pdf)를
+  게시판 글에 첨부했거나 올린 파일에 두었다는 뜻이다. files_list에서 book_outline 수정본 줄의 마지막 업로드보다 나중에 올라온 문서를 찾아 이 프로젝트(book_outline 첫 줄의 id)의
+  수정본으로 올린다(book_import, path는 files_list에 보이는 이름, new_edition=true)." 웹의 수정본 올리기 폼을 없앴기 때문이다(status.md 0-23절).
 - **instructions는 등록된 도구만 언급한다.** `build_instructions(등록된 도구 이름)`은 규칙 문장에 나오는 도구(`book_|ref_|idea_|style_|files_|category_` 이름)가 모두 등록된 규칙만 넣고, 번호는 다시 매긴다. 도구를 부르지 않는 규칙(#96 번호 5·6·10·11)은 언제나 실린다. 도구가 모두 등록되면 SPEC과 똑같아진다(`tests/test_instructions.py`).
 - 새 도구를 추가하면 그 도구가 필요한 규칙이 자동으로 instructions에 들어간다. 따로 손댈 것은 없다.
 
@@ -529,6 +537,11 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
     원고 책 `/shelf/book/<작업물>?tab=chapters|issues|cites|editions`(인용 상태 안에 `view=questions`, 수정본 이력 안에 `POST …/edition`과 리포트 `report=N`).
     문서 책 `/shelf/doc/<id>`(`?v=N` 이력, `POST …/redo` 다시 만들기, `…/docx`, 인쇄 CSS로 PDF). 책 설정 `/shelf/edit/ms.<id>`·`doc.<id>`(이름·색·위치), 휴지통 `/shelf/trash/ms.…`·`doc.…`.
     원고 책은 옮기지 않는다(가운데 노드 자체). 원고 책 휴지통은 원고만 옮기고 같은 id의 원고 없는 프로젝트를 남긴다. (#97에서 문헌 등록 폼 `POST /shelf/refs/register`를 없앴다.)
+  - **게시판 페이지(#98, 2026-10-09, `magus/webboard.py`)**: 책을 누르면 별도 페이지 `/shelf/<책>`(위치 표시 프로젝트 › 프로젝트 이름 › 노드 › 책, 한 줄 = 제목·📎/그림 미리보기·날짜,
+    최신 글 위 20개씩, 오른쪽 위 '글쓰기'), 글쓰기 `/shelf/write/<책>`(끌어다 놓기·고르기·`capture` 사진 찍기), 글 보기 `/shelf/<책>/<글>`(본문·사진·파일 목록·🗑 화면 안 확인 창 →
+    `POST …/trash`). 지도 옆 패널의 게시판 자리(iframe)·EMBED·주소창 넘기기는 없앴고 옛 `?at=`·`/shelf/add`는 그 페이지로 넘긴다. 책장에는 책 목록과 '새 책' 하나,
+    웹의 수정본 올리기·글 고치기·원문 확인 체크는 없다. 프로젝트 휴지통에 노드와 글(되살리기). 도움말 대화는 브라우저 localStorage(사용자별 열쇠, 20턴·24시간·새 대화·로그아웃).
+    아래 #94~#96 설명 중 '책 추가'·'수정본 이력 안 POST …/edition'·'게시판(iframe)'은 #98 전 기록이다.
   - **컨텍스트(#96, `magus/webcontexts.py`)**: '+ 노드'·노드 설정·새 책·책 설정(올린 문서·만든 문서 포함)에 컨텍스트 칸(자주 쓰는 컨텍스트 단추: 누르면 붙고 다시 누르면 떨어짐,
     붙인 사본은 그 자리에서 고침, 줄마다 '자주 쓰는 컨텍스트로 등록'·'떼기', 직접 적기). 노드 패널·게시판(노드 「…」 → 이 책)·올린 문서·만든 문서 머리에 컨텍스트 이름(누르면 전문).
     책등 위 띠 = 컨텍스트 이름(첫 이름 + 외 N). 내 정보 → 자주 쓰는 컨텍스트 `/me/contexts`(고치기·지우기·새로 더하기). 책 추가 = 새 책 / 문서 올리기 / 올린 문서에서 만든 문서.
