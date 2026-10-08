@@ -160,6 +160,7 @@ sudo docker tag magus:rollback-ec6c40b magus:latest && sudo docker compose up -d
 
 | 날짜(KST) | 반영 | 반영 전 → 후 | 확인 |
 |---|---|---|---|
+| 2026-10-09 03:13 | `p1-board`(#98 게시판 페이지·도움말 대화 보관·웹 글 고치기/원문 확인 체크 없앰 + 배포 전 수정: 사진 썸네일·크게 보기, 원문 확인 떼기(category_edit), 규칙 7 문장, 휴대폰 화면. 데이터 이전 없음) | `ed15ffb`(`p1-razor`) → `0e0c89e` | 서버 키 줄 개수 1(값 출력 없음). 반영 전 백업 스냅샷 `cf6daea4`(2,321개, 오류 없음). healthy·재시작 0, 허용 2명, `/healthz` ok, `/mcp` 401 + resource_metadata, 인덱스 v20, Pillow 12.3.0. data 2,321개 해시 같음(index 제외), `.env` 해시 같음. 수치 전후 같음: default 문헌 299·원문 확인 0·미확인 297·미연결 0·확인 요청 86·수정본 0, father 337·0·335·5·129·수정본 3(E3). 전체 현황 글자까지 같음. `magus thumbs --all-users`: 서버에 사진 첨부가 없어 만듦 0, 그 뒤 원본 해시 같음(.thumb 제외 2,321개). 컨테이너 안 /tmp 임시 점검 13/13(게시판 사진 썸네일·📎·글 휴지통·되살리기·노드 휴지통·원문 확인 붙이기/떼기·files_list 첨부·도구 23개, 실사용자 공간에 시험 글 없음). 메모리 111.6MiB, 디스크 76%. 되돌리기 이미지 `rollback-ed15ffb` 더함(`efc19ac`·`ec6c40b`·`e08bb79` 유지). 서버 기록 `/root/deploy-20261009-board/`(ROLLBACK.txt) |
 | 2026-10-09 00:33 | `p1-razor`(#97 오캄의 면도날 + 도움말 + 이어지는 질문 + 노드 삭제, 데이터 이전 없음) | `efc19ac`(`p1-contexts`) → `ed15ffb` | 서버 키 줄 개수 1(값 출력 없음). 반영 전 백업 스냅샷 `65e81c66`(2,320개, 오류 없음). healthy·재시작 0, 허용 2명, `/healthz` ok, `/mcp` 401 + resource_metadata, `/help/ask` 로그인 없이 401, 인덱스 v20. data 2,320개 해시 같음(index 제외), `.env` 해시 같음. 수치 전후 같음: default 문헌 299·미확인 297·미연결 0·확인 요청 86·수정본 0, father 337·335·5·129·수정본 3(E3). 전체 현황 글자까지 같음. 컨테이너 안 /tmp 임시 점검 9/9(실사용자 공간에서 노드 삭제 시험 안 함). 도움말 실제 호출 1회: 입력 50·캐시 쓰기 15,749·출력 173토큰, 5.0초. 메모리 127.5MiB, 디스크 69%. 되돌리기 이미지 `rollback-efc19ac` 더함(`ec6c40b`·`e08bb79` 유지). 서버 기록 `/root/deploy-20261009-razor/` |
 | 2026-10-08 21:47 | `p1-contexts`(#93 층 + #94 책 종류 + #95 프로젝트·지도 + #96 컨텍스트 묶음, 데이터 이전 `magus maps apply --all-users`) | `ec6c40b`(`p1-profile-email`) → `efc19ac` | 반영 전 백업 스냅샷 `b390a042`(1,207개, 오류 없음). 옛 코드 전체 현황: default 미확인 문헌 297·열린 확인 요청 86, father 335편·미연결 5·확인 요청 129. 이전(멈춘 시간 약 1분): 두 사용자 모두 '전후 비교: 같음'·'옛 규칙 인용 점검과 같음'(default 생각 → 글 458·문체 → 글 4·휴지통 글 4·문헌 299, father 문헌 337·수정본 3). 올린 뒤 전체 현황 집계 줄 전후 같음. healthy·재시작 0, 허용 2명, `/healthz` ok, `/mcp` 401, 인덱스 v20. data 1,207개 중 원고 장·확인 요청·결정·원본·올린 파일 등 103개 해시 같음, 바뀜 638(문헌 bib.json 636·project.json 2), 옮겨짐 466(생각·문체 파일 → 책의 글), 새로 478(책·글·지도·floors.json·휴지통 글), `.env` 해시 같음. 컨테이너 안 임시 서버(/tmp, 인증 끔)로 프로젝트 목록·지도·노드 패널·노드 → 책 컨텍스트 순서·자주 쓰는 컨텍스트·올린 문서·옛 주소 넘김 확인 뒤 정리. 메모리 magus 125.8MiB, 디스크 61%. 되돌리기 이미지 `rollback-ec6c40b` 더함, `rollback-ebb98fc` 삭제, `rollback-e08bb79` 유지. 서버 기록 `/root/deploy-20261008-contexts/`(ROLLBACK.txt) |
 | 2026-10-06 18:28 | `p1-profile-email`(표시 이름 메일: userinfo 주소를 OIDC 디스커버리에서, 못 받으면 검증한 id_token) | `e08bb79`(`p1-shelf-tweak`) → `ec6c40b` | 원인: WorkOS의 oauth-authorization-server 메타데이터에 userinfo_endpoint가 없어 userinfo를 부르지 않음(로그 email=no 3회, profile.json에 email 없음). 반영 전 백업 `f02024b5`(1,200개, 오류 없음). healthy·재시작 0, 허용 2명, `/healthz` ok, `/mcp` 401, data 1,200개·`.env` 해시 같음, 인덱스 v16. 컨테이너 안에서 userinfo 주소 찾음·가짜 토큰 401 확인. 되돌리기 이미지 `rollback-e08bb79` 더함, `rollback-05a2659` 삭제, `rollback-ebb98fc` 유지. 서버 기록 `/root/deploy-20261006-profile-email/` |
@@ -196,6 +197,24 @@ instructions 규칙 12(커넥터 재연결), 의존성 `anthropic`(이미지 다
 **되돌리기**: 데이터 이전이 없으므로 이미지만 되돌린다. `docker tag magus:rollback-efc19ac magus:latest && docker compose up -d --no-build`(또는 `efc19ac`로 reset --hard 뒤 build).
 옛 코드는 첨부 폴더(`files/`)·`status_by`를 읽지 않고 무시한다(로컬 사본에서 확인: reindex·전체 현황 정상, 체크한 원문 확인은 그대로 확인으로 보인다).
 배포 뒤 웹에서 붙인 첨부는 옛 화면에 보이지 않을 뿐 폴더에 그대로 있다.
+
+### 2-4. 게시판 페이지 + 배포 전 수정(#98) — 2026-10-09 사용자 승인
+
+반영 전 서버는 `p1-razor`(`ed15ffb`), 반영할 것은 태그 `p1-board`(`0e0c89e`). **데이터 이전 없음**: 저장 형식 그대로이고, 사진 첨부의 썸네일
+(`…/files/<글>/<첨부 id>/.thumb/thumb.jpg`, 파생값)과 bib.json `status_by.via=chat`만 새로 생긴다. 인덱스 v20 그대로. 의존성 `pillow`(이미지 다시 빌드).
+바뀌는 것: 책 = 별도 페이지의 게시판(위치 표시·20개씩·글쓰기·글 보기), 지도 옆 iframe 없앰, 웹의 수정본 올리기·글 고치기·원문 확인 체크 없앰,
+글 🗑 → 프로젝트 휴지통에서 되살리기, 게시판 첨부 → files_list `첨부:<id>` → book_import, instructions 규칙 7, category_edit `checked`·`item_id`,
+사진 썸네일·크게 보기, 도움말 대화 브라우저 보관. MCP 도구 수 23개 그대로(설명 바뀜) → **커넥터 재연결**.
+**실제 사용자 공간에서는 시험 글을 쓰지 않는다**(점검은 컨테이너 안 /tmp 임시 서버에서만).
+
+1. **기록·백업**(`private/tmp/deploy-board/pre.sh`): head, `.env` 해시·키 줄 개수, data 해시(index 제외), 사진 첨부 수, 옛 코드 수치·전체 현황, 손 백업 스냅샷.
+2. **되돌리기 이미지·빌드**(`build.sh`): `magus:rollback-ed15ffb` 태그 → 번들 fetch → `git checkout -B master p1-board`(`p1-razor` 포함 확인) → `docker compose build magus`.
+3. **올리기·확인**(`up.sh`): `up -d` → healthy·허용 2명·`/healthz`·`/mcp` 401 → 수치·전체 현황 전후 → data 해시(아직 아무도 쓰지 않음) →
+   `docker compose exec magus /app/.venv/bin/magus thumbs --all-users` → `.thumb/`을 뺀 data 해시가 반영 전과 같은지(원본 그대로) → 컨테이너 안 /tmp 임시 점검(`smoke.py`).
+4. **커넥터 재연결 한 번**(도구 설명·instructions 규칙 7이 바뀜).
+
+**되돌리기**: 데이터 이전이 없으므로 이미지만 되돌린다. `docker tag magus:rollback-ed15ffb magus:latest && docker compose up -d --no-build`.
+옛 코드는 첨부 폴더에서 파일만 세므로 `.thumb/` 하위 폴더를 무시한다(첨부 목록 그대로). 배포 뒤 대화로 뗀 원문 확인 표시는 파일(bib.json status)에 그대로 남는다.
 
 ## 3. 알림 확인
 
