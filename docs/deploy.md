@@ -170,12 +170,15 @@ sudo docker tag magus:rollback-ec6c40b magus:latest && sudo docker compose up -d
 | 2026-10-06 01:38 | `p1-reupload`(#69~#77 임포트 보완, #76 다시 올리기, #79 포함) | `896633c`(`p1-auth-audience`) → `4df2720` | 반영 전 백업 스냅샷 `a3322693`(798개, 오류 없음). 인덱스 v12 자동 재생성(01:39:52), healthy, `/healthz` ok, `/mcp` 401 + resource_metadata, data 798개 해시 같음(index 제외), `.env` 해시 같음, default outline 수치 같음. 메모리 magus 123MiB, 호스트 available 440MB. 되돌리기 이미지 `magus:rollback-896633c`, 옛 `rollback-21b4e2a` 삭제. 서버 기록 `/root/deploy-20261006-reupload/`(ROLLBACK.txt) |
 | 2026-10-06 00:53 | `p1-auth-audience`(토큰 aud 검사, 결정 #79) + 이력 교체 | `21b4e2a`(옛 이력) → `896633c`. 같은 상태의 새 이력 커밋은 `78c9668` | `/healthz` ok, `/mcp` 401 + resource_metadata, 컨테이너 안에서 trip_ai·섞인 aud 거부, 다른 `AUTH_AUDIENCE`로 시작 실패(종료 2), data 798개 해시 같음, `docs/reports` 객체 없음. 서버 기록은 `/root/deploy-20261006-auth-audience/`(ROLLBACK.txt) |
 
-### 2-3. 오캄의 면도날 + 도움말(#97) — 사용자 승인 뒤
+### 2-3. 오캄의 면도날 + 도움말 + 노드 삭제(#97) — 2026-10-09 사용자 승인
 
-반영 전 서버는 `p1-contexts`(`efc19ac`), 반영할 것은 master 끝(태그 `razor-c`·`razor-ab`·`razor-d` 뒤). **데이터 이전 없음**: 기존 파일 형식은 그대로이고
-새 폴더(`files/`·`trash/shelf/attachments/`)와 bib.json의 선택 키 `status_by`만 새로 생긴다(쓰기가 있을 때만). 인덱스 버전 그대로(v20).
+반영 전 서버는 `p1-contexts`(`efc19ac`), 반영할 것은 태그 `p1-razor`(`razor-c`·`razor-ab`·`razor-d`·이어지는 질문·`node-trash` 뒤). **데이터 이전 없음**:
+기존 파일 형식은 그대로이고 새 폴더(`files/`·`trash/shelf/attachments/`·노드째 휴지통 `trash/shelf/nodes/<프로젝트>/<노드>/`)와
+bib.json의 선택 키 `status_by`, 노드 휴지통 기록의 선택 키(`_trash.categories`·`documents`·`map_before`·`map_after_sha`)만 새로 생긴다(쓰기가 있을 때만). 인덱스 버전 그대로(v20).
 바뀌는 것: 웹 화면 문구(설명 → 도움말), 게시판 새 글·고치기 = 제목·본문·첨부, 문헌 글의 '원문 확인' 체크, 원문 확인 넣기 폼(`/shelf/refs/register`) 없음,
-첨부 보기 `/shelf/<책>/<글>/files/<id>`, 도움말 `POST /help/ask`, instructions 규칙 12(커넥터 재연결), 의존성 `anthropic`(이미지 다시 빌드).
+첨부 보기 `/shelf/<책>/<글>/files/<id>`, 도움말 `POST /help/ask`(이어지는 질문: 최근 3번·3,000자), 노드 삭제(🗑·확인 창·`/shelf/p/<프로젝트>/trash` 되살리기),
+instructions 규칙 12(커넥터 재연결), 의존성 `anthropic`(이미지 다시 빌드). MCP 도구 수·설명은 그대로(23개).
+**실제 사용자 공간에서는 노드 삭제를 시험하지 않는다**(시험은 로컬 시험본과 컨테이너 안 /tmp 임시 서버에서만).
 
 0. **사용자 할 일(배포 전)**: 서버 `/opt/magus/deploy/.env`에 `ANTHROPIC_API_KEY=<키>`를 직접 넣는다(대화창에 붙이지 않는다. `=` 앞뒤 공백 없이).
    없으면 도움말만 "지금은 도움말을 쓸 수 없어요."이고 다른 기능은 그대로다. 선택: `MAX_ATTACH_MB`(기본 20)·`HELP_DAILY_LIMIT`(기본 30).
