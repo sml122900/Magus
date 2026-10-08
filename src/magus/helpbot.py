@@ -54,7 +54,7 @@ SCREENS = {
     "add": "책 추가", "new_book": "새 책", "book_settings": "책 설정",
     "doc_chapters": "올린 문서 · 장 목록", "doc_issues": "올린 문서 · 확인 요청", "doc_cites": "올린 문서 · 인용 상태",
     "doc_questions": "올린 문서 · 답해 주실 질문", "doc_editions": "올린 문서 · 수정본 이력", "made_doc": "올린 문서에서 만든 문서",
-    "me": "내 정보", "files": "올린 파일", "contexts": "자주 쓰는 컨텍스트", "other": "기타",
+    "me": "내 정보", "files": "올린 파일", "contexts": "자주 쓰는 컨텍스트", "node_trash": "휴지통(지운 노드)", "other": "기타",
 }
 _TABS = {"issues": "doc_issues", "cites": "doc_cites", "editions": "doc_editions"}
 
@@ -72,7 +72,7 @@ def screen_key(path: str, query: str = "") -> str:
         return "projects"
     head = rest[0]
     if head == "p":
-        return "map"
+        return "node_trash" if rest[2:3] == ["trash"] else "map"
     if head in ("add", "new"):
         return {"add": "add", "new": "new_book"}[head]
     if head == "edit":

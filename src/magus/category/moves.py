@@ -140,6 +140,13 @@ def trash_node(store: Store, user: str, floor: str, node_id: str, note: str) -> 
     return node, _refs_changed(store, user, before) if node.link else []
 
 
+def trash_node_with_books(store: Store, user: str, floor: str, node_id: str, note: str) -> tuple[MapNode, list[str]]:
+    """웹의 노드 삭제(#97): 책·글·첨부째 휴지통으로. (옮긴 노드, 그 문헌을 더는 보지 않게 된 원고(연결 노드를 지웠을 때))."""
+    before = _scopes(store, user)
+    node = store.trash_node_with_books(user, floor, node_id, note)
+    return node, _refs_changed(store, user, before) if node.link else []
+
+
 def scope_names(store: Store, user: str, projects: list[str]) -> str:
     return "·".join(floor_name(store, user, p) for p in projects)
 
@@ -226,6 +233,10 @@ def error_message(e: MoveError | MapError, polite: bool) -> str:
         "link_node": ("연결 노드에는 책을 놓지 않습니다. 원본 노드에 놓입니다.", "연결 노드에는 책을 놓지 않는다."),
         "ms_center": ("올린 문서가 든 책은 가운데 노드에만 둡니다.", "올린 문서가 든 책은 가운데 노드에만 둔다."),
         "unknown_book": ("그 책이 이 프로젝트에 없습니다.", "그 책이 이 프로젝트에 없다."),
+        # 노드 삭제(#97, 웹): 다른 프로젝트가 연결 중인 노드, 문헌 글이 든 책이 꽂힌 노드
+        "linked": (f"{info.get('projects', '')}에서 연결하고 있어 지울 수 없습니다.",
+                   f"{info.get('projects', '')}의 연결 노드가 가리키고 있어 옮기지 않았다."),
+        "has_refs": (f"문헌 글이 든 책 「{name}」이 있어 지울 수 없습니다.", f"문헌 글이 든 책 「{name}」이 있어 옮기지 않았다."),
         "bad_context": ("컨텍스트를 저장하지 못했습니다. 하나에 500자까지, 노드·책마다 4개까지입니다.",
                         "컨텍스트는 하나에 500자까지, 노드·책마다 4개까지다."),
         "ctx_register": ("자주 쓰는 컨텍스트로 등록하지 못했습니다. 이름을 적었는지, 같은 이름이 이미 있는지 확인해 주세요.",

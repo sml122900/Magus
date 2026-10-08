@@ -264,7 +264,8 @@ class ShelfMixin:
             items.append(TrashItem(kind, item_id, at, mark.get("note", ""), preview, mark.get("with")))  # type: ignore[arg-type]
         for ref, data in self._trashed_nodes(user_id):  # type: ignore[attr-defined]  # 지도의 노드(#95)
             mark = data.get("_trash") or {}
-            preview = "연결 노드" if data.get("link") else f"노드 「{data.get('name', '')}」"
+            books = len(data.get("books") or [])  # 책째 옮긴 노드(#97)면 책 수
+            preview = "연결 노드" if data.get("link") else f"노드 「{data.get('name', '')}」" + (f" · 책 {books}권" if books else "")
             items.append(TrashItem("node", ref, mark.get("at", ""), mark.get("note", ""), preview))
         return sorted(items, key=lambda i: i.trashed_at, reverse=True)
 

@@ -416,6 +416,18 @@ class MapNode:
 
 
 @dataclass(frozen=True)
+class NodeTrashInfo:
+    """웹의 노드 삭제 확인 창에 보일 것(#97). blocked: 옮길 수 없는 까닭 코드(center | linked | has_refs | unknown_book), 없으면 None."""
+
+    node: MapNode
+    books: int
+    items: int
+    blocked: str | None = None
+    linked_from: tuple[str, ...] = ()  # 이 노드를 가리키는 연결 노드가 있는 프로젝트 이름
+    refs_book: str = ""  # 문헌 글이 든 책 이름
+
+
+@dataclass(frozen=True)
 class ProjectMap:
     """프로젝트 하나의 지도(#95): 노드와 선. stored: 지도 파일이 있나(없으면 지금 배치에서 계산한 지도)."""
 
@@ -675,6 +687,12 @@ class Store(Protocol):
         ...
     def set_ref_book(self, user_id: str, key: str, book: str, reason: str | None = None) -> Ref:
         """문헌 한 편을 다른 책으로(프로젝트도 그 책의 것). reason을 주면 bib.json "moved"에 옮긴 기록을 남긴다(#93-a)."""
+        ...
+    def node_trash_info(self, user_id: str, floor: str, node_id: str) -> NodeTrashInfo | None:
+        """웹의 노드 삭제 확인 창(#97): 책·글 수와 막는 까닭(가운데·다른 프로젝트가 연결 중·문헌 글이 든 책)."""
+        ...
+    def trash_node_with_books(self, user_id: str, floor: str, node_id: str, note: str) -> MapNode:
+        """노드를 책·글·첨부·문서째 휴지통으로(#97, 웹). 되살리기는 restore_trash("node", …)."""
         ...
     def set_ref_status(self, user_id: str, key: str, status: str) -> Ref:
         """원문 확인 표시만 바꾼다(#97, 웹의 '원문 확인' 체크). 쓸 부분·전문·서지는 그대로. bib.json "status_by"에 누가·언제."""

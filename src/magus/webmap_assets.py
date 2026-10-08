@@ -101,6 +101,12 @@ list-style:none;position:relative}
 .pp-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
 .pp-title{margin:4px 0;font-size:22px}.pp-title:focus{outline:none}.pp-title:focus-visible{outline:3px solid var(--primary)}
 .pp-kind{color:var(--ink2)}
+.node-del{position:relative;margin-left:auto}
+.node-del>summary{list-style:none;display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;border-radius:9999px;
+cursor:pointer;font-size:20px}.node-del>summary::-webkit-details-marker{display:none}.node-del>summary:hover{background:var(--soft)}
+.del-box{position:absolute;right:0;top:48px;z-index:30;width:min(340px,80vw);background:var(--canvas);border:1px solid var(--line);
+border-left:4px solid var(--ruby);border-radius:10px;padding:4px 16px;box-shadow:0 8px 24px rgb(0 0 0/.18)}
+.del-box p{margin:10px 0}
 .pp-link{background:var(--soft);border-radius:8px;padding:8px 12px}
 .pm-panel .case{margin:12px 0}.pm-panel .books{padding:26px 10px 0}
 .pp-hint{color:var(--ink2);font-size:15px;margin:4px 0 8px}
@@ -113,6 +119,14 @@ list-style:none;position:relative}
 .bp-frame{display:block;width:100%;height:max(560px,75vh);border:1px solid var(--line);border-radius:8px;background:var(--canvas)}
 a.book.lifting{opacity:.4}
 .ghost{position:fixed!important;left:0;top:0;pointer-events:none;z-index:50;transform:translate(-50%,-60%) rotate(-4deg);opacity:.92;list-style:none}
+"""
+
+# 노드 휴지통 화면(#97)
+TRASH_STYLE = """
+ol.trash-list{list-style:none;padding:0;margin:12px 0;display:grid;gap:8px}
+ol.trash-list li{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;background:var(--canvas);border:1px solid var(--line);
+border-radius:10px;padding:8px 16px}ol.trash-list time{color:var(--ink2);font-variant-numeric:tabular-nums}
+ol.trash-list form{margin-left:auto}
 """
 
 PROJECTS_STYLE = """
@@ -505,6 +519,12 @@ MAP_SCRIPT = r"""<script>
     stopBand(); unselect();
     var box = document.getElementById("new-node");
     if (box && box.open) { box.open = false; box.querySelector("summary").focus(); }
+    document.querySelectorAll("details.node-del[open]").forEach(function (d) { d.open = false; d.querySelector("summary").focus(); });
   });
+  // 노드 삭제 확인 창(#97): 열면 첫 단추로 초점을 옮긴다(패널은 새로 받아 바뀌므로 문서에서 잡는다. toggle은 거품이 없어 capture)
+  document.addEventListener("toggle", function (e) {
+    var d = e.target;
+    if (d.matches && d.matches("details.node-del") && d.open) { var b = d.querySelector(".del-box button"); if (b) b.focus(); }
+  }, true);
 })();
 </script>"""

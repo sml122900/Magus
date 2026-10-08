@@ -64,6 +64,7 @@ def test_help_docs_have_no_internal_or_tool_names():
 
 def test_screen_names_come_from_a_fixed_list():
     assert screen_key("/shelf") == "projects" and screen_key("/shelf/p/city") == "map"
+    assert screen_key("/shelf/p/city/trash") == "node_trash"
     assert screen_key("/shelf/book/x", "tab=issues") == "doc_issues" and screen_key("/shelf/book/x") == "doc_chapters"
     assert screen_key("/shelf/book/x", "tab=cites&view=questions") == "doc_questions"
     assert screen_key("/shelf/abc") == "board" and screen_key("/shelf/abc/def") == "board"

@@ -163,8 +163,10 @@ def test_map_edits_with_forms_and_script(server_proc):  # noqa: F811
         too_long = c.post(post, data={"csrf": csrf, "action": "contexts", "node": field, "ctx_new": "가" * 501})
         assert "컨텍스트를 저장하지 못했습니다." in too_long.text
         c.post(post, data={"csrf": csrf, "action": "trash", "node": field})
+        # 노드 삭제(#97): 책이 꽂힌 노드도 옮기지만, 다른 프로젝트(「강과 사람」)의 연결 노드가 가리키는 노드는 막는다
+        c.post("/shelf/p/river/map", data={"csrf": csrf, "action": "add_link", "target": f"city:{ids['person_node']}"})
         busy = c.post(post, data={"csrf": csrf, "action": "trash", "node": ids["person_node"]})
-        assert "책이 꽂힌 노드는 휴지통으로 옮길 수 없습니다." in busy.text
+        assert "「강과 사람」에서 연결하고 있어 지울 수 없습니다." in busy.text
         linked = c.post(post, data={"csrf": csrf, "action": "add_link", "target": "river:center"})
         assert "연결 노드 「강과 사람」을 만들었습니다." in linked.text
         gone = c.post(post, data={"csrf": csrf, "action": "trash", "node": node})

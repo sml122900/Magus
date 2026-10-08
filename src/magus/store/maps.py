@@ -14,13 +14,24 @@
 그래서 이전(magus maps apply)은 '보이는 지도를 파일로 적는 일'이고, 층 이전 전·뒤 어느 데이터에서 시작해도 같은 지도가 된다.
 지도 파일이 있어도 읽을 때마다 맞춘다: 없어진 책은 빼고, 노드에 없는 책은 이름이 같은 노드(없으면 새 노드)에 꽂아 보인다.
 지도를 바꾸는 쓰기 전에는 모든 프로젝트의 지도를 파일로 적는다(ensure_maps).
+
+노드 휴지통(trash/shelf/nodes/<프로젝트>/<노드>.json, 이어진 선과 함께):
+  - 도구(category_trash node)는 빈 노드만 옮긴다(trash_node). 연결 노드는 그 노드만, 원본은 그대로다.
+  - 웹(#97 노드 삭제, 2026-10-09)은 책이 꽂힌 노드도 옮긴다(trash_node_with_books): 그 노드의 책(글·첨부 폴더째)과 문서를
+    같은 이름의 폴더 trash/shelf/nodes/<프로젝트>/<노드>/{categories,documents}/로 옮기고 색인에서 뺀다(지우지 않는다).
+    옮기기 전 지도 파일 전문(map_before)과 옮긴 뒤 지도의 해시(map_after_sha)를 적어 두어, 그사이 지도가 그대로면 되살릴 때
+    지도 파일을 바이트까지 그대로 돌려놓는다(바뀌었으면 노드·선만 다시 넣는다. 반대쪽 노드가 없어진 선은 뺀다).
+    가운데 노드, 다른 프로젝트의 연결 노드가 가리키는 노드, 문헌 글이 든 책(인용 점검이 보는 기록)이 꽂힌 노드는 옮기지 않는다.
+  - 옛 코드는 노드 기록만 읽고(책 없이 되살린다) 같은 이름의 폴더는 건드리지 않는다(되돌리기 안전).
 """
 
 from __future__ import annotations
 
 import hashlib
 import math
+import os
 import re
+import shutil
 import sqlite3
 import threading
 from collections.abc import Callable
@@ -33,7 +44,8 @@ from magus.maps import (
     BOOK_NAMES, CENTER, LIBRARY, LIBRARY_NAME, MAP_SCHEMA, MAX_BOOKS_PER_NODE, MAX_NODES, NODE_GAP, RING, clean_node_name,
     global_key, local_key, name_key, valid_node_id,
 )
-from magus.store.base import Context, MapNode, ProjectMap
+from magus.category.rules import name_key as category_key
+from magus.store.base import Context, MapNode, NodeTrashInfo, ProjectMap
 from magus.store.fileio import locked, read_json, write_json
 
 _HEX = re.compile(r"#[0-9a-fA-F]{6}")
@@ -95,6 +107,21 @@ def link_id(project: str, node: str) -> str:
     return "l-" + hashlib.sha256(f"{project}/{node}".encode()).hexdigest()[:10]
 
 
+def _sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else ""
+
+
+def _prune_empty(folder: Path) -> None:
+    """비어 있는 폴더만 치운다(파일은 지우지 않는다)."""
+    if not folder.is_dir():
+        return
+    for d in sorted((d for d in folder.rglob("*") if d.is_dir()), key=lambda d: len(d.parts), reverse=True):
+        if not any(d.iterdir()):
+            d.rmdir()
+    if not any(folder.iterdir()):
+        folder.rmdir()
+
+
 class MapMixin:
     root: Path
     _db: sqlite3.Connection
@@ -104,6 +131,10 @@ class MapMixin:
     _existing: Callable[[str, Any], list[str]]
     ensure_layout: Callable[[str], Any]
     _write_layout: Callable[[str, Any], None]
+    _known: Callable[[str, Any], set[str]]  # FloorMixin
+    _drop_chunks: Callable[[str, str, str], None]  # ShelfMixin
+    _reindex_category: Callable[[str, Path, set[str]], None]  # CategoryMixin
+    _reindex_documents: Callable[[str], None]  # DocumentMixin
 
     # ---- 파일 ------------------------------------------------------------------------------
 
@@ -535,6 +566,107 @@ class MapMixin:
         assert before is not None
         return before
 
+    def _linked_from(self, user_id: str, floor: str, node_id: str) -> list[str]:
+        """그 노드를 가리키는 연결 노드가 있는 다른 프로젝트의 이름."""
+        layout = self._layout(user_id)
+        out = []
+        for other in self._known_floors(user_id, layout):
+            if other != floor and any(n.get("link") == {"project": floor, "node": node_id}
+                                      for n in self._reconcile(user_id, other, layout)[0]["nodes"]):
+                out.append(self._floor_title(user_id, other) or other)
+        return out
+
+    def _node_books(self, user_id: str, node: dict[str, Any]) -> tuple[list[str], list[str], str | None, str]:
+        """(책 id들, 문서 id들, 막는 까닭 코드, 문헌 글이 든 책 이름)."""
+        cats: list[str] = []
+        docs: list[str] = []
+        for b in node.get("books") or []:
+            if b.startswith("doc."):
+                docs.append(b[4:])
+                continue
+            row = self._db.execute("SELECT name FROM categories WHERE user_id = ? AND id = ?", (user_id, b)).fetchone()
+            if row is None:  # 원고 책(가운데에만)이나 옛 기본 책: 노드째 옮기지 않는다
+                return cats, docs, "unknown_book", ""
+            if self._holds_refs(user_id, b):
+                return cats, docs, "has_refs", str(row[0])
+            cats.append(b)
+        return cats, docs, None, ""
+
+    @locked
+    def node_trash_info(self, user_id: str, floor: str, node_id: str) -> NodeTrashInfo | None:
+        """웹의 확인 창: 책·글 수와 막는 까닭. 지도를 바꾸지 않는다."""
+        shown = self.get_map(user_id, floor)
+        node = shown.node(node_id) if shown else None
+        if shown is None or node is None:
+            return None
+        if node.center:
+            return NodeTrashInfo(node, 0, 0, "center")
+        if node.link:
+            return NodeTrashInfo(node, 0, 0)
+        raw = next((n for n in self._reconcile(user_id, floor, self._layout(user_id))[0]["nodes"] if n["id"] == node_id), {})
+        cats, docs, blocked, refs_book = self._node_books(user_id, raw)
+        items = sum(int(self._db.execute("SELECT COUNT(*) FROM category_items WHERE user_id = ? AND category_id = ?",
+                                         (user_id, c)).fetchone()[0]) for c in cats)
+        linked = tuple(self._linked_from(user_id, floor, node_id))
+        if linked:
+            blocked = "linked"
+        return NodeTrashInfo(node, len(raw.get("books") or []), items, blocked, linked, refs_book)
+
+    @locked
+    def trash_node_with_books(self, user_id: str, floor: str, node_id: str, note: str) -> MapNode:
+        """노드를 그 책·글·첨부·문서째 휴지통으로(#97 노드 삭제, 웹). 연결 노드는 그 노드만(원본은 그대로).
+        막는 경우: 가운데 노드(center), 다른 프로젝트의 연결 노드가 가리키는 노드(linked), 문헌 글이 든 책(has_refs)."""
+        _, data = self._editable(user_id, floor)
+        node = self._node(data, node_id)
+        if node_id == CENTER:
+            raise MapError("center", "가운데 노드는 휴지통으로 옮기지 않는다")
+        if "link" in node:
+            return self.trash_node(user_id, floor, node_id, note)
+        linked = self._linked_from(user_id, floor, node_id)
+        if linked:
+            raise MapError("linked", "다른 프로젝트의 연결 노드가 가리키는 노드는 옮기지 않는다",
+                           projects="·".join(f"「{x}」" for x in linked))
+        cats, docs, blocked, refs_book = self._node_books(user_id, node)
+        if blocked:
+            raise MapError(blocked, "이 노드의 책은 노드째 옮기지 않는다", name=refs_book)
+        shown = self.get_map(user_id, floor)
+        before = shown.node(node_id) if shown else None
+        assert before is not None
+        map_path = self._map_path(user_id, floor)
+        map_before = map_path.read_bytes().decode("utf-8")
+        base = self._user_dir(user_id) / "trash" / "shelf" / "nodes" / floor
+        stem = node_id
+        if (base / f"{stem}.json").exists() or (base / stem).exists():
+            stem = f"{node_id}-{re.sub(r'[^0-9]', '', utcnow())}"
+        bundle = base / stem
+        items = 0
+        for cid in cats:
+            items += int(self._db.execute("SELECT COUNT(*) FROM category_items WHERE user_id = ? AND category_id = ?",
+                                          (user_id, cid)).fetchone()[0])
+            target = bundle / "categories" / cid
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(self._user_dir(user_id) / "shelf" / "categories" / cid), str(target))
+            with self._db:
+                for row in self._db.execute("SELECT id FROM category_items WHERE user_id = ? AND category_id = ?", (user_id, cid)).fetchall():
+                    self._drop_chunks(user_id, "category", f"{cid}/{row[0]}")
+                self._db.execute("DELETE FROM category_items WHERE user_id = ? AND category_id = ?", (user_id, cid))
+                self._db.execute("DELETE FROM categories WHERE user_id = ? AND id = ?", (user_id, cid))
+        for did in docs:
+            target = bundle / "documents" / did
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(self._user_dir(user_id) / "shelf" / "documents" / did), str(target))
+            with self._db:
+                self._db.execute("DELETE FROM documents WHERE user_id = ? AND id = ?", (user_id, did))
+                self._drop_chunks(user_id, "document", did)
+        edges = [e for e in data["edges"] if node_id in e]
+        data["nodes"] = [n for n in data["nodes"] if n["id"] != node_id]
+        data["edges"] = [e for e in data["edges"] if node_id not in e]
+        self._write_map(user_id, floor, data)
+        write_json(base / f"{stem}.json", {**node, "edges": [list(e) for e in edges], "_trash": {
+            "at": utcnow(), "note": note, "categories": cats, "documents": docs, "items": items,
+            "map_before": map_before, "map_after_sha": _sha(map_path)}})
+        return before
+
     def _drop_empty_node(self, user_id: str, floor: str, node_id: str) -> None:
         """옮기기로 생겼던 노드를 되돌리기 뒤에 치운다(비어 있고 연결 노드가 가리키지 않을 때만). 휴지통에 남기지 않는다."""
         layout = self._layout(user_id)
@@ -555,27 +687,72 @@ class MapMixin:
         return [(f"{p.parent.name}/{p.stem}", read_json(p)) for p in sorted(base.glob("*/*.json"))]
 
     def _restore_node(self, user_id: str, ref: str) -> list[str]:
-        floor, _, node_id = ref.partition("/")
-        path = self._user_dir(user_id) / "trash" / "shelf" / "nodes" / floor / f"{node_id}.json"
-        if not valid_node_id(node_id) or not valid_node_id(floor) or not path.exists():
+        """휴지통의 노드를 제자리(좌표)·선과 함께 되살린다. 책째 옮긴 노드(#97)면 책·글·첨부·문서도 제자리로.
+        반대쪽 노드가 없어진 선은 뺀다. 같은 이름의 책이 그사이 생겼으면 아무것도 옮기지 않고 ValueError."""
+        floor, _, stem = ref.partition("/")
+        base = self._user_dir(user_id) / "trash" / "shelf" / "nodes" / floor
+        path = base / f"{stem}.json"
+        if not valid_node_id(stem) or not valid_node_id(floor) or not path.exists():
             raise ValueError(f"휴지통에 노드 {ref}가 없다")
         record = read_json(path)
+        mark = record.get("_trash") or {}
+        node_id = str(record.get("id") or stem)
+        bundle = base / stem
+        cats = [c for c in mark.get("categories") or [] if isinstance(c, str)]
+        docs = [d for d in mark.get("documents") or [] if isinstance(d, str)]
         _, data = self._editable(user_id, floor)
         self._room(data)
-        node = {k: v for k, v in record.items() if k not in ("_trash", "edges")}
-        if any(n["id"] == node["id"] for n in data["nodes"]):
-            node["id"] = "n-" + new_id()
-        if "link" not in node:
-            node["books"] = []
-            if any("link" not in n and n["id"] != CENTER and name_key(n["name"]) == name_key(node.get("name", "")) for n in data["nodes"]):
-                node["name"] = f"{node.get('name', '노드')}(되살림)"[:20]
-        ids = {n["id"] for n in data["nodes"]}
-        data["nodes"].append(node)
-        restored = {_edge(node["id"], b if a == node_id else a) for a, b in record.get("edges") or [] if (b if a == node_id else a) in ids}
-        data["edges"] = sorted({*map(tuple, data["edges"]), *restored})
-        self._write_map(user_id, floor, data)
+        shelf = self._user_dir(user_id) / "shelf"
+        taken = {r[0] for r in self._db.execute("SELECT name_key FROM categories WHERE user_id = ? AND floor = ?", (user_id, floor))}
+        for cid in cats:  # 먼저 모두 살핀 뒤에 옮긴다(반쯤 되살린 채 남지 않게)
+            src = bundle / "categories" / cid / "category.json"
+            if not src.exists() or (shelf / "categories" / cid).exists():
+                raise ValueError(f"책 {cid}를 되살릴 수 없다(휴지통에 없거나 같은 책이 이미 있다)")
+            name = str(read_json(src).get("name") or "")
+            if category_key(name) in taken:
+                raise ValueError(f"「{name}」 책이 이미 있어 되살리지 못했다. 그 책 이름을 바꾼 뒤 되살린다", name)
+        for did in docs:
+            if not (bundle / "documents" / did / "document.json").exists() or (shelf / "documents" / did).exists():
+                raise ValueError(f"문서 {did}를 되살릴 수 없다(휴지통에 없거나 같은 문서가 이미 있다)")
+        for cid in cats:
+            (shelf / "categories").mkdir(parents=True, exist_ok=True)
+            shutil.move(str(bundle / "categories" / cid), str(shelf / "categories" / cid))
+        for did in docs:
+            (shelf / "documents").mkdir(parents=True, exist_ok=True)
+            shutil.move(str(bundle / "documents" / did), str(shelf / "documents" / did))
+        known = self._known(user_id, self._layout(user_id))
+        with self._db:
+            for cid in cats:
+                self._reindex_category(user_id, shelf / "categories" / cid, known)
+        if docs:
+            with self._db:
+                self._reindex_documents(user_id)
+        map_path = self._map_path(user_id, floor)
+        exact = (isinstance(mark.get("map_before"), str) and mark.get("map_after_sha") == _sha(map_path)
+                 and not any(n["id"] == node_id for n in data["nodes"]))
+        if exact:  # 그사이 지도가 그대로: 옮기기 전 지도 파일을 바이트까지 그대로
+            tmp = map_path.with_name(map_path.name + ".tmp")
+            tmp.write_bytes(str(mark["map_before"]).encode("utf-8"))
+            os.replace(tmp, map_path)
+            restored_id = node_id
+        else:
+            node = {k: v for k, v in record.items() if k not in ("_trash", "edges")}
+            if any(n["id"] == node["id"] for n in data["nodes"]):
+                node["id"] = "n-" + new_id()
+            if "link" not in node:
+                node["books"] = [*cats, *(f"doc.{d}" for d in docs)]
+                if any("link" not in n and n["id"] != CENTER and name_key(n["name"]) == name_key(node.get("name", "")) for n in data["nodes"]):
+                    node["name"] = f"{node.get('name', '노드')}(되살림)"[:20]
+            ids = {n["id"] for n in data["nodes"]}
+            data["nodes"].append(node)
+            restored = {_edge(node["id"], b if a == node_id else a) for a, b in record.get("edges") or []
+                        if (b if a == node_id else a) in ids}
+            data["edges"] = sorted({*map(tuple, data["edges"]), *restored})
+            self._write_map(user_id, floor, data)
+            restored_id = node["id"]
         path.unlink()
-        return [f"{floor}/{node['id']}"]
+        _prune_empty(bundle)
+        return [f"{floor}/{restored_id}"]
 
     # ---- 책 놓기 ------------------------------------------------------------------------------
 
