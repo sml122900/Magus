@@ -21,20 +21,22 @@
 - **야간 자율 작업(2026-10-06 밤, #92, 서버 배포 없음)**: 책장 화면(`/shelf`, 양장본 책장 + 게시판형 목록 + 검색, 태그 `shelf-web`), 저자의 카테고리·책 색·항목 제목(도구 21 → 28, 인덱스 v15, 태그 `shelf-categories`). #92는 사용자 확인(e만 바꿈). 아침 보완과 함께 2026-10-06 14:51 `p1-shelf`로 서버에 배포했다(status.md 0-10절).
 - **층·3D 책장(2026-10-07, 사용자 결정 #93 승인, 로컬만, 태그 `floors-local`)**: 작업물마다 책장의 한 층, 맨 위 공용 층. 카테고리(기본 포함)는 층에 꽂히고 옮긴다(#92-a 대체, `docs/decisions/floors.md`).
   인용 점검은 그 작업물 층 + 공용 문헌. 두 작업물이 쓰게 되어 공용으로 옮긴 문헌은 리포트 한 줄과 문헌 항목의 기록(시각·이유)으로 알린다(#93-a 더함). 이전은 `magus floors plan|apply|revert`.
-  **서버 배포 안 함: #94·#95·#96과 묶어 한 번에 배포한다**(서버 이전 한 번, 커넥터 재연결 한 번, `docs/deploy.md` 2-2절). 3D 책장 화면은 #95로 걷어 냈다.
+  **2026-10-08 #94·#95·#96과 묶어 배포했다(`p1-contexts`, 서버 이전 한 번, `docs/deploy.md` 2-2절)**. 3D 책장 화면은 #95로 걷어 냈다.
 - **모든 동작을 책장에서(2026-10-07 밤, 사용자 결정 #94, 확인 대기, 로컬만, 태그 `shelf-books-local`)**: 책 종류 원고 책·모음 책·문서 책, 층의 '책 추가', 원고 책 화면(탭 넷),
   출처 확인 문서(book_document, 내용은 서버가, Claude는 머리말만), 메뉴는 책장 하나·받은함은 내 정보의 '올린 파일'. 도구 30 → 29(10,904토큰), 인덱스 v19(`docs/decisions/bookshelf-all.md`, status.md 0-15절).
 - **층 → 프로젝트·마인드맵(2026-10-08, 사용자 결정 #95, 확인 대기, 로컬만)**: 프로젝트(옛 층) → 지도(노드·선) → 노드 → 책장(정면 2D) → 책 → 게시판.
   옛 공용 층은 프로젝트 「내 서재」(내부 id `common`), 공유는 연결 노드로. 지도 `shelf/maps/<프로젝트>.json`. 인용 점검은 자기 문헌 + 연결 노드가 가리키는 문헌.
   도구 29개 그대로(floor → project(+ node), 노드 일은 category_*에 합침, 10,900토큰), instructions 규칙 7·8·12·13. 웹은 프로젝트 목록 + 프로젝트 화면(지도 + 패널).
-  3D 책장 걷어 냄. 이전 `magus maps plan|apply|revert`(`docs/decisions/project-map.md`, 문구 전문 `project-map-texts.md`, status.md 0-18절). 서버 배포 안 함(#93·#94·#96과 묶음).
+  3D 책장 걷어 냄. 이전 `magus maps plan|apply|revert`(`docs/decisions/project-map.md`, 문구 전문 `project-map-texts.md`, status.md 0-18절). 2026-10-08 묶음 배포(`p1-contexts`).
 - **종류를 없애고 '컨텍스트'로(2026-10-08, 사용자 요청 #96, 확인 대기, 로컬만)**: 책에는 글이 쌓이거나 올린 문서가 들어 있다. 종류 이름(원고 책·모음 책·문서 책, 생각·문체·문헌)은
   저자에게 보이지 않고, AI가 읽는 법은 노드·책의 **컨텍스트**(저자가 적은 글, 사본)다. 자주 쓰는 컨텍스트(`shelf/contexts.json`, 처음 제공 「문체」·「원고」·「논문」·「생각 메모」).
   생각·문체는 책의 글(항목 파일)로, 문헌은 제자리 + 그 문헌이 든 책. 도구 29 → 23(글 넣기 category_put·찾기 category_search, 8,416토큰), instructions 머리말·규칙 2·3·5~9·11·12.
-  응답 머리에 컨텍스트 전문. 이전은 `magus maps apply`에 합침(`docs/decisions/contexts.md`, 문구 전후 `contexts-texts.md`, status.md 0-19절). 서버 배포 안 함(묶음).
+  응답 머리에 컨텍스트 전문. 이전은 `magus maps apply`에 합침(`docs/decisions/contexts.md`, 문구 전후 `contexts-texts.md`, status.md 0-19절). 2026-10-08 21:47 묶음 배포(`p1-contexts`).
   **사용자 답(2026-10-08 저녁)**: d·s는 바꿔서, 나머지 승인. d = 노드 → 책 순서로 컨텍스트를 이어 읽는다(합쳐 1,000자). s = 일반 기능의 '원고' → '올린 문서'
-  (instructions 머리말·1·4·6·7·8·12, 화면·도구 응답·설명). 도구 목록 8,450토큰, instructions 2,259토큰. #93~#96 묶음 배포는 사용자 직접 확인 대기(status.md 1절).
-- 서버(2026-10-06 18:28부터): master `p1-profile-email`(`ec6c40b`: 책장·카테고리 #92·질문지 #84·시험 수정·문헌 책등·상단 바 이름 + 메일 받기 수정). 되돌리기 기준은 `e08bb79`(이미지 `magus:rollback-e08bb79`, 그 앞 `magus:rollback-ebb98fc`). `74bbbf4`까지 갈 때는 이미지가 없어 코드로 빌드하고 **생각 파일의 제목 키를 먼저 정리한다**(status.md 0-10절, 서버 ROLLBACK.txt).
+  (instructions 머리말·1·4·6·7·8·12, 화면·도구 응답·설명). 도구 목록 8,450토큰, instructions 2,259토큰. #93~#96 묶음은 사용자 확인 뒤 배포했다(status.md 0-20절).
+- 서버(2026-10-08 21:47부터): master `p1-contexts`(`efc19ac`: #93 층 + #94 책 종류 + #95 프로젝트·지도 + #96 컨텍스트 묶음, 데이터 이전 `magus maps apply --all-users`, status.md 0-20절).
+  되돌리기 기준은 `ec6c40b`(`p1-profile-email`, 이미지 `magus:rollback-ec6c40b`, 그 앞 `magus:rollback-e08bb79`). **되돌릴 때는 먼저 새 코드로 `magus maps revert --all-users`**(서버 `/root/deploy-20261008-contexts/ROLLBACK.txt`).
+  (그 전 서버 2026-10-06 18:28~: `p1-profile-email`. `74bbbf4`까지 갈 때는 코드로 빌드하고 생각 파일의 제목 키를 먼저 정리한다, status.md 0-10절.)
   - 다음 배포도 docs/deploy.md "업데이트" 절차(`git fetch … master && git checkout -B master FETCH_HEAD`)로 한다.
 - (고침 2026-10-06 밤) `tests/test_http.py::test_request_size_limit`의 Windows 간헐 실패: 머리만 보내고 응답을 먼저 읽게 고쳤다(status.md 7절).
 - 대기 사항: 계정·키·결정·아버지 docx처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), 저자 보고서 답변. 상세는 status.md에만 적는다.
