@@ -5,6 +5,7 @@
 - 시스템 프롬프트 = 안내 몇 줄 + docs/help/*.md 전체(검색 없이 통째로). 프롬프트 캐싱(ephemeral)을 건다.
   Haiku 4.5의 캐시 최소 길이는 4,096토큰이라 도움말 문서가 그보다 짧으면 캐시가 걸리지 않는다(오류 없이). 내부 이름·도구 이름은 문서에 없다.
 - API로 보내는 것은 질문, 도움말 문서, 지금 화면 이름(정해 둔 목록 SCREENS의 이름만)뿐이다. 글·문서 내용·메일은 보내지 않는다.
+  이어지는 질문(2026-10-09): 브라우저가 들고 있던 최근 3번의 질문·답을 함께 보낸다(서버 저장 없음, 3,000자 상한). 문서는 캐시되는 앞부분, 대화는 그 뒤.
 - 로그인한 허용 사용자만(웹이 확인한다). 사용자별 하루 질문 수 HELP_DAILY_LIMIT(기본 30, 서버 시간대의 날짜 기준, 프로세스 메모리).
 - 키가 없거나 API 오류면 "지금은 도움말을 쓸 수 없어요."만 준다. 다른 기능과는 상관없다.
 - 로그에는 질문·답·메일을 남기지 않는다. 호출 수·토큰 수·응답 시간·오류 코드만.
@@ -30,6 +31,13 @@ UNAVAILABLE = "지금은 도움말을 쓸 수 없어요."
 QUOTA = "오늘 도움말 질문을 다 썼어요. 내일 다시 물어 주세요."
 EMPTY = "질문을 적어 주세요."
 QUESTION_MAX = 300
+BAD_REQUEST = "잘못된 요청입니다. 화면을 새로 고쳐 주세요."
+# 이어지는 질문(#97 m, 2026-10-09 사용자 답): 브라우저가 들고 있는 최근 주고받기(질문 + 답)를 새 질문과 함께 받는다.
+# 서버는 저장하지 않고, 최근 3번·합쳐 3,000자까지만 쓴다(넘으면 오래된 것부터 뺀다).
+HISTORY_TURNS = 3
+HISTORY_CHARS = 3000
+HISTORY_ITEMS_MAX = 20  # 이보다 긴 목록은 형식이 틀린 것으로 본다
+ANSWER_MAX = 1500  # 이전 답 하나의 글자 상한
 DEFAULT_DIR = Path(__file__).resolve().parents[2] / "docs" / "help"  # 저장소(Docker: /app)의 docs/help
 
 PREAMBLE = """너는 Magus 웹 화면의 도움말이다. Magus는 책을 쓰는 저자가 자기 자료(프로젝트·지도·노드·책·글)와 올린 문서를 관리하고 Claude 대화와 함께 쓰는 서비스다.
@@ -160,11 +168,15 @@ class HelpBot:
             self._client = anthropic.Anthropic(api_key=self.api_key, timeout=30.0, max_retries=1)
         return self._client
 
-    def ask(self, uid: str, question: str, screen: str) -> tuple[int, dict[str, Any]]:
-        """(HTTP 상태, JSON). 질문·답은 로그에 남기지 않는다."""
-        text = " ".join("".join(ch for ch in str(question) if ch.isprintable() or ch == "\n").split())[:QUESTION_MAX]
+    def ask(self, uid: str, question: str, screen: str, history: Any = None) -> tuple[int, dict[str, Any]]:
+        """(HTTP 상태, JSON). history: 브라우저가 보낸 이전 주고받기 [{"q", "a"}](없으면 None). 질문·답은 로그에 남기지 않는다."""
+        text = _one_line(question)[:QUESTION_MAX]
         if not text:
             return 400, {"ok": False, "error": EMPTY}
+        try:
+            pairs = clean_history(history)
+        except ValueError:
+            return 400, {"ok": False, "error": BAD_REQUEST}
         if not self.available:
             log.info("help unavailable user=%s code=%s", uid, "no_key" if not self.api_key else "no_docs")
             return 503, {"ok": False, "error": UNAVAILABLE}
@@ -176,7 +188,7 @@ class HelpBot:
         try:
             response = self._api().messages.create(
                 model=self.model, max_tokens=self.max_tokens, system=self.system(),
-                messages=[{"role": "user", "content": f"지금 화면: {screen}\n\n질문: {text}"}],
+                messages=conversation(pairs, screen, text),
             )
         except Exception as e:  # noqa: BLE001 - 어떤 실패든 도움말만 꺼지고 다른 기능은 그대로
             self._refund(uid)
@@ -190,10 +202,43 @@ class HelpBot:
             self._refund(uid)
             log.warning("help error user=%s code=%s ms=%d", uid, response.stop_reason or "empty", ms)
             return 503, {"ok": False, "error": UNAVAILABLE}
-        log.info("help ok user=%s n=%d in=%d cache_write=%d cache_read=%d out=%d ms=%d stop=%s", uid, n,
+        log.info("help ok user=%s n=%d hist=%d in=%d cache_write=%d cache_read=%d out=%d ms=%d stop=%s", uid, n, len(pairs),
                  usage.input_tokens or 0, getattr(usage, "cache_creation_input_tokens", 0) or 0,
                  getattr(usage, "cache_read_input_tokens", 0) or 0, usage.output_tokens or 0, ms, response.stop_reason)
         return 200, {"ok": True, "answer": _plain(answer), "left": max(0, self.daily_limit - n)}
+
+
+def _one_line(text: Any) -> str:
+    return " ".join("".join(ch for ch in str(text) if ch.isprintable() or ch == "\n").split())
+
+
+def clean_history(raw: Any) -> list[tuple[str, str]]:
+    """브라우저가 보낸 이전 대화 → [(질문, 답)]: 최근 HISTORY_TURNS번, 합쳐 HISTORY_CHARS자(넘으면 오래된 것부터 뺀다).
+    없으면 []. 목록이 아니거나 항목이 {"q": 글, "a": 글}이 아니면 ValueError(형식이 틀린 요청)."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > HISTORY_ITEMS_MAX:
+        raise ValueError("history는 목록이어야 한다")
+    pairs = []
+    for item in raw:
+        if not isinstance(item, dict) or not isinstance(item.get("q"), str) or not isinstance(item.get("a"), str):
+            raise ValueError("history 항목은 {q, a} 글이어야 한다")
+        q = _one_line(item["q"])[:QUESTION_MAX]
+        a = "\n".join(_one_line(line) for line in item["a"].splitlines()).strip()[:ANSWER_MAX]
+        if q and a:
+            pairs.append((q, a))
+    pairs = pairs[-HISTORY_TURNS:]
+    while pairs and sum(len(q) + len(a) for q, a in pairs) > HISTORY_CHARS:
+        pairs.pop(0)
+    return pairs
+
+
+def conversation(pairs: list[tuple[str, str]], screen: str, question: str) -> list[dict[str, str]]:
+    """이전 주고받기 뒤에 새 질문. 화면 이름은 새 질문에만(문서는 system, 캐시되는 앞부분)."""
+    out: list[dict[str, str]] = []
+    for q, a in pairs:
+        out += [{"role": "user", "content": f"질문: {q}"}, {"role": "assistant", "content": a}]
+    return [*out, {"role": "user", "content": f"지금 화면: {screen}\n\n질문: {question}"}]
 
 
 def _plain(text: str) -> str:
@@ -229,9 +274,10 @@ HELP_SCRIPT = """<script>
   if (!root) return;
   var btn = root.querySelector(".help-btn"), box = root.querySelector(".help-box"), log = root.querySelector(".help-log");
   var form = root.querySelector(".help-form"), q = form.querySelector("textarea"), send = form.querySelector("button");
+  var turns = [];  // 최근 3번 주고받은 질문·답(이어지는 질문용). 이 창의 메모리에만 있다
   function show(on) {  // 닫으면 대화를 지운다(저장하지 않는다)
     box.hidden = !on; btn.setAttribute("aria-expanded", on ? "true" : "false");
-    if (on) { q.focus(); } else { log.textContent = ""; q.value = ""; btn.focus(); }
+    if (on) { q.focus(); } else { log.textContent = ""; q.value = ""; turns = []; btn.focus(); }
   }
   btn.addEventListener("click", function () { show(box.hidden); });
   root.querySelector(".help-close").addEventListener("click", function () { show(false); });
@@ -254,9 +300,13 @@ HELP_SCRIPT = """<script>
     add("me", text); q.value = "";
     var wait = add("bot wait", "…"); send.disabled = true;
     fetch("/help/ask", {method: "POST", credentials: "same-origin", headers: {"content-type": "application/json", "accept": "application/json"},
-      body: JSON.stringify({csrf: root.getAttribute("data-csrf"), q: text, screen: document.body.getAttribute("data-screen") || "", sub: inner()})})
+      body: JSON.stringify({csrf: root.getAttribute("data-csrf"), q: text, screen: document.body.getAttribute("data-screen") || "", sub: inner(),
+                            history: turns.slice(-3)})})
       .then(function (r) { return r.json().catch(function () { return {ok: false}; }); })
-      .then(function (res) { wait.className = "bot"; wait.textContent = res.ok ? res.answer : (res.error || "지금은 도움말을 쓸 수 없어요."); })
+      .then(function (res) {
+        wait.className = "bot"; wait.textContent = res.ok ? res.answer : (res.error || "지금은 도움말을 쓸 수 없어요.");
+        if (res.ok) { turns.push({q: text, a: res.answer}); turns = turns.slice(-3); }
+      })
       .catch(function () { wait.className = "bot"; wait.textContent = "지금은 도움말을 쓸 수 없어요."; })
       .then(function () { send.disabled = false; q.focus(); });
   });

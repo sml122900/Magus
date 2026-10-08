@@ -15,7 +15,9 @@ import httpx2
 import pytest
 from test_web import _csrf, server_proc  # noqa: F401 - 픽스처
 
-from magus.helpbot import DEFAULT_DIR, QUOTA, SCREENS, UNAVAILABLE, HelpBot, load_docs, screen_key, screen_label
+from magus.helpbot import (
+    BAD_REQUEST, DEFAULT_DIR, QUOTA, SCREENS, UNAVAILABLE, HelpBot, clean_history, load_docs, screen_key, screen_label,
+)
 from magus.instructions import CORE_NAMES, OLD_NAMES
 from magus.signing import sign
 
@@ -83,7 +85,7 @@ def test_ask_sends_only_question_docs_and_screen(caplog: pytest.LogCaptureFixtur
     assert call["messages"] == [{"role": "user", "content": f"지금 화면: 게시판\n\n질문: {SECRET_Q}"}]
     assert call["system"][0]["cache_control"] == {"type": "ephemeral"} and "도움말 내용" in call["system"][0]["text"]
     logged = "\n".join(r.getMessage() for r in caplog.records)
-    assert "help ok user=alice n=1 in=30 cache_write=0 cache_read=5000 out=12" in logged
+    assert "help ok user=alice n=1 hist=0 in=30 cache_write=0 cache_read=5000 out=12" in logged
     assert SECRET_Q not in logged and SECRET_A not in logged and "sk-test" not in logged
 
 
@@ -186,7 +188,7 @@ def test_help_endpoint_with_fake_api(server_proc, fake_api):  # noqa: F811
         quota = _ask(c, csrf)
         assert quota.status_code == 429 and quota.json()["error"] == QUOTA
     text = Path(log_path).read_text(encoding="utf-8")
-    assert "help ok user=alice n=1 in=40 cache_write=6000 cache_read=0 out=9" in text and "help error user=alice code=500" in text
+    assert "help ok user=alice n=1 hist=0 in=40 cache_write=6000 cache_read=0 out=9" in text and "help error user=alice code=500" in text
     assert "help quota user=alice" in text
     assert SECRET_Q not in text and SECRET_A not in text and "sk-ant-fake-key-123" not in text
 
@@ -208,3 +210,67 @@ def test_help_without_key_and_outside_allowed_list(server_proc):  # noqa: F811
         assert got.status_code == 403 and got.json()["ok"] is False
     with httpx2.Client(base_url=remote, timeout=120, cookies={"magus_session": "forged.cookie"}) as c:
         assert c.post("/help/ask", json={"csrf": "x", "q": "q"}).status_code == 401
+
+
+# ---- 이어지는 질문(2026-10-09 사용자 답 m): 최근 3번 주고받기, 3,000자 상한, 서버 저장 없음 ---------------------------------
+
+
+def test_follow_up_sends_recent_three_turns_after_the_cached_docs(caplog: pytest.LogCaptureFixture):
+    client = FakeClient()
+    bot = _bot(client)
+    history = [{"q": f"이전질문{n}", "a": f"이전답{n}\n둘째 줄"} for n in range(5)]
+    with caplog.at_level(logging.INFO, logger="magus.help"):
+        status, _ = bot.ask("alice", "그럼 되살리기는요?", "프로젝트 지도", history)
+    assert status == 200
+    [call] = client.calls
+    assert call["messages"] == [
+        {"role": "user", "content": "질문: 이전질문2"}, {"role": "assistant", "content": "이전답2\n둘째 줄"},
+        {"role": "user", "content": "질문: 이전질문3"}, {"role": "assistant", "content": "이전답3\n둘째 줄"},
+        {"role": "user", "content": "질문: 이전질문4"}, {"role": "assistant", "content": "이전답4\n둘째 줄"},
+        {"role": "user", "content": "지금 화면: 프로젝트 지도\n\n질문: 그럼 되살리기는요?"},
+    ]
+    assert call["system"][0]["cache_control"] == {"type": "ephemeral"} and "이전질문" not in call["system"][0]["text"]  # 문서는 앞, 대화는 뒤
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert "hist=3" in logged and "이전질문" not in logged and "이전답" not in logged and "되살리기" not in logged
+    assert bot.used("alice") == 1  # 이전 대화는 서버에 남지 않는다(한도만 센다)
+
+
+def test_history_is_cut_to_the_char_limit():
+    long = [{"q": "가" * 500, "a": "나" * 2000} for _ in range(3)]
+    pairs = clean_history(long)
+    assert len(pairs) == 1 and len(pairs[0][0]) == 300 and len(pairs[0][1]) == 1500  # 질문 300자·답 1,500자로 자르고, 합쳐 3,000자 안
+    mixed = [{"q": "짧은 질문", "a": "짧은 답"}, {"q": "가" * 300, "a": "나" * 1500}, {"q": "끝 질문", "a": "끝 답"}]
+    assert [q for q, _ in clean_history(mixed)] == ["짧은 질문", "가" * 300, "끝 질문"]  # 합쳐 3,000자 안이면 셋 다
+    assert clean_history([{"q": "  ", "a": "답"}, {"q": "질문", "a": ""}]) == []  # 빈 것은 뺀다
+    client = FakeClient()
+    assert _bot(client).ask("alice", "새 질문", "게시판", long)[0] == 200
+    assert len(client.calls[0]["messages"]) == 3
+
+
+@pytest.mark.parametrize("bad", ["문자열", {"q": "a", "a": "b"}, [{"q": 1, "a": "b"}], [{"q": "a"}], ["a"], [[1, 2]],
+                                 [{"q": "a", "a": "b"}] * 21])
+def test_bad_history_is_rejected_without_calling_the_api(bad):
+    client = FakeClient()
+    bot = _bot(client)
+    assert bot.ask("alice", "질문", "게시판", bad) == (400, {"ok": False, "error": BAD_REQUEST})
+    assert client.calls == [] and bot.used("alice") == 0
+
+
+def test_follow_up_through_the_endpoint(server_proc, fake_api):  # noqa: F811
+    url, state = fake_api
+    base, _, log_path = server_proc({"ANTHROPIC_API_KEY": "sk-ant-fake-key-123", "ANTHROPIC_BASE_URL": url})
+    with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
+        csrf = _csrf(c.get("/login?next=/shelf").text)
+        history = [{"q": "노드는 어떻게 지우나요?", "a": "노드를 고르고 🗑를 누릅니다."}]
+        ok = _ask(c, csrf, q="그럼 되살리기는요?", history=history)
+        assert ok.status_code == 200
+        sent = state["seen"][-1]["body"]["messages"]
+        assert sent[0] == {"role": "user", "content": "질문: 노드는 어떻게 지우나요?"} and sent[1]["role"] == "assistant"
+        assert sent[2]["content"].endswith("질문: 그럼 되살리기는요?")
+        bad = _ask(c, csrf, history="망가진 형식")
+        assert bad.status_code == 400 and bad.json()["error"] == BAD_REQUEST and len(state["seen"]) == 1
+        big = c.post("/help/ask", content=b'{"csrf": "' + csrf.encode() + b'", "q": "x", "history": "' + b"a" * 40_000 + b'"}',
+                     headers={"content-type": "application/json"})
+        assert big.status_code == 413
+    text = Path(log_path).read_text(encoding="utf-8")
+    assert "hist=1" in text and "되살리기" not in text and "🗑" not in text

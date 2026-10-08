@@ -48,7 +48,7 @@ from magus.webshelf import EMBED, ShelfPages, is_panel_request, safe_at, state_u
 
 log = logging.getLogger("magus.web")
 SCREEN: contextvars.ContextVar[str] = contextvars.ContextVar("magus_screen", default="other")  # 도움말에 보낼 화면 이름 열쇠(#97)
-HELP_BODY_MAX = 8_000  # 도움말 질문 요청 본문 한도(바이트)
+HELP_BODY_MAX = 32_000  # 도움말 질문 요청 본문 한도(바이트). 이전 대화 3번(한글 3바이트 × 3,000자 남짓)이 들어간다
 SESSION_COOKIE, OAUTH_COOKIE = "magus_session", "magus_oauth"
 DISPLAY_NAME_MAX = 40  # 상단 바 표시 이름 길이 한도
 SESSION_TTL, OAUTH_TTL, DOWNLOAD_TTL = 12 * 3600, 600, 24 * 3600
@@ -395,7 +395,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages):
         if self.helpbot is None:
             return JSONResponse({"ok": False, "error": "지금은 도움말을 쓸 수 없어요."}, status_code=503)
         screen = screen_label(str(data.get("screen") or ""), str(data.get("sub") or ""))
-        status, body = await run_in_threadpool(self.helpbot.ask, session[0], str(data.get("q") or ""), screen)
+        status, body = await run_in_threadpool(self.helpbot.ask, session[0], str(data.get("q") or ""), screen, data.get("history"))
         return JSONResponse(body, status_code=status)
 
     # --- 로그인 ---
