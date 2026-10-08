@@ -40,6 +40,7 @@ from magus.project_args import (
     PROJECT_PUT, find_project, floor_name, match_project, projects_text, resolve_project, search_projects, short,
 )
 from magus.search import Embedder, hybrid_search
+from magus.attachments import describe
 from magus.store import Category, CategoryItem, MapNode, Passage, Ref, ShelfSettings, Store
 from magus.store.floors import MoveError
 from magus.store.formats import one_line
@@ -505,7 +506,16 @@ def build_tools(
             parent = store.get_category_item(user, item.category_id, item.parent_id)
             if parent is not None:
                 out.append(f"   ↳ 이 글이 응답한 저자의 말: “{summary(parent)[:80]}”")
+        out += attached(user, f"{item.category_id}/{item.id}")
         return out
+
+    def attached(user: str, owner: str) -> list[str]:
+        """첨부(#97): 이름·종류·크기만. 내용은 읽지 않는다."""
+        files = store.list_attachments(user, owner)
+        if not files:
+            return []
+        shown = " · ".join(describe(a.name, a.size) for a in files[:5])
+        return [f"   첨부 {len(files)}개: {shown}" + (f" 외 {len(files) - 5}개" if len(files) > 5 else "")]
 
     def source_lines(user: str, n: int, ref: Ref, chunk: Any) -> list[str]:
         title = one_line(str(ref.bib.get("title") or ref.bib.get("raw") or ""))[:80]
@@ -513,9 +523,11 @@ def build_tools(
         if chunk.lane == "ref_picked":
             passage = next((p for p in store.get_passages(user, ref.key) if p.text == chunk.text), None)
             return [head + (f" · {passage.locator}" if passage and passage.locator else ""), f"   쓸 부분 “{one_line(chunk.text)[:300]}”",
-                    *([f"   이유: {one_line(passage.reason)[:150]}"] if passage and passage.reason else [])]
+                    *([f"   이유: {one_line(passage.reason)[:150]}"] if passage and passage.reason else []),
+                    *attached(user, f"ref:{ref.key}")]
         return [head + " · 원문(쓸 부분으로 고르지 않은 곳)", f"   “{one_line(chunk.text)[:300]}”",
-                "   → 인용하려면 저자가 확인한 뒤 이 대목을 parts에 더해 다시 넣는다(category_put, checked=true)."]
+                "   → 인용하려면 저자가 확인한 뒤 이 대목을 parts에 더해 다시 넣는다(category_put, checked=true).",
+                *attached(user, f"ref:{ref.key}")]
 
     # ---- 지우기 -------------------------------------------------------------------------------------
 

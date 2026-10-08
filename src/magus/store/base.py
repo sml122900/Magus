@@ -77,6 +77,17 @@ class InboxFile:
     modified: str
 
 
+@dataclass(frozen=True)
+class Attachment:
+    """글에 붙인 파일 하나(#97). id는 서버가 만든 시간순 id(new_id), name은 다듬은 원래 이름, at은 올린 시각(UTC ISO).
+    owner: 글이면 "<책 id>/<글 id>", 문헌 글이면 "ref:<key>"."""
+
+    id: str
+    name: str
+    size: int
+    at: str
+
+
 class CiteKeys(NamedTuple):
     """장 하나의 인용 집계 파생값: 미확인 문헌 key(unverified + unknown)와 미연결 한글 표기 key(uncertain)."""
 
@@ -486,6 +497,20 @@ class Store(Protocol):
     def usage_bytes(self, user_id: str) -> int:
         """사용자 폴더 전체(원고·책장·받은함·휴지통) 크기. 저장 용량 한도에 쓴다."""
         ...
+
+    # 글의 첨부(#97) — 사용자 폴더 안(글 폴더 옆, 백업 대상). owner는 "<책 id>/<글 id>" 또는 "ref:<key>"
+    def list_attachments(self, user_id: str, owner: str) -> list[Attachment]:
+        """올린 순서. 글이 없거나 첨부가 없으면 []."""
+        ...
+    def put_attachment(self, user_id: str, owner: str, name: str, data: bytes) -> Attachment:
+        """name은 magus.attachments.clean_name을 거친 것. 글이 없으면 ValueError."""
+        ...
+    def attachment_path(self, user_id: str, owner: str, attachment_id: str) -> tuple[Path, Attachment] | None:
+        """읽기용 로컬 경로와 정보. 없으면 None."""
+        ...
+    def trash_attachment(self, user_id: str, owner: str, attachment_id: str, note: str) -> bool:
+        """지우지 않고 trash/shelf/attachments/로 옮긴다. 없으면 False."""
+        ...
     def get_profile(self, user_id: str) -> Profile:
         """없으면 빈 프로필. 읽기만 하면 사용자 폴더를 만들지 않는다."""
         ...
@@ -650,6 +675,9 @@ class Store(Protocol):
         ...
     def set_ref_book(self, user_id: str, key: str, book: str, reason: str | None = None) -> Ref:
         """문헌 한 편을 다른 책으로(프로젝트도 그 책의 것). reason을 주면 bib.json "moved"에 옮긴 기록을 남긴다(#93-a)."""
+        ...
+    def set_ref_status(self, user_id: str, key: str, status: str) -> Ref:
+        """원문 확인 표시만 바꾼다(#97, 웹의 '원문 확인' 체크). 쓸 부분·전문·서지는 그대로. bib.json "status_by"에 누가·언제."""
         ...
 
     # 휴지통 — 지우지 않고 trash/shelf/로 옮긴다. 검색·목록·웹에서 빠지고 되살릴 수 있다

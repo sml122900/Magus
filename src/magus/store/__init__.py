@@ -1,4 +1,5 @@
 from magus.store.base import (
+    Attachment,
     BookTitles,
     Category,
     CategoryItem,
@@ -31,6 +32,7 @@ from magus.store.base import (
 from magus.store.local import LocalStore
 
 __all__ = [
+    "Attachment",
     "BookTitles",
     "Category",
     "CategoryItem",

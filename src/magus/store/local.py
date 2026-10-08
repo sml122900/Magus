@@ -20,6 +20,7 @@ from pathlib import Path
 from magus.ids import safe_id, utcnow
 from magus.store import formats
 from magus.store.fileio import locked as _locked
+from magus.store.attachments import AttachmentMixin
 from magus.store.fileio import mtime as _mtime
 from magus.store.fileio import read_json as _read_json
 from magus.store.fileio import read_text as _read_text
@@ -69,7 +70,7 @@ ANSWERS_HEADER = ("# 저자 답\n\n질문은 매번 올린 문서와 문헌에�
 _CHAPTER_FILE = re.compile(r"ch-(\d+)\.md")
 _VERSION_FILE = re.compile(r"ch-(\d+)\.v(\d+)\.md")
 
-class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, DocumentMixin):
+class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, DocumentMixin, AttachmentMixin):
     def __init__(self, data_dir: Path):
         self.root = Path(data_dir)
         self.root.mkdir(parents=True, exist_ok=True)

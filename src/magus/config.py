@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from magus.auth import AuthConfig
@@ -32,6 +32,13 @@ class Settings:
     session_secret: str | None = None
     web_client_id: str | None = None
     web_client_secret: str | None = None
+    # 글의 첨부 한 개(#97). 사용자 전체는 max_user_bytes에 함께 든다
+    max_attach_bytes: int = 20_000_000
+    # 웹 도움말(#97): 서버에서만 Anthropic API를 부른다(키는 브라우저로 내려가지 않는다). 키가 없으면 도움말만 꺼진다
+    anthropic_api_key: str | None = field(default=None, repr=False)  # repr·로그에 남지 않게
+    help_model: str = "claude-haiku-4-5-20251001"
+    help_max_tokens: int = 600
+    help_daily_limit: int = 30  # 사용자별 하루 질문 수
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -54,6 +61,11 @@ class Settings:
             session_secret=env.get("SESSION_SECRET") or None,
             web_client_id=env.get("WEB_CLIENT_ID") or None,
             web_client_secret=env.get("WEB_CLIENT_SECRET") or None,
+            max_attach_bytes=_mb(env, "MAX_ATTACH_MB", 20),
+            anthropic_api_key=(env.get("ANTHROPIC_API_KEY") or "").strip() or None,
+            help_model=(env.get("HELP_MODEL") or "").strip() or "claude-haiku-4-5-20251001",
+            help_max_tokens=_count(env, "HELP_MAX_TOKENS", 600),
+            help_daily_limit=_count(env, "HELP_DAILY_LIMIT", 30),
         )
 
 
@@ -66,3 +78,14 @@ def _mb(env: Mapping[str, str], name: str, default: float) -> int:
     if value <= 0:
         raise ValueError(f"{name}는 0보다 커야 한다")
     return int(value * 1_000_000)
+
+
+def _count(env: Mapping[str, str], name: str, default: int) -> int:
+    raw = (env.get(name) or "").strip()
+    try:
+        value = int(raw) if raw else default
+    except ValueError as e:
+        raise ValueError(f"{name}={raw!r}: 정수여야 한다") from e
+    if value < 0:
+        raise ValueError(f"{name}는 0 이상이어야 한다")
+    return value

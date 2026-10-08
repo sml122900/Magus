@@ -10,6 +10,7 @@
 휴지통(지우지 않고 옮긴다, "_trash"를 덧붙인다):
   data/users/<user_id>/trash/shelf/categories/<카테고리 id>/       # 카테고리 통째(항목 포함)
   data/users/<user_id>/trash/shelf/category-items/<카테고리 id>/<항목 id>.json
+  data/users/<user_id>/trash/shelf/category-items/<카테고리 id>/files/<항목 id>/   # 그 글의 첨부(#97)
 인덱스: categories·category_items 행과 검색 청크(레인 category, owner_id "<카테고리 id>/<항목 id>").
 """
 
@@ -47,6 +48,7 @@ class CategoryMixin:
     _layout: Callable[[str], Any]  # FloorMixin
     _known: Callable[[str, Any], set[str]]
     _check_floor: Callable[[str, Any, str], str]
+    _move_item_files: Callable[..., None]  # AttachmentMixin(#97: 글의 첨부도 함께 휴지통으로)
 
     def _categories_dir(self, user_id: str) -> Path:
         return self._user_dir(user_id) / "shelf" / "categories"
@@ -218,6 +220,7 @@ class CategoryMixin:
             mark = {"at": at, "note": note, **({"with": with_id} if with_id else {})}
             write_json(target, {**data, "_trash": mark})  # 먼저 쓰고 지운다
             path.unlink()
+            self._move_item_files(user_id, category_id, one, to_trash=True)
             with self._db:
                 self._db.execute("DELETE FROM category_items WHERE user_id = ? AND category_id = ? AND id = ?",
                                  (user_id, category_id, one))
@@ -242,6 +245,7 @@ class CategoryMixin:
             data = {k: v for k, v in read_json(src).items() if k != "_trash"}
             write_json(self._category_dir(user_id, category_id) / "items" / f"{name}.json", data)
             src.unlink()
+            self._move_item_files(user_id, category_id, name, to_trash=False)
             with self._db:
                 self._index_item(user_id, _item_from_record(category_id, data))
         return [f"{category_id}/{n}" for n in names]
