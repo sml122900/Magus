@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 from magus.limits import TITLE_MAX
 from magus.category.maptext import outline_lines
-from magus.ids import local_time
+from magus.ids import STAMP, local_time
 from magus.store import ChapterMeta, Project, Store
 
 TOKEN_BUDGET = 3000
@@ -74,10 +74,12 @@ def edition_line(store: Store, user_id: str, project: Project, chapters: list[Ch
     if editions:
         last = editions[-1]
         name = f"수정본 E{last.number}" if last.number > 1 else "처음 올린 문서 E1"  # 저자에게 보이는 이름(용어집)
-        line = f"{name} · 마지막 업로드 {local_time(last.uploaded_at)}({_clip(last.file, 40)})"
+        line = f"{name} · 마지막 업로드 {local_time(last.uploaded_at, STAMP)}({_clip(last.file, 40)})"
         at = last.uploaded_at
+    elif not chapters:  # 올린 문서 없이 만든 프로젝트(전에는 가져온 적 없는데 '임포트 시각'처럼 보였다, 점검 16-1)
+        return "올린 문서 없음"
     else:
-        line = f"수정본 기록 없음(수정본 기능 전 임포트) · 임포트 {local_time(project.created_at)}"
+        line = f"수정본 기록 없음(수정본 기능 전 임포트) · 임포트 {local_time(project.created_at, STAMP)}"
         at = project.created_at
     line += f" · 그 뒤 Magus에서 고친 장 {edited}"
     try:

@@ -36,6 +36,9 @@ def new_id() -> str:
     return re.sub(r"\D", "", utcnow()) + "-" + secrets.token_hex(3)
 
 
+STAMP = "%Y-%m-%d %H:%M:%S"  # 수정본 줄(전체 현황)과 올린 파일 목록이 같은 형식으로 앞뒤를 가리게(점검 16-1)
+
+
 def local_time(iso: str, fmt: str = "%m-%d %H:%M") -> str:
     """표시용: UTC ISO → 서버 로컬 시각."""
     try:

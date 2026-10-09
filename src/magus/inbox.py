@@ -9,13 +9,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from collections.abc import Callable
 from pathlib import Path
 from typing import IO
 
-from magus.ids import local_time
+from magus.ids import STAMP, local_time
 from magus.paths import resolve_input
 from magus.store.fileio import data_size
 from magus.store import Store
@@ -114,6 +115,34 @@ def attached_file(store: Store, user_id: str, attachment_id: str) -> tuple[Path,
     return None
 
 
+MANUSCRIPT_TYPES = (".docx", ".pdf")  # 수정본으로 올릴 수 있는 파일
+_SHA: dict[tuple[str, int, float], str] = {}  # (경로, 크기, 고친 시각) → sha256. 프로세스 안에서만(파생값)
+
+
+def file_sha(path: Path) -> str:
+    """파일의 sha256(같은 파일이면 다시 읽지 않는다)."""
+    st = path.stat()
+    key = (str(path), st.st_size, st.st_mtime)
+    if key not in _SHA:
+        digest = hashlib.sha256()
+        with path.open("rb") as f:
+            while block := f.read(1024 * 1024):
+                digest.update(block)
+        _SHA[key] = digest.hexdigest()
+    return _SHA[key]
+
+
+def imported_editions(store: Store, user_id: str) -> dict[str, str]:
+    """sha256 → 그 파일로 만든 판('수정본 E2(「제목」)', '처음 올린 문서 E1(…)'). 올린 파일 목록에서 이미 가져온 것을 보이려고(점검 16-1)."""
+    out: dict[str, str] = {}
+    for project in store.list_projects(user_id):
+        for e in store.list_editions(user_id, project.id):
+            if e.sha256:
+                name = f"수정본 E{e.number}" if e.number > 1 else "처음 올린 문서 E1"
+                out[e.sha256] = f"{name}(「{project.title[:40]}」)"
+    return out
+
+
 def attached_lines(store: Store, user_id: str) -> list[str]:
     """files_list의 게시판 첨부 줄: '첨부:<id>' · 파일 이름 · 크기 · 올린 시각 · 어느 책의 어느 글(최근 ATTACHED_SHOWN개)."""
     from magus.attachments import shown_title  # noqa: PLC0415  (magus.attachments가 이 모듈을 가져온다)
@@ -122,6 +151,7 @@ def attached_lines(store: Store, user_id: str) -> list[str]:
     if not found:
         return []
     names = {c.id: c.name for c in store.list_categories(user_id)}
+    imported = imported_editions(store, user_id)
     lines = []
     for owner, a in found[:ATTACHED_SHOWN]:
         if owner.startswith("ref:"):
@@ -132,15 +162,21 @@ def attached_lines(store: Store, user_id: str) -> list[str]:
             files = [x.name for x in store.list_attachments(user_id, owner)] if post else []
             title = (shown_title(post.title, files) or post.content[:30]) if post else item  # 제목이 없으면 첫 첨부 이름
             where = f"「{names.get(book, book)}」 책의 글 「{title}」"
-        lines.append(f"- {ATTACHED}{a.id} · {a.name} · {size_text(a.size)} · {local_time(a.at)} · {where}")
+        hit = store.attachment_path(user_id, owner, a.id)
+        done = imported.get(file_sha(hit[0])) if hit and Path(a.name).suffix.lower() in MANUSCRIPT_TYPES else None
+        lines.append(f"- {ATTACHED}{a.id} · {a.name} · {size_text(a.size)} · {local_time(a.at, STAMP)} · {where}"
+                     + (f" · 이미 가져옴: {done}" if done else ""))
     more = f" 중 최근 {ATTACHED_SHOWN}개" if len(found) > ATTACHED_SHOWN else ""
     return [f"게시판 첨부 문서 {len(found)}개{more}(새것부터):", *lines]
 
 
-def describe(files: list[InboxFile], used: int, limit: int, attached: list[str] | None = None) -> str:
+def describe(files: list[InboxFile], used: int, limit: int, attached: list[str] | None = None,
+             done: dict[str, str] | None = None) -> str:
+    """done: 올린 파일 이름 → 이미 가져온 판('수정본 E2(「제목」)' 등)."""
     head = f"올린 파일 {len(files)}개 · 사용 {mb(used)} / 한도 {mb(limit)}"
     lines = [
-        f"- {f.name} · {size_text(f.size)} · {local_time(f.modified)} · {INBOX_TYPES.get(Path(f.name).suffix.lower(), '')}"
+        f"- {f.name} · {size_text(f.size)} · {local_time(f.modified, STAMP)} · {INBOX_TYPES.get(Path(f.name).suffix.lower(), '')}"
+        + (f" · 이미 가져옴: {done[f.name]}" if done and f.name in done else "")
         for f in files
     ]
     if not files and not attached:
@@ -157,7 +193,14 @@ def build_tools(store: Store, current_user: Callable[[], str], max_user_bytes: i
 
     def files_list() -> str:
         user = current_user()
-        return describe(store.list_inbox(user), store.usage_bytes(user), max_user_bytes, attached_lines(store, user))
+        files = store.list_inbox(user)
+        imported = imported_editions(store, user)
+        done = {}
+        for f in files:
+            if Path(f.name).suffix.lower() in MANUSCRIPT_TYPES and imported and (path := store.inbox_path(user, f.name)):
+                if hit := imported.get(file_sha(path)):
+                    done[f.name] = hit
+        return describe(files, store.usage_bytes(user), max_user_bytes, attached_lines(store, user), done)
 
     return [
         Tool.from_function(

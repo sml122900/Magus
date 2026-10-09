@@ -149,7 +149,10 @@ def test_outline_shows_edition_and_asks_for_latest_upload(store: LocalStore, tmp
 def test_same_file_again_changes_nothing(store: LocalStore, tmp_path: Path, e1):
     reupload_manuscript(store, U, edition(tmp_path / "e2.docx", 2), P)
     issues = store.list_issues(U, P, None)
-    again = reupload_manuscript(store, U, edition(tmp_path / "e3.docx", 2), P)
+    with pytest.raises(ValueError, match="이미 올린 파일입니다. 마지막 수정본 E2"):  # 같은 파일은 멈춘다(점검 16-1)
+        reupload_manuscript(store, U, edition(tmp_path / "e3.docx", 2), P)
+    assert [e.number for e in store.list_editions(U, P)] == [1, 2]
+    again = reupload_manuscript(store, U, edition(tmp_path / "e3.docx", 2), P, force=True)  # 그래도 올리라면 force
     assert (again.edition, len(again.changed), again.unchanged, again.issues_new, again.added, again.removed) == (3, 0, 5, 0, [], [])
     assert store.list_issues(U, P, None) == issues  # 표시도 그대로(언제 그렇게 됐는지 stale_edition 2 유지)
 

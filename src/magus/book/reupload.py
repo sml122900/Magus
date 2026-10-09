@@ -192,6 +192,11 @@ def reupload_manuscript(
     project = store.get_project(user_id, project_id)
     if project is None:
         raise ValueError(f"수정본으로 올릴 프로젝트 {project_id!r}가 없다. 처음 올리는 책이면 수정본이 아니라 임포트한다.")
+    last = (store.list_editions(user_id, project.id) or [None])[-1]
+    if last is not None and last.sha256 and not force and hashlib.sha256(path.read_bytes()).hexdigest() == last.sha256:
+        # 같은 파일을 다시 올리면 본문 바뀜 0인 판이 새로 생겼다(점검 16-1)
+        raise ValueError(f"이미 올린 파일입니다. 마지막 수정본 E{last.number}({last.file})와 내용이 같습니다. "
+                         "저자가 원본 파일에서 고친 뒤 다시 올린 것인지 확인한다.")
     manuscript = read_manuscript(path)
     split = split_manuscript(manuscript.blocks)
     if not split.chapters:

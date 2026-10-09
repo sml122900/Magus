@@ -166,3 +166,30 @@ async def test_input_limits_in_schema_and_enforced(store: LocalStore, settings: 
         ok = await c.call_tool("book_decide", {"text": "가" * 4000, "project_id": "b"})
         assert not ok.is_error
     assert store.read_chapter("alice", "b", 1).meta.title == "하나"  # 긴 제목은 저장되지 않았다
+
+
+# ---- 16-1 시각 형식 통일·이미 가져온 파일·같은 파일 수정본 막기·올린 문서 없음 ----
+
+async def test_same_file_edition_and_timestamps(store: LocalStore, settings: Settings):
+    import re
+    from pathlib import Path
+
+    synth = Path(__file__).parent / "fixtures" / "synthetic" / "닿으려는_종_합성.docx"
+    inbox = store.root / "users" / "alice" / "inbox"
+    inbox.mkdir(parents=True)
+    (inbox / "원고.docx").write_bytes(synth.read_bytes())
+    (inbox / "다른.docx").write_bytes(synth.read_bytes() + b"\0")  # 내용이 다른 파일(가져오지 않음)
+    async with Client(build_server(settings, store)) as c:
+        made = await c.call_tool("book_import", {"path": "원고.docx", "project_id": "book"})
+        assert not made.is_error, made.content[0].text[:300]
+        again = await c.call_tool("book_import", {"path": "원고.docx", "project_id": "book", "new_edition": True})
+        assert again.is_error and "이미 올린 파일입니다. 마지막 수정본 E1(원고.docx)" in again.content[0].text
+        listed = (await c.call_tool("files_list", {})).content[0].text
+        line = next(x for x in listed.splitlines() if x.startswith("- 원고.docx"))
+        assert re.search(r"· \d{4}-\d\d-\d\d \d\d:\d\d:\d\d ·", line) and "이미 가져옴: 처음 올린 문서 E1(「" in line
+        assert "이미 가져옴" not in next(x for x in listed.splitlines() if x.startswith("- 다른.docx"))
+        outline = (await c.call_tool("book_outline", {"project_id": "book"})).content[0].text
+        assert re.search(r"처음 올린 문서 E1 · 마지막 업로드 \d{4}-\d\d-\d\d \d\d:\d\d:\d\d\(원고\.docx\)", outline)
+        empty = await c.call_tool("book_import", {"title": "아직 문서 없는 책", "project_id": "empty"})
+        assert not empty.is_error
+        assert "올린 문서 없음" in (await c.call_tool("book_outline", {"project_id": "empty"})).content[0].text
