@@ -109,7 +109,8 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 - `ssh … 'bash -s' <<EOF` 안에서 `docker compose exec -T`를 부를 때는 `</dev/null`을 붙인다. 안 붙이면 exec가 스크립트의 남은 줄을 stdin으로 먹는다.
 - 배포는 pull 대신 `cd /opt/magus && sudo git fetch /root/magus.bundle master && sudo git checkout -B master FETCH_HEAD && cd deploy && sudo docker compose up -d --build`. 태그도 가져오려면 `git fetch /root/magus.bundle "refs/heads/master:refs/remotes/bundle/master" "refs/tags/*:refs/tags/*"` 뒤 `git checkout -B master <태그>`.
   - 그 master에 `p1-auth-audience`가 들어 있어야 한다(`git merge-base --is-ancestor p1-auth-audience FETCH_HEAD`). 아니면 aud 검사가 옛 판으로 되돌아간다.
-- 반영 전에: 백업을 손으로 한 번 돌려 스냅샷을 확인하고(`docker compose --profile backup run --rm backup </dev/null`), 실행 중 이미지를 `magus:rollback-<커밋>`으로 태그해 둔다.
+- 반영 전에: 백업을 손으로 한 번 돌려 스냅샷을 확인하고(`docker compose --profile backup run --rm -e BACKUP_TAG=<배포 태그> backup </dev/null`, 2026-10-09부터 스냅샷에 `predeploy`·배포 태그),
+  실행 중 이미지를 `magus:rollback-<커밋>`으로 태그해 둔다. 되돌리기 이미지는 지금 것 + 최근 2개만 남긴다(그보다 옛 판은 태그에서 다시 빌드, 2-9절).
 - 반영 전에 되돌릴 커밋(`git rev-parse HEAD`)과 data 해시 목록을 적어 둔다. 되돌릴 때는 그 커밋으로 `reset --hard` 후 다시 빌드한다(`HEAD~1`을 쓰지 않는다).
 
 ### 2-2. 층(#93) + 책 종류(#94) + 프로젝트·지도(#95) + 컨텍스트(#96) 묶음 배포 — 사용자 승인 뒤 한 번에
@@ -288,6 +289,35 @@ data 2,363개 해시 같음(.cache·trash/projects 0개), 수치·전체 현황 
 (시험본에서 확인). 되돌린 동안 휴지통에 있는 프로젝트는 옛 코드에서 그냥 없는 프로젝트로 보이고 되살릴 수 없다 — 새 코드로 다시 올리거나 manifest.json의
 paths를 `files/`에서 사용자 폴더로 옮긴 뒤 `magus reindex`.
 
+### 2-9. 코드 점검 높음 5건 + 운영(로그 회전·배포 전 백업 태그·이미지 정리) — 2026-10-09 사용자 승인
+
+반영 전 서버는 `p1-fix-ui`(`409242d`), 반영할 것은 태그 `p1-high-fix`(`deba2af`: `fix-high-5`까지의 5건 + 운영 커밋). **데이터 이전 없음, 인덱스 v23 그대로.**
+바뀐 것: 그림 폭탄(썸네일 픽셀 상한 3,000만·실패 표시 `.thumb/failed`), docx 압축 폭탄(`magus/zipguard.py`, 풀기 전에 항목 2,000·풀린 합 200MB·압축률 100:1),
+색인 다시 만들기(새 파일에 만들어 바꿔 끼움, 깨진 파일은 건너뛰고 경로만 로그, 실패하면 지금 색인 유지), 장 번호 0~9,999(book_write_chapter 입력 스키마에 최소·최대),
+대화로 글 고치기(category_put item_id)는 웹과 같은 patch. 운영: `deploy/compose.yaml`의 magus·caddy `logging`, `deploy/backup.sh`의 `BACKUP_TAG`.
+도구 설명·instructions 그대로, **book_write_chapter 입력 스키마만 바뀜**(도구 목록 9,207 → 9,218토큰). 서버가 범위 밖 번호를 거절하므로 재연결은 필수가 아니다(재연결하면 Claude가 범위를 미리 안다).
+
+1. **기록**(`private/tmp/deploy-high/pre.sh`, 읽기만): head, `.env` 해시, SESSION_SECRET(줄 수·길이 32자 이상·감사 때 찍힌 값과 같은지·실행 중 컨테이너와 같은지, 값은 출력하지 않음),
+   data 해시, 옛 코드 수치·전체 현황, 로그 설정·크기, 이미지 목록·`docker system df`, 메모리·디스크.
+2. **되돌리기 이미지·코드·백업·빌드**(`build.sh`): `magus:rollback-409242d` → 번들 fetch → `git checkout -B master p1-high-fix` →
+   손 백업(**새 backup.sh라 코드를 바꾼 뒤** `-e BACKUP_TAG=p1-high-fix`, 올리기 전) → build.
+3. **올리기·확인**(`up.sh`): `docker compose up -d`(logging이 바뀌어 magus·caddy를 다시 만든다, caddy 인증서는 볼륨에 그대로) → healthy·`/healthz`·`/mcp` 401·`/login` 303 →
+   인덱스 v23 → 수치·전체 현황 전후 → data 해시 → `.env` 같음 → SESSION_SECRET이 새 컨테이너에 있고 `.env`와 같음 → `LogConfig` → /tmp 점검(`smoke.py`) → 메모리·디스크.
+4. **이미지 정리**(`cleanup.sh`, 올리기가 healthy일 때만): `magus:latest` + `rollback-409242d`·`rollback-58ce884`만 남기고 나머지 rollback 태그를 `docker rmi`(목록 먼저 출력),
+   그다음 `docker image prune -f`(dangling만). 컨테이너·볼륨·빌드 캐시는 건드리지 않는다.
+
+반영 기록(2026-10-09 19:32 서버 시각): `409242d` → `deba2af`. 백업 `68013e32`(태그 predeploy·p1-high-fix, 2,363개, 오류 없음), healthy·재시작 0, 오류 로그 0, `.env` 같음,
+data 2,363개 해시 같음, 수치·전체 현황 전후 같음(default 299·297·0·86 3개 프로젝트, father 337·335·5·129·수정본 3(E3)), /tmp 점검 8/8
+(압축 폭탄 25KB 0.01초 거절, 첨부 글자 뽑기 failed, 3,600만 픽셀 PNG 썸네일 없음·원본 그대로, 4,200만 화소 JPEG 썸네일 만듦, 색인 건너뜀 2·나머지 색인, 장 번호 2^63·-1·10000·문자열 거절,
+대화 고치기 ★·누가 그대로). 로그 설정 `json-file map[]` → `map[max-file:5 max-size:10m]`(magus·caddy). 메모리 magus 119 → 103MiB, caddy 12 → 10MiB.
+SESSION_SECRET: 줄 1개·32자 이상·새 컨테이너에 있고 `.env`와 같음 — **감사 때 도구 출력에 찍힌 값과 아직 같다(교체 안 함, 승인 대기).**
+이미지 정리: rollback-458ffb9·d692855·0e0c89e·ed15ffb·efc19ac·ec6c40b·e08bb79(7개) 지움, dangling 0. 이미지 10.06GB → 7.34GB, 디스크 76%(여유 5.3G) → 67%(7.3G).
+빌드 캐시 7.78GB(그중 6.54GB 회수 가능)는 그대로. 기록 `/root/deploy-20261009-high/`.
+
+**되돌리기**: `docker tag magus:rollback-409242d magus:latest && docker compose up -d --no-build`(인덱스 v23 그대로, 데이터 형식 같음).
+썸네일 실패 표시(`.thumb/failed`)는 옛 코드가 읽지 않는다(그 그림은 다시 만들려 한다). compose·backup.sh까지 되돌리려면 `git checkout -B master p1-fix-ui` 뒤 `up -d`.
+`p1-contexts` 이전(`ec6c40b`)으로 가는 이미지는 지웠다 — 그때는 태그에서 다시 빌드하고 먼저 새 코드로 `magus maps revert --all-users`(2-2절).
+
 ## 3. 알림 확인
 
 ```sh
@@ -319,6 +349,8 @@ sudo crontab -e
 - 처음 한 번은 손으로 돌려 본다: `sudo docker compose --profile backup run --rm backup` → `backup ok`.
   - 첫 실행이 R2에 저장소를 만든다(init). 2026-10-05: 24초, 스냅샷 7.7MiB.
 - 하는 일: `restic backup /data`(index.sqlite 제외) → `forget --keep-daily 30 --keep-monthly 12 --prune`(일별 30개 + 월별 12개, 결정 #62) → `check --read-data-subset=1/30`.
+- 스냅샷 태그(2026-10-09): 매일 백업은 `daily`, 배포 전 손 백업은 `-e BACKUP_TAG=<배포 태그>`로 `predeploy`와 그 태그(영문·숫자·`.`·`_`·`-`만).
+  태그는 이름표일 뿐 보관 규칙은 같다: 같은 날 뒤에 백업이 또 있으면 forget이 그날의 마지막 하나만 남긴다(배포 전 스냅샷이 그날 다른 배포의 것에 밀려 지워질 수 있다).
 - 이미지 버전: compose.yaml에 `restic/restic:0.19.1`로 고정했다(2026-10-05). 올릴 때는 새 버전으로 한 번 손으로 돌려 `backup ok`를 본 뒤 바꾼다.
 - 스크립트에서 `docker compose exec`·`run`을 부를 때는 `</dev/null`을 붙인다. 붙이지 않으면 표준입력을 읽어, 뒤에 이어지는 명령을 먹어 버린다.
 
@@ -357,3 +389,5 @@ cd /opt/magus/deploy && sudo ./restore-test.sh default father
 - [ ] `restore-test.sh`가 "같음"인가(위 기록에 적는다)
 - [ ] `sudo apt list --upgradable`, Docker 이미지 갱신(`docker compose pull && up -d --build`)
 - [ ] 디스크(`df -h`)와 사용자별 용량(웹 받은함 페이지의 "사용")
+- [ ] 되돌리기 이미지(`docker images magus`): 지금 것 + 최근 rollback 2개만. 빌드 캐시(`docker system df`)가 크면 정리를 정한다(2026-10-09: 7.8GB, 정리는 승인 대기)
+- [ ] 컨테이너 로그는 compose의 `logging`(json-file 10MB × 5)으로 회전한다(2026-10-09부터). `docker inspect -f '{{.HostConfig.LogConfig.Config}}' magus-magus-1`
