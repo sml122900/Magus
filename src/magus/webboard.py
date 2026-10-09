@@ -42,7 +42,7 @@ from magus.store import Attachment, CategoryItem, Chunk, Store
 from magus.store.formats import display_title, one_line
 from magus.docupdate import UpdateError, update_document
 from magus.store.fileio import data_size
-from magus.webdocs import SWAP_SCRIPT, revision_query, revision_text, swap_fields
+from magus.webdocs import FAILED, SWAP_SCRIPT, log_failure, revision_query, revision_text, swap_fields
 from magus.webshelf import (
     AI_MARK, AI_TITLE, Book, Kind, Upload, clean_query, find_hits, mark, paragraphs, snippet, state_url,
 )
@@ -839,7 +839,7 @@ class BoardPages:
         limit = max(CONTENT_MAX, len(text))  # 대화로 넣은 긴 글은 그 길이까지(고쳐 저장해도 뒷부분이 잘리지 않게)
         error = ""
         swap_error: tuple[str, str] | None = None
-        swapped, form_base = None, None
+        swapped, form_base, failed = None, None, False
         if request.method == "POST":
             if self._too_big(request):
                 return RedirectResponse(f"{here}?error=big", status_code=303)
@@ -869,6 +869,9 @@ class BoardPages:
                                                 force=form.get("force") == "1", allowed=None))
                 except UpdateError as e:
                     error, swap_error = str(e), (swapped_at.id, e.code)
+                except Exception as e:  # 예상 못 한 실패: 로그에는 종류·스택만, 화면에는 한국어 한 줄(500)
+                    log_failure("글 고치기 바꾸기", e)
+                    error, swap_error, failed = FAILED, (swapped_at.id, "failed"), True
                 else:  # 제목을 그대로 두었으면 바꾸기가 고친 제목(이전 파일 이름 → 새 이름)을 따른다. 그사이 저장 시각도 새로
                     fresh = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
                     if fresh is not None and is_item:
@@ -903,7 +906,7 @@ class BoardPages:
                 + self._write_form(session, here, link, title=title_text, content=text, heading=heading, current=current, limit=limit,
                                    base=str(form.get("base") or "") if request.method == "POST" else base, swap_error=swap_error))
         lead = await run_in_threadpool(self.trail, uid, kind.key, "고치기")
-        return self._shelf_page("고치기", body, session, 400 if error else 200, lead=lead)
+        return self._shelf_page("고치기", body, session, 500 if failed else 400 if error else 200, lead=lead)
 
     def _save_edit(self, uid: str, kind: Kind, obj: Any, owner: str, title: str | None, content: str,
                    files: list[Upload], drops: list[str], base: str | None = None) -> None:

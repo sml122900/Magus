@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import logging
 import re
 import urllib.parse
 from collections.abc import Awaitable, Callable
@@ -24,11 +25,19 @@ from starlette.responses import RedirectResponse, Response
 from magus.docupdate import DOC_TYPES, DocRow, UpdateError, find_rows, list_documents, update_document
 from magus.ids import local_time
 from magus.inbox import MANUSCRIPT_TYPES, mb, size_text
+from magus.logsafe import exc_summary
 from magus.config import Settings
 from magus.store import Store
 from magus.store.fileio import data_size
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+log = logging.getLogger("magus.docupdate")
+FAILED = "문서를 바꾸는 중에 문제가 생겼습니다. 잠시 뒤 다시 해 보시고, 계속되면 운영자에게 알려 주세요."
+
+
+def log_failure(where: str, exc: BaseException) -> None:
+    """예상 못 한 실패(바꾸기): 예외 종류와 스택(파일:줄 함수)만 남긴다. 메시지에는 파일 이름·글 내용이 들어갈 수 있어 넣지 않는다."""
+    log.error("문서 바꾸기 실패(%s) | %s", where, exc_summary(exc))
 
 DOCS_STYLE = """
 .usage{color:var(--ink2);margin:8px 0}
@@ -209,6 +218,9 @@ class DocumentPages:
                                         force=form.get("force") == "1"))
         except UpdateError as e:
             return await self._documents(request, session, q, (key, str(e), e.code), 400)
+        except Exception as e:  # 예상 못 한 실패: 로그에는 종류·스택만, 화면에는 한국어 한 줄(500)
+            log_failure("문서 업데이트", e)
+            return await self._documents(request, session, q, (key, FAILED, "failed"), 500)
         back = [("q", q)] if q else []
         if result.revision is not None and result.project_id:
             query = [("done", "revised"), *urllib.parse.parse_qsl(revision_query(result)[1:]), *back]

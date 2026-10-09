@@ -40,6 +40,11 @@ def _frames(exc: BaseException) -> str:
     return f"{kinds} at {where or '?'}"
 
 
+def exc_summary(exc: BaseException) -> str:
+    """예외 종류와 위치(파일:줄 함수)만(메시지 없음). 로그를 우리가 직접 쓸 때(문서 업데이트, 2026-10-10) 다른 핸들러에도 메시지가 가지 않게."""
+    return _frames(exc)
+
+
 class RedactingFilter(logging.Filter):
     def __init__(self, alert: Callable[[str], None] | None = None):
         super().__init__()

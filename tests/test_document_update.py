@@ -263,3 +263,43 @@ async def test_chat_outputs_after_cleanups(store: LocalStore, settings, tmp_path
     assert "그대로 둔 것: 결정 0건, 직접 남긴 확인 요청 0건, 다른 책의 글" in again and "생각·문헌·문체" not in again
     assert "· 초안 ·" in outline and "· draft ·" not in outline and '"status": "초안"' in read
     assert found.startswith("category_search '없는말' (「가상 책」의 책): 결과 없음")
+
+
+async def test_unexpected_swap_failure_logs_kind_and_stack_only(store: LocalStore, settings, monkeypatch, caplog):
+    """바꾸기에서 예상 못 한 실패(문서 업데이트·글 고치기의 바꾸기, 2026-10-10): 로그에는 예외 종류와 스택만
+    (파일 이름·글 내용·메일 없음), 화면은 한국어 한 줄(500). 첨부는 그대로."""
+    import logging
+
+    from magus.transports import http_app
+    from magus.web import Web
+    from magus.webdocs import FAILED
+
+    owner = _post(store)
+    att = store.put_attachment(U, owner, "회의록.md", "물안개 회의".encode())
+    secret = "비밀원고.md 물안개 본문 alice@example.com"
+
+    def boom(*_args, **_kwargs):
+        raise OSError(secret)
+
+    monkeypatch.setattr(LocalStore, "replace_attachment", boom)
+    server = build_server(settings, store)
+    web = Web.create(store, settings, "http://127.0.0.1:8000", None)
+    web.register(server)
+    app = http_app(server, "127.0.0.1", None, settings.max_request_bytes, web.http_error, web.body_limit)
+    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://127.0.0.1:8000",
+                                  follow_redirects=True) as c:
+        csrf = _csrf((await c.get("/login?next=/me/documents")).text)
+        with caplog.at_level(logging.INFO, logger="magus"):
+            docs = await c.post("/me/documents/update", data={"csrf": csrf, "key": f"att:{att.id}"},
+                                files={"file": ("비밀원고.md", "물안개 본문".encode())})
+            edit = await c.post(f"/shelf/{owner}/edit", data={"csrf": csrf, "title": "회의록", "content": "물안개 본문"},
+                                files=[(f"swap_{att.id}", ("비밀원고.md", "물안개 본문".encode()))])
+    for page in (docs, edit):
+        assert page.status_code == 500 and FAILED in page.text
+    logged = [r.getMessage() for r in caplog.records if r.name == "magus.docupdate"]
+    assert len(logged) == 2 and all(r.levelno == logging.ERROR for r in caplog.records if r.name == "magus.docupdate")
+    assert "(문서 업데이트)" in logged[0] and "(글 고치기 바꾸기)" in logged[1]
+    for line in logged:
+        assert "builtins.OSError at " in line and "docupdate.py:" in line and "test_document_update.py:" in line
+        assert not any(w in line for w in ("비밀원고", "물안개", "회의록", "example.com", "alice"))
+    assert store.attachment_path(U, owner, att.id)[0].read_text(encoding="utf-8") == "물안개 회의"
