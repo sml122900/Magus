@@ -98,15 +98,17 @@ class AttachmentMixin:
     def attachment_thumb(self, user_id: str, owner: str, attachment_id: str) -> Path | None:
         """사진 첨부의 썸네일 경로(없으면 그 자리에서 만든다). 사진이 아니거나 만들지 못하면 None(화면은 원본을 쓴다).
         그림을 줄이는 동안 저장소 잠금을 잡지 않는다(파일 하나를 읽고 다른 이름으로 쓸 뿐이다)."""
-        from magus.thumbs import THUMB_DIR, THUMB_NAME, make_thumb, thumbnailable  # noqa: PLC0415
+        from magus.thumbs import THUMB_DIR, THUMB_NAME, failed, make_thumb, thumbnailable  # noqa: PLC0415
 
         hit = self.attachment_path(user_id, owner, attachment_id)
         if hit is None or not thumbnailable(hit[1].name):
             return None
         thumb = hit[0].parent / THUMB_DIR / THUMB_NAME
-        if thumb.is_file() or make_thumb(hit[0], thumb):
+        if thumb.is_file():
             return thumb
-        return None
+        if failed(thumb):  # 전에 못 만든 그림(너무 큼·망가짐)은 볼 때마다 다시 풀지 않는다(2026-10-09)
+            return None
+        return thumb if make_thumb(hit[0], thumb) else None
 
     @locked
     def trash_attachment(self, user_id: str, owner: str, attachment_id: str, note: str) -> bool:
