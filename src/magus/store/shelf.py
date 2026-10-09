@@ -50,6 +50,10 @@ def safe_ref_key(key: str) -> str:
     return key
 
 
+# bib.json에서 put_ref가 직접 쓰는 칸. 그 밖의 칸(앞으로 더할 표시 등)은 다시 넣어도 그대로 둔다(점검 13-c)
+REF_FILE_KEYS = frozenset({"key", "status", "aliases", "bib", "file_path", "created_at", "updated_at", "floor", "book", "moved", "scrap",
+                           "status_by"})
+
 class ShelfMixin:
     root: Path
     _db: sqlite3.Connection
@@ -142,6 +146,10 @@ class ShelfMixin:
                 "book": book,
                 **({"moved": old["moved"]} if isinstance(old.get("moved"), dict) else {}),  # 공용으로 옮긴 기록은 그대로(#93-a)
                 **({"scrap": True} if old.get("scrap") is True else {}),  # 스크랩(별표)은 저자의 표시라 그대로(set_scrap만 바꾼다)
+                # 원문 확인 표시를 누가·언제·어디서(status_by)는 표시가 그대로일 때 그대로(점검 13-c: 다시 넣으면 사라졌다)
+                **({"status_by": old["status_by"]} if isinstance(old.get("status_by"), dict) and old.get("status") == ref.status else {}),
+                # 이 코드가 모르는 칸은 지우지 않는다(글 파일 put_category_item과 같게)
+                **{k: v for k, v in old.items() if k not in REF_FILE_KEYS},
             },
         )
         with self._db:

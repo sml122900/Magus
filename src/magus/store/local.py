@@ -24,6 +24,7 @@ from magus.store.fileio import locked as _locked
 from magus.store.attachments import AttachmentMixin
 from magus.store.fileio import mtime as _mtime
 from magus.store.fileio import read_json as _read_json
+from magus.store.fileio import write_bytes as _write_bytes
 from magus.store.fileio import read_text as _read_text
 from magus.store.fileio import to_int as _int
 from magus.store.fileio import write_json as _write_json
@@ -216,8 +217,7 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
     @_locked
     def save_original(self, user_id: str, project_id: str, filename: str, data: bytes) -> str:
         path = self._require_project(user_id, project_id) / "original" / Path(filename).name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+        _write_bytes(path, data)  # 원자적으로(점검 10-a)
         return self._rel(path)
 
     @_locked
@@ -635,8 +635,7 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
     @_locked
     def save_export(self, user_id: str, project_id: str, filename: str, data: bytes) -> str:
         path = self._require_project(user_id, project_id) / "exports" / Path(filename).name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+        _write_bytes(path, data)  # 원자적으로(점검 10-a)
         return str(path.resolve())
 
     @_locked

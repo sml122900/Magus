@@ -319,3 +319,57 @@ async def test_issue_close_odd_digits_and_long_export_name(store: LocalStore, se
         ok = await c.call_tool("book_issue_close", {"id": "I1", "project_id": "b"})
         assert not ok.is_error
     assert not list((store.root / "users" / "alice" / "projects" / "b").glob("exports/*"))
+
+
+# ---- 13-c·10-a 문헌을 다시 넣어도 status_by·모르는 칸 그대로, 임시 파일 이름 ----
+
+async def test_put_ref_keeps_status_by_and_unknown_keys(store: LocalStore, settings: Settings):
+    import json
+
+    from magus.melchior.bibliography import import_bibliography
+
+    store.create_project("alice", "책", project_id="b")
+    import_bibliography(store, "alice", "Clack, J. (2012). Gaining ground. Indiana.\n", floor="b")
+    async with Client(build_server(settings, store)) as c:
+        r = await c.call_tool("category_put", {"book": "참고문헌", "author": "me", "source": {"key": "clack2012"}, "checked": True,
+                                               "parts": [{"text": "대목", "reason": "근거"}]})
+        assert not r.is_error, r.content[0].text
+    store.set_ref_status("alice", "clack2012", "unverified", via="web")
+    store.set_ref_status("alice", "clack2012", "verified", via="web")
+    path = store.root / "users" / "alice" / "shelf" / "melchior" / "clack2012" / "bib.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    path.write_text(json.dumps({**data, "future_mark": "앞으로 더할 표시"}, ensure_ascii=False), encoding="utf-8")
+    by = data["status_by"]
+    async with Client(build_server(settings, store)) as c:  # 같은 문헌을 다시 넣음(표시는 그대로 원문 확인)
+        r = await c.call_tool("category_put", {"book": "참고문헌", "author": "me", "source": {"key": "clack2012"}, "checked": True,
+                                               "parts": [{"text": "둘째 대목", "reason": "근거"}]})
+        assert not r.is_error, r.content[0].text
+    after = json.loads(path.read_text(encoding="utf-8"))
+    assert after["status"] == "verified" and after["status_by"] == by and after["future_mark"] == "앞으로 더할 표시"
+
+
+def test_write_is_atomic_with_random_temp_name(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    import os
+
+    from magus.store import fileio
+
+    seen: list[str] = []
+    real = os.replace
+
+    def spy(src, dst):
+        seen.append(os.path.basename(src))
+        return real(src, dst)
+
+    monkeypatch.setattr(fileio.os, "replace", spy)
+    target = tmp_path / "a.json"
+    fileio.write_text(target, "하나\n")
+    fileio.write_text(target, "둘\n")
+    assert target.read_text(encoding="utf-8") == "둘\n" and len(set(seen)) == 2 and all(n.startswith("a.json.") and n.endswith(".tmp") for n in seen)
+
+    def broken(src, dst):
+        raise OSError("디스크")
+
+    monkeypatch.setattr(fileio.os, "replace", broken)
+    with pytest.raises(OSError):
+        fileio.write_text(target, "셋\n")
+    assert target.read_text(encoding="utf-8") == "둘\n" and [p.name for p in tmp_path.iterdir()] == ["a.json"]  # 임시 파일이 남지 않는다

@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import secrets
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,11 +29,20 @@ def read_text(path: Path) -> str:
 
 
 def write_text(path: Path, text: str) -> None:
-    # 원본 파일이 반쯤 쓰인 채로 남지 않도록 임시 파일에 쓴 뒤 교체한다.
+    # 원본 파일이 반쯤 쓰인 채로 남지 않도록 임시 파일에 쓴 뒤 교체한다(줄 끝은 바꾸지 않는다: 전의 newline="\n"과 같다).
+    write_bytes(path, text.encode("utf-8"))
+
+
+def write_bytes(path: Path, data: bytes) -> None:
+    """임시 파일에 쓴 뒤 교체(원자적). 임시 이름에 무작위 꼬리(점검 10-a: 서버와 CLI가 같은 파일을 동시에 쓰면 고정 이름 .tmp가 섞였다)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8", newline="\n")
-    os.replace(tmp, path)
+    tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def read_json(path: Path) -> Any:
