@@ -252,7 +252,13 @@ def main(argv: list[str] | None = None) -> None:
                     from magus.category.rules import check_name, name_key
 
                     name = check_name(args.name, {name_key(c.name): c.name for c in store.list_categories(user)})
-                print(f"되살림({user}): {args.kind} {', '.join(store.restore_trash(user, kind, args.id, name=name))}")
+                if kind == "node":  # 연결 노드면 인용 점검 범위가 바뀐다(점검 13-b)
+                    from magus.category.moves import restore_node
+
+                    restored = restore_node(store, user, args.id)
+                else:
+                    restored = store.restore_trash(user, kind, args.id, name=name)
+                print(f"되살림({user}): {args.kind} {', '.join(restored)}")
         except ValueError as e:
             parser.exit(2, f"{e}\n")
         items = store.list_trash(user)

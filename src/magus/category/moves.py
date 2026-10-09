@@ -147,6 +147,14 @@ def trash_node_with_books(store: Store, user: str, floor: str, node_id: str, not
     return node, _refs_changed(store, user, before) if node.link else []
 
 
+def restore_node(store: Store, user: str, ref: str) -> list[str]:
+    """노드 되살리기(웹·CLI 공통, 2026-10-09 점검 13-b). 연결 노드가 돌아오면 인용 점검 범위가 다시 넓어지므로
+    지울 때와 같이 장별 미확인 수·확인 요청 연결을 다시 센다(전에는 다음 문헌 변경이나 서버 재시작까지 틀린 수가 남았다)."""
+    restored = store.restore_trash(user, "node", ref)
+    after_refs_changed(store, user)
+    return restored
+
+
 def scope_names(store: Store, user: str, projects: list[str]) -> str:
     return "·".join(floor_name(store, user, p) for p in projects)
 

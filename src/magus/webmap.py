@@ -28,7 +28,8 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from magus.attachments import shown_title
-from magus.category.moves import add_link, book_name, error_message, move_book, trash_node_with_books, undo_move, web_message
+from magus.category.moves import (add_link, book_name, error_message, move_book, restore_node, trash_node_with_books, undo_move,
+                                  web_message)
 from magus.category.rules import PALETTE, parse_color
 from magus.floors import MAX_FLOORS, josa
 from magus.ids import local_time
@@ -839,7 +840,7 @@ class MapPages:
             if not ref.startswith(f"{floor.id}/"):
                 return RedirectResponse(with_query(here, err="missing"), status_code=303)
             try:
-                [restored] = await run_in_threadpool(self.store.restore_trash, uid, "node", ref)
+                [restored] = await run_in_threadpool(restore_node, self.store, uid, ref)  # 인용 수도 다시(점검 13-b)
             except MapError as e:
                 return RedirectResponse(with_query(here, maperr=e.code), status_code=303)
             except ValueError as e:
