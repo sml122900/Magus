@@ -239,6 +239,21 @@ instructions 규칙 12(커넥터 재연결), 의존성 `anthropic`(이미지 다
 (옛 코드가 인덱스 v20을 다시 만든다). 옛 코드는 `"scrap"` 키와 첨부 휴지통 기록을 읽지 않고 무시한다. 다만 옛 코드로 대화에서 그 글을 고치면
 (category_put item_id) 옛 put_category_item이 모르는 칸을 쓰지 않아 그 글의 스크랩 표시가 빠진다(글 내용은 그대로).
 
+### 2-6. 첨부 글자·대화 검색 범위·예약어 '스크랩'(#100) — 2026-10-09 사용자 승인
+
+반영 전 서버는 `p1-edit-scrap`(`d692855`), 반영할 것은 태그 `p1-attach-text`(`att-1-search-scope`·`att-2-reserved`·`att-3-extract` 뒤). **데이터 이전 없음**:
+새로 생기는 것은 첨부 폴더 안 `.text/`(뽑은 글자·상태, 파생값)뿐이다. **인덱스 v22 → v23**(레인 attach_text, chunks.part): 첫 시작 때 다시 만든다. 의존성 그대로.
+MCP 도구 23개 그대로(category_search `attachment`·`page`, category_edit `parts`, 설명 바뀜), instructions 규칙 2 → **커넥터 재연결**.
+
+1. **기록·백업**(`private/tmp/deploy-attach/pre.sh`): head, `.env`, data 해시, 「스크랩」 책 수(읽기만), 글자 뽑을 첨부 수, 옛 코드 수치·전체 현황·찾기, 손 백업.
+2. **되돌리기 이미지·빌드**(`build.sh`): `magus:rollback-d692855` → 번들 fetch → `git checkout -B master p1-attach-text` → build.
+3. **올리기·확인**(`up.sh`): healthy·인덱스 v23 → 수치·전체 현황 전후 → data 해시(같아야 한다) → `magus extract --all-users`(개수만) →
+   `.text/`를 뺀 data 해시가 반영 전과 같은지, 새 파일이 `.text/`뿐인지 → 컨테이너 안 /tmp 점검(`smoke.py`).
+4. **커넥터 재연결 한 번**.
+
+**되돌리기**: `docker tag magus:rollback-d692855 magus:latest && docker compose up -d --no-build`(옛 코드가 인덱스 v22를 다시 만든다).
+옛 코드는 첨부 폴더에서 파일만 세므로 `.text/`를 무시한다(시험본에서 첨부 목록·수치 같음 확인). 지울 필요 없다(파생값).
+
 ## 3. 알림 확인
 
 ```sh
