@@ -20,6 +20,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from magus import zipguard
 from magus.ids import utcnow
 from magus.store.fileio import write_json, write_text
 
@@ -138,6 +139,8 @@ def _docx(path: Path, check) -> tuple[str, bool]:
 
     parts: list[str] = []
     total = 0
+    with zipfile.ZipFile(path) as z:
+        zipguard.check(z)  # 압축 폭탄은 풀기 전에 막는다(2026-10-09 점검 7-c) → 글자를 뽑지 못함(failed)
     with zipfile.ZipFile(path) as z, z.open("word/document.xml") as f:
         for n, (_, p) in enumerate(etree.iterparse(f, events=("end",), tag=f"{_W}p")):
             if n % 200 == 0:

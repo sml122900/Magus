@@ -15,6 +15,8 @@ from typing import Literal
 
 from lxml import etree
 
+from magus import zipguard
+
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 M = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 DC = "http://purl.org/dc/elements/1.1/"
@@ -199,6 +201,7 @@ def _comments(xml: bytes) -> dict[str, tuple[str, str, str]]:
 
 def read_docx(path: Path) -> Manuscript:
     with zipfile.ZipFile(path) as z:
+        zipguard.check(z)  # 압축 폭탄은 풀기 전에 막는다(2026-10-09 점검 7-c)
         names = set(z.namelist())
         document = etree.fromstring(z.read("word/document.xml"))
         styles = _style_names(z.read("word/styles.xml")) if "word/styles.xml" in names else {}
