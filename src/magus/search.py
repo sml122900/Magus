@@ -126,7 +126,7 @@ def find_all_words(store: Store, user_id: str, lanes: list[Lane], query: str, li
     """웹 찾기(2026-10-09 점검): 낱말이 여럿이면 모두 맞는 글만(AND, 글 단위 — 낱말이 다른 조각·첨부 글자에 있어도 된다).
     기호가 든 낱말(<b>, doc_1009)은 글자 그대로 포함만 본다(기호를 뗀 b·1009로 넓히지 않는다). 따옴표 구절은 구절 그대로.
     한글 세 글자 이상 낱말(없는낱말)도 2글자 조각 중 하나만 맞는 글로 넓히지 않는다(조각이 이어진 구절 또는 글자 그대로).
-    순서는 find_chunks 그대로(그 밖에 맞은 글은 뒤에). 대화(category_search)는 find_chunks를 그대로 쓴다(웹만 바꿈)."""
+    순서는 find_chunks 그대로(그 밖에 맞은 글은 뒤에). 대화(category_search)도 이것을 쓴다(2026-10-09 결정 b, 전에는 웹만)."""
     query = " ".join((query or "").split())
     phrases, words = query_parts(query)
     terms = [(p, False) for p in phrases] + [(w, _PLAIN.fullmatch(w) is None) for w in words]

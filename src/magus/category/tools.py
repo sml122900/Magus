@@ -41,7 +41,7 @@ from magus.melchior.refs import add_ref
 from magus.project_args import (
     PROJECT_PUT, find_project, floor_name, match_project, projects_text, resolve_project, search_projects, short,
 )
-from magus.search import Embedder, find_chunks
+from magus.search import Embedder, find_all_words
 from magus.attachments import describe, title_from_files
 from magus.extract import page_of, pages
 from magus.textindex import query_parts, tokens
@@ -564,7 +564,8 @@ def build_tools(
         lanes: list[Any] = ["category", "ref_bib", "ref_picked", *(["ref_full"] if full else []), "attach_text"]  # 첨부 글자는 맨 뒤(#100)
         hits: list[tuple[str, Any, Any]] = []  # (책 id, 글 또는 문헌, 맞은 청크)
         best: dict[str, tuple[int, int, tuple[str, Any, Any]]] = {}  # 글·문헌 하나에 가장 좋은 맞음 하나: (등급, 차례, hit)
-        chunks = find_chunks(store, user, lanes, query, SEARCH_POOL, embedder) if query else []
+        # 웹 찾기와 같은 규칙(2026-10-09 결정 b): 낱말이 여럿이면 모두 맞는 글만(AND), 기호가 든 낱말은 글자 그대로
+        chunks = find_all_words(store, user, lanes, query, SEARCH_POOL, embedder) if query else []
         if not query:  # 스크랩한 글 전체(최근 것부터)
             starred: list[tuple[str, Any, Any]] = [
                 *((i.category_id, i, None) for i in store.list_category_items(user)

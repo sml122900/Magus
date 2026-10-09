@@ -1,16 +1,21 @@
 """웹 찾기(2026-10-09 구조·버그 점검 4번): 기호가 든 검색어는 글자 그대로, 낱말이 여럿이면 모두 맞는 글만(AND),
 구절은 발췌에 구절 전체를 표시, 파일 이름으로만 맞은 글은 '📎 파일 이름', 결과 문구는 세 곳(게시판·지도·전체)이 같다.
-대화(category_search)는 그대로다(웹만)."""
+대화(category_search)도 같은 규칙(2026-10-09 결정 b, 전에는 웹만)."""
 
 from __future__ import annotations
 
 import re
 
 import httpx2
+import pytest
+from mcp import Client
 from test_web import server_proc  # noqa: F401 - 픽스처
 
 from magus.search import find_all_words, find_chunks
+from magus.server import build_server
 from magus.store import CategoryItem, LocalStore
+
+pytestmark = pytest.mark.anyio
 
 BOOK = "notes-common"
 POSTS = {
@@ -49,8 +54,26 @@ def test_find_all_words(store: LocalStore, data_dir):
     assert _owners(find_all_words(store, "alice", lanes, '"도시 성장"', 50)) == {"20261009000000005", "20261009000000006"}
     assert _owners(find_all_words(store, "alice", lanes, "도시 없는낱말", 50)) == set()
     assert len(_owners(find_all_words(store, "alice", lanes, "도시", 50))) == 3  # 낱말 하나는 지금까지와 같다
-    # 대화(find_chunks)는 그대로: 낱말 중 하나만 맞아도
+    # find_chunks(순위·1단계 찾기)는 그대로: 낱말 중 하나만 맞아도
     assert "20261009000000007" in _owners(find_chunks(store, "alice", lanes, "도시 성장", 50))
+    store.close()
+
+
+async def test_chat_search_same_rules(data_dir, settings):
+    """대화(category_search)도 웹과 같은 사례(결정 b): 낱말 여럿은 AND, 기호가 든 낱말은 글자 그대로, 낱말 하나는 그대로."""
+    store = _seed(data_dir)
+    async with Client(build_server(settings, store)) as c:
+        async def found(query: str) -> set[str]:
+            text = (await c.call_tool("category_search", {"query": query, "k": 20})).content[0].text
+            return {item[:17] for item in re.findall(r"20261009\d{9}-aaaaaa", text)}
+
+        assert await found("<b>") == {"20261009000000001"}
+        assert await found("doc_1009") == {"20261009000000003"}
+        assert await found("도시 성장") == {"20261009000000005", "20261009000000006"}
+        assert await found('"도시 성장"') == {"20261009000000005", "20261009000000006"}
+        assert await found("도시 없는낱말") == set()
+        assert len(await found("도시")) == 3
+        assert await found("현장사진") == {"20261009000000009"}
     store.close()
 
 
