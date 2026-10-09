@@ -23,12 +23,14 @@ from magus.store.base import (
     Profile,
     Project,
     ProjectMap,
+    ProjectTrashInfo,
     Ref,
     SavedContext,
     ShelfSettings,
     Store,
     StyleEntry,
     TrashItem,
+    TrashedProject,
 )
 from magus.store.local import LocalStore
 
@@ -58,10 +60,12 @@ __all__ = [
     "Profile",
     "Project",
     "ProjectMap",
+    "ProjectTrashInfo",
     "Ref",
     "SavedContext",
     "ShelfSettings",
     "Store",
     "StyleEntry",
     "TrashItem",
+    "TrashedProject",
 ]

@@ -35,6 +35,7 @@ from magus.store.contexts import ContextMixin
 from magus.store.documents import DocumentMixin
 from magus.store.floors import FloorMixin
 from magus.store.maps import MapMixin
+from magus.store.project_trash import ProjectTrashMixin
 from magus.store.shelf import ShelfMixin
 from magus.store.base import (
     ANCHOR_MAX,
@@ -71,7 +72,7 @@ ANSWERS_HEADER = ("# 저자 답\n\n질문은 매번 올린 문서와 문헌에�
 _CHAPTER_FILE = re.compile(r"ch-(\d+)\.md")
 _VERSION_FILE = re.compile(r"ch-(\d+)\.v(\d+)\.md")
 
-class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, DocumentMixin, AttachmentMixin):
+class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, DocumentMixin, AttachmentMixin, ProjectTrashMixin):
     def __init__(self, data_dir: Path):
         self.root = Path(data_dir)
         self.root.mkdir(parents=True, exist_ok=True)
@@ -679,13 +680,31 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
             for udir in sorted(users_dir.iterdir()) if users_dir.is_dir() else []:
                 if not udir.is_dir():
                     continue
-                db.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (udir.name,))
-                for project_json in sorted((udir / "projects").glob("*/project.json")):
-                    self._reindex_project(udir.name, project_json.parent)
-                self._reindex_shelf(udir.name)
-                self._reindex_categories(udir.name)
-                self._reindex_documents(udir.name)
+                self._index_user(udir.name, udir)
         db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    def _index_user(self, user_id: str, udir: Path) -> None:
+        self._db.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (user_id,))
+        for project_json in sorted((udir / "projects").glob("*/project.json")):
+            self._reindex_project(user_id, project_json.parent)
+        self._reindex_shelf(user_id)
+        self._reindex_categories(user_id)
+        self._reindex_documents(user_id)
+
+    @_locked
+    def _reindex_user(self, user_id: str) -> None:
+        """한 사용자의 색인만 파일에서 다시(프로젝트 휴지통·되살리기, 2026-10-09). 다른 사용자의 색인은 그대로."""
+        db = self._db
+        existing = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        with db:
+            ids = [r[0] for r in db.execute("SELECT id FROM chunks WHERE user_id = ?", (user_id,))]
+            for n in range(0, len(ids), 500):
+                part = ids[n : n + 500]
+                db.execute(f"DELETE FROM chunks_fts WHERE rowid IN ({','.join('?' * len(part))})", part)
+            for table in reversed(TABLES):
+                if table not in ("users", "chunks_fts") and table in existing:
+                    db.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
+            self._index_user(user_id, self._user_dir(user_id))
 
     def _reindex_project(self, user_id: str, pdir: Path) -> None:
         project_id = pdir.name

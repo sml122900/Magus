@@ -108,6 +108,8 @@ cursor:pointer;font-size:20px}.node-del>summary::-webkit-details-marker{display:
 .del-box{position:absolute;right:0;top:48px;z-index:30;width:min(340px,80vw);background:var(--canvas);border:1px solid var(--line);
 border-left:4px solid var(--ruby);border-radius:10px;padding:4px 16px;box-shadow:0 8px 24px rgb(0 0 0/.18)}
 .del-box p{margin:10px 0}
+.proj-del{margin-left:0}.proj-del>summary{font-size:16px;gap:6px;padding:0 16px;border:1px solid var(--line);background:var(--canvas)}
+.del-box .big-warn{font-size:19px;font-weight:600;border-left:4px solid var(--ruby);padding:4px 0 4px 10px}
 .pp-link{background:var(--soft);border-radius:8px;padding:8px 12px}
 .pm-panel .case{margin:12px 0}.pm-panel .books{padding:26px 10px 0}
 .pp-hint{color:var(--ink2);font-size:15px;margin:4px 0 8px}
@@ -123,6 +125,7 @@ ol.trash-list{list-style:none;padding:0;margin:12px 0;display:grid;gap:8px}
 ol.trash-list li{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;background:var(--canvas);border:1px solid var(--line);
 border-radius:10px;padding:8px 16px}ol.trash-list time{color:var(--ink2);font-variant-numeric:tabular-nums}
 ol.trash-list form{margin-left:auto}
+.trash-count{color:var(--ink2);margin:8px 0}.trash-sub{flex-basis:100%;color:var(--ink2)}
 """
 
 PROJECTS_STYLE = """

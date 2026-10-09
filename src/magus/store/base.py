@@ -432,6 +432,34 @@ class NodeTrashInfo:
 
 
 @dataclass(frozen=True)
+class ProjectTrashInfo:
+    """웹의 확인 창에 보일 것. blocked: library(「내 서재」) | linked(다른 프로젝트가 연결 중), 없으면 None."""
+
+    project_id: str
+    title: str
+    nodes: int
+    books: int
+    items: int
+    refs: int
+    chapters: int
+    revisions: int  # 수정본 수(E2부터. 처음 올린 문서 E1은 세지 않는다)
+    blocked: str | None = None
+    linked_from: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class TrashedProject:
+    trash_id: str  # trash/projects/ 아래 폴더 이름(<프로젝트>-<시각>)
+    project_id: str
+    title: str
+    trashed_at: str
+    chapters: int
+    revisions: int
+    books: int
+    items: int
+
+
+@dataclass(frozen=True)
 class ProjectMap:
     """프로젝트 하나의 지도(#95): 노드와 선. stored: 지도 파일이 있나(없으면 지금 배치에서 계산한 지도)."""
 
@@ -784,6 +812,17 @@ class Store(Protocol):
         """글 파일에서 준 칸만 바꾼다(웹의 글 고치기·스크랩). 나머지 칸은 파일에서 그대로. 값이 None이면 그 칸을 뺀다. 없으면 ValueError."""
         ...
     def trash_category_item(self, user_id: str, category_id: str, item_id: str, note: str) -> CategoryItem | None: ...
+    # 프로젝트 휴지통(2026-10-09) — trash/projects/<프로젝트>-<시각>/(manifest.json + files/). 지우지 않는다
+    def project_trash_info(self, user_id: str, project_id: str) -> ProjectTrashInfo | None:
+        """웹 확인 창: 노드·책·글·문헌·장·수정본 수와 막는 까닭(「내 서재」, 다른 프로젝트가 연결 중). 없는 프로젝트면 None."""
+        ...
+    def trash_project(self, user_id: str, project_id: str, note: str) -> str:
+        """프로젝트를 통째로 휴지통으로(휴지통 id). 막히면 ValueError(code, 보일 이름)."""
+        ...
+    def list_trashed_projects(self, user_id: str) -> list[TrashedProject]: ...
+    def restore_project(self, user_id: str, trash_id: str) -> str:
+        """되살린 프로젝트 id. 막히면 아무것도 옮기지 않고 ValueError(code: missing·taken·full·clash, 보일 이름)."""
+        ...
     def trashed_item_project(self, user_id: str, category_id: str, item_id: str) -> str | None:
         """휴지통에 있는 글이면 그 책의 프로젝트(웹의 '이 글은 휴지통에 있습니다.'). 없으면 None."""
         ...

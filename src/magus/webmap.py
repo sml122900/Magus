@@ -31,6 +31,7 @@ from magus.category.moves import add_link, book_name, error_message, move_book, 
 from magus.category.rules import PALETTE, parse_color
 from magus.floors import MAX_FLOORS, josa
 from magus.ids import local_time
+from magus.melchior.check import after_refs_changed
 from magus.maps import CENTER, LIBRARY_NAME, MAX_NODES, NODE_NAME_MAX
 from magus.store import Floor, MapNode, ProjectMap, Store
 from magus.store.floors import MoveError
@@ -51,7 +52,7 @@ _NEXT = re.compile(r"/shelf(/[A-Za-z0-9_.\-/%]*)?")
 _ID = re.compile(r"[A-Za-z0-9_.\-]{1,80}")
 TRASH_FIELD = {"node": "node", "attachment": "attachment"}  # 휴지통 목록의 되살리기 폼 이름(그 밖은 글 item)
 MAP_DONE = ("node", "link", "rename", "color", "connect", "disconnect", "node_trash", "project", "contexts", "ctx_saved",
-            "restored")  # 지도 바꾸기 뒤 한 줄의 종류
+            "restored", "project_restored")  # 지도 바꾸기 뒤 한 줄의 종류
 
 
 def done_text(done: str, name: str) -> str:
@@ -65,6 +66,7 @@ def done_text(done: str, name: str) -> str:
         "project": "프로젝트를 만들었습니다.",
         "contexts": "컨텍스트를 저장했습니다.",
         "restored": "되살렸습니다.",
+        "project_restored": "프로젝트를 되살렸습니다.",
         "ctx_saved": "자주 쓰는 컨텍스트에 등록했습니다.",
     }[done]
 
@@ -136,6 +138,8 @@ class MapPages:
             ("/shelf/p/{project}/map", ["POST"], self.map_post),
             ("/shelf/p/{project}/export.zip", ["GET"], self.export_project),
             ("/shelf/p/{project}/trash", ["GET", "POST"], self.project_trash),  # 노드 휴지통·되살리기(#97)
+            ("/shelf/p/{project}/discard", ["POST"], self.project_discard),  # 프로젝트째 휴지통으로(2026-10-09)
+            ("/shelf/trash", ["GET", "POST"], self.projects_trash),  # 휴지통의 프로젝트·되살리기(2026-10-09)
             ("/shelf/floor/{floor}", ["GET"], self.floor_redirect),
             ("/shelf/move", ["POST"], self.shelf_move),
             ("/shelf/undo", ["POST"], self.shelf_undo),
@@ -178,8 +182,10 @@ class MapPages:
         cards = await run_in_threadpool(self._project_cards, uid, floors, session)
         from magus.webbooks import UPLOAD_PROGRESS  # noqa: PLC0415
 
+        trashed = len(await run_in_threadpool(self.store.list_trashed_projects, uid))
         body = (f"{notices}{form}<ul class=\"projects\">{cards}</ul>{UPLOAD_PROGRESS}"
-                '<p class="muted"><a href="/shelf/export.zip">전체 내려받기(zip)</a></p>')
+                '<p class="muted"><a href="/shelf/export.zip">전체 내려받기(zip)</a> · '
+                f'<a href="/shelf/trash">휴지통{f" {trashed}" if trashed else ""}</a></p>')
         return self._map_page("프로젝트", body, session, css=PROJECTS_STYLE)
 
     def _project_cards(self, uid: str, floors: list[Floor], session: tuple[str, str]) -> str:
@@ -251,6 +257,10 @@ class MapPages:
         if err := {"empty": "제목을 적어 주세요.", "full": f"프로젝트는 {MAX_FLOORS}개까지입니다."}.get(
                 params.get("projecterr") or ""):
             out += f'<p class="msg err">{err}</p>'
+        if done == "project_trashed":  # 프로젝트째 휴지통으로(2026-10-09)
+            gone = next((t for t in self.store.list_trashed_projects(uid) if t.trash_id == params.get("t")), None)
+            name = f"「{gone.title}」 " if gone else ""
+            out += f'<p class="msg">{html.escape(name)}프로젝트를 휴지통으로 옮겼습니다. <a href="/shelf/trash">휴지통</a></p>'
         if params.get("pick") == "book":  # /shelf/new를 프로젝트 없이 열었을 때
             out += '<p class="msg">새 책은 프로젝트 안에서 만듭니다. 프로젝트를 골라 노드를 열면 「새 책」이 있습니다.</p>'
         if code := params.get("maperr"):
@@ -321,7 +331,8 @@ class MapPages:
                 "panel": f"/shelf/p/{urllib.parse.quote(floor_id)}/panel", "page": f"/shelf/p/{urllib.parse.quote(floor_id)}",
                 "nodes": [{"id": n.id, "x": n.x, "y": n.y} for n in found.nodes], "edges": [list(e) for e in found.edges]}
         state = f' data-node="{html.escape(node.id)}"' if node else ""
-        head = (f'<div class="pm-head"><h1 class="pm-title">{html.escape(project_name(floor))}</h1>{new_node}'
+        discard = await run_in_threadpool(self._project_delete, uid, session, floor)
+        head = (f'<div class="pm-head"><h1 class="pm-title">{html.escape(project_name(floor))}</h1>{new_node}{discard}'
                 f'<p class="pm-meta">노드 {len(found.nodes)} · 선 {len(found.edges)} · {when_text(floor.updated_at)}</p></div>')
         body = (f'{notices}<p class="crumb"><a href="/shelf">← 프로젝트</a></p><div class="pm" data-view="{view}">{head}{bar}{search}'
                 f'<div class="pm-body"{state}><div class="pm-main">{map_html}{list_html}</div>'
@@ -478,6 +489,96 @@ class MapPages:
         return (f'<div class="pp-node" id="pp-node" data-node="{html.escape(node.id)}">'
                 f'<div class="pp-head"><h2 class="pp-title" id="pp-title" tabindex="-1">{html.escape(title)}</h2>'
                 f'<span class="pp-kind">{kind} · 책 {len(books)}권</span>{delete}</div>{context}{intro}{shelf}{hint}{settings}</div>')
+
+    def _project_delete(self, uid: str, session: tuple[str, str], floor: Floor) -> str:
+        """지도 머리의 '🗑 휴지통으로'와 화면 안 확인 창(2026-10-09). 프로젝트째(가운데 노드·올린 문서 포함) 휴지통으로.
+        「내 서재」에는 없다. 다른 프로젝트가 연결 중이면 그 프로젝트 이름과 '닫기'만. 수정본이 있으면 크게 알린다."""
+        if floor.common:
+            return ""
+        info = self.store.project_trash_info(uid, floor.id)
+        if info is None:
+            return ""
+        close = '<button type="button" class="del-cancel" onclick="this.closest(\'details\').open=false">{}</button>'
+        name = f"「{project_name(floor)}」"
+        if info.blocked == "linked":
+            inner = (f'<p>{html.escape("·".join(f"「{x}」" for x in info.linked_from))}에서 연결하고 있어 휴지통으로 옮길 수 없습니다. '
+                     "그 프로젝트의 연결 노드를 먼저 휴지통으로 옮겨 주세요.</p>"
+                     f"<p>{close.format('닫기')}</p>")
+        else:
+            along = [f"노드 {info.nodes}개", f"책 {info.books}권", f"글 {info.items}개"]
+            along += [f"문헌 글 {info.refs}편"] if info.refs else []
+            along += [f"올린 문서 {info.chapters}장"] if info.chapters else []
+            ask = f"프로젝트 {josa(name, '을/를')} 휴지통으로 옮길까요? 가운데 노드를 포함해 {'·'.join(along)}이 함께 옮겨집니다."
+            warn = f'<p class="big-warn">수정본 {info.revisions}개가 함께 옮겨집니다.</p>' if info.revisions else ""
+            inner = (f"<p>{html.escape(ask)}</p>{warn}"
+                     f'<form method="post" action="/shelf/p/{urllib.parse.quote(floor.id)}/discard">{self._csrf_input(session)}'
+                     f'<p><button class="primary">옮기기</button> {close.format("취소")}</p></form>')
+        return ('<details class="node-del proj-del"><summary><span aria-hidden="true">🗑</span> 휴지통으로</summary>'
+                f'<div class="del-box" role="dialog" aria-label="프로젝트 휴지통으로">{inner}</div></details>')
+
+    async def project_discard(self, request: Request) -> Response:
+        """프로젝트째 휴지통으로(POST, CSRF). 막히면 지도에 까닭(400). 옮기면 프로젝트 목록에 한 줄과 휴지통 링크."""
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        try:
+            await self._form(request, session)
+        except PermissionError:
+            return self._map_page("프로젝트", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+        floor_id = request.path_params["project"]
+        try:
+            trash_id = await run_in_threadpool(self.store.trash_project, uid, floor_id, "웹 지도에서 옮김")
+        except ValueError as e:
+            code = e.args[0] if e.args else ""
+            if code == "missing":
+                return self.not_found(request, session, "프로젝트")
+            said = ("「내 서재」는 휴지통으로 옮기지 않습니다." if code == "library" else
+                    f"{e.args[1]}에서 연결하고 있어 휴지통으로 옮길 수 없습니다." if code == "linked" else "휴지통으로 옮기지 못했습니다.")
+            return await self.project_page(request, f'<p class="msg err">{html.escape(said)}</p>', 400)
+        await run_in_threadpool(after_refs_changed, self.store, uid)  # 장별 미확인 수는 파생값이라 색인을 다시 만든 뒤 맞춘다
+        return RedirectResponse(with_query("/shelf", done="project_trashed", t=trash_id), status_code=303)
+
+    async def projects_trash(self, request: Request) -> Response:
+        """휴지통의 프로젝트(2026-10-09): 옮긴 날짜·이름·올린 문서·수정본·책·글과 [되살리기]. 되살리면 그 프로젝트 지도로."""
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        if request.method == "POST":
+            try:
+                form = await self._form(request, session)
+            except PermissionError:
+                return self._map_page("휴지통", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            try:
+                project = await run_in_threadpool(self.store.restore_project, uid, str(form.get("trash") or ""))
+            except ValueError as e:
+                code = e.args[0] if e.args and e.args[0] in ("taken", "full", "clash") else "missing"
+                return RedirectResponse(with_query("/shelf/trash", err=code, name=str(e.args[1]) if len(e.args) > 1 else ""),
+                                        status_code=303)
+            await run_in_threadpool(after_refs_changed, self.store, uid)
+            return RedirectResponse(state_url(project, done="project_restored"), status_code=303)
+        rows = await run_in_threadpool(self.store.list_trashed_projects, uid)
+        params = request.query_params
+        named = params.get("name") or ""
+        message = {"taken": f"같은 id의 프로젝트(「{named}」)가 이미 있어 되살리지 못했습니다.",
+                   "full": f"프로젝트는 {MAX_FLOORS}개까지라 되살리지 못했습니다. 다른 프로젝트를 먼저 휴지통으로 옮겨 주세요.",
+                   "clash": f"같은 이름의 책·문헌 글·문서(「{named}」)가 그사이 생겨 되살리지 못했습니다.",
+                   "missing": "휴지통에 없는 프로젝트입니다."}.get(params.get("err") or "", "")
+        csrf = self._csrf_input(session)
+        items = "".join(
+            f'<li><time datetime="{html.escape(t.trashed_at)}">{local_time(t.trashed_at, "%Y-%m-%d %H:%M")}</time> '
+            f"<b>프로젝트 「{html.escape(t.title)}」</b>"
+            f'<small class="trash-sub">올린 문서 {t.chapters}장 · 수정본 {t.revisions}개 · 책 {t.books}권 · 글 {t.items}개</small>'
+            f'<form method="post" action="/shelf/trash" class="inline">{csrf}<input type="hidden" name="trash" value="{html.escape(t.trash_id)}">'
+            "<button>되살리기</button></form></li>" for t in rows)
+        from magus.webboard import SEP  # noqa: PLC0415
+
+        lead = f'<nav class="trail" aria-label="위치"><a href="/shelf">프로젝트</a>{SEP}<span aria-current="page">휴지통</span></nav>'
+        body = ((f'<p class="msg err">{html.escape(message)}</p>' if message else "")
+                + (f'<p class="trash-count">{len(rows)}개</p><ol class="trash-list">{items}</ol>' if rows
+                   else '<p class="empty">휴지통이 비었습니다.</p>'))
+        return self._map_page("휴지통", body, session, css=TRASH_STYLE, lead=lead)
 
     def _node_delete(self, uid: str, session: tuple[str, str], floor: Floor, node: MapNode) -> str:
         """노드를 고르면 보이는 🗑과 화면 안의 작은 확인 창(#97 노드 삭제, confirm() 쓰지 않음). 가운데 노드에는 없다.
