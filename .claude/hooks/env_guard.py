@@ -1,4 +1,5 @@
 """.env 보호 장치(PreToolUse 훅, 2026-10-09 사용자 지시). 셸 명령에 ".env"가 들어 있으면 막는다(종료 코드 2 + 이유).
+".env" 바로 뒤에 글자·숫자·_가 오면 다른 낱말이라 막지 않는다(os.environ, 후속 C). .env·.env.local·.ENV·"…/.env"는 막는다.
 
 예외는 정확히 두 꼴뿐이다(값을 읽지 않고 변수 이름 개수만 보거나, git이 무시하는지만 본다):
   grep -c '^이름=' <경로>/.env
@@ -17,6 +18,7 @@ import shlex
 import sys
 
 PATH = r"[\w./:~\\-]*\.env"
+ENV_WORD = re.compile(r"\.env(?!\w)", re.IGNORECASE)  # .env 뒤에 글자·숫자·_가 없을 때만(os.environ은 통과)
 ALLOWED = (
     re.compile(r"grep\s+-c\s+(['\"])\^[A-Za-z_][A-Za-z0-9_]*=\1\s+" + PATH),
     re.compile(r"git\s+check-ignore(?:\s+-{1,2}[a-z-]+)*(?:\s+" + PATH + r")+"),
@@ -84,7 +86,7 @@ def recursive_targets(command: str) -> list[str] | None:
 
 def check(command: str, cwd: str) -> int:
     one = command.strip()
-    if ".env" in one.lower():
+    if ENV_WORD.search(one):
         if "\n" not in one and any(p.fullmatch(one) for p in ALLOWED):
             return 0
         return block("명령에 .env가 들어 있다")

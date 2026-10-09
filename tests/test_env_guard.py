@@ -34,6 +34,9 @@ def tree(tmp_path: Path) -> Path:
     "grep -c '^SESSION_SECRET=' deploy/.env; cat deploy/.env", "grep -c '^SESSION_SECRET=' deploy/.env\ncat deploy/.env",
     "grep -c '^SESSION_SECRET=' deploy/.env | cat", "cat deploy/.ENV", "cat deploy/.env.local", "cat .env.example",
     "ssh host \"grep -c '^A=' /opt/magus/deploy/.env\"",
+    # 후속 C: os.environ과 함께 써도, 뒤에 점·따옴표·끝이 오면 그대로 막는다
+    "python -c \"import os; print(len(os.environ)); print(open('deploy/.env').read())\"", "cat 'deploy/.env'", "cat deploy/.Env.local",
+    "type deploy\\.ENV",
 ])
 def test_blocks_reading_values(tree: Path, command: str):
     r = run(command, tree)
@@ -45,6 +48,8 @@ def test_blocks_reading_values(tree: Path, command: str):
     "grep -c '^ANTHROPIC_API_KEY=' deploy/.env", 'grep -c "^SESSION_SECRET=" /opt/magus/deploy/.env', "grep -c '^A_1=' .env",
     "git check-ignore deploy/.env", "git check-ignore -v deploy/.env", "git check-ignore -q --no-index deploy/.env .env",
     "ls src", ".venv/Scripts/python -m pytest -q", "grep -rn x src", "grep -n x src/a.py", "rg x", "rg -n x src",
+    # 후속 C: .env 바로 뒤에 글자·숫자·_가 오면 다른 낱말(os.environ 오탐 없앰)
+    'python -c "import os; print(len(os.environ))"', "python -c \"import os; os.environ.get('X')\"", "echo x.env_file", "echo a.env2",
 ])
 def test_allows(tree: Path, command: str):
     r = run(command, tree)
