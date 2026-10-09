@@ -16,7 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from magus.melchior.check import Resolver, check_text, terms_of
+from magus.melchior.cache import CiteCache
 from magus.melchior.report import build_cite_report
 from magus.melchior.translit import KOREAN_SURNAMES, korean_skeleton, latin_skeleton, score
 from magus.store import Ref, Store
@@ -143,6 +143,7 @@ class ReportParts:
     same_author: dict[str, list[str]]
     ambiguous: dict[str, list[str]]
     texts: list[tuple[str, str]]
+    cache: CiteCache  # 이름 찾기(mentions)도 이 캐시로. 다 쓰면 부른 쪽이 save()
 
     @property
     def unchecked(self) -> list[Any]:
@@ -161,25 +162,22 @@ class ReportParts:
         return len(self.report.docs) - len(self.report.of("uncertain"))
 
 
-def gather(store: Store, user_id: str, project_id: str) -> ReportParts:
+def gather(store: Store, user_id: str, project_id: str, cache: CiteCache | None = None) -> ReportParts:
+    """재료를 모은다. 인용 대조·이름 찾기는 계산 캐시를 쓴다(저장은 부른 쪽이 p.cache.save())."""
     project = store.get_project(user_id, project_id)
     if project is None:
         raise ValueError(f"프로젝트 {project_id!r}가 없다")
-    report = build_cite_report(store, user_id, project_id)
-    resolver, terms = Resolver(store, user_id, project_id), terms_of(store, user_id, project_id)
-    refs = {r.key: r for r in store.list_refs(user_id, floors=resolver.floors)}  # 그 프로젝트 + 연결 노드가 가리키는 문헌(#95)
+    cache = cache or CiteCache(store, user_id, project_id)
+    report = build_cite_report(store, user_id, project_id, cache)
+    refs = cache.refs  # 그 프로젝트 + 연결 노드가 가리키는 문헌(#95)
 
     # 추정 연결과 동명 판별을 장 단위로 다시 모은다(어느 장의 어떤 표기인지 보여 주려고)
     inferred: dict[tuple[str, str], list[str]] = defaultdict(list)  # (표기, ref key) → 장
     same_author: dict[str, list[str]] = defaultdict(list)  # ref key → 장
     ambiguous: dict[str, list[str]] = {}  # 연도 a/b 모호로 잇지 않은 것 → 후보 key
-    texts: list[tuple[str, str]] = []
-    for meta in store.list_chapters(user_id, project_id):
-        chapter = store.read_chapter(user_id, project_id, meta.number)
-        if chapter is None:
-            continue
-        texts.append((meta.display, chapter.content))
-        for g in check_text(store, user_id, chapter.content, resolver, terms).groups:
+    for chapter in cache.chapters():
+        meta = chapter.meta
+        for g in chapter.result.groups:
             for _, surface in g.occurrences:
                 if g.matched_by not in ("", "alias"):
                     inferred[(surface, g.key)].append(meta.display)
@@ -187,7 +185,7 @@ def gather(store: Store, user_id: str, project_id: str) -> ReportParts:
                 ambiguous[g.key] = [k for k, _ in g.candidates]
             if re.search(r"-\d+$", g.key) or any(k.startswith(g.key + "-") for k in refs):
                 same_author[g.key].append(meta.display)
-    return ReportParts(project, report, refs, inferred, same_author, ambiguous, texts)
+    return ReportParts(project, report, refs, inferred, same_author, ambiguous, cache.texts(), cache)
 
 
 def summary_line(p: ReportParts) -> str:
@@ -213,7 +211,7 @@ def mismatch_lines(p: ReportParts) -> list[str]:
     ]
     for key, _ in report.uncited:
         ref = refs.get(key)
-        shown, where = name_mentions(p.texts, ref) if ref else ([], [])
+        shown, where = p.cache.mentions(ref) if ref else ([], [])
         note = f" — 본문에는 이름만 나옵니다: '{', '.join(shown)}'({chapters_text(where)})" if where else " — 본문에서 이름도 찾지 못했습니다"
         lines.append(f"- {cite_label(ref, key)}{note}")
     return lines
@@ -306,6 +304,7 @@ def build_author_report(store: Store, user_id: str, project_id: str, date: str) 
         "- 확인된 문헌만 글에 인용됩니다. 확인 전인 문헌은 [출처 필요]로 표시됩니다.",
         "- 새 대화를 열어도 목차와 결정이 그대로 유지됩니다.",
     ]
+    p.cache.save()
     return "\n".join(lines) + "\n"
 
 

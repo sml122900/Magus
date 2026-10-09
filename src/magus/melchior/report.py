@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from magus.melchior.check import Resolver, check_text, terms_of
+from magus.melchior.cache import CiteCache
 from magus.store import Store
 
 
@@ -87,17 +87,15 @@ class CiteReport:
         return "\n".join(lines)
 
 
-def build_cite_report(store: Store, user_id: str, project_id: str) -> CiteReport:
-    resolver = Resolver(store, user_id, project_id)
-    terms = terms_of(store, user_id, project_id)
+def build_cite_report(store: Store, user_id: str, project_id: str, cache: CiteCache | None = None) -> CiteReport:
+    """cache를 주면 그 캐시를 함께 쓰고(저장은 준 쪽이), 없으면 스스로 만들어 끝에 저장한다."""
+    own = cache is None
+    cache = cache or CiteCache(store, user_id, project_id)
     docs: dict[str, DocStat] = {}
     per_chapter = []
     needs_source = 0
-    for meta in store.list_chapters(user_id, project_id):
-        chapter = store.read_chapter(user_id, project_id, meta.number)
-        if chapter is None:
-            continue
-        result = check_text(store, user_id, chapter.content, resolver, terms)
+    for chapter in cache.chapters():
+        meta, result = chapter.meta, chapter.result
         needs_source += result.needs_source
         per_chapter.append(
             (meta.display, meta.title, result.unchecked_count,
@@ -110,7 +108,7 @@ def build_cite_report(store: Store, user_id: str, project_id: str) -> CiteReport
             doc.cited_as.update(c for _, c in g.occurrences)
             if g.matched_by not in ("", "alias"):
                 doc.inferred.update(f"{c} [{g.matched_by}]" for _, c in g.occurrences)
-    refs = store.list_refs(user_id, floors=resolver.floors)  # 그 프로젝트 + 연결 노드가 가리키는 문헌(#95)
+    refs = list(cache.refs.values())  # 그 프로젝트 + 연결 노드가 가리키는 문헌(#95)
     for doc in docs.values():
         if doc.status == "unknown" and (name := re.sub(r"\d{4}[a-z]?(-\d+)?$", "", doc.key)):
             similar = [r.key for r in refs if re.sub(r"\d{4}[a-z]?(-\d+)?$", "", r.key) == name]
@@ -121,4 +119,6 @@ def build_cite_report(store: Store, user_id: str, project_id: str) -> CiteReport
         for ref in refs
         if ref.key not in cited and not ref.key.startswith("raw-")
     ]
+    if own:
+        cache.save()
     return CiteReport(per_chapter, docs, uncited, needs_source)

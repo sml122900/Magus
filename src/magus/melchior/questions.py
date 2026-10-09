@@ -17,8 +17,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from magus.ids import utcnow
-from magus.melchior.author_report import chapters_text, cite_label, name_mentions, surnames
-from magus.melchior.check import cite_floors, Resolver, after_refs_changed, check_text, terms_of
+from magus.melchior.author_report import chapters_text, cite_label, surnames
+from magus.melchior.cache import CiteCache
+from magus.melchior.check import cite_floors, after_refs_changed
 from magus.melchior.refs import add_alias
 from magus.melchior.report import build_cite_report
 from magus.melchior.translit import score
@@ -52,21 +53,19 @@ def _base(key: str) -> str:
     return re.sub(r"(-\d+)$", "", key)
 
 
-def build_questions(store: Store, user_id: str, project_id: str) -> list[Question]:
-    """지금 원고·문헌에서 질문을 계산하고, answers.md의 답으로 상태를 붙인다."""
-    report = build_cite_report(store, user_id, project_id)
-    resolver, terms = Resolver(store, user_id, project_id), terms_of(store, user_id, project_id)
-    refs = {r.key: r for r in store.list_refs(user_id, floors=resolver.floors)}  # 그 프로젝트 + 연결 노드가 가리키는 문헌(#95)
+def build_questions(store: Store, user_id: str, project_id: str, cache: CiteCache | None = None) -> list[Question]:
+    """지금 원고·문헌에서 질문을 계산하고, answers.md의 답으로 상태를 붙인다.
+    인용 대조·이름 찾기는 계산 캐시(melchior/cache.py)를 쓴다. cache를 주면 저장은 준 쪽이 한다."""
+    own = cache is None
+    cache = cache or CiteCache(store, user_id, project_id)
+    report = build_cite_report(store, user_id, project_id, cache)
+    refs = cache.refs  # 그 프로젝트 + 연결 노드가 가리키는 문헌(#95)
     inferred: dict[tuple[str, str], list[str]] = defaultdict(list)  # (표기, key) → 장
     ambiguous: dict[str, tuple[list[str], list[str], set[str]]] = {}  # 모호 key → (후보, 장, 표기)
     linked: dict[str, list[str]] = defaultdict(list)  # 형제가 있는 key → 장
-    texts: list[tuple[str, str]] = []
-    for meta in store.list_chapters(user_id, project_id):
-        chapter = store.read_chapter(user_id, project_id, meta.number)
-        if chapter is None:
-            continue
-        texts.append((meta.display, chapter.content))
-        for g in check_text(store, user_id, chapter.content, resolver, terms).groups:
+    for chapter in cache.chapters():
+        meta = chapter.meta
+        for g in chapter.result.groups:
             if g.candidates:
                 cands, where, shown = ambiguous.setdefault(g.key, ([k for k, _ in g.candidates], [], set()))
                 where.append(meta.display)
@@ -97,7 +96,7 @@ def build_questions(store: Store, user_id: str, project_id: str) -> list[Questio
         if key in hinted:
             continue
         ref = refs.get(key)
-        shown, at = name_mentions(texts, ref) if ref else ([], [])
+        shown, at = cache.mentions(ref) if ref else ([], [])
         mention = f" 본문에는 이름만 나옵니다: '{', '.join(shown)}'({where(at)})." if at else " 본문에서 이름도 찾지 못했습니다."
         out.append(Question(
             f"bibonly:{key}", "bibonly", at, f"참고문헌에만 있는 {label(key)}.{mention}",
@@ -147,6 +146,8 @@ def build_questions(store: Store, user_id: str, project_id: str) -> list[Questio
             # 서버가 바로 반영하는 답(alias·비인용 용어)을 했는데도 질문이 남아 있으면 다시 연다(반영이 안 된 것)
             applied = q.type in ("translit", "ab", "unlinked") and kind in ("yes", "ref", "not_person")
             q.state = "waiting" if kind in WAIT else "open" if applied else "answered"
+    if own:
+        cache.save()
     return out
 
 

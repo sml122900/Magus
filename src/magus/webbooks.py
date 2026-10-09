@@ -22,6 +22,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from starlette.requests import Request
@@ -38,6 +39,8 @@ from magus.mdlite import to_html
 from magus.melchior.author_report import cite_label, write_docx
 from magus.melchior.check import cite_floors
 from magus.melchior.questions import TYPES as QUESTION_TYPES
+from magus.melchior.cache import CiteCache
+from magus.melchior.cache import warm as warm_cites
 from magus.melchior.questions import build_questions
 from magus.melchior.report import build_cite_report
 from magus.store import BookTitles, Store
@@ -193,7 +196,9 @@ class BookPages:
         except (ValueError, FileNotFoundError, LimitError) as e:
             return self._book_page("문서 올리기", f'<p class="msg err">{html.escape(str(e))}</p><p><a href="/shelf">프로젝트</a></p>',
                                    session, 400)
-        return RedirectResponse(f"/shelf/book/{report.project_id}?done=imported", status_code=303)
+        # 응답 뒤에 인용 계산 캐시를 미리 만든다(첫 인용 상태 탭이 빠르게, 2026-10-09)
+        return RedirectResponse(f"/shelf/book/{report.project_id}?done=imported", status_code=303,
+                                background=BackgroundTask(warm_cites, self.store, uid, report.project_id))
 
     # ---- 원고 책 ------------------------------------------------------------------------------
     def _manuscript_head(self, uid: str, project: Any, tab: str) -> str:
@@ -300,8 +305,9 @@ class BookPages:
                 f"<table><tr><th>번호</th><th>장</th><th>누가</th><th>종류</th><th>내용</th></tr>{rows or '<tr><td colspan=\"5\">없음</td></tr>'}</table>")
 
     def _checklist_html(self, uid: str, project: Any, params: Any) -> str:
-        report = build_cite_report(self.store, uid, project.id)
-        refs = {r.key: r for r in self.store.list_refs(uid, floors=cite_floors(self.store, uid, project.id))}  # 그 프로젝트 + 연결 노드가 가리키는 문헌(#95)
+        cache = CiteCache(self.store, uid, project.id)  # 인용 집계와 질문이 같은 계산 캐시를 쓴다(2026-10-09, 전 7.5~8.4초)
+        report = build_cite_report(self.store, uid, project.id, cache)
+        refs = cache.refs  # 그 프로젝트 + 연결 노드가 가리키는 문헌(#95)
         status = params.get("status") or ""
         docs = [d for d in report.docs.values() if not status or d.status == status]
         order = {"unknown": 0, "unverified": 1, "uncertain": 2, "verified": 3}
@@ -309,7 +315,8 @@ class BookPages:
         counts = {s: len(report.of(s)) for s in LIGHTS}
         base = f"/shelf/book/{urllib.parse.quote(project.id)}?tab=cites"
         filters = " · ".join(f'<a href="{base}&status={s}">{LIGHTS[s][0]} {LIGHTS[s][1]} {counts[s]}</a>' for s in LIGHTS)
-        questions = [q for q in build_questions(self.store, uid, project.id) if q.state == "open"]
+        questions = [q for q in build_questions(self.store, uid, project.id, cache) if q.state == "open"]
+        cache.save()
         doc_rows = "".join(
             f"<tr><td>{LIGHTS[d.status][0]} {LIGHTS[d.status][1]}</td><td>{html.escape(cite_label(refs.get(d.key), d.key))}"
             + (f"<br><small>후보: {html.escape(' / '.join(d.candidates))}</small>" if d.candidates else "")

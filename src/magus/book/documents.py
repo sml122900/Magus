@@ -40,7 +40,7 @@ def build_source_check(store: Store, user_id: str, project_id: str, title: str, 
     project = p.project
     editions = store.list_editions(user_id, project_id)
     edition = editions[-1] if editions else None
-    questions = [q for q in build_questions(store, user_id, project_id) if q.state in ("open", "waiting")]
+    questions = [q for q in build_questions(store, user_id, project_id, p.cache) if q.state in ("open", "waiting")]
     asked = [q for q in questions if q.type not in IN_MISMATCH]  # 연도 불일치·참고문헌에만 있음은 2절(원고 불일치)에서 보인다
     open_issues = store.list_issues(user_id, project_id, "open")
     fact_count, facts = fact_lines(store, user_id, project_id)
@@ -89,6 +89,7 @@ def build_source_check(store: Store, user_id: str, project_id: str, title: str, 
               "문서 화면에서 다시 만들 수 있습니다(이전 판은 이력으로 남습니다)."]
     version = DocVersion(0, made, edition.number if edition else None, "server+preface" if preface and preface.strip() else "server",
                          (preface_by or "ai") if preface and preface.strip() else None, stats)
+    p.cache.save()
     return "\n".join(lines) + "\n", version
 
 
