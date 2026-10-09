@@ -102,7 +102,7 @@ class CategoryMixin:
     def update_category(self, user_id: str, category_id: str, *, name: str | None = None, color: str | None = None) -> Category:
         current = self.get_category(user_id, category_id)
         if current is None:
-            raise ValueError(f"카테고리 {category_id}가 없다")
+            raise ValueError(f"책 {category_id}가 없다")  # 저자에게 보일 수 있는 문장은 용어집 이름(점검 25-b)
         if color is not None and not HEX.fullmatch(color):
             raise ValueError(f"색은 #RRGGBB: {color!r}")
         if name is not None and name_key(name) != name_key(current.name):
@@ -124,7 +124,7 @@ class CategoryMixin:
         if current is None:
             return None
         if current.sources:
-            raise ValueError(f"「{current.name}」에는 문헌·참고문헌 항목이 {current.sources}편 있어 휴지통으로 옮기지 않는다")
+            raise ValueError(f"「{current.name}」에는 문헌 글이 {current.sources}편 있어 휴지통으로 옮기지 않는다")
         src = self._category_dir(user_id, category_id)
         target = self._user_dir(user_id) / "trash" / "shelf" / "categories" / category_id
         if target.exists():  # 같은 id가 휴지통에 이미 있으면(되살린 뒤 다시 옮김) 옛것을 시각 이름으로 비켜 둔다
@@ -157,7 +157,7 @@ class CategoryMixin:
             raise ValueError(f"'{clash[0]}' 책이 이미 있어 되살리지 못했다. --name으로 새 이름을 준다")
         dst = self._category_dir(user_id, category_id)
         if dst.exists():
-            raise ValueError(f"카테고리 {category_id} 폴더가 이미 있다")
+            raise ValueError(f"책 {category_id}의 폴더가 이미 있다")
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dst))
         write_json(dst / "category.json", record)
@@ -172,7 +172,7 @@ class CategoryMixin:
         safe_id(item.id, "item id")
         cdir = self._category_dir(user_id, item.category_id)
         if not (cdir / "category.json").exists():
-            raise ValueError(f"카테고리 {item.category_id}가 없다")
+            raise ValueError(f"책 {item.category_id}가 없다")
         path = cdir / "items" / f"{item.id}.json"
         now = utcnow()
         old = read_json(path) if path.exists() else {}

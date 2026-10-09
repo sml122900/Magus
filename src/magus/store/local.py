@@ -545,7 +545,7 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
         new = {i.id: replace(i, anchor=formats.one_line(i.anchor)[:ANCHOR_MAX] if i.anchor else None) for i in issues}
         current = formats.parse_issues(_read_text(path))
         if missing := set(new) - {i.id for i in current}:
-            raise ValueError(f"없는 미해결: {sorted(missing)}")
+            raise ValueError(f"없는 확인 요청: {sorted(missing)}")  # 용어집 이름(점검 25-b)
         _write_text(path, formats.dump_issues([new.get(i.id, i) for i in current]))
         with self._db:
             self._index_issues(user_id, project_id, list(new.values()))
@@ -583,7 +583,7 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
     def _inbox_file(self, user_id: str, name: str) -> Path:
         path = self._inbox_dir(user_id) / name
         if path.parent != self._inbox_dir(user_id) or name in ("", ".", ".."):
-            raise ValueError(f"받은함 파일 이름이 아니다: {name!r}")
+            raise ValueError(f"올린 파일 이름이 아니다: {name!r}")
         return path
 
     def list_inbox(self, user_id: str) -> list[InboxFile]:

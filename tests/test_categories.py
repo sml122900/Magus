@@ -485,7 +485,7 @@ async def test_put_routes_sources_and_shows_context(settings: Settings, store: L
         trash = await c.call_tool("category_trash", {"book": "읽은 논문", "item_id": "galor2022", "note": "x"})
         assert trash.is_error and "문헌 글(서지·원문 확인)은 휴지통으로 옮기지 않는다" in _text(trash)
         whole = await c.call_tool("category_trash", {"book": "읽은 논문", "note": "x"})
-        assert whole.is_error and "문헌·참고문헌 항목이 1편 있어" in _text(whole)
+        assert whole.is_error and "문헌 글이 1편 있어" in _text(whole)
     [book] = store.list_categories("alice")
     ref = store.get_ref("alice", "galor2022")
     assert (book.items, book.sources, book.verified) == (1, 1, 1) and ref.book == book.id and ref.status == "verified"

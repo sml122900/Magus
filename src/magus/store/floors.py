@@ -327,7 +327,7 @@ class FloorMixin:
         to_floor = self._check_floor(user_id, layout, to_floor)
         row = self._db.execute("SELECT name, floor FROM categories WHERE user_id = ? AND id = ?", (user_id, category_id)).fetchone()
         if row is None:
-            raise MoveError("unknown_category", f"카테고리 {category_id}가 없다")
+            raise MoveError("unknown_category", f"책 {category_id}가 없다")
         name, from_floor = row["name"], row["floor"]
         if from_floor == to_floor:
             raise MoveError("same", f"「{name}」은 이미 {self._label(user_id, layout, to_floor)}에 있다", name=name)
@@ -404,7 +404,7 @@ class FloorMixin:
         else:
             row = self._db.execute("SELECT floor FROM categories WHERE user_id = ? AND id = ?", (user_id, move.book)).fetchone()
             if row is None:
-                raise MoveError("unknown_category", f"카테고리 {move.book}가 없다")
+                raise MoveError("unknown_category", f"책 {move.book}가 없다")
             if clash := self._clash(user_id, move.book, move.from_floor):
                 raise MoveError("undo_clash", f"{self._label(user_id, layout, move.from_floor)}에 같은 이름 「{clash}」이 생겼다",
                                 name=clash, floor=self._label(user_id, layout, move.from_floor))
