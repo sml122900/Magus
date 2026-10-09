@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "anthropic>=1.12.1",
+    "lxml>=6.1.3",  # docx_reader·extract가 직접 쓴다(전에는 python-docx를 통해서만 들어옴, 점검 20-3)
     "mcp>=2.2.0",
     "numpy>=2.5.3",
     "pillow>=12.3.0",
@@ -31,6 +32,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "ruff>=0.16.10",  # 린트(CLAUDE.md 개발 명령, 점검 20-3)
 ]
 
 [tool.pytest.ini_options]
