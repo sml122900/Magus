@@ -393,8 +393,8 @@ def test_shelf_books_and_board_lists(server_proc):
         assert str(old.url).endswith(f"/shelf/ideas-common/{oldest}") and "<h1>오래된 생각 0</h1>" in old.text
         assert c.get("/shelf/ideas/20260101000000000-ffffff").status_code == 404
         assert c.get("/shelf/nothing").status_code == 404
-        for page in (styles, ideas, refs):  # 로그아웃만(찾기는 GET, 글쓰기는 별도 페이지)
-            assert page.count('method="post"') == 1
+        for page in (styles, ideas, refs):  # 로그아웃과 줄마다 스크랩(☆)만(찾기는 GET, 글쓰기는 별도 페이지)
+            assert page.count('method="post"') - page.count('<form class="star"') == 1
         assert shelf.count('method="post"') == 3  # 로그아웃 · 끌어 옮기기(숨은 폼) · 새 프로젝트 만들기
         assert "<h1>생각</h1>" in ideas and 'aria-current=page>프로젝트</a>' in styles
 

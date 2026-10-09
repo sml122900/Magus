@@ -483,6 +483,7 @@ class ShelfPages:
     post_view: Callable[[Request], Awaitable[Response]]
     board_write: Callable[[Request], Awaitable[Response]]
     board_edit: Callable[[Request], Awaitable[Response]]
+    board_scrap: Callable[[Request], Awaitable[Response]]
     trail: Callable[..., str]
     # BookPages(webbooks)가 구현한다
     book_routes: Callable[[], list[tuple[str, list[str], Callable[..., Any]]]]
@@ -503,6 +504,7 @@ class ShelfPages:
             ("/shelf/{kind}", ["GET"], self.board_list),  # 책 = 게시판 페이지(webboard)
             ("/shelf/{kind}/{item}", ["GET"], self.post_view),  # 글 보기 페이지(webboard)
             ("/shelf/{kind}/{item}/edit", ["GET", "POST"], self.board_edit),  # 글 고치기(webboard, 2026-10-09 되돌림)
+            ("/shelf/{kind}/{item}/scrap", ["POST"], self.board_scrap),  # 스크랩(별표, webboard, 2026-10-09)
             ("/shelf/{kind}/{item}/trash", ["POST"], self.shelf_item_trash),  # 글 보기의 🗑(화면 안 확인 창, 2026-10-09)
             ("/shelf/{kind}/{item}/files/{att}", ["GET"], self.shelf_file),  # 첨부 보기·내려받기(#97)
             ("/shelf/{kind}/{item}/thumbs/{att}", ["GET"], self.shelf_thumb),  # 사진 썸네일(없으면 만들고, 못 만들면 원본)

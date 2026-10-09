@@ -1,8 +1,9 @@
 """SQLite 인덱스 스키마. 인덱스는 언제든 원본 파일에서 다시 만들 수 있으므로,
 스키마가 바뀌면 SCHEMA_VERSION을 올린다. 그러면 LocalStore가 인덱스를 지우고 다시 만든다."""
 
-SCHEMA_VERSION = 20  # 17: 층(#93). 18: refs.moved(공용으로 옮긴 기록). 19: 문서 책(documents, 레인 document)·원고 책 색(#94)
+SCHEMA_VERSION = 21  # 17: 층(#93). 18: refs.moved(공용으로 옮긴 기록). 19: 문서 책(documents, 레인 document)·원고 책 색(#94)
 # 20: 컨텍스트(#96). 생각·문체 표(ideas·style_entries)를 빼고 글(category_items)에 칸을 더함, refs.book, contexts 열
+# 21: 스크랩(별표, 2026-10-09). category_items.scrap·refs.scrap
 
 # 지울 때는 역순으로 지운다. chunks_fts는 가상 테이블이다(그림자 테이블도 함께 지워진다).
 TABLES = (
@@ -130,6 +131,7 @@ CREATE TABLE refs (
     floor         TEXT NOT NULL DEFAULT 'common',
     moved         TEXT,
     book          TEXT,  -- 그 글이 꽂힌 책(카테고리 id, #96)
+    scrap         INTEGER NOT NULL DEFAULT 0,  -- 스크랩(별표, 2026-10-09). 원본은 bib.json의 "scrap": true
     UNIQUE (user_id, key)
 );
 
@@ -183,8 +185,10 @@ CREATE TABLE category_items (
     origin          TEXT,
     kind            TEXT,
     tags_by         TEXT CHECK (tags_by IN ('ai', 'author')),
+    scrap           INTEGER NOT NULL DEFAULT 0,  -- 스크랩(별표, 2026-10-09). 원본은 글 파일의 "scrap": true
     PRIMARY KEY (user_id, category_id, id)
 );
+CREATE INDEX category_items_scrap ON category_items (user_id, category_id) WHERE scrap = 1;
 
 CREATE TABLE documents (
     id          TEXT NOT NULL,

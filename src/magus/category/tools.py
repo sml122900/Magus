@@ -177,6 +177,9 @@ def build_tools(
             lines += project_block(store, user, f.id, counts, header=head)
         if not counts.categories and not any(f.has_manuscript for f in floors):
             lines.append("책이 아직 없다(저자가 만들자고 하면 category_create로 만든다).")
+        starred = sum(1 for i in store.list_category_items(user) if i.scrap) + sum(1 for r in store.list_refs(user) if r.scrap)
+        if starred:
+            lines.append(f"스크랩(★)한 글 {starred}개 — category_search(scrap_only=true)로 본다.")
         if settings.title_default == "ask":
             lines.append("제목: 저자가 제목을 말하지 않았으면 저장하기 전에 직접 지을지·지어 드릴지·비워 둘지 묻는다.")
         elif settings.title_default == "ai":
@@ -233,8 +236,11 @@ def build_tools(
     def category_edit(book: str | None = None, new_name: str | None = None, color: str | None = None,
                       context: list[str] | None = None, project: str | None = None, move_to: str | None = None,
                       undo_move: bool = False, node: str | None = None, link: str | None = None,
-                      unlink: str | None = None, item_id: str | None = None, checked: bool | None = None) -> str:
+                      unlink: str | None = None, item_id: str | None = None, checked: bool | None = None,
+                      scrap: bool | None = None) -> str:
         user = current_user()
+        if scrap is not None:  # 글의 스크랩(★) 켜고 끄기(2026-10-09). 파일의 표시 하나만
+            return set_scrap(user, book, project, item_id, scrap)
         if checked is not None:  # 문헌 글의 원문 확인 표시 켜고 끄기(2026-10-09). 쓸 부분·서지·전문은 그대로
             return set_checked(user, book, project, item_id, checked)
         if node and not book:
@@ -285,6 +291,31 @@ def build_tools(
                 raise ToolError(" · ".join([*done, error_message(e, polite=False)])) from e
         head = view_for_book(store, user, found.key).header() + "\n" if context is not None else ""
         return head + (f"책 「{found.name}」을 고침: " + " · ".join(done) + ".").replace("..", ".")
+
+    def set_scrap(user: str, book: str | None, project: str | None, item_id: str | None, on: bool) -> str:
+        if not item_id or not item_id.strip():
+            raise ToolError("scrap에는 item_id(category_search 결과의 글 id 또는 문헌 글 key)를 함께 준다.")
+        ident = item_id.strip()
+        cats = [find_book(user, book, project).category] if book else store.list_categories(user)
+        owner, label, was = None, "", False
+        for c in cats:
+            if c is None:
+                continue
+            item = store.get_category_item(user, c.id, ident)
+            if item is not None:
+                owner, was = f"{c.id}/{item.id}", item.scrap
+                files = (a.name for a in store.list_attachments(user, owner))
+                label = f"「{c.name}」의 글 “{(item.title or title_from_files(files) or summary(item))[:60]}”"
+                break
+        if owner is None:
+            ref = store.get_ref(user, ident)
+            if ref is None or (book and cats and cats[0] is not None and ref.book != cats[0].id):
+                raise ToolError(f"글 {ident!r}이 없다. category_search 결과의 id(문헌 글은 key)를 준다.")
+            owner, was, label = f"ref:{ref.key}", ref.scrap, f"문헌 글 {cite_label(ref, ref.key)}"
+        if was == on:
+            return f"{label}: 스크랩(★)은 이미 {'붙어' if on else '떨어져'} 있다(바꾸지 않음)."
+        store.set_scrap(user, owner, on)
+        return f"{label}: {'스크랩(★)했다' if on else '스크랩(★)을 뗐다'}. 저자는 게시판의 '★ 스크랩만'으로 모아 본다."
 
     def set_checked(user: str, book: str | None, project: str | None, key: str | None, checked: bool) -> str:
         if not key:
@@ -453,10 +484,13 @@ def build_tools(
 
     # ---- 찾기 ---------------------------------------------------------------------------------------
 
-    def category_search(query: str, book: str | None = None, project: str | None = None,
-                        author: Literal["me", "ai", "all"] = "all", full: bool = False, k: int = 8) -> str:
+    def category_search(query: str = "", book: str | None = None, project: str | None = None,
+                        author: Literal["me", "ai", "all"] = "all", full: bool = False, k: int = 8, scrap_only: bool = False) -> str:
         user = current_user()
         k = max(1, min(k, 30))
+        query = " ".join((query or "").split())
+        if not query and not scrap_only:
+            return "category_search: 검색어가 비었다(찾을 말을 준다. 스크랩한 글만 보려면 scrap_only=true)."
         only = find_book(user, book, project) if book else None
         if only is not None and only.upload:
             raise ToolError(f"「{only.name}」에는 올린 문서가 들어 있다. 장은 book_read_chapter, 확인 요청은 book_issues로 본다.")
@@ -465,19 +499,26 @@ def build_tools(
         lanes: list[Any] = ["category", "ref_picked", *(["ref_full"] if full else [])]
         hits: list[tuple[str, Any, Any]] = []  # (책 id, 글 또는 문헌, 맞은 청크)
         seen: set[str] = set()
-        for chunk in hybrid_search(store, user, query, lanes, k * 6, embedder):
+        if not query:  # 스크랩한 글 전체(최근 것부터)
+            starred: list[tuple[str, Any, Any]] = [
+                *((i.category_id, i, None) for i in store.list_category_items(user)
+                  if i.scrap and i.category_id in books and (not only or i.category_id == only.key) and author in ("all", i.author)),
+                *((r.book, r, None) for r in store.list_refs(user)
+                  if r.scrap and r.book in books and (not only or r.book == only.key) and author != "ai")]
+            hits = sorted(starred, key=lambda h: h[1].created_at, reverse=True)
+        for chunk in (hybrid_search(store, user, query, lanes, k * 6, embedder) if query else []):
             if chunk.lane == "category":
                 cid, _, iid = chunk.owner_id.partition("/")
                 if cid not in books or (only and cid != only.key) or chunk.owner_id in seen:
                     continue
                 item = store.get_category_item(user, cid, iid)
-                if item is None or (author != "all" and item.author != author):
+                if item is None or (author != "all" and item.author != author) or (scrap_only and not item.scrap):
                     continue
                 seen.add(chunk.owner_id)
                 hits.append((cid, item, chunk))
             else:
                 ref = store.get_ref(user, chunk.owner_id)
-                if ref is None or ref.book not in books or (only and ref.book != only.key) or author == "ai":
+                if ref is None or ref.book not in books or (only and ref.book != only.key) or author == "ai" or (scrap_only and not ref.scrap):
                     continue
                 mark = f"{ref.key}/{chunk.lane}/{chunk.text[:40]}"
                 if mark in seen:
@@ -489,10 +530,12 @@ def build_tools(
         if author == "all":  # 저자의 말을 먼저(같은 쪽 안에서는 검색 순위 그대로)
             hits.sort(key=lambda h: isinstance(h[1], CategoryItem) and h[1].author == "ai")
         hits = hits[:k]
-        where = f"「{only.name}」" if only else "모든 책"
+        where = (f"「{only.name}」" if only else "모든 책") + (" · 스크랩만" if scrap_only else "")
+        asked = f"category_search {query!r}" if query else "category_search"
         if not hits:
-            return f"category_search {query!r} ({where}): 결과 없음."
-        lines = [f"category_search {query!r} ({where}) — {len(hits)}건. author=me 글이 저자의 말이다. 인용은 '원문 확인' 문헌 글의 쓸 부분만 쓴다."]
+            return f"{asked} ({where}): 결과 없음." + (" 스크랩(★)한 글이 없다." if scrap_only and not query else "")
+        lines = [f"{asked} ({where}) — {len(hits)}건. author=me 글이 저자의 말이다. 인용은 '원문 확인' 문헌 글의 쓸 부분만 쓴다."
+                 + (" ★는 저자가 스크랩(중요 표시)한 글이다." if any(h[1].scrap for h in hits) else "")]
         multi = len({books[h[0]].floor for h in hits}) > 1
         names: dict[str, dict[int, str]] = {}
         groups: dict[str, list[tuple[Any, Any]]] = {}
@@ -512,7 +555,7 @@ def build_tools(
         return "\n".join(lines)
 
     def item_lines(user: str, n: int, item: CategoryItem, names: dict[str, dict[int, str]]) -> list[str]:
-        head = f"{n}. {item.id} · [{item.author}] {local_time(item.created_at, '%Y-%m-%d')}"
+        head = f"{n}. {item.id} · [{item.author}] {local_time(item.created_at, '%Y-%m-%d')}" + (" · ★스크랩" if item.scrap else "")
         head += f" · 제목 「{item.title}」" + (" (AI가 지은 제목)" if item.title_by == "ai" else "") if item.title else ""
         if not item.title and (stem := title_from_files(a.name for a in store.list_attachments(user, f"{item.category_id}/{item.id}"))):
             head += f" · 제목 「{stem}」(첫 첨부의 파일 이름)"  # 제목 없는 글은 보일 때만 첫 첨부 이름(파일은 그대로)
@@ -544,7 +587,10 @@ def build_tools(
 
     def source_lines(user: str, n: int, ref: Ref, chunk: Any) -> list[str]:
         title = one_line(str(ref.bib.get("title") or ref.bib.get("raw") or ""))[:80]
-        head = f"{n}. {ref.key} · 문헌 글 · {SOURCE_LIGHT[ref.status]} · {title}"
+        head = f"{n}. {ref.key} · 문헌 글 · {SOURCE_LIGHT[ref.status]}" + (" · ★스크랩" if ref.scrap else "") + f" · {title}"
+        if chunk is None:  # 스크랩 목록(검색어 없이): 쓸 부분 하나만
+            picked = store.get_passages(user, ref.key)[:1]
+            return [head, *(f"   쓸 부분 “{one_line(p.text)[:300]}”" for p in picked), *attached(user, f"ref:{ref.key}")]
         if chunk.lane == "ref_picked":
             passage = next((p for p in store.get_passages(user, ref.key) if p.text == chunk.text), None)
             return [head + (f" · {passage.locator}" if passage and passage.locator else ""), f"   쓸 부분 “{one_line(chunk.text)[:300]}”",
@@ -622,11 +668,12 @@ def build_tools(
         Tool.from_function(
             category_edit, name="category_edit",
             description=(
-                "저자가 책·노드의 이름·색·컨텍스트·위치나 선, 또는 문헌 글의 원문 확인 표시를 바꾸라고 분명히 말했을 때만 부른다. "
+                "저자가 책·노드의 이름·색·컨텍스트·위치나 선, 문헌 글의 원문 확인 표시, 또는 글의 스크랩을 바꾸라고 분명히 말했을 때만 부른다. "
                 "book(책 이름) 또는 node(노드 이름). "
                 "context: 새 컨텍스트 목록(자주 쓰는 컨텍스트 이름이나 글, []이면 뗀다). move_to: 책을 옮길 노드('프로젝트 · 노드'나 프로젝트). "
                 "undo_move=true: 마지막 옮기기 되돌리기. node와 함께 link=이을 노드, unlink=끊을 노드. 같은 이름이 여러 프로젝트에 있으면 project. "
-                "checked=true|false와 item_id(문헌 글 key): 원문 확인 표시를 붙이거나 뗀다(저자가 그렇게 말했을 때만. 쓸 부분·서지는 그대로)."
+                "checked=true|false와 item_id(문헌 글 key): 원문 확인 표시를 붙이거나 뗀다(저자가 그렇게 말했을 때만. 쓸 부분·서지는 그대로). "
+                "scrap=true|false와 item_id(글 id 또는 문헌 글 key): 글을 스크랩(★)하거나 뗀다(저자가 '스크랩해 줘'라고 했을 때만)."
             ),
             structured_output=False,
         ),
@@ -647,7 +694,8 @@ def build_tools(
             category_search, name="category_search",
             description=(
                 "책의 글에서 찾는다(문헌 글의 쓸 부분 포함, full=true면 원문 전체도). book을 주면 그 책만, project를 주면 그 프로젝트와 연결 노드. "
-                "author=me|ai|all(기본, 저자의 말을 먼저). k=8. 결과는 책마다 컨텍스트와 함께."
+                "author=me|ai|all(기본, 저자의 말을 먼저). k=8. scrap_only=true면 저자가 스크랩(★)한 글만(query 없이 부르면 스크랩 전체, "
+                "최근 것부터). 결과는 책마다 컨텍스트와 함께."
             ),
             structured_output=False,
         ),

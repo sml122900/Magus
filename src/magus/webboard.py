@@ -11,6 +11,8 @@
   기존 첨부마다 ✕(빼기 → 지우지 않고 휴지통, 프로젝트 휴지통에서 그 글로 되살린다), 새 첨부 더하기. 바꾼 칸(제목·본문·고친 시각)만
   파일에서 고치고 나머지 칸(누가·이유·위치·쓸 부분·태그·칸 등)은 바이트까지 그대로 둔다. 문헌 글은 본문(메모)·첨부만.
   칸(인물·사례 등)은 본문 아래 "칸: 값" 줄. 이유·위치·쓸 부분(일반 글)·태그·원문 확인 표시는 파일에 그대로 있고 보이지 않는다.
+- 스크랩(별표, 2026-10-09): 게시판 줄 오른쪽과 글 보기 머리의 ☆를 누르면 ★(다시 누르면 해제). 스크립트가 있으면 새로고침 없이
+  (POST …/scrap, JSON), 없으면 폼으로 돌아온다. 게시판 '★ 스크랩만'(?scrap=1)은 찾기와 함께 쓰고 개수를 보인다. 파일에는 표시 하나.
 - 모든 출력은 이스케이프하고, 첨부 주소는 세션의 사용자 폴더에서만 찾는다(magus.webshelf.shelf_file).
 """
 
@@ -24,7 +26,7 @@ from typing import Any
 
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from magus.attachments import ACCEPT, MAX_FILES, kind_of, mb, media_type, shown_title, size_text, title_from_files
 from magus.book_migrate import legacy_book_id
@@ -52,7 +54,17 @@ BOARD_STYLE = """
 a.button{display:inline-flex;align-items:center;min-height:44px;padding:8px 18px;border-radius:9999px;background:var(--primary);color:#fff;
 text-decoration:none;font-weight:600}a.button:hover{background:var(--press);color:#fff}
 ol.posts{list-style:none;margin:8px 0;padding:0;background:var(--canvas);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
-ol.posts>li{border-bottom:1px solid var(--line)}ol.posts>li:last-child{border-bottom:0}
+ol.posts>li{border-bottom:1px solid var(--line);display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center}
+ol.posts>li:last-child{border-bottom:0}ol.posts>li>small.hit{grid-column:1/-1}
+form.star{margin:0 8px 0 0}form.star.head{margin:0}
+form.star button{min-width:44px;min-height:44px;border:0;border-radius:9999px;background:transparent;color:var(--ink2);font-size:24px;line-height:1;
+cursor:pointer;padding:0}form.star button:hover{background:var(--soft)}
+form.star button[aria-pressed=true]{color:#b8860b}form.star button:focus-visible{outline:3px solid var(--primary);outline-offset:1px}
+.post-head{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}.post-head .post-meta{margin:0}
+a.scrap-only{display:inline-flex;align-items:center;gap:4px;min-height:44px;padding:0 14px;border-radius:9999px;border:1px solid var(--mute);
+text-decoration:none;color:var(--ink);background:var(--canvas);font-weight:600}a.scrap-only:hover{background:var(--soft)}
+a.scrap-only[aria-current=true]{background:#fff3c4;border-color:#b8860b}a.scrap-only .n{font-weight:400;color:var(--ink2)}
+.search-row{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}.search-row form.search{margin:0}
 a.post{display:grid;grid-template-columns:minmax(0,1fr) auto 10.5em;gap:4px 16px;align-items:center;padding:10px 16px;min-height:52px;
 text-decoration:none;color:var(--ink)}
 a.post:hover .pt,a.post:focus-visible .pt{text-decoration:underline}
@@ -171,6 +183,28 @@ LIGHTBOX = """<div class="lightbox" role="dialog" aria-modal="true" aria-label="
 })();
 </script>"""
 
+# 스크랩(별표): 새로고침 없이 켜고 끈다(fetch, JSON). 실패하면 폼을 그대로 보낸다(새로고침). 게시판 '스크랩만' 개수도 바꾼다
+STAR_SCRIPT = """<script>
+(function () {
+  if (window.magusStar) return; window.magusStar = true;
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (!form.matches || !form.matches("form.star") || !window.fetch) return;
+    e.preventDefault();
+    var button = form.querySelector("button"), on = form.querySelector("input[name=on]");
+    button.disabled = true;
+    fetch(form.action, { method: "POST", body: new FormData(form), credentials: "same-origin", headers: { "Accept": "application/json" } })
+      .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+      .then(function (d) {
+        button.setAttribute("aria-pressed", d.scrap ? "true" : "false"); button.textContent = d.scrap ? "★" : "☆";
+        on.value = d.scrap ? "0" : "1"; button.disabled = false;
+        var n = document.querySelector("[data-scrap-count]"); if (n) n.textContent = String(d.count);
+      })
+      .catch(function () { button.disabled = false; form.submit(); });
+  });
+})();
+</script>"""
+
 # 글 보기의 🗑 확인 창: 열면 첫 단추로 초점, Esc로 닫는다(스크립트가 없어도 details라 열고 닫힌다)
 DEL_SCRIPT = """<script>
 document.addEventListener("toggle", function (e) {
@@ -264,6 +298,7 @@ class Post:
     badge: str
     files: tuple[Attachment, ...]
     text: str = ""  # 찾기의 맞은 곳 한 줄(제목 밖에서 맞았을 때)
+    scrap: bool = False  # 스크랩(별표, 2026-10-09)
 
 
 def item_preview(item: CategoryItem, files: list[Attachment] | tuple[Attachment, ...]) -> str:
@@ -276,8 +311,17 @@ def _inline_image(name: str) -> bool:
     return inline and media.startswith("image/")
 
 
-def post_row_html(post: Post, q: str = "") -> str:
-    """게시판 한 줄: 제목 · 첨부 표시(📎, 그림이면 작은 미리보기) · 날짜. 누르면 글 보기 페이지."""
+def star_html(link: str, on: bool, csrf: str, back: str, head: bool = False) -> str:
+    """스크랩(별표) 단추: 누르면 켜고 다시 누르면 끈다. 스크립트가 있으면 새로고침 없이(STAR_SCRIPT), 없으면 폼으로 back에 돌아온다.
+    csrf는 이미 만든 숨은 칸 HTML."""
+    return (f'<form class="star{" head" if head else ""}" method="post" action="{html.escape(link)}/scrap">{csrf}'
+            f'<input type="hidden" name="on" value="{"0" if on else "1"}"><input type="hidden" name="next" value="{html.escape(back)}">'
+            f'<button aria-pressed="{"true" if on else "false"}" aria-label="스크랩" title="스크랩">{"★" if on else "☆"}</button></form>')
+
+
+def post_row_html(post: Post, q: str = "", star: str = "") -> str:
+    """게시판 한 줄: 제목 · 첨부 표시(📎, 그림이면 작은 미리보기) · 날짜 · 스크랩(☆). 누르면 글 보기 페이지.
+    star: 별표 단추 HTML(게시판). 없으면(찾기 결과 등) 스크랩한 글에 ★ 표시만."""
     if post.title:
         shown = mark(post.title, q)
         head = f'<span class="pt">{shown}{post.badge}</span>'
@@ -290,8 +334,9 @@ def post_row_html(post: Post, q: str = "") -> str:
     thumb = (f'<img class="thumb" src="{html.escape(post.link)}/thumbs/{html.escape(pic.id)}" alt="" loading="lazy">' if pic else "")
     count = len(post.files)
     clip = f'<span class="clip" aria-label="첨부 {count}개" title="첨부 {count}개">📎 {count}</span>' if count else ""
-    return (f'<li><a class="post" href="{html.escape(post.link)}">{head}<span class="pa">{thumb}{clip}</span>'
-            f'<time class="pd" datetime="{html.escape(post.at)}">{local_time(post.at, WHEN)}</time></a>'
+    mark_only = '<span class="scrapped" title="스크랩" aria-label="스크랩">★</span>' if post.scrap and not star else ""
+    return (f'<li><a class="post" href="{html.escape(post.link)}">{head}<span class="pa">{mark_only}{thumb}{clip}</span>'
+            f'<time class="pd" datetime="{html.escape(post.at)}">{local_time(post.at, WHEN)}</time></a>{star}'
             + (f'<small class="hit">{hit}</small>' if hit else "") + "</li>")
 
 
@@ -347,9 +392,10 @@ class BoardPages:
         filters = filters or {}
         author = filters.get("author") if filters.get("author") in ("me", "ai") else None
         tag = (filters.get("tag") or "").strip()
+        scrap = filters.get("scrap") == "1"
         pairs: list[tuple[str, Post]] = []
         for i in self.store.list_category_items(uid, c.id):
-            if (author and i.author != author) or (tag and tag not in i.tags):
+            if (author and i.author != author) or (tag and tag not in i.tags) or (scrap and not i.scrap):
                 continue
             link = f"/shelf/{c.id}/{i.id}"
             files = tuple(self.store.list_attachments(uid, f"{c.id}/{i.id}"))
@@ -358,14 +404,16 @@ class BoardPages:
             text = "\n".join([i.content, i.reason or "", i.where or "", *(p.text for p in i.passages),
                               *(f"{k} {v}" for k, v in i.fields.items()), " ".join(i.tags)]) if q else ""
             title = shown_title(i.title, (a.name for a in files))
-            pairs.append((i.id, Post(i.id, link, i.created_at, title, preview, badge, files, text)))
+            pairs.append((i.id, Post(i.id, link, i.created_at, title, preview, badge, files, text, i.scrap)))
         if not author and not tag:
             for r in self.store.list_refs(uid, book=c.id):
+                if scrap and not r.scrap:
+                    continue
                 link = f"/shelf/{c.id}/{urllib.parse.quote(r.key)}"
                 files = tuple(self.store.list_attachments(uid, f"ref:{r.key}"))
                 text = ("\n".join([str(r.bib.get("authors") or r.bib.get("raw") or ""), str(r.bib.get("container") or ""),
                                    str(r.bib.get("memo") or ""), *(p.text for p in self.store.get_passages(uid, r.key))]) if q else "")
-                pairs.append((r.key, Post(r.key, link, r.created_at, cite_label(r, r.key), "", "", files, text)))
+                pairs.append((r.key, Post(r.key, link, r.created_at, cite_label(r, r.key), "", "", files, text, r.scrap)))
         if not q:
             return [p for _, p in sorted(pairs, key=lambda kv: (kv[1].at, kv[0]), reverse=True)]
         order: dict[str, int] = {}
@@ -395,7 +443,7 @@ class BoardPages:
             return self._shelf_page("책장", '<p class="msg err">없는 책입니다. <a href="/shelf">프로젝트</a></p>', session, 404)
         params = request.query_params
         q = clean_query(params.get("q"))
-        filters = {k: params.get(k, "") for k in ("author", "tag")}
+        filters = {k: params.get(k, "") for k in ("author", "tag", "scrap")}
         posts = await run_in_threadpool(self._posts, uid, kind, filters, q)
         try:
             page = max(1, int(params.get("page") or 1))
@@ -430,11 +478,25 @@ class BoardPages:
                   f'<input type="search" name="q" value="{html.escape(q)}" aria-label="{html.escape(c.name)}에서 찾기">'
                   + "".join(f'<input type="hidden" name="{k}" value="{html.escape(v)}">' for k, v in filters.items() if v)
                   + "<button>찾기</button></form>")
+        scrap_on = filters.get("scrap") == "1"
+        starred = sum(1 for i in items if i.scrap) + sum(1 for r in self.store.list_refs(uid, book=c.id) if r.scrap)
+        toggle = [(k, v) for k, v in [("q", q), *((k, v) for k, v in filters.items() if k != "scrap")] if v]
+        toggle += [] if scrap_on else [("scrap", "1")]
+        scrap_link = (f'<a class="scrap-only" href="{base}{"?" + html.escape(urllib.parse.urlencode(toggle)) if toggle else ""}" '
+                      f'aria-current="{"true" if scrap_on else "false"}"><span aria-hidden="true">★</span> 스크랩만 '
+                      f'<span class="n" data-scrap-count>{starred}</span></a>')
+        search = f'<div class="search-row">{search}{scrap_link}</div>'
         found = f'<p>「{html.escape(q)}」 {len(posts)} · <a href="{base}">지우기</a></p>' if q else ""
+        back = base + ("?" + urllib.parse.urlencode([(k, v) for k, v in params.multi_items() if k != "done"])
+                       if any(k != "done" for k in params.keys()) else "")
+        csrf = self._csrf_input(session)
         if shown:
-            board = f'<ol class="posts">{"".join(post_row_html(p, q) for p in shown)}</ol>'
+            board = (f'<ol class="posts">{"".join(post_row_html(p, q, star_html(p.link, p.scrap, csrf, back)) for p in shown)}</ol>'
+                     + STAR_SCRIPT)
+        elif q:
+            board = '<p class="msg">없음</p>'
         else:
-            board = '<p class="msg">없음</p>' if q else '<p class="empty">글이 없습니다.</p>'
+            board = '<p class="empty">스크랩한 글이 없습니다.</p>' if scrap_on else '<p class="empty">글이 없습니다.</p>'
         keep = [(k, v) for k, v in params.multi_items() if k not in ("page", "done")]
 
         def link(n: int, label: str, current: bool = False) -> str:
@@ -521,8 +583,9 @@ class BoardPages:
             f'<li><a href="{html.escape(link)}/files/{html.escape(a.id)}" download>{html.escape(a.name)}</a> '
             f'<small>{html.escape(kind_of(a.name))} · {size_text(a.size)}</small></li>' for a in rest)
         done = DONE.get(params.get("done") or "")
+        star = star_html(link, obj.scrap, self._csrf_input(session), link, head=True) + STAR_SCRIPT
         body = ((f'<p class="msg">{done}</p>' if done else "")
-                + f'<p class="post-meta">{html.escape(" · ".join(meta))}</p>'
+                + f'<div class="post-head">{star}<p class="post-meta">{html.escape(" · ".join(meta))}</p></div>'
                 + (f'<div class="post-body">{text}</div>' if text.strip() else "")
                 + (f'<div class="pics{" one" if len(pics) == 1 else ""}">{pictures}</div>{LIGHTBOX}' if pictures else "")
                 + (f'<ul class="files" aria-label="첨부">{others}</ul>' if others else "")
@@ -595,6 +658,36 @@ class BoardPages:
             '<ul class="chosen" aria-label="담은 파일"></ul><p class="pick-note" role="status" aria-live="polite"></p></fieldset>'
             f'<p><button class="primary">저장</button> <a href="{html.escape(cancel)}">취소</a></p></form>{WRITE_SCRIPT}'
         )
+
+    # ---- 스크랩(별표, 2026-10-09) ------------------------------------------------------------------
+    async def board_scrap(self, request: Request) -> Response:
+        """☆ → ★(on=1), ★ → ☆(on=0). 자기 글만(다른 사용자의 글은 404). 스크립트가 부르면 JSON {scrap, count}, 폼이면 next로."""
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        try:
+            form = await self._form(request, session)
+        except PermissionError:
+            return self._shelf_page("스크랩", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+        found = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
+        if found is None:
+            return self._shelf_page("스크랩", '<p class="msg err">없는 글입니다. <a href="/shelf">프로젝트</a></p>', session, 404)
+        kind, obj = found
+        assert kind.category is not None
+        on = form.get("on") == "1"
+        now = await run_in_threadpool(self.store.set_scrap, uid, self._owner(kind, obj), on)
+
+        def count() -> int:
+            assert kind.category is not None
+            return (sum(1 for i in self.store.list_category_items(uid, kind.category.id) if i.scrap)
+                    + sum(1 for r in self.store.list_refs(uid, book=kind.category.id) if r.scrap))
+
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"scrap": now, "count": await run_in_threadpool(count)})
+        back = str(form.get("next") or "")
+        ok = back.startswith(f"/shelf/{kind.category.id}") and "//" not in back and ".." not in back
+        return RedirectResponse(back if ok else f"/shelf/{kind.category.id}", status_code=303)
 
     # ---- 글 고치기(2026-10-09 되돌림) -------------------------------------------------------------
     async def board_edit(self, request: Request) -> Response:

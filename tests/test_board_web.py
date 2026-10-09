@@ -106,7 +106,7 @@ def test_board_pages_twenty_per_page_newest_first(server_proc):  # noqa: F811
     store = LocalStore(data_dir)
     for n in range(44):  # 시드 글 1 + 44 = 45개 → 20 · 20 · 5
         store.put_category_item("alice", CategoryItem(f"20261009{n:09d}-bbbbbb", NOTES, f"글 {n:02d}", "me", f"제목 {n:02d}", "author",
-                                                      created_at=f"2026-10-09T00:{n:02d}:00.000Z"))
+                                                      created_at=f"2099-01-01T00:{n:02d}:00.000Z"))  # 시드 글(지금 시각)보다 늘 나중
     store.close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         first = c.get(f"/login?next=/shelf/{NOTES}").text

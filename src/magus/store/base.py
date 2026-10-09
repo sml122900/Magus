@@ -231,6 +231,7 @@ class Ref:
     moved: dict[str, str] | None = None
     # 그 글이 꽂힌 책(카테고리 id, #96). 문헌·참고문헌 항목도 여느 글처럼 어떤 책에든 들어간다. None이면 저장소가 정한다
     book: str | None = None
+    scrap: bool = False  # 스크랩(별표, 2026-10-09). bib.json에 켰을 때만 "scrap": true. put_ref는 바꾸지 않는다(set_scrap만)
 
 
 IdeaKind = Literal["thought", "ai", "article", "conversation", "tv", "other"]
@@ -315,6 +316,7 @@ class CategoryItem:
     origin: str | None = None  # 어디서 왔나(대화 기록 이름 등)
     kind: str | None = None  # 옛 생각의 갈래(thought·ai·article·conversation·tv·other). 화면에 보이지 않고 되돌리기에 쓴다
     tags_by: TagsBy | None = None  # 태그를 누가 정했나(옛 문체 #89)
+    scrap: bool = False  # 스크랩(저자가 별표로 표시해 둔 글, 2026-10-09). 파일에는 켰을 때만 "scrap": true
 
 
 @dataclass(frozen=True)
@@ -705,6 +707,10 @@ class Store(Protocol):
         ...
     def trash_node_with_books(self, user_id: str, floor: str, node_id: str, note: str) -> MapNode:
         """노드를 책·글·첨부·문서째 휴지통으로(#97, 웹). 되살리기는 restore_trash("node", …)."""
+        ...
+    def set_scrap(self, user_id: str, owner: str, on: bool) -> bool:
+        """글("<책 id>/<글 id>") 또는 문헌 글("ref:<key>")의 스크랩(별표)을 켜고 끈다. 파일의 표시 하나만 바꾸고(고친 시각은 그대로)
+        색인도 바꾼다. 없는 글이면 ValueError. 바꾼 뒤의 값을 돌려준다."""
         ...
     def set_ref_memo(self, user_id: str, key: str, memo: str) -> Ref:
         """문헌 글의 본문(bib.memo)만 바꾼다(웹의 글 고치기). 서지·쓸 부분·원문 확인 표시와 그 기록은 그대로."""

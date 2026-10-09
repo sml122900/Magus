@@ -184,9 +184,11 @@ class CategoryMixin:
         return item
 
     @locked
-    def patch_category_item(self, user_id: str, category_id: str, item_id: str, changes: dict[str, Any]) -> CategoryItem:
-        """글 파일에서 준 칸만 바꾼다(2026-10-09 웹의 글 고치기). 나머지 칸(누가·이유·위치·쓸 부분·태그·칸·장·응답 관계 등)은
-        파일에서 바이트까지 그대로 둔다. 값이 None이면 그 칸을 뺀다(제목·제목 지은 사람은 null로 남긴다: 원래 늘 있는 칸)."""
+    def patch_category_item(self, user_id: str, category_id: str, item_id: str, changes: dict[str, Any], *,
+                            touch: bool = True) -> CategoryItem:
+        """글 파일에서 준 칸만 바꾼다(2026-10-09 웹의 글 고치기·스크랩). 나머지 칸(누가·이유·위치·쓸 부분·태그·칸·장·응답 관계 등)은
+        파일에서 바이트까지 그대로 둔다. 값이 None이면 그 칸을 뺀다(제목·제목 지은 사람은 null로 남긴다: 원래 늘 있는 칸).
+        touch=False면 updated_at도 그대로(스크랩은 글을 고친 것이 아니다)."""
         path = self._category_dir(user_id, category_id) / "items" / f"{safe_id(item_id, 'item id')}.json"
         if not path.exists():
             raise ValueError(f"글 {category_id}/{item_id}가 없다")
@@ -196,7 +198,8 @@ class CategoryMixin:
                 data.pop(key, None)
             else:
                 data[key] = value
-        data["updated_at"] = utcnow()
+        if touch:
+            data["updated_at"] = utcnow()
         write_json(path, data)
         item = _item_from_record(category_id, data)
         with self._db:
@@ -319,13 +322,13 @@ class CategoryMixin:
     def _index_item(self, user_id: str, item: CategoryItem) -> None:
         self._db.execute(
             "INSERT OR REPLACE INTO category_items (id, user_id, category_id, title, title_by, content, fields, author, tags, chapters,"
-            " schema_version, created_at, updated_at, edited_at, edited_by, reason, location, passages, parent_id, origin, kind, tags_by)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " schema_version, created_at, updated_at, edited_at, edited_by, reason, location, passages, parent_id, origin, kind, tags_by,"
+            " scrap) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (item.id, user_id, item.category_id, item.title, item.title_by, item.content,
              json.dumps(item.fields, ensure_ascii=False), item.author, json.dumps(list(item.tags), ensure_ascii=False),
              json.dumps([list(c) for c in item.chapters]), ITEM_SCHEMA, item.created_at, item.updated_at, item.edited_at,
              item.edited_by, item.reason, item.where, json.dumps([_passage(p) for p in item.passages], ensure_ascii=False),
-             item.parent_id, item.origin, item.kind, item.tags_by),
+             item.parent_id, item.origin, item.kind, item.tags_by, int(item.scrap)),
         )
         # 글의 모든 칸을 찾는다(#96: 옛 문체는 이유·태그만 찾았지만, 이제 무엇을 볼지는 컨텍스트가 정한다)
         text = "\n".join([item.title or "", item.content, item.reason or "", item.where or "",
@@ -384,7 +387,7 @@ def _passages(raw: Any) -> tuple[Passage, ...]:
 _OPTIONAL = ("reason", "where", "parent_id", "origin", "kind", "tags_by")
 # 이 코드가 글 파일에 쓰는 칸 전부. 이 밖의 칸은 put_category_item이 그대로 둔다
 _ITEM_KEYS = frozenset(("schema_version", "id", "title", "title_by", "content", "fields", "author", "tags", "chapters",
-                        "created_at", "updated_at", "edited_at", "edited_by", "passages", *_OPTIONAL))
+                        "created_at", "updated_at", "edited_at", "edited_by", "passages", "scrap", *_OPTIONAL))
 
 
 def _item_record(item: CategoryItem) -> dict[str, Any]:
@@ -395,7 +398,8 @@ def _item_record(item: CategoryItem) -> dict[str, Any]:
             "title_by": item.title_by, "content": item.content, "fields": item.fields, "author": item.author,
             "tags": list(item.tags), "chapters": [{"project": p, "number": n} for p, n in item.chapters],
             "created_at": item.created_at, "updated_at": item.updated_at,
-            **({"edited_at": item.edited_at, "edited_by": item.edited_by} if item.edited_by else {}), **extra}
+            **({"edited_at": item.edited_at, "edited_by": item.edited_by} if item.edited_by else {}), **extra,
+            **({"scrap": True} if item.scrap else {})}  # 스크랩은 표시 하나(형식 버전은 그대로, 옛 코드는 이 키를 읽지 않는다)
 
 
 def _item_from_record(category_id: str, r: dict[str, Any]) -> CategoryItem:
@@ -410,7 +414,7 @@ def _item_from_record(category_id: str, r: dict[str, Any]) -> CategoryItem:
         reason=str(r["reason"]) if r.get("reason") else None, where=str(r["where"]) if r.get("where") else None,
         passages=_passages(r.get("passages")), parent_id=str(r["parent_id"]) if r.get("parent_id") else None,
         origin=str(r["origin"]) if r.get("origin") else None, kind=str(r["kind"]) if r.get("kind") else None,
-        tags_by=r.get("tags_by") if r.get("tags_by") in ("ai", "author") else None,
+        tags_by=r.get("tags_by") if r.get("tags_by") in ("ai", "author") else None, scrap=r.get("scrap") is True,
     )
 
 
@@ -426,7 +430,7 @@ def _item(r: sqlite3.Row) -> CategoryItem:
         chapters=tuple((str(p), int(n)) for p, n in json.loads(r["chapters"])), created_at=r["created_at"],
         updated_at=r["updated_at"], edited_at=r["edited_at"], edited_by=r["edited_by"], reason=r["reason"], where=r["location"],
         passages=_passages(json.loads(r["passages"] or "[]")), parent_id=r["parent_id"], origin=r["origin"], kind=r["kind"],
-        tags_by=r["tags_by"],
+        tags_by=r["tags_by"], scrap=bool(r["scrap"]),
     )
 
 

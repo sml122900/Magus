@@ -138,6 +138,7 @@ class ShelfMixin:
                 "floor": floor,
                 "book": book,
                 **({"moved": old["moved"]} if isinstance(old.get("moved"), dict) else {}),  # 공용으로 옮긴 기록은 그대로(#93-a)
+                **({"scrap": True} if old.get("scrap") is True else {}),  # 스크랩(별표)은 저자의 표시라 그대로(set_scrap만 바꾼다)
             },
         )
         with self._db:
@@ -216,6 +217,26 @@ class ShelfMixin:
         return found
 
     @locked
+    def set_scrap(self, user_id: str, owner: str, on: bool) -> bool:
+        """스크랩(별표) 켜고 끄기(2026-10-09). 파일의 표시 하나("scrap": true, 끄면 키를 뺀다)만 바꾸고 고친 시각은 그대로 둔다."""
+        if not owner.startswith("ref:"):
+            book, _, item = owner.partition("/")
+            return self.patch_category_item(user_id, book, item, {"scrap": True if on else None}, touch=False).scrap  # type: ignore[attr-defined]
+        path = self._melchior_dir(user_id) / safe_ref_key(owner[4:]) / "bib.json"
+        if not path.exists():
+            raise ValueError(f"문헌 {owner[4:]!r}가 없다")
+        data = read_json(path)
+        if (data.get("scrap") is True) != on:
+            if on:
+                data["scrap"] = True
+            else:
+                data.pop("scrap", None)
+            write_json(path, data)
+            with self._db:
+                self._index_ref(user_id, path.parent)
+        return on
+
+    @locked
     def set_ref_memo(self, user_id: str, key: str, memo: str) -> Ref:
         """문헌 글의 본문(메모, bib.memo)만 바꾼다(2026-10-09 웹의 글 고치기). 서지·쓸 부분·전문·원문 확인 표시와
         그 기록(status_by)·옮긴 기록은 파일에서 그대로다(put_ref는 bib.json을 다시 쓰므로 여기서는 쓰지 않는다)."""
@@ -241,12 +262,13 @@ class ShelfMixin:
         passages = read_json(rdir / "passages.json") if (rdir / "passages.json").exists() else []
         ref_id = self._db.execute(
             """
-            INSERT INTO refs (user_id, key, aliases, bib, status, has_fulltext, file_path, created_at, updated_at, floor, moved, book)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO refs (user_id, key, aliases, bib, status, has_fulltext, file_path, created_at, updated_at, floor, moved, book,
+                              scrap)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (user_id, key) DO UPDATE SET
                 aliases = excluded.aliases, bib = excluded.bib, status = excluded.status,
                 has_fulltext = excluded.has_fulltext, file_path = excluded.file_path, updated_at = excluded.updated_at,
-                floor = excluded.floor, moved = excluded.moved, book = excluded.book
+                floor = excluded.floor, moved = excluded.moved, book = excluded.book, scrap = excluded.scrap
             RETURNING id
             """,
             (
@@ -262,6 +284,7 @@ class ShelfMixin:
                 floor or str(record.get("floor") or COMMON),
                 json.dumps(record["moved"], ensure_ascii=False) if isinstance(record.get("moved"), dict) else None,
                 str(record["book"]) if record.get("book") else None,
+                int(record.get("scrap") is True),
             ),
         ).fetchone()[0]
         self._db.execute("DELETE FROM ref_passages WHERE ref_id = ?", (ref_id,))
@@ -432,4 +455,5 @@ def _ref(r: sqlite3.Row) -> Ref:
         updated_at=r["updated_at"] or r["created_at"],
         moved=json.loads(r["moved"]) if r["moved"] else None,
         book=r["book"],
+        scrap=bool(r["scrap"]),
     )
