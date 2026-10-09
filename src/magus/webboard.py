@@ -241,9 +241,9 @@ WRITE_SCRIPT = """<script>
     Array.prototype.forEach.call(files || [], function (f) {
       var same = chosen.some(function (c) { return c.name === f.name && c.size === f.size; });
       if (same || attached(f)) return;  // 같은 파일(이름·크기)은 한 번만
-      if (TYPES.indexOf(ext(f.name)) < 0) said.push("「" + f.name + "」은 받지 않는 형식이라 뺐어요.");
-      else if (f.size > LIMIT) said.push("「" + f.name + "」은 " + LIMIT_TEXT + "를 넘어 뺐어요.");
-      else if (chosen.length >= MAX) said.push("첨부는 한 번에 " + MAX + "개까지라 「" + f.name + "」은 뺐어요.");
+      if (TYPES.indexOf(ext(f.name)) < 0) said.push("「" + f.name + "」 파일은 받지 않는 형식이라 뺐어요.");
+      else if (f.size > LIMIT) said.push("「" + f.name + "」 파일은 " + LIMIT_TEXT + " 한도를 넘어 뺐어요.");
+      else if (chosen.length >= MAX) said.push("첨부는 한 번에 " + MAX + "개까지라 「" + f.name + "」 파일은 뺐어요.");
       else chosen.push(f);
     });
     note.textContent = said.join(" ");
@@ -259,7 +259,7 @@ WRITE_SCRIPT = """<script>
       var x = document.createElement("button"); x.type = "button"; x.className = "unpick"; x.textContent = "✕";
       x.setAttribute("aria-label", f.name + " 빼기"); x.title = "빼기";
       x.addEventListener("click", function () {
-        chosen.splice(i, 1); note.textContent = "「" + f.name + "」을 뺐어요."; show();
+        chosen.splice(i, 1); note.textContent = "「" + f.name + "」 파일을 뺐어요."; show();
         var next = list.querySelectorAll("button.unpick")[Math.min(i, chosen.length - 1)];
         (next || zone.querySelector("input[type=file]")).focus();
       });
