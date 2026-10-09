@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from conftest import needs_tools
 from test_attach_browser import CHROME, NODE
 from test_web import server_proc  # noqa: F401 - 픽스처
 
@@ -21,7 +22,7 @@ PATHS = ["/shelf", "/shelf/p/common", "/shelf/p/common?view=list", "/shelf/notes
          "/shelf/edit/notes", "/shelf/write/notes", "/shelf/book/city", "/shelf/notes?page=2", "/me/files", "/shelf/trash"]
 
 
-@pytest.mark.skipif(NODE is None or CHROME is None, reason="node 또는 Chrome이 없다")
+@needs_tools("node 또는 Chrome이 없다", NODE, CHROME)
 @pytest.mark.parametrize("width", [390, 1280])
 def test_header_targets_and_help_button(server_proc, tmp_path, width):  # noqa: F811
     secret = "s" * 40

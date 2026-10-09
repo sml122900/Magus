@@ -11,7 +11,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
+from conftest import needs_tools
 from test_web import server_proc  # noqa: F401 - 픽스처
 
 from magus.signing import sign
@@ -24,7 +24,7 @@ SCRIPT = Path(__file__).parent / "e2e" / "attach_browser.mjs"
 POST = "20261009000000000-aaaaaa"
 
 
-@pytest.mark.skipif(NODE is None or CHROME is None, reason="node 또는 Chrome이 없다")
+@needs_tools("node 또는 Chrome이 없다", NODE, CHROME)
 def test_pick_files_in_several_rounds_and_remove_one(server_proc, tmp_path):  # noqa: F811
     secret = "s" * 40
     base, data_dir, _ = server_proc({

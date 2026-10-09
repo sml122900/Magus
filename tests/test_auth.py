@@ -23,6 +23,7 @@ from pathlib import Path
 import httpx2
 import jwt
 import pytest
+from conftest import wait_log
 from cryptography.hazmat.primitives.asymmetric import rsa
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
@@ -257,8 +258,7 @@ async def test_remote_auth_rejects_and_isolates_users(keys, auth_server, data_di
         assert _text(await c.call_tool("category_search", {"query": "앨리스의 생각"})).endswith("결과 없음.")
         assert (await c.call_tool("book_read_chapter", {"number": 1, "project_id": "synth"})).is_error
 
-    time.sleep(0.3)
-    log = log_path.read_text(encoding="utf-8")
+    log = wait_log(log_path, "tool=book_import user=alice", "tool=book_outline user=bob", "auth=forbidden sub_hash=")  # 점검 24-b
     assert "tool=book_import user=alice" in log and "tool=book_outline user=bob" in log
     assert "auth=forbidden sub_hash=" in log and "sub-carol" not in log  # sub는 해시로만
     assert f'aud 불일치 (토큰 aud=문자열 "{TRIP_AI}", 기대={aud})' in log

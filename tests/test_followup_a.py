@@ -433,3 +433,20 @@ def test_later_retry_waits_and_one_per_user(store: LocalStore, monkeypatch: pyte
     store_attachments._extracting.discard("alice")
     store.attachment_text("alice", owner, att.id)
     assert calls == ["긴 글.txt", "긴 글.txt"]
+
+
+# ---- 24-d 브라우저 도구가 없을 때: 건너뜀(사유 보임) 또는 MAGUS_REQUIRE_BROWSER=1이면 실패 ----
+
+def test_needs_tools(monkeypatch: pytest.MonkeyPatch):
+    import conftest
+
+    mark = conftest.needs_tools("node가 없다", None)
+    assert mark.name == "skipif" and mark.kwargs["reason"] == "node가 없다" and mark.args == (True,)
+    assert conftest.needs_tools("node가 없다", "node").args == (False,)
+    monkeypatch.setattr(conftest, "REQUIRE_BROWSER", True)
+
+    def sample() -> None:
+        raise AssertionError("돌지 않아야 한다")
+
+    with pytest.raises(pytest.fail.Exception, match="MAGUS_REQUIRE_BROWSER=1"):
+        conftest.needs_tools("node가 없다", None)(sample)()

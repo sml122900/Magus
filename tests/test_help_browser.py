@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
+from conftest import needs_tools
 from test_help import fake_api  # noqa: F401 - 픽스처
 from test_web import server_proc  # noqa: F401 - 픽스처
 
@@ -20,7 +20,7 @@ CHROME = next((c for c in (os.environ.get("CHROME"), r"C:\Program Files\Google\C
 SCRIPT = Path(__file__).parent / "e2e" / "help_browser.mjs"
 
 
-@pytest.mark.skipif(NODE is None or CHROME is None, reason="node 또는 Chrome이 없다")
+@needs_tools("node 또는 Chrome이 없다", NODE, CHROME)
 def test_help_conversation_survives_pages_and_is_cleared_when_it_should(server_proc, fake_api, tmp_path):  # noqa: F811
     url, state = fake_api
     secret = "s" * 40

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+import functools
+import os
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -48,3 +52,35 @@ def make_book(store: LocalStore, user: str, name: str, context: str | None = Non
     saved = {c.name: c for c in store.list_saved_contexts(user)}
     contexts = (Context(saved[context].name, saved[context].text),) if context else ()
     return store.create_category(user, name, template, "#1f2f5c", fields, floor, node, contexts=contexts).id
+
+
+def wait_log(path: Path, *needles: str, until: Callable[[str], bool] | None = None, timeout: float = 10.0) -> str:
+    """하위 프로세스(서버) 로그에 needles가 모두 나올 때까지(또는 until이 참일 때까지) 최대 timeout초 기다리고 글을 돌려준다.
+    점검 24-b: 0.3초 쉬고 읽으면 느린 PC·CI에서 로그가 아직 쓰이지 않아 실패할 수 있었다. 제때 안 나오면 마지막 글을 돌려준다(단정이 실패를 알린다)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        text = path.read_text(encoding="utf-8") if path.exists() else ""
+        if all(n in text for n in needles) and (until is None or until(text)):
+            return text
+        if time.monotonic() > deadline:
+            return text
+        time.sleep(0.05)
+
+
+REQUIRE_BROWSER = os.environ.get("MAGUS_REQUIRE_BROWSER") == "1"
+
+
+def needs_tools(reason: str, *tools: Any) -> Callable[[Any], Any]:
+    """브라우저 시험의 도구(node·Chrome)가 없으면 건너뛴다(pytest -rs로 사유가 보인다). MAGUS_REQUIRE_BROWSER=1이면 건너뛰지 않고 실패한다
+    (점검 24-d: Docker·CI에서 조용히 빠져도 알아차리기 어려웠다)."""
+    missing = any(t is None for t in tools)
+    if missing and REQUIRE_BROWSER:
+        def fail(fn: Any) -> Any:
+            @functools.wraps(fn)
+            def wrapper(*args: Any, **kwargs: Any) -> None:
+                pytest.fail(f"{reason} — MAGUS_REQUIRE_BROWSER=1이라 건너뛰지 않는다")
+
+            return wrapper
+
+        return fail
+    return pytest.mark.skipif(missing, reason=reason)

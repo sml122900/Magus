@@ -22,6 +22,7 @@ from pathlib import Path
 import httpx2
 import jwt
 import pytest
+from conftest import wait_log
 from cryptography.hazmat.primitives.asymmetric import rsa
 from test_http import FIXTURES, _free_port, _wait_healthy  # tests/는 패키지가 아니다(rootdir 모드)
 
@@ -235,8 +236,7 @@ def test_web_login_rejected_token_is_401_with_reason_in_log(server_proc, fake_is
             assert page.status_code == 401, bad
             assert "로그인 토큰을 받아들이지 못했습니다(401)" in page.text and "허용 목록" not in page.text
             assert c.get("/inbox", follow_redirects=False).status_code == 303  # 세션이 생기지 않았다
-    time.sleep(0.3)
-    log = log_path.read_text(encoding="utf-8")
+    log = wait_log(log_path, *(f"web login: token rejected ({hint}" for hint in cases))  # 점검 24-b
     for hint in cases:
         assert f"web login: token rejected ({hint}" in log, hint
     assert len(issued) == len(cases) and not any(token in log for token in issued)  # 토큰 값은 로그에 없다
@@ -471,8 +471,8 @@ def test_display_name_from_email_and_editable(server_proc, fake_issuer):
     assert profile["email"] == "sub-alice@example.com" and "display_name" not in profile and profile["schema_version"] == 1
     assert json.loads((data_dir / "users" / "bob" / "profile.json").read_text(encoding="utf-8"))["display_name"] == "밥"
     assert not (data_dir / "users" / "liar" / "profile.json").exists()
-    time.sleep(0.3)
-    log = log_path.read_text(encoding="utf-8")
+    log = wait_log(log_path, "web login profile: email=yes via=userinfo", "web login profile: email=yes via=id_token",
+                   "web login profile: email=no via=-")  # 점검 24-b
     assert "web login profile: email=yes via=userinfo" in log and "web login profile: email=yes via=id_token" in log
     assert "web login profile: email=no via=- (sub-mismatch; id_token=invalid)" in log  # 이유 코드만
     for secret in ("sub-alice@example.com", "liar@example.com", "sub-noinfo@id.example.com", "sub-liar@id.example.com", "표시명시험", "교수"):

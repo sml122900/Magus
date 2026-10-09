@@ -17,6 +17,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from conftest import wait_log
 from mcp import Client
 
 pytestmark = pytest.mark.anyio
@@ -123,8 +124,7 @@ async def test_all_tools_over_http_and_log_has_no_content(http_server, data_dir:
         # 원격에서는 서버의 파일 경로를 받지 않는다(받은함 이름만)
         escaped = await client.call_tool("book_import", {"path": str(FIXTURES / "닿으려는_종_합성.docx"), "project_id": "x"})
         assert escaped.is_error and "올린 파일에" in escaped.content[0].text
-    time.sleep(0.3)
-    log = log_path.read_text(encoding="utf-8")
+    log = wait_log(log_path, until=lambda t: sum("magus.audit" in line for line in t.splitlines()) >= len(calls) + 3)  # 점검 24-b
     lines = [line for line in log.splitlines() if "magus.audit" in line]
     assert len(lines) == len(calls) + 3 and all(" user=alice " in line for line in lines)
     assert "tool=book_read_chapter user=alice" in lines[-2] and "status=error error=ToolError" in lines[-2]

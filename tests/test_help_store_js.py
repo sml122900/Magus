@@ -6,7 +6,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-import pytest
+from conftest import needs_tools
 
 from magus.helpbot import HELP_STORE_JS, user_key
 
@@ -46,7 +46,7 @@ console.log("ok");
 """
 
 
-@pytest.mark.skipif(NODE is None, reason="node가 없다")
+@needs_tools("node가 없다", NODE)
 def test_help_store_logic_in_node():
     done = subprocess.run([NODE, "-e", HELP_STORE_JS + "\n" + CHECKS], capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert done.returncode == 0, done.stderr

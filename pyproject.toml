@@ -37,3 +37,4 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-rs"  # 건너뛴 시험의 사유를 끝에 보인다(점검 24-d: 브라우저 시험)
