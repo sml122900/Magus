@@ -123,6 +123,17 @@ border:2px solid currentColor;border-right-color:transparent;border-radius:50%;a
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (max-width:767px){main{padding:16px 12px 24px}h1{font-size:22px}table{min-width:640px}
 button,input[type=file]::file-selector-button,input:not([type=radio]):not([type=checkbox]):not([type=hidden]),select{min-height:44px}}
+/* 누르는 것의 크기(2026-10-09): 넓은 화면 32px 이상, 휴대폰(390px) 44px 이상. 위치 표시·돌아가기·쪽 번호·파일·취소 같은 글자 링크와 접는 칸 */
+nav.trail a,.crumb a,p.muted>a,nav.pages a,nav.pages span,ul.files a,form p>a,.picker label,label.drop,.nlist p>a,.nl-books a,a.back{
+display:inline-flex;align-items:center;min-height:32px}
+details>summary{min-height:32px;padding-top:3px;padding-bottom:3px}
+@media (max-width:767px){
+nav.trail a,.crumb a,p.muted>a,nav.pages a,nav.pages span,ul.files a,form p>a,.picker label,label.drop,.nlist p>a,.nl-books a,a.back,
+a.gear,.pm-bar .btn,main a.gear,main .pm-new>summary,main .floor-meta a.gear{min-height:44px;min-width:44px}
+details>summary{min-height:44px;padding-top:9px;padding-bottom:9px}
+/* 머리는 두 줄까지: 첫 줄 Magus, 둘째 줄 메뉴·이름(줄임)·로그아웃 */
+.site-in{padding:6px 12px;gap:2px 12px}.site nav{flex-wrap:nowrap;gap:4px 12px;min-width:0}
+.site nav a.me{max-width:9em;min-width:0}.site nav form button{padding:8px 12px}}
 """
 # 글자 수(2026-10-09): data-count-max가 있는 칸 옆에 "n/한도"를 보이고, 넘치면 그 칸에 머문 채 저장을 막는다(서버도 같은 한도로 거절).
 # data-count-quiet가 있으면 한도의 9할을 넘을 때만 보인다(본문처럼 큰 칸). 글자는 서버와 같이 코드 포인트로 센다.
