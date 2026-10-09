@@ -13,6 +13,7 @@ category_put = 글 넣기(어느 책에든. 서지·원문 확인을 주면 문�
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any, Literal
 
 from mcp.server.mcpserver.exceptions import ToolError
@@ -468,6 +469,10 @@ def build_tools(
             name, by, said = old.title, old.title_by, "제목 그대로"
         else:
             name, by, said = decide_title(store, user, title, title_by, untitled)
+        if old is not None:  # 고치기(2026-10-09 점검 10-b): 웹 고치기와 같이 준 칸만 파일에서 바꾼다
+            return edit_item(user, category, old, head, said, author, text, name, by, values if fields is not None else None,
+                             clean_tag_list if tags is not None else None, links if chapters is not None else None,
+                             one_line(reason or "")[:FIELD_MAX] or None, one_line(where or "")[:FIELD_MAX] or None, picked)
         item = store.put_category_item(user, CategoryItem(
             id=old.id if old else new_id(), category_id=category.id, content=text or (old.content if old else ""), author=author,
             title=name, title_by=by, fields=values, tags=tuple(clean_tag_list), chapters=links,
@@ -482,6 +487,32 @@ def build_tools(
         bits += [f"쓸 부분 {len(item.passages)}"] if item.passages else []
         bits += [f"연결된 장 {', '.join(str(n) for _, n in links)}"] if links else []
         return f"{head}\n{'고침' if old else '넣음'}: 「{category.name}」 {item.id} · " + " · ".join(bits)
+
+    def edit_item(user: str, category: Category, old: CategoryItem, head: str, said: str, author: str, text: str, name: str | None,
+                  by: str | None, fields: dict[str, str] | None, tags: list[str] | None, links: Any, reason: str | None,
+                  where: str | None, picked: tuple[Passage, ...]) -> str:
+        """대화로 글 고치기: 준 칸만 바꾸고 나머지(★ 스크랩·숨긴 칸·쓸 부분·응답 관계·이 코드가 모르는 칸)는 파일에서 그대로.
+        누가(author)는 처음 쓴 사람 그대로이고, 고친 사람·시각은 edited_by·edited_at에 남긴다(웹 고치기와 같다).
+        읽은 뒤 쓰기 전에 다른 곳(웹 등)에서 저장했으면 덮어쓰지 않는다."""
+        from magus.ids import utcnow  # noqa: PLC0415
+        from magus.store.categories import item_changes  # noqa: PLC0415
+
+        new = replace(old, content=text or old.content, title=name, title_by=by,
+                      fields=fields if fields is not None else old.fields, tags=tuple(tags) if tags is not None else old.tags,
+                      chapters=links if links is not None else old.chapters, reason=reason or old.reason, where=where or old.where,
+                      passages=picked or old.passages)
+        keys = {"content", "title", "title_by", "fields", "tags", "chapters", "reason", "where", "passages"}
+        changes = item_changes(old, new, keys)
+        if changes:
+            changes |= {"edited_at": utcnow(), "edited_by": "ai" if author == "ai" else "author"}
+            try:
+                store.patch_category_item(user, category.id, old.id, changes, if_updated_at=old.updated_at or old.created_at)
+            except EditConflict as e:
+                raise ToolError(CONFLICT) from e
+        done = [said, f"누가: {WHO[old.author]}({old.author}) 그대로",
+                f"고친 사람: {'Claude' if author == 'ai' else '저자'}" if changes else "바뀐 것 없음"]
+        done += ["★ 스크랩 그대로"] if old.scrap else []
+        return f"{head}\n고침: 「{category.name}」 {old.id} · " + " · ".join(done)
 
     def put_source(user: str, category: Category, author: str, content: str | None, reason: str | None, where: str | None,
                    parts: list[PartIn], bib: dict[str, Any], checked: bool, file: str | None, aliases: list[str] | None) -> str:
