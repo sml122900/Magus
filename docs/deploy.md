@@ -363,6 +363,22 @@ healthy·재시작 0·오류 로그 0, 원본 2,351개 해시 같음(파생 .cac
 **되돌리기**: `docker tag magus:rollback-7662192 magus:latest && docker compose up -d --no-build`(인덱스 v23, 데이터 형식 같음).
 늦은 색인 기록(`index-pending.json`)이 남아 있으면 옛 코드는 읽지 않는다 — 되돌린 뒤 `magus reindex`로 맞춘다. 되돌리면 커넥터도 다시 연결한다(설명이 옛것으로).
 
+### 2-12. 후속 C: 찾기 일부 낱말만 맞음 + 활용형 앞부분, .env 훅 오탐 — 2026-10-09 사용자 승인
+
+반영 전 서버는 `p1-followup-b`(`86b6155`), 반영할 것은 태그 `p1-followup-c`(`8806621`). **데이터 이전 없음, 인덱스 v23 그대로.**
+바뀐 것: 찾기(웹·category_search)에서 보이는 범위에 모든 낱말이 맞는 글이 없으면 일부 낱말만 맞는 글을 '일부 낱말만 맞음'으로, 이 단계에서만 한글 낱말 앞부분(짧은 → 짧).
+category_search 설명 한 문장(도구 목록 6,359 → 6,376토큰) → **커넥터 재연결 필요(B와 묶어 한 번)**. .env 훅(`.claude/`, 서버와 상관없음). 의존성·Dockerfile·deploy 그대로(status.md 0-32절).
+
+절차는 2-11절과 같다(`private/tmp/deploy-fc/pre.sh`·`build.sh`·`up.sh`·`cleanup.sh`, 도구 `/root/fc-tools/`, 되돌리기 이미지 `magus:rollback-86b6155`, 백업 태그 p1-followup-c).
+
+반영 기록(2026-10-09 23:01 서버 시각): `86b6155` → `8806621`. 백업 `92d55834`(predeploy·p1-followup-c, 2,365개, 오류 없음).
+healthy·재시작 0·오류 로그 0, 원본 2,351개 해시 같음(파생 .cache 2·.text 10·.thumb 2 그대로), 수치 전후 같음(default 299·297·0·86, father 337·335·5·129·수정본 3(E3)),
+전체 현황 네 개 모두 같음. 인용 상태 첫 열기 default 0.14초·father 0.17초. /tmp 점검 9/9(활용형 셋·모두 맞음 그대로·기호 글자 그대로·결과 줄·설명·대화 첫 줄).
+메모리 magus 102 → 114MiB. 정리: `rollback-deba2af` 지움(남김: latest·rollback-86b6155·rollback-7662192), 72시간 넘은 빌드 캐시 0B, 디스크 55 → 51%.
+배포 전 스냅샷 68013e32·a231513b·b10f8adf·92d55834.
+
+**되돌리기**: `docker tag magus:rollback-86b6155 magus:latest && docker compose up -d --no-build`(인덱스 v23, 데이터 형식 같음). 되돌리면 커넥터도 다시 연결한다.
+
 ## 3. 알림 확인
 
 ```sh
