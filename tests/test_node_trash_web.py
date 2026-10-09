@@ -36,7 +36,7 @@ def test_delete_dialog_trash_page_and_restore(server_proc):  # noqa: F811
         before = _hashes(root)
         gone = c.post("/shelf/p/book/map", data={"csrf": csrf, "action": "trash", "node": ids["walk"]})
         assert "노드를 휴지통으로 옮겼습니다." in gone.text and f'data-node="{ids["walk"]}"' not in gone.text
-        assert "<p>「장날」 없음</p>" in c.get("/shelf", params={"q": "장날"}).text  # 검색에서 빠진다
+        assert "「장날」 맞는 글이 없습니다." in c.get("/shelf", params={"q": "장날"}).text  # 검색에서 빠진다
         assert c.get(f"/shelf/{ids['notes']}").status_code == 404
         trash = c.get("/shelf/p/book/trash").text
         assert "노드 「답사」 · 책 3권" in trash and re.search(r'<time datetime="[^"]+">\d{4}-\d\d-\d\d \d\d:\d\d</time>', trash)

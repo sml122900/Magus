@@ -326,6 +326,12 @@ def star_html(link: str, on: bool, csrf: str, back: str, head: bool = False) -> 
             f'<button aria-pressed="{"true" if on else "false"}" aria-label="스크랩" title="스크랩">{"★" if on else "☆"}</button></form>')
 
 
+def search_line(q: str, count: int, clear: str) -> str:
+    """찾기 결과 한 줄(게시판·지도·전체가 같은 문구, 2026-10-09): 「검색어」 N건 · 지우기 / 「검색어」 맞는 글이 없습니다. · 지우기."""
+    said = f"{count}건" if count else "맞는 글이 없습니다."
+    return f'<p class="found">「{html.escape(q)}」 {said} · <a href="{html.escape(clear)}">지우기</a></p>'
+
+
 def post_row_html(post: Post, q: str = "", star: str = "") -> str:
     """게시판 한 줄: 제목 · 첨부 표시(📎, 그림이면 작은 미리보기) · 날짜 · 스크랩(☆). 누르면 글 보기 페이지.
     star: 별표 단추 HTML(게시판). 없으면(찾기 결과 등) 스크랩한 글에 ★ 표시만."""
@@ -336,7 +342,12 @@ def post_row_html(post: Post, q: str = "", star: str = "") -> str:
         preview = one_line(post.preview)
         shown = mark(preview[:80] + ("…" if len(preview) > 80 else "") or "(제목 없음)", q)
         head = f'<span class="pt none">{shown}{post.badge}</span>'
-    hit = snippet(post.text, q) if q and "<mark>" not in shown else ""  # 제목 밖에서 맞았으면 맞은 곳 한 줄
+    hit = ""
+    if q and "<mark>" not in shown:  # 제목 밖에서 맞았으면 맞은 곳 한 줄: 낱말 그대로 맞은 본문 → 첨부 파일 이름(📎, 사진 포함) → 조각
+        hit = snippet(post.text, q, exact=True)
+        if not hit and (named := next((m for m in (mark(a.name, q, exact=True) for a in post.files) if "<mark>" in m), "")):
+            hit = f'<span aria-hidden="true">📎</span> {named}'
+        hit = hit or snippet(post.text, q)
     if q and post.attach:  # 첨부 글자에서 맞음(#100): 어느 첨부의 어느 부분인지 앞뒤 100자
         hit = f'<span aria-hidden="true">📎</span> {html.escape(post.attach)} · ' + snippet(post.text, q, width=100)
     pic = next((a for a in post.files if _inline_image(a.name)), None)
@@ -503,7 +514,7 @@ class BoardPages:
                       f'aria-current="{"true" if scrap_on else "false"}"><span aria-hidden="true">★</span> 스크랩만 '
                       f'<span class="n" data-scrap-count>{starred}</span></a>')
         search = f'<div class="search-row">{search}{scrap_link}</div>'
-        found = f'<p>「{html.escape(q)}」 {len(posts)} · <a href="{base}">지우기</a></p>' if q else ""
+        found = search_line(q, len(posts), base) if q else ""
         back = base + ("?" + urllib.parse.urlencode([(k, v) for k, v in params.multi_items() if k != "done"])
                        if any(k != "done" for k in params.keys()) else "")
         csrf = self._csrf_input(session)
@@ -511,7 +522,7 @@ class BoardPages:
             board = (f'<ol class="posts">{"".join(post_row_html(p, q, star_html(p.link, p.scrap, csrf, back)) for p in shown)}</ol>'
                      + STAR_SCRIPT)
         elif q:
-            board = '<p class="msg">없음</p>'
+            board = ""  # 결과 줄이 '맞는 글이 없습니다.'라고 말한다
         else:
             board = '<p class="empty">스크랩한 글이 없습니다.</p>' if scrap_on else '<p class="empty">글이 없습니다.</p>'
         keep = [(k, v) for k, v in params.multi_items() if k not in ("page", "done")]

@@ -37,7 +37,7 @@ from magus.store import Floor, MapNode, ProjectMap, Store
 from magus.store.floors import MoveError
 from magus.store.formats import one_line
 from magus.store.maps import MapError
-from magus.webboard import post_row_html
+from magus.webboard import post_row_html, search_line
 from magus.webmap_assets import MAP_SCRIPT, MAP_STYLE, PROJECTS_STYLE, TRASH_STYLE
 from magus.contexts import View
 from magus.webcontexts import CONTEXT_SCRIPT, CONTEXT_STYLE, context_fieldset, contexts_from_form, contexts_view_html, register_row
@@ -173,10 +173,9 @@ class MapPages:
         form = (f'<form method="get" action="/shelf" class="search" role="search">'
                 f'<input type="search" name="q" value="{html.escape(q)}" aria-label="모든 프로젝트에서 찾기"><button>찾기</button></form>')
         if q:
-            groups = await run_in_threadpool(self._search_all, uid, floors, q)
+            groups, count = await run_in_threadpool(self._search_all_counted, uid, floors, q)
             hits = [g for g in groups if g]
-            head = (f'<p class="crumb"><a href="/shelf">← 프로젝트</a></p>{form}'
-                    f"<p>「{html.escape(q)}」 " + (f"{len(hits)}" if hits else "없음") + "</p>")
+            head = f'<p class="crumb"><a href="/shelf">← 프로젝트</a></p>{form}{search_line(q, count, "/shelf")}'
             return self._map_page("프로젝트", head + "".join(hits), session, css=PROJECTS_STYLE)
         notices = await run_in_threadpool(self._notices, uid, request, session, "/shelf")
         cards = await run_in_threadpool(self._project_cards, uid, floors, session)
@@ -318,10 +317,9 @@ class MapPages:
         view = params.get("view") if params.get("view") in ("map", "list") else "auto"
         search = ""
         if q:
-            result = await run_in_threadpool(self._search_project, uid, floor, found, q)
-            search = (f'<section class="pm-results" aria-label="찾은 것"><p>「{html.escape(q)}」 '
-                      + ("" if result else "없음 · ")
-                      + f'<a href="{html.escape(state_url(floor_id))}">지우기</a></p>{result}</section>')
+            result, count = await run_in_threadpool(self._search_project_counted, uid, floor, found, q)
+            search = (f'<section class="pm-results" aria-label="찾은 것">{search_line(q, count, state_url(floor_id))}'
+                      f"{result}</section>")
         bar = self._toolbar(floor, found, q, view)
         new_node = await run_in_threadpool(self._new_node_form, uid, session, floor, found)
         map_html = await run_in_threadpool(self._map_html, uid, found, node)
@@ -952,8 +950,13 @@ class MapPages:
     # ---- 검색 ------------------------------------------------------------------------------
     def _search_project(self, uid: str, floor: Floor, found: ProjectMap, q: str) -> str:
         """이 프로젝트에서: 노드 이름, 책 이름, 게시판 내용. 결과를 누르면 그 노드·책이 열린다."""
+        return self._search_project_counted(uid, floor, found, q)[0]
+
+    def _search_project_counted(self, uid: str, floor: Floor, found: ProjectMap, q: str) -> tuple[str, int]:
+        """(HTML, 찾은 글 수)."""
         needle = q.replace(" ", "").lower()
         parts = []
+        posts = 0
         named = [n for n in found.nodes if needle and needle in n.name.replace(" ", "").lower()]
         if named:
             parts.append("<p>노드: " + " · ".join(
@@ -974,6 +977,7 @@ class MapPages:
                     in_name = True
                 if not rows and not in_name:
                     continue
+                posts += len(rows)
                 where = "" if n.name == b.name else f'{html.escape(node_label(n) if not n.center else "가운데")} · '
                 more = (f' <small><a href="/shelf/{html.escape(b.key)}?q={html.escape(urllib.parse.quote(q))}">모두 보기</a></small>'
                         if len(rows) > GROUP_SIZE else "")
@@ -982,7 +986,7 @@ class MapPages:
                 parts.append(f'<section class="group"><h3>{where}<a href="{html.escape(b.href or "")}">'
                              f'{html.escape(b.name)}</a> <small>{band}{len(rows)}개</small>{more}</h3>'
                              + (f'<ol class="posts">{items}</ol>' if items else "") + "</section>")
-        return "".join(parts)
+        return "".join(parts), posts
 
     def _kind_of(self, uid: str, key: str) -> Kind | None:
         base, _, rest = key.partition(".")
@@ -996,15 +1000,21 @@ class MapPages:
 
     def _search_all(self, uid: str, floors: list[Floor], q: str) -> list[str]:
         """모든 프로젝트에서: 프로젝트마다 한 덩어리(HTML). 찾은 것이 없으면 빈 문자열."""
+        return self._search_all_counted(uid, floors, q)[0]
+
+    def _search_all_counted(self, uid: str, floors: list[Floor], q: str) -> tuple[list[str], int]:
+        """(프로젝트마다 HTML, 찾은 글 수)."""
         needle = q.replace(" ", "").lower()
         out = []
+        posts = 0
         for f in floors:
             found = self.store.get_map(uid, f.id)
             if found is None:
                 out.append("")
                 continue
             own = ProjectMap(found.floor, found.title, tuple(n for n in found.nodes if not n.link), found.edges, found.stored)
-            inner = self._search_project(uid, f, own, q)
+            inner, count = self._search_project_counted(uid, f, own, q)
+            posts += count
             named = needle in project_name(f).replace(" ", "").lower()
             if not inner and not named:
                 out.append("")
@@ -1012,7 +1022,7 @@ class MapPages:
             out.append(f'<section class="fgroup"><h2><a href="{html.escape(state_url(f.id))}">{html.escape(project_name(f))}</a> '
                        f'<small>{when_text(f.updated_at)}</small></h2>'
                        + inner + "</section>")
-        return out
+        return out, posts
 
     # ---- 내려받기 ----------------------------------------------------------------------------
     async def export_project(self, request: Request) -> Response:

@@ -59,7 +59,7 @@ def test_project_list_and_new_project(server_proc):  # noqa: F811
         assert "프로젝트를 만들었습니다." in made.text and '<h1 class="pm-title">다음 책 &lt;b&gt;메모&lt;/b&gt;</h1>' in made.text
         # 모든 프로젝트에서 찾기: 프로젝트 → 노드 · 책으로 묶는다. 책은 그 책의 게시판, 글은 글 보기 페이지로
         found = c.get("/shelf", params={"q": "제이콥스"}).text
-        assert '<h2><a href="/shelf/p/city">도시는 어떻게 태어났나</a>' in found and "<p>「제이콥스」 1</p>" in found
+        assert '<h2><a href="/shelf/p/city">도시는 어떻게 태어났나</a>' in found and '<p class="found">「제이콥스」 1건 · <a href="/shelf">지우기</a></p>' in found
         assert f'<a href="/shelf/{ids["person"]}">인물</a>' in found
         assert f'<a class="post" href="/shelf/{ids["person"]}/20261007000000000-aaaaaa"><span class="pt"><mark>제이콥스</mark></span>' in found
 

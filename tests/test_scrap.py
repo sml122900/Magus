@@ -93,7 +93,7 @@ def test_web_star_toggle_filter_and_count(server_proc):  # noqa: F811
         both = c.get(f"/shelf/{notes}", params={"q": "물안개", "scrap": "1"}).text
         assert both.count('<li><a class="post"') == 1 and "물안개" in both
         none = c.get(f"/shelf/{notes}", params={"q": "나루", "scrap": "1"}).text
-        assert '<p class="msg">없음</p>' in none and '<li><a class="post"' not in none
+        assert "「나루」 맞는 글이 없습니다." in none and '<li><a class="post"' not in none  # 결과 문구 통일(2026-10-09)
         assert '<p class="empty">스크랩한 글이 없습니다.</p>' in c.get("/shelf/" + ids["photos"] + "?scrap=1").text
         # 글 보기 머리의 ★
         view = c.get(f"/shelf/{notes}/{FIRST}").text

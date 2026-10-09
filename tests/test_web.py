@@ -415,10 +415,10 @@ def test_shelf_search_marks_hits(server_proc):
         store.close()
         fish = c.get("/shelf/ideas-common", params={"q": "물고기"}).text
         assert "<mark>물고기</mark>가 강을 거슬러 오른다" in fish and "물가는 궁지다" not in fish
-        assert "「물고기」 1 · " in fish and 'value="물고기"' in fish
+        assert "「물고기」 1건 · " in fish and 'value="물고기"' in fish
         one = c.get("/shelf/ideas-common", params={"q": "물"}).text  # 한 글자: 2글자 조각 색인으로는 못 찾는다
         assert "<mark>물</mark>고기가" in one and "<mark>물</mark>가는 궁지다" in one
-        assert '<p class="msg">없음</p>' in c.get("/shelf/ideas-common", params={"q": "없는말"}).text
+        assert "「없는말」 맞는 글이 없습니다." in c.get("/shelf/ideas-common", params={"q": "없는말"}).text
         assert "<mark>물결</mark>이 길게" in c.get("/shelf/styles-common", params={"q": "물결"}).text  # 본문(구절)
         assert "<mark>유홍준</mark>" in c.get("/shelf/styles-common", params={"q": "유홍준"}).text  # 위치(출전)
         assert "<mark>Gaining</mark> ground" in c.get("/shelf/refs-common", params={"q": "gaining"}).text  # 서지
@@ -427,7 +427,7 @@ def test_shelf_search_marks_hits(server_proc):
         both = c.get("/shelf", params={"q": "물"}).text  # 프로젝트 → 노드 · 책으로 묶는다(#95). 책 옆에 컨텍스트 이름(#96)
         assert re.search(r'<a href="/shelf/ideas-common">생각</a> <small>생각 메모 · \d+개</small>', both)  # 누르면 그 책의 게시판
         assert '<a href="/shelf/styles-common">문체</a> <small>문체 · 1개</small>' in both
-        assert "<p>「물」 1</p>" in both and ">문헌</a>" not in both and '<h2><a href="/shelf/p/common">내 서재</a>' in both
+        assert re.search(r'<p class="found">「물」 \d+건 · <a href="/shelf">지우기</a></p>', both) and ">문헌</a>" not in both and '<h2><a href="/shelf/p/common">내 서재</a>' in both
         evil = c.get("/shelf/ideas-common", params={"q": "<script>"}).text
         assert "<script>alert" not in evil and "&lt;script&gt;alert(1)&lt;/script&gt;" in c.get("/shelf/ideas-common").text
         assert 'value="&lt;script&gt;"' in evil

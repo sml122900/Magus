@@ -414,7 +414,7 @@ def test_web_category_list_search_and_titles(server_proc):  # noqa: F811
         assert 'class="ctxs"' not in listed  # 컨텍스트가 없으면 아무것도 보이지 않는다(#97)
         assert "물결" not in c.get(f"/shelf/{c1.id}?author=ai").text
         found = c.get(f"/shelf/{c1.id}", params={"q": "장날"}).text
-        assert "「장날」 1 · " in found and "<mark>장날</mark>" in found
+        assert "「장날」 1건 · " in found and "<mark>장날</mark>" in found
         everywhere = c.get("/shelf", params={"q": "물결"}).text
         assert f'<a href="/shelf/{c1.id}">사례</a> <small>1개</small>' in everywhere
         assert "<mark>물결</mark>" in everywhere

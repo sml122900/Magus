@@ -53,7 +53,7 @@ from magus.store import Category, CategoryItem, Chunk, ShelfSettings, Store
 from magus.webcontexts import CONTEXT_SCRIPT, CONTEXT_STYLE, context_fieldset, contexts_from_form, contexts_view_html, register_row
 from magus.store.base import Lane
 from magus.store.formats import one_line
-from magus.search import find_chunks
+from magus.search import find_all_words
 from magus.textindex import query_parts, tokens
 
 GROUP_SIZE = 5  # 책장 전체 검색에서 카테고리마다 먼저 보이는 수
@@ -395,7 +395,7 @@ def find_hits(store: Store, user_id: str, lanes: list[Lane], q: str) -> list[tup
     if not q.strip():
         return []
     out: dict[str, Chunk] = {}
-    for c in find_chunks(store, user_id, lanes, q, SEARCH_LIMIT):
+    for c in find_all_words(store, user_id, lanes, q, SEARCH_LIMIT):  # 웹: 낱말 모두(AND), 기호 든 낱말은 글자 그대로(2026-10-09)
         out.setdefault(c.owner_id, c)
     return list(out.items())
 
@@ -404,22 +404,24 @@ def one_char(q: str) -> bool:
     return bool(q) and not any(len(t) >= 2 for t in tokens(q))
 
 
-def _pattern(q: str, text: str) -> re.Pattern[str] | None:
+def _pattern(q: str, text: str, exact: bool = False) -> re.Pattern[str] | None:
     """맞은 부분 표시: 따옴표 구절·검색어 낱말이 그대로(대소문자 무시) 있으면 그것을, 없으면 색인 조각(2글자·영단어)을 표시한다.
     앞부분 일치("ra" → raw)는 맞은 앞부분만 표시된다."""
     phrases, words = query_parts(q)
-    for terms in ([*phrases, *words], tokens(q)):
+    # 구절은 낱말 사이의 띄어쓰기·문장부호가 달라도 구절 전체를 표시한다("도시 성장" → "도시, 성장"도)
+    loose = [r"[\W_]+".join(re.escape(w) for w in p.split()) for p in sorted(phrases, key=len, reverse=True)]
+    for terms in ([*phrases, *words], *([] if exact else [tokens(q)])):  # exact: 낱말·구절 그대로만(조각으로 내려가지 않는다)
         terms = sorted({t for t in terms if t}, key=len, reverse=True)
         if terms:
-            pattern = re.compile("|".join(re.escape(t) for t in terms), re.IGNORECASE)
+            pattern = re.compile("|".join([*loose, *(re.escape(t) for t in terms)]), re.IGNORECASE)
             if pattern.search(text):
                 return pattern
     return None
 
 
-def mark(text: str, q: str) -> str:
+def mark(text: str, q: str, exact: bool = False) -> str:
     """text를 이스케이프하면서 맞은 부분을 <mark>로 감싼다."""
-    pattern = _pattern(q, text) if q else None
+    pattern = _pattern(q, text, exact) if q else None
     if pattern is None:
         return html.escape(text)
     out, last = [], 0
@@ -429,10 +431,10 @@ def mark(text: str, q: str) -> str:
     return "".join([*out, html.escape(text[last:])])
 
 
-def snippet(text: str, q: str, width: int = 40) -> str:
-    """맞은 곳 앞뒤 width자(HTML). 맞은 곳이 없으면 빈 문자열."""
+def snippet(text: str, q: str, width: int = 40, exact: bool = False) -> str:
+    """맞은 곳 앞뒤 width자(HTML). 맞은 곳이 없으면 빈 문자열. exact면 낱말·구절 그대로 맞은 곳만."""
     text = one_line(text)
-    pattern = _pattern(q, text) if q else None
+    pattern = _pattern(q, text, exact) if q else None
     m = pattern.search(text) if pattern else None
     if m is None:
         return ""
