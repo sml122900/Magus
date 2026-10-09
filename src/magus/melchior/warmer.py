@@ -4,7 +4,7 @@
   올린 문서·수정본을 가져온 직후(가져오기도 끝에 after_refs_changed를 부른다). 그 사용자의 올린 문서가 있는 프로젝트를 모두 예약한다.
 - 어떻게: 일꾼 스레드 하나가 줄을 차례로 비운다. 같은 (사용자, 프로젝트)는 줄에 한 번만. 계산 도중 문헌이 또 바뀌면
   CiteCache.save가 쓰지 않고, 다시 예약된 것이 새로 계산한다. 실패해도 다음 화면이 다시 계산하므로 남기기만 한다.
-- 서버(magus serve)에서만 켠다. 다른 CLI 명령은 프로세스가 곧 끝나 계산이 잘리므로 끈다(cli.main). 시험은 conftest가 끈다.
+- 서버(magus serve)에서만 켠다(기본은 꺼짐). 다른 CLI 명령·스크립트는 프로세스가 곧 끝나거나 저장소를 닫아 계산이 잘린다. 시험도 끈다(conftest).
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from magus.store import Store
 
 log = logging.getLogger("magus.cache")
 
-ENABLED = True
+ENABLED = False  # magus serve만 켠다(cli.main). 라이브러리로 쓰는 스크립트는 저장소를 닫은 뒤에도 일꾼이 돌 수 있어 끈 채로 둔다
 _lock = threading.Lock()
 _idle = threading.Event()
 _idle.set()
