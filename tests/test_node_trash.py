@@ -64,7 +64,7 @@ def test_trash_with_books_and_restore_round_trip_keeps_every_file(store: LocalSt
     assert (bundle / "categories" / ids["notes"] / "files").is_dir() and (bundle / "documents" / ids["doc"] / "document.json").exists()
     assert not (root / "shelf" / "categories" / ids["notes"]).exists()
     [t] = [t for t in store.list_trash("alice") if t.kind == "node"]
-    assert t.id == f"book/{ids['walk']}" and t.preview == "노드 「답사」 · 책 3권"
+    assert t.id == f"book/{ids['walk']}" and t.preview == "노드 「답사」" and t.detail.startswith("책 3권·글 ")
     # 휴지통에 있는 것은 목록·검색·색인에서 빠진다
     assert store.get_category("alice", ids["notes"]) is None and store.get_document("alice", ids["doc"]) is None
     assert store.list_category_items("alice", ids["notes"]) == []

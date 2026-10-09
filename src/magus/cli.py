@@ -253,7 +253,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"휴지통({user}) {len(items)}개")
         for t in items:
             print(f"- {t.kind} {t.id} · {t.trashed_at} · {t.note or '-'}" + (f" · 함께 옮긴 글 {t.with_id}" if t.with_id else "")
-                  + f" · “{t.preview[:40]}”")
+                  + f" · “{t.preview[:40]}”" + (f" · {t.detail}" if t.detail else ""))
     elif args.cmd == "thumbs":  # 사진 썸네일(2026-10-09). 첨부 폴더 안 .thumb/에 쓰고 원본은 건드리지 않는다
         from magus.thumbs import THUMB_DIR, THUMB_NAME, thumbnailable
 
