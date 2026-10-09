@@ -34,7 +34,8 @@
   응답 머리에 컨텍스트 전문. 이전은 `magus maps apply`에 합침(`docs/decisions/contexts.md`, 문구 전후 `contexts-texts.md`, status.md 0-19절). 2026-10-08 21:47 묶음 배포(`p1-contexts`).
   **사용자 답(2026-10-08 저녁)**: d·s는 바꿔서, 나머지 승인. d = 노드 → 책 순서로 컨텍스트를 이어 읽는다(합쳐 1,000자). s = 일반 기능의 '원고' → '올린 문서'
   (instructions 머리말·1·4·6·7·8·12, 화면·도구 응답·설명). 도구 목록 8,450토큰, instructions 2,259토큰. #93~#96 묶음은 사용자 확인 뒤 배포했다(status.md 0-20절).
-- **서버(2026-10-09 13:50부터): master `p1-edit-scrap`(`d692855`, #99 웹 수정 묶음, 데이터 이전 없음·인덱스 v22, status.md 0-25절, `docs/deploy.md` 2-5절). 되돌리기 기준 `0e0c89e`(이미지 `magus:rollback-0e0c89e`, 이미지만 되돌리면 된다).**
+- **서버(2026-10-09 14:57부터): master `p1-attach-text`(`458ffb9`, #100 첨부 글자·대화 검색 범위·예약어, 데이터 이전 없음·인덱스 v23, 기존 첨부 글자 2개 뽑음, status.md 0-26절, `docs/deploy.md` 2-6절). 되돌리기 기준 `d692855`(이미지 `magus:rollback-d692855`, 이미지만 되돌리면 된다).**
+- 그 전 서버(2026-10-09 13:50부터): master `p1-edit-scrap`(`d692855`, #99 웹 수정 묶음, 인덱스 v22, status.md 0-25절, `docs/deploy.md` 2-5절). 되돌리기 기준 `0e0c89e`(이미지 `magus:rollback-0e0c89e`).
 - 그 전 서버(2026-10-09 03:13부터): master `p1-board`(`0e0c89e`, #98 + 배포 전 수정, 데이터 이전 없음, status.md 0-24절, `docs/deploy.md` 2-4절). 되돌리기 기준 `ed15ffb`(이미지 `magus:rollback-ed15ffb`).
 - 그 전 서버(2026-10-09 00:33부터): master `p1-razor`(`ed15ffb`, #97, 데이터 이전 없음, status.md 0-22절). 되돌리기 기준 `efc19ac`(이미지 `magus:rollback-efc19ac`).
 - 그 전 서버(2026-10-08 21:47부터): master `p1-contexts`(`efc19ac`: #93 층 + #94 책 종류 + #95 프로젝트·지도 + #96 컨텍스트 묶음, 데이터 이전 `magus maps apply --all-users`, status.md 0-20절).
@@ -62,7 +63,7 @@
   글자 포함(최근 것부터), 첨부 이름 색인), 첨부 고르기(스크립트가 담은 목록·✕·담는 순간 거절), 책 색(색 선택기 먼저·'기본 색 ▾'), 책등(upright·2~4자 tcy·5자 이상 눕힘),
   정해진 이름 안내(`RESERVED_SHOWN` 목록), 도움말. 인덱스 v22. 도구 23개·8,787토큰, instructions 규칙 6·7(2,305토큰, 커넥터 재연결).
   태그 `webfix-1-edit`~`webfix-9-help`·`webfix-4b-rank`, 결정 문서 `docs/decisions/web-edit-scrap.md`, 배포 `docs/deploy.md` 2-5절, status.md 0-25절·4절 #99 표.
-- **대화 검색 범위 + 예약어 '스크랩' + 첨부 글자 뽑기(2026-10-09, 사용자 요청 #100, 서버 배포 `p1-attach-text`)**: category_search가 문헌 글의 서지·key·한글 표기·첨부 이름(ref_bib)도 찾음(미확인 표시),
+- **대화 검색 범위 + 예약어 '스크랩' + 첨부 글자 뽑기(2026-10-09, 사용자 요청 #100, 2026-10-09 14:57 서버 배포 `p1-attach-text`)**: category_search가 문헌 글의 서지·key·한글 표기·첨부 이름(ref_bib)도 찾음(미확인 표시),
   '스크랩' 정해진 이름, 첨부(docx·pdf·txt·md) 글자를 첨부 폴더 안 `.text/`에 뽑아(`magus/extract.py`, 30만 자·20초·글자 없음·나중에, `magus extract --all-users`)
   색인 v23(레인 attach_text, chunks.part)으로 찾고, 대화는 `category_search(attachment='첨부:<id>', page=N)`로 3,000자씩, 웹은 '글자 보기'로 읽음.
   쓸 부분 저장은 `category_edit(item_id=문헌 key, parts)`. instructions 규칙 2 끝 문장(2,385토큰), 도구 23개·9,207토큰(커넥터 재연결).

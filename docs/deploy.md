@@ -251,6 +251,10 @@ MCP 도구 23개 그대로(category_search `attachment`·`page`, category_edit `
    `.text/`를 뺀 data 해시가 반영 전과 같은지, 새 파일이 `.text/`뿐인지 → 컨테이너 안 /tmp 점검(`smoke.py`).
 4. **커넥터 재연결 한 번**.
 
+반영 기록(2026-10-09 14:57 서버 시각): `d692855` → `458ffb9`. 백업 `4a98c511`, healthy·재시작 0, 인덱스 v23 재생성, data 2,328개 해시 같음,
+수치·전체 현황 전후 같음(default 299·297·0·86, father 337·335·5·129·E3), `magus extract --all-users` default 2개 뽑음(실패 0),
+뽑은 뒤 기존 파일 해시 같음·새 파일은 .text 4개뿐, /tmp 점검 12/12. 기록 `/root/deploy-20261009-attach/`.
+
 **되돌리기**: `docker tag magus:rollback-d692855 magus:latest && docker compose up -d --no-build`(옛 코드가 인덱스 v22를 다시 만든다).
 옛 코드는 첨부 폴더에서 파일만 세므로 `.text/`를 무시한다(시험본에서 첨부 목록·수치 같음 확인). 지울 필요 없다(파생값).
 
