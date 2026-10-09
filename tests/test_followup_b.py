@@ -250,7 +250,8 @@ def test_display_title_rule():
     assert display_title("", "  본문\n둘째 줄 ", {}, []) == "본문 둘째 줄"
     assert display_title(None, "", {"장소": "엘알토", "빈칸": ""}, []) == "장소: 엘알토"
     assert display_title(None, "", {}, []) == UNTITLED == "제목 없는 글"
-    assert display_title(None, "가" * 50, {}, [], 30) == "가" * 29 + "…"
+    assert display_title(None, "가" * 50, {}, [], 30) == "가" * 30 + "…"  # 본문에서 만든 이름만 자른다
+    assert display_title("나" * 70, "본문", {}, [], 30) == "나" * 70  # 제목은 자르지 않는다(제목 한도 80)
 
 
 async def test_same_name_everywhere(store: LocalStore, settings: Settings):

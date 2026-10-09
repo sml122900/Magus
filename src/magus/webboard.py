@@ -37,7 +37,7 @@ from magus.ids import local_time, new_id, utcnow
 from magus.melchior.author_report import cite_label
 from magus.store.base import EditConflict
 from magus.store import Attachment, CategoryItem, Chunk, Store
-from magus.store.formats import UNTITLED, clip, display_title, one_line
+from magus.store.formats import display_title, one_line
 from magus.webshelf import (
     AI_MARK, AI_TITLE, Book, Kind, Upload, clean_query, find_hits, mark, paragraphs, snippet, state_url,
 )
@@ -355,7 +355,7 @@ def post_row_html(post: Post, q: str = "", star: str = "") -> str:
         shown = mark(post.title, q)
         head = f'<span class="pt">{shown}{post.badge}</span>'
     else:
-        shown = mark(clip(one_line(post.preview), 80) or UNTITLED, q)  # 제목도 첨부도 없는 글: 본문 → 칸을 흐리게(점검 22-a)
+        shown = mark(display_title(None, post.preview, None, (), 80), q)  # 제목도 첨부도 없는 글: 본문 → 칸을 흐리게(점검 22-a)
         head = f'<span class="pt none">{shown}{post.badge}</span>'
     hit = ""
     if q and "<mark>" not in shown:  # 제목 밖에서 맞았으면 맞은 곳 한 줄: 낱말 그대로 맞은 본문 → 첨부 파일 이름(📎, 사진 포함) → 조각

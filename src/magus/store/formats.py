@@ -21,17 +21,26 @@ UNTITLED = "제목 없는 글"
 
 
 def clip(text: str, width: int | None) -> str:
-    return text if width is None or len(text) <= width else text[: width - 1] + "…"
+    """width자를 넘으면 width자에서 자르고 '…'(화면의 예전 규칙과 같다)."""
+    return text if width is None or len(text) <= width else text[:width] + "…"
+
+
+NAME_MAX = 80  # 제목(웹·도구의 제목 한도)과 같은 길이. 첨부 이름으로 보일 때도 이만큼
 
 
 def display_title(title: str | None, content: str | None, fields: Mapping[str, str] | None, file_names: Iterable[str],
                   width: int | None = None) -> str:
     """글의 보일 이름(2026-10-09 점검 22-a: 웹·도구·zip이 9곳에서 다르던 것을 하나로). 제목 → 첫 첨부의 파일 이름(확장자 뺌) →
-    본문 한 줄 → 채워진 칸('키: 값') → '제목 없는 글'. width를 넘으면 자르고 '…'. 파일은 바꾸지 않는다(보일 때만)."""
-    stem = next((s for s in (" ".join(PurePath(n).stem.split()) for n in file_names) if s), "")
-    shown = (one_line(title or "") or stem or one_line(content or "")
-             or " · ".join(f"{k}: {v}" for k, v in (fields or {}).items() if v) or UNTITLED)
-    return clip(one_line(shown), width)
+    본문 한 줄 → 채워진 칸('키: 값') → '제목 없는 글'. 제목·첨부 이름은 자르지 않고(80자까지), 본문·칸에서 만든 이름만
+    width를 넘으면 width자에서 자르고 '…'를 붙인다(웹 게시판 80·글 보기 40처럼 그 자리 길이). 파일은 바꾸지 않는다(보일 때만)."""
+    if name := one_line(title or ""):
+        return name
+    if stem := next((s for s in (" ".join(PurePath(n).stem.split()) for n in file_names) if s), ""):
+        return stem[:NAME_MAX]
+    body = one_line(content or "") or one_line(" · ".join(f"{k}: {v}" for k, v in (fields or {}).items() if v))
+    if not body:
+        return UNTITLED
+    return clip(body, width)
 
 
 def dump_chapter(meta: dict[str, object], body: str) -> str:
