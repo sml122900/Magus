@@ -291,6 +291,11 @@ background:var(--canvas);cursor:pointer}
 .picker{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:8px 0}
 .picker label{margin:0}.picker input[type=number]{width:5.5em}.picker input[name=hex]{width:7.5em}
 .picker input[type=color]{width:56px;height:44px;padding:2px;border:1px solid var(--mute);border-radius:6px;background:var(--canvas);vertical-align:middle}
+.picker .pick-main{display:flex;align-items:center;gap:8px;font-weight:600}.picker .pick-main input[type=color]{width:72px;height:48px}
+details.palette{margin:8px 0}details.palette>summary{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 16px;border-radius:9999px;
+border:1px solid var(--mute);background:var(--canvas);cursor:pointer;font-weight:600;list-style:none}
+details.palette>summary::-webkit-details-marker{display:none}details.palette>summary:hover{background:var(--soft)}
+details.palette[open]>summary .chev{display:inline-block;transform:rotate(180deg)}
 .preview .case{display:inline-block;margin:0}.preview .books{padding:28px 24px 0}
 .mycolors{list-style:none;padding:0;margin:8px 0;display:flex;flex-wrap:wrap;gap:8px 16px}
 .mycolors li{display:flex;align-items:center;gap:8px}.mycolors .chip{width:28px;height:28px;border-radius:6px;border:1px solid rgb(0 0 0/.3)}
@@ -420,7 +425,8 @@ def category_kind(c: Category) -> Kind:
 
 
 def color_fieldset(current: str, my_colors: tuple[str, ...]) -> str:
-    """책 색 고르기: 기본 색 격자 + 내 색 + 직접 고르기(색 선택기·#RRGGBB·R·G·B)."""
+    """책 색 고르기(2026-10-09): 색 선택기가 먼저 보이고(직접 고르기·#RRGGBB·R·G·B), 내 색, 기본 제공 색은 '기본 색 ▾'를 누르면
+    펼쳐진다(기본은 접힘). 저장하는 값·방식은 그대로(color 라디오 + hex·R·G·B). was는 처음 색(스크립트 없이 색 선택기만 바꿨을 때)."""
     current = safe_color(current, PALETTE[0][1])
     chosen = current if current in COLOR_NAMES or current in my_colors else "custom"
 
@@ -431,23 +437,27 @@ def color_fieldset(current: str, my_colors: tuple[str, ...]) -> str:
     r, g, b = (int(current[i : i + 2], 16) for i in (1, 3, 5))
     mine = "".join(swatch(c, c) for c in my_colors)
     return (
-        '<fieldset><legend>책 색</legend>'
-        f'<div class="sw-grid" role="group" aria-label="기본 색">{"".join(swatch(h, n) for n, h in PALETTE)}</div>'
-        + (f'<p><b>내 색</b></p><div class="sw-grid" role="group" aria-label="내 색">{mine}</div>' if mine else "")
-        + f'<div class="picker"><label class="sw"><input type="radio" name="color" value="custom"{" checked" if chosen == "custom" else ""}>'
+        f'<fieldset><legend>책 색</legend><input type="hidden" name="was" value="{current}">'
+        f'<div class="picker"><label class="pick-main">색 선택기 <input type="color" name="picker" value="{current}"></label>'
+        f'<label class="sw"><input type="radio" name="color" value="custom"{" checked" if chosen == "custom" else ""}>'
         "직접 고르기</label>"
-        f'<label>색 선택기 <input type="color" name="picker" value="{current}"></label>'
         f'<label>#RRGGBB <input name="hex" value="{current}" maxlength="7" pattern="#[0-9A-Fa-f]{{6}}" autocomplete="off"></label>'
         f'<label>R <input type="number" name="r" min="0" max="255" value="{r}"></label>'
         f'<label>G <input type="number" name="g" min="0" max="255" value="{g}"></label>'
         f'<label>B <input type="number" name="b" min="0" max="255" value="{b}"></label>'
-        '<label><input type="checkbox" name="keep" value="1"> 내 색에 저장</label></div></fieldset>'
+        '<label><input type="checkbox" name="keep" value="1"> 내 색에 저장</label></div>'
+        + (f'<p><b>내 색</b></p><div class="sw-grid" role="group" aria-label="내 색">{mine}</div>' if mine else "")
+        + '<details class="palette"><summary>기본 색 <span class="chev" aria-hidden="true">▾</span></summary>'
+        f'<div class="sw-grid" role="group" aria-label="기본 색">{"".join(swatch(h, n) for n, h in PALETTE)}</div></details></fieldset>'
     )
 
 
 def chosen_color(form: Any) -> str:
     """폼에서 고른 색 → #rrggbb. 직접 고르기면 #RRGGBB 칸을 먼저, 없으면 R·G·B 숫자를 본다. 그 밖에는 ValueError."""
     choice = str(form.get("color") or "")
+    picked, was = str(form.get("picker") or "").strip().lower(), str(form.get("was") or "").strip().lower()
+    if choice.lower() == was and HEX.fullmatch(picked) and picked != was:  # 스크립트 없이 색 선택기만 바꿨다
+        return picked
     if choice == "custom":
         typed = str(form.get("hex") or "").strip()
         if HEX.fullmatch(typed):
