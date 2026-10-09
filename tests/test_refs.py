@@ -124,7 +124,7 @@ async def test_ref_add_new_with_fulltext_and_search(settings: Settings, imported
         lines = [line for line in found.splitlines() if line[:1].isdigit()]
         assert lines[0].startswith("1. zimmer1998 · 문헌 글 · 원문 확인")
         assert "이유: 6장 도입" in found and "## 「참고문헌」 — 컨텍스트(책 「참고문헌」)" in found
-        assert "원문(쓸 부분으로 고르지 않은 곳)" in found and "parts에 더해 다시 넣는다" in found
+        assert "원문(쓸 부분으로 고르지 않은 곳)" in found and "parts)로 더하고, 원문 확인 표시는 저자에게 물은 뒤" in found
         picked_only = _text(await client.call_tool("category_search", {"query": "파키케투스 귀뼈"}))
         assert "결과 없음" in picked_only
         full_only = _text(await client.call_tool("category_search", {"query": "파키케투스 귀뼈", "full": True}))

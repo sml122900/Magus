@@ -35,8 +35,9 @@ def build_tools(
         return (
             head + report.render()
             + (f"\n새 항목을 넣은 책: 「{shelf.name}」({floor_name(store, user, shelf.floor)})." if shelf else "")
-            + f"\n확인 요청과의 연결 변경 {linked}건. 모두 원문 확인 전이다. 저자가 원문을 읽고 고른 대목이 있는 문헌만 "
-            "category_put(checked=true)으로 원문 확인이 된다."
+            + f"\n확인 요청과의 연결 변경 {linked}건. 모두 원문 확인 전이다. 저자가 원문을 읽고 고른 대목은 "
+            "category_edit(item_id=문헌 key, parts)로 쓸 부분에 더하고, 원문 확인 표시는 저자에게 물은 뒤 category_edit(checked=true)로 붙인다."
+            # 규칙 2·category_edit 설명과 같은 길(점검 22-b, 전에는 category_put(checked=true))
         )
 
     def ref_check(chapter_number: int, project_id: str | None = None) -> str:

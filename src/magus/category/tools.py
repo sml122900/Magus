@@ -784,7 +784,8 @@ def build_tools(
                     *([f"   이유: {one_line(passage.reason)[:150]}"] if passage and passage.reason else []),
                     *attached(user, f"ref:{ref.key}")]
         return [head + " · 원문(쓸 부분으로 고르지 않은 곳)", f"   “{one_line(chunk.text)[:300]}”",
-                "   → 인용하려면 저자가 확인한 뒤 이 대목을 parts에 더해 다시 넣는다(category_put, checked=true).",
+                f"   → 인용하려면 저자가 이 대목을 쓸 부분으로 저장하라고 할 때 category_edit(item_id={ref.key}, parts)로 더하고, "
+                "원문 확인 표시는 저자에게 물은 뒤 category_edit(checked=true)로 붙인다.",  # 규칙 2와 같은 길(점검 22-b)
                 *attached(user, f"ref:{ref.key}")]
 
     # ---- 지우기 -------------------------------------------------------------------------------------
