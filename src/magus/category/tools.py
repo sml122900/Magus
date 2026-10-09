@@ -613,7 +613,9 @@ def build_tools(
             owners.setdefault(cid, set()).add(obj.id if isinstance(obj, CategoryItem) else f"ref:{obj.key}")
         counts = {cid: len(found) for cid, found in owners.items()}
         hits = (ranked[:k] if only else spread(ranked, k)) if query else hits[:k]  # 스크랩 목록은 최근 것부터 k개
-        where = (f"「{only.name}」" if only else "모든 책") + (" · 스크랩만" if scrap_only else "")
+        # project를 주면 그 프로젝트의 책(연결 노드가 가리키는 책 포함)이다. "모든 책"이라고 쓰지 않는다(2026-10-10)
+        where = ((f"「{only.name}」" if only else f"{floor_name(store, user, scope[0])}의 책" if scope else "모든 책")
+                 + (" · 스크랩만" if scrap_only else ""))
         asked = f"category_search {query!r}" if query else "category_search"
         if not hits:
             return f"{asked} ({where}): 결과 없음." + (" 스크랩(★)한 글이 없다." if scrap_only and not query else "")
@@ -898,7 +900,7 @@ def build_tools(
                 "글 넣기. 저자가 그 책에 넣으라고 분명히 말했을 때만 부른다. 넣을 책이 대화에서 분명하지 않으면 부르지 말고 책 이름과 컨텍스트를 보여 주며 묻는다(category_list). item_id면 그 글을 고친다. "
                 "응답 머리의 컨텍스트를 따른다. author: 저자의 말 me, Claude가 쓴 글 ai. reason·where(출전·쪽)·tags·fields·chapters는 저자가 말한 것만. 문헌이면 source(서지 "
                 "{authors, year, title…} 또는 {key}). checked=true(저자가 원문을 읽고 확인)는 parts(원문에서 고른 대목) 하나 이상 필요, 인용 점검은 checked만 확인으로 본다. "
-                "file: 원문 파일(올린 파일 이름), aliases: 한글 표기(갤러2022). 제목을 넣으면 title_by도 반드시(저자가 말한 제목 author, Claude가 지은 제목 ai). 제목을 말하지 않았으면 "
+                "file: 원문 파일(files_list의 이름, 첨부는 '첨부:<id>'), aliases: 한글 표기(갤러2022). 제목을 넣으면 title_by도 반드시(저자가 말한 제목 author, Claude가 지은 제목 ai). 제목을 말하지 않았으면 "
                 "instructions의 제목 규칙(기본값이 없으면 먼저 묻고, 비우기로 했으면 untitled=true)."
             )
             ),

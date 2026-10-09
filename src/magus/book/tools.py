@@ -24,7 +24,7 @@ from magus.melchior.check import CheckResult, Resolver, check_chapter, check_tex
 from magus.inbox import FileResolver, ResolveFile
 from magus.store import BookTitles, Issue, Project, Store
 from magus.limits import ChapterNumber, Note, Text, Title
-from magus.store.base import CHAPTER_RANGE, STALE_REASONS, ChapterStatus, chapter_number_ok
+from magus.store.base import CHAPTER_RANGE, CHAPTER_STATUS_NAMES, STALE_REASONS, ChapterStatus, chapter_number_ok
 from magus.store.formats import one_line, strip_front_matter
 
 FRONT_MATTER_WARNING = (
@@ -98,7 +98,7 @@ def build_tools(
                 "number": m.number,
                 "label": m.display,
                 "title": m.title,
-                "status": m.status,
+                "status": CHAPTER_STATUS_NAMES.get(m.status, m.status),  # 웹과 같은 말(초안·고치는 중·완성, 2026-10-10)
                 "part_number": m.part_number,
                 "version": m.version,
                 "last_note": m.last_note,
@@ -139,7 +139,7 @@ def build_tools(
                 "project_id": project.id,
                 "number": meta.number,
                 "title": meta.title,
-                "status": meta.status,
+                "status": CHAPTER_STATUS_NAMES.get(meta.status, meta.status),
                 "version": meta.version,
                 "archived_version": meta.version - 1 if meta.version > 1 else None,
                 "char_count": meta.char_count,
@@ -243,14 +243,14 @@ def build_tools(
             if new_edition or replace:
                 raise ToolError("수정본·바꾸기에는 문서 파일(path)이 필요하다.")
             if not title or not title.strip():
-                raise ToolError("올린 문서 없이 프로젝트를 만들려면 제목(title)을 준다. 문서를 가져오려면 path에 올린 파일 이름을 준다.")
+                raise ToolError("올린 문서 없이 프로젝트를 만들려면 제목(title)을 준다. 문서를 가져오려면 path에 files_list의 이름을 준다.")
             try:
                 made = store.create_project(user, " ".join(title.split())[:120], project_id=project_id or None,
                                             titles=BookTitles(subtitle=subtitle) if subtitle else None)
             except ValueError as e:
                 raise ToolError(str(e)) from e
             return (f"올린 문서가 없는 프로젝트를 만듦: 「{made.title}」({made.id}). 지도에 가운데 노드가 있다. "
-                    f"문서는 저자가 올린 파일(내 정보)에 올리거나 게시판 글에 첨부한 뒤, book_import(path=files_list의 이름, project_id={made.id})로 가져온다.")
+                    f"문서는 저자가 게시판 글에 첨부한 뒤, book_import(path=files_list의 이름, project_id={made.id})로 가져온다.")
         if new_edition:
             if not project_id:
                 raise ToolError("수정본으로 올릴 책의 project_id를 주세요(book_outline 첫 줄의 괄호 안).")
@@ -262,7 +262,8 @@ def build_tools(
                 raise ToolError(str(e)) from e
             return "\n\n".join(
                 [view_for_book(store, user, f"ms.{project_id}").header(),
-                 again.summary(), "### 바뀐 장", again.change_table(), f"이 리포트는 {again.files['report']}에 있다."]
+                 again.summary(), "### 바뀐 장", again.change_table(),
+                 f"이 리포트는 올린 문서의 '수정본 이력'(E{again.edition})에서 저자도 볼 수 있다."]
             )
         try:
             report = import_manuscript(
@@ -278,7 +279,7 @@ def build_tools(
                 report.summary(),
                 "### ch-NN.md ↔ 장 제목",
                 report.mapping_table(),
-                f"코멘트 분류 전체 표와 이 리포트는 {report.files['report']}에 있다. 원본 사본: {report.files['original']}",
+                "코멘트 분류 전체 표와 이 리포트는 올린 문서의 '수정본 이력'에서 저자도 볼 수 있다(원본 사본도 함께 보관).",
             ]
         )
 

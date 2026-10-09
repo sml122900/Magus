@@ -23,7 +23,6 @@ from magus.book.comments import COMMENT_ANCHOR_SPLIT
 from magus.book.importer import (
     EMPTY_BODY,
     ChapterPlan,
-    book_titles,
     chapter_body,
     comment_entries,
     cover_blocks,
@@ -98,6 +97,7 @@ class ReuploadReport:
     previous: int
     overlap: float
     titles_changed: str = ""
+    title_differs: str = ""  # 문서 속 제목이 프로젝트 제목과 다르면 그 제목(바꾸지 않는다, 2026-10-10)
     parts_changed: str = ""
     changed: list[ChapterChange] = field(default_factory=list)
     added: list[ChapterChange] = field(default_factory=list)
@@ -127,20 +127,21 @@ class ReuploadReport:
             f"## 수정본 E{self.edition} — {self.title} ({self.project_id})",
             f"- 원본: {self.source} · 수정본 번호 E{self.previous} → E{self.edition} · 장 제목 겹침 {self.overlap:.0%}",
             *([f"- 제목 바뀜: {self.titles_changed}"] if self.titles_changed else []),
+            *([f"- 문서 제목이 다릅니다(바꾸지 않음): 「{self.title_differs[:TITLE_MAX]}」"] if self.title_differs else []),
             *([f"- 부 바뀜: {self.parts_changed}"] if self.parts_changed else []),
             f"- 장: 본문 바뀜 {len(self.changed)} · 그대로 {self.unchanged} · 새 장 {len(self.added)}"
             + (f"({names(self.added)})" if self.added else "")
             + f" · 빠진 장 {len(self.removed)}"
-            + (f"({names(self.removed)}, removed/에 보관)" if self.removed else ""),
+            + (f"({names(self.removed)}, 지우지 않고 따로 보관)" if self.removed else ""),
             *(["  - 제목이 바뀐 장: " + ", ".join(f"{c.display} '{c.title_from[:TITLE_MAX]}' → '{c.title[:TITLE_MAX]}'" for c in renamed)]
               if renamed else []),
-            *([f"- ⚠ Magus에서 고친 뒤 이번 수정본으로 덮인 장: {', '.join(self.overwritten_magus)} (이전본은 versions/에 있다)"]
+            *([f"- ⚠ Magus에서 고친 뒤 이번 수정본으로 덮인 장: {', '.join(self.overwritten_magus)} (이전 본문은 보관돼 있다)"]
               if self.overwritten_magus else []),
             f"- 문서 코멘트 {self.comments_total}건 → 이어진 확인 요청 {self.issues_kept}(장을 옮긴 것 {self.issues_moved}) · 새 확인 요청 {self.issues_new}"
             + (f" · 해결됐을 수 있음 {sum(self.stale.values())}({stale}) — 닫지 않았다" if self.stale else ""),
             *([f"  - Magus에서 닫았지만 올린 문서에 코멘트가 남아 있는 것 {self.closed_but_in_file}건(닫힌 채 둔다)"]
               if self.closed_but_in_file else []),
-            f"- 그대로 둔 것: 결정 {self.decisions}건, 직접 남긴 확인 요청 {self.direct_issues}건, 생각·문헌·문체",
+            f"- 그대로 둔 것: 결정 {self.decisions}건, 직접 남긴 확인 요청 {self.direct_issues}건, 다른 책의 글",
             f"- {self.bib.render().splitlines()[0]}",
             *(f"  {line}" for line in self.bib.render().splitlines()[1:]),
             f"- 답해 주실 질문: 새로 생김 {len(self.questions_new)} · 저절로 닫힘 {len(self.questions_closed)} · "
@@ -220,14 +221,14 @@ def reupload_manuscript(
     report = ReuploadReport(project.id, project.title, f"{path.name} ({manuscript.source})", n, editions[-1].number, overlap)
     report.files["original"] = store.save_original(user_id, project.id, f"E{n}-{path.name}", data)
 
-    # 제목: 사람이 준 것 > 원고에서 읽은 것 > 지금 것. 원고가 원본이므로 원고에서 읽혔으면 부제·영문도 그대로 따른다.
+    # 제목(2026-10-10): 수정본은 프로젝트 제목·부제·영문 제목을 바꾸지 않는다. 문서 속 제목이 다르면 리포트에 적기만 한다.
+    # 저자가 title·subtitle을 직접 준 경우(book_import)만 바꾼다.
     found = detect_titles(manuscript, cover_blocks(manuscript, split))
-    wanted = (
-        book_titles(manuscript, split, title, subtitle, path)
-        if (title or found.title)
-        else BookTitles(project.title, subtitle or project.subtitle, project.title_en, project.subtitle_en)
-    )
+    norm = lambda s: " ".join((s or "").split())  # noqa: E731
+    if (found.title and norm(found.title) != norm(project.title)) or (found.subtitle and norm(found.subtitle) != norm(project.subtitle)):
+        report.title_differs = " — ".join(x for x in (found.title or project.title, found.subtitle) if x)
     now = BookTitles(project.title, project.subtitle, project.title_en, project.subtitle_en)
+    wanted = BookTitles(title or project.title, subtitle if subtitle is not None else project.subtitle, project.title_en, project.subtitle_en)
     if wanted != now:
         project = store.set_titles(user_id, project.id, wanted)
         shown = lambda t: " — ".join(x for x in (t.title, t.subtitle) if x) + (f" / {t.title_en}" if t.title_en else "")  # noqa: E731

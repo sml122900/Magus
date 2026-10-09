@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Any
 
-from magus.ids import safe_id, utcnow
+from magus.ids import new_id, safe_id, utcnow
 from magus.store import formats
 from magus.store.fileio import locked as _locked
 from magus.store.attachments import AttachmentMixin
@@ -708,6 +708,47 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
     def inbox_path(self, user_id: str, name: str) -> Path | None:
         path = self._inbox_file(user_id, name)
         return path if path.is_file() else None
+
+    # 예전 올린 파일의 휴지통(2026-10-10 문서 업데이트): trash/inbox/<휴지통 id>/<이름> + <휴지통 id>.trash.json = {at, note, name}
+    def _inbox_trash(self, user_id: str) -> Path:
+        return self._user_dir(user_id) / "trash" / "inbox"
+
+    @_locked
+    def trash_inbox(self, user_id: str, name: str, note: str) -> str:
+        path = self._inbox_file(user_id, name)
+        if not path.is_file():
+            raise ValueError(f"올린 파일에 {name!r}이 없다")
+        trash_id = new_id()
+        folder = self._inbox_trash(user_id) / trash_id
+        folder.mkdir(parents=True)
+        shutil.move(str(path), str(folder / path.name))
+        _write_json(folder.with_name(f"{trash_id}.trash.json"), {"at": utcnow(), "note": note, "name": path.name})
+        return trash_id
+
+    @_locked
+    def list_trashed_inbox(self, user_id: str) -> list[tuple[str, InboxFile, dict]]:
+        out = []
+        for mark in sorted(self._inbox_trash(user_id).glob("*.trash.json"), reverse=True):
+            folder = mark.with_name(mark.name.removesuffix(".trash.json"))
+            files = [p for p in folder.iterdir() if p.is_file()] if folder.is_dir() else []
+            if len(files) == 1:
+                out.append((folder.name, _inbox_entry(files[0]), _read_json(mark)))
+        return out
+
+    @_locked
+    def restore_inbox(self, user_id: str, trash_id: str) -> str:
+        folder = self._inbox_trash(user_id) / safe_id(trash_id, "trash id")
+        files = [p for p in folder.iterdir() if p.is_file()] if folder.is_dir() else []
+        if len(files) != 1:
+            raise ValueError("missing", "")
+        target = self._inbox_file(user_id, files[0].name)
+        if target.exists():
+            raise ValueError("taken", files[0].name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(files[0]), str(target))
+        folder.rmdir()
+        folder.with_name(f"{trash_id}.trash.json").unlink(missing_ok=True)
+        return target.name
 
     @_locked
     def get_profile(self, user_id: str) -> Profile:

@@ -125,7 +125,7 @@ def test_part_intro_is_a_chapter_of_its_part(store: LocalStore, tmp_path: Path):
 
     outline = build_outline(store, "alice", "b")
     assert "2장 + 부 들어가며 1·맺음 · 2부 · " in outline
-    assert "### 제2부 평지와 털\n- 제2부 들어가며(102) 인간은 왜 넓은 평지에 사는가 · draft" in outline
+    assert "### 제2부 평지와 털\n- 제2부 들어가며(102) 인간은 왜 넓은 평지에 사는가 · 초안" in outline
     heads = [line for line in assemble_markdown(store, "alice", store.get_project("alice", "b")).splitlines() if line.startswith("#")]
     assert heads == [
         "# 제1부 항온", "## 제1장 따뜻한 피는 왜 비싼가",

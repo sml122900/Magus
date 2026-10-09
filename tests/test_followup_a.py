@@ -132,22 +132,21 @@ def _broken_files(tmp_path):
 
 
 async def test_broken_manuscript_through_files_and_chat(server_proc, tmp_path):  # noqa: F811
-    """웹의 문서 올리기는 없앴다(2026-10-10): 깨진 문서를 올린 파일에 올리고 대화(이 서버의 /mcp)에서 가져오면 알아듣는 오류, 서버 로그에 traceback 없음."""
+    """웹의 문서 올리기는 없앴다(2026-10-10): 깨진 문서를 게시판 글에 첨부하고 대화(이 서버의 /mcp)에서 가져오면 알아듣는 오류, 서버 로그에 traceback 없음."""
     import httpx2
-    from test_web import _csrf
+    from test_web import _csrf, attach_files
 
     from magus.book.importer import UNREADABLE
 
-    base, _, log = server_proc({})
+    base, data_dir, log = server_proc({})
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=60) as c:
         csrf = _csrf(c.get("/login?next=/shelf").text)
         made = c.post("/shelf/projects", data={"csrf": csrf, "title": "깨진 문서 시험"})
         pid = str(made.url).split("/shelf/p/")[1].split("?")[0]
-        for name, data in _broken_files(tmp_path).items():
-            assert f"올림: {name}" in c.post("/inbox/upload", data={"csrf": csrf}, files={"files": (name, data)}).text
+        ids = attach_files(c, data_dir, csrf, pid, _broken_files(tmp_path))
     async with Client(f"{base}/mcp") as chat:
         for name in _broken_files(tmp_path):
-            r = await chat.call_tool("book_import", {"path": name, "project_id": pid})
+            r = await chat.call_tool("book_import", {"path": f"첨부:{ids[name]}", "project_id": pid})
             assert r.is_error and UNREADABLE in r.content[0].text, (name, r.content[0].text)
     assert "Traceback" not in log.read_text(encoding="utf-8") and " ERROR " not in log.read_text(encoding="utf-8")
 
@@ -268,7 +267,7 @@ async def test_jwks_fetch_does_not_block_event_loop(jwks_server):
 
 # ---- 3-4·4-4 세션 없는 로그아웃, 올린 파일 지우기 이름 검사 ----
 
-def test_logout_without_session_and_inbox_delete_name(server_proc):  # noqa: F811
+def test_logout_without_session_and_inbox_delete_gone(server_proc):  # noqa: F811
     import httpx2
     from test_web import _csrf
 
@@ -276,16 +275,15 @@ def test_logout_without_session_and_inbox_delete_name(server_proc):  # noqa: F81
     with httpx2.Client(base_url=base, follow_redirects=False, timeout=60) as c:
         r = c.post("/logout", data={"csrf": "다른 사이트"})
         assert r.status_code == 303 and r.headers["location"] == "/login" and "set-cookie" not in r.headers  # 쿠키를 지우지 않는다
-        c.get("/login?next=/me/files")
-        csrf = _csrf(c.get("/me/files").text)
+        c.get("/login?next=/me/documents")
+        csrf = _csrf(c.get("/me/documents").text)
         inbox = data_dir / "users" / "alice" / "inbox"
         inbox.mkdir(parents=True, exist_ok=True)
         (inbox / "secret.txt").write_text("x", encoding="utf-8")
-        for bad in ("secret.txt:zone", "../secret.txt", ".secret.txt"):
-            assert c.post("/inbox/delete", data={"csrf": csrf, "name": bad}).status_code == 403, bad
-        assert (inbox / "secret.txt").exists()
-        ok = c.post("/inbox/delete", data={"csrf": csrf, "name": "secret.txt"}, follow_redirects=True)
-        assert ok.status_code == 200 and not (inbox / "secret.txt").exists()
+        # 내 정보의 지우기는 없앴다(2026-10-10): 어떤 이름이든 410, 예전 올린 파일은 그대로
+        for name in ("secret.txt:zone", "../secret.txt", ".secret.txt", "secret.txt"):
+            assert c.post("/inbox/delete", data={"csrf": csrf, "name": name}).status_code == 410, name
+        assert (inbox / "secret.txt").read_text(encoding="utf-8") == "x"
         out = c.post("/logout", data={"csrf": csrf})
         assert out.status_code == 200 and "magus_session" in out.headers.get("set-cookie", "")  # 세션이 있으면 지운다
 

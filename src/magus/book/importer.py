@@ -238,7 +238,7 @@ class ImportReport:
             *([titles_line(self.titles)] if self.titles and titles_line(self.titles) else []),
             f"- 장 {len(self.chapters)}개({count_by_labels([c[1] for c in self.chapters])}) · 부 {len(self.parts)}개"
             f" · 그림 {self.figures} · 표 {self.tables} · 수식 {self.equations}",
-            f"- 분할 못 한 구간: {self.unsplit_chars:,}자 (original/unsplit.md) — {self.unsplit_preview}",
+            f"- 분할 못 한 구간: {self.unsplit_chars:,}자 (따로 보관) — {self.unsplit_preview}",
             f"- 목차 등으로 판단해 버린 제목 줄: {len(self.discarded)}개"
             + (f" — {', '.join(self.discarded[:8])}" + (" …" if len(self.discarded) > 8 else "") if self.discarded else ""),
             f"- 빠진 장 번호: {', '.join(map(str, self.gaps)) or '없음'} · 본문 없는 장: {', '.join(map(str, self.empty_chapters)) or '없음'}",

@@ -79,7 +79,7 @@ async def test_write_gate_reports_and_counts(settings: Settings, imported: Local
         assert {(c["key"], c["status"]) for c in written["unverified_cites"]} == {("nobody2020", "unknown"), ("clack2012", "unverified")}
         assert written["needs_source"] == 1
         outline = _text(await client.call_tool("book_outline", {}))
-        assert "- 제7장 닿으려는 종 · draft" in outline and "미확인인용 2" in outline.split("- 제7장")[1].splitlines()[0]
+        assert "- 제7장 닿으려는 종 · 초안" in outline and "미확인인용 2" in outline.split("- 제7장")[1].splitlines()[0]
         read = await _json(client, "book_read_chapter", {"number": 7})
         assert read["unverified_cites"] == written["unverified_cites"]
         clean = await _json(client, "book_write_chapter", {"number": 7, "content": "인용 없는 문단.", "note": "정리"})

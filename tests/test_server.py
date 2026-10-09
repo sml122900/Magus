@@ -58,7 +58,7 @@ async def test_read_returns_body_and_meta_separately(settings: Settings, store: 
         ch = await _call(client, "book_read_chapter", {"number": 2})
         assert ch["content"] == "아가미덮개가 사라지고 목이 생겼다. Clack(2012)은 이 변화를 길게 다룬다.\n\n목은 머리를 돌리는 자유였다."
         assert "---" not in ch["content"] and "version:" not in ch["content"]
-        assert (ch["title"], ch["status"], ch["part_number"], ch["version"]) == ("목이 생긴 날", "draft", 1, 2)
+        assert (ch["title"], ch["status"], ch["part_number"], ch["version"]) == ("목이 생긴 날", "초안", 1, 2)
         assert ch["last_note"] == "2장 끝에 한 문장 추가"
         # 4단계부터 인용 게이트가 돈다: 데모 책장에는 refs가 없으므로 Clack(2012)은 unknown
         assert ch["unverified_cites"] == [
@@ -95,7 +95,7 @@ async def test_write_with_front_matter_keeps_server_meta(settings: Settings, sto
         assert written["warnings"] == [FRONT_MATTER_WARNING]
         after = await _call(client, "book_read_chapter", {"number": 3})
         assert after["content"] == "새 본문"
-        assert (after["title"], after["status"], after["part_number"], after["version"]) == ("숨의 경제학", "draft", 1, 2)
+        assert (after["title"], after["status"], after["part_number"], after["version"]) == ("숨의 경제학", "초안", 1, 2)
     raw = (data_dir / "users/alice/projects/demo/book/ch-03.md").read_text(encoding="utf-8")
     assert raw.count("---") == 2 and "바꿔치기" not in raw
 
@@ -107,7 +107,7 @@ async def test_write_creates_new_chapter_with_title(settings: Settings, store: L
             client, "book_write_chapter", {"number": 6, "content": "새 장 본문", "note": "신규", "title": "다시 물로"}
         )
         assert (written["title"], written["version"], written["archived_version"]) == ("다시 물로", 1, None)
-        assert "- 제6장 다시 물로 · draft" in _text(await client.call_tool("book_outline", {}))
+        assert "- 제6장 다시 물로 · 초안" in _text(await client.call_tool("book_outline", {}))
         empty = await client.call_tool("book_write_chapter", {"number": 6, "content": "---\ntitle: x\n---\n", "note": "빈"})
         assert empty.is_error
 
@@ -118,7 +118,7 @@ async def test_write_rejects_unknown_status(settings: Settings, store: LocalStor
         bad = await client.call_tool("book_write_chapter", {"number": 1, "content": "본문", "note": "x", "status": "final"})
         assert bad.is_error
         ok = await _call(client, "book_write_chapter", {"number": 1, "content": "본문", "note": "x", "status": "revising"})
-        assert ok["status"] == "revising"
+        assert ok["status"] == "고치는 중"  # 웹과 같은 말(2026-10-10)
 
 
 async def test_book_issues_lists_and_filters(settings: Settings, store: LocalStore):

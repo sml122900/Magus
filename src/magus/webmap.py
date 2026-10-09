@@ -579,7 +579,8 @@ class MapPages:
         return RedirectResponse(with_query("/shelf", done="project_trashed", t=trash_id), status_code=303)
 
     async def projects_trash(self, request: Request) -> Response:
-        """휴지통의 프로젝트(2026-10-09): 옮긴 날짜·이름·올린 문서·수정본·책·글과 [되살리기]. 되살리면 그 프로젝트 지도로."""
+        """휴지통의 프로젝트(2026-10-09): 옮긴 날짜·이름·올린 문서·수정본·책·글과 [되살리기]. 되살리면 그 프로젝트 지도로.
+        문서 업데이트로 바꾼 예전 올린 파일의 이전 파일도 여기(2026-10-10). 되살리면 문서 업데이트로."""
         session = self.user_of(request)
         if not session:
             return self._need_login(request)
@@ -589,6 +590,14 @@ class MapPages:
                 form = await self._form(request, session)
             except PermissionError:
                 return self._map_page("휴지통", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
+            if inbox := str(form.get("inbox") or ""):  # 예전 올린 파일(문서 업데이트의 이전 파일)
+                try:
+                    name = await run_in_threadpool(self.store.restore_inbox, uid, inbox)
+                except ValueError as e:
+                    code = e.args[0] if e.args and e.args[0] in ("taken",) else "file_missing"
+                    return RedirectResponse(with_query("/shelf/trash", err=code if code != "taken" else "file_taken",
+                                                       name=str(e.args[1]) if len(e.args) > 1 else ""), status_code=303)
+                return RedirectResponse(with_query("/me/documents", done="restored", f=name), status_code=303)
             try:
                 project = await run_in_threadpool(self.store.restore_project, uid, str(form.get("trash") or ""))
             except ValueError as e:
@@ -598,12 +607,15 @@ class MapPages:
             await run_in_threadpool(after_refs_changed, self.store, uid)
             return RedirectResponse(state_url(project, done="project_restored"), status_code=303)
         rows = await run_in_threadpool(self.store.list_trashed_projects, uid)
+        files = await run_in_threadpool(self.store.list_trashed_inbox, uid)
         params = request.query_params
         named = params.get("name") or ""
         message = {"taken": f"같은 id의 프로젝트(「{named}」)가 이미 있어 되살리지 못했습니다.",
                    "full": f"프로젝트는 {MAX_FLOORS}개까지라 되살리지 못했습니다. 다른 프로젝트를 먼저 휴지통으로 옮겨 주세요.",
                    "clash": f"같은 이름의 책·문헌 글·문서(「{named}」)가 그사이 생겨 되살리지 못했습니다.",
-                   "missing": "휴지통에 없는 프로젝트입니다."}.get(params.get("err") or "", "")
+                   "missing": "휴지통에 없는 프로젝트입니다.",
+                   "file_taken": f"같은 이름의 올린 파일(「{named}」)이 있어 되살리지 못했습니다.",
+                   "file_missing": "휴지통에 없는 파일입니다."}.get(params.get("err") or "", "")
         csrf = self._csrf_input(session)
         items = "".join(
             f'<li><time datetime="{html.escape(t.trashed_at)}">{local_time(t.trashed_at, "%Y-%m-%d %H:%M")}</time> '
@@ -611,11 +623,17 @@ class MapPages:
             f'<small class="trash-sub">올린 문서 {t.chapters}장 · 수정본 {t.revisions}개 · 책 {t.books}권 · 글 {t.items}개</small>'
             f'<form method="post" action="/shelf/trash" class="inline">{csrf}<input type="hidden" name="trash" value="{html.escape(t.trash_id)}">'
             "<button>되살리기</button></form></li>" for t in rows)
+        items += "".join(
+            f'<li><time datetime="{html.escape(str(rec.get("at") or f.modified))}">{local_time(str(rec.get("at") or f.modified), "%Y-%m-%d %H:%M")}</time> '
+            f"<b>올린 파일 「{html.escape(f.name)}」</b>"
+            f'<small class="trash-sub">{html.escape(str(rec.get("note") or ""))}</small>'
+            f'<form method="post" action="/shelf/trash" class="inline">{csrf}<input type="hidden" name="inbox" value="{html.escape(trash_id)}">'
+            "<button>되살리기</button></form></li>" for trash_id, f, rec in files)
         from magus.webboard import SEP  # noqa: PLC0415
 
         lead = f'<nav class="trail" aria-label="위치"><a href="/shelf">프로젝트</a>{SEP}<span aria-current="page">휴지통</span></nav>'
         body = ((f'<p class="msg err">{html.escape(message)}</p>' if message else "")
-                + (f'<p class="trash-count">{len(rows)}개</p><ol class="trash-list">{items}</ol>' if rows
+                + (f'<p class="trash-count">{len(rows) + len(files)}개</p><ol class="trash-list">{items}</ol>' if rows or files
                    else '<p class="empty">휴지통이 비었습니다.</p>'))
         return self._map_page("휴지통", body, session, css=TRASH_STYLE, lead=lead)
 

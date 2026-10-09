@@ -76,7 +76,8 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
         book = re.search(r"/shelf/([^/?]+)\?done=made", str(page.url)).group(1)
         assert "「자료」 만들었습니다." in page.text and f'<a class="button write-btn" href="/shelf/write/{book}">글쓰기</a>' in page.text
         first = _attach(c, csrf, book, manuscript, "원고")
-        assert c.get("/me/files").text.count("<tr><td>") == 0  # 올린 파일에는 남지 않는다(첨부는 글에)
+        docs = c.get("/me/documents").text  # 첨부한 문서는 문서 업데이트에 보인다(프로젝트 › 노드 › 책 › 글, 2026-10-10)
+        assert f'<li data-key="att:{first}">' in docs and "닿으려는 종 › " in docs and " › 자료 › <a href=" in docs and "예전에 올린 파일" not in docs
         # 3. Claude: '이 문서 올려 줘' → files_list의 첨부를 이 프로젝트의 올린 문서로
         assert f"첨부:{first} · {manuscript.name}" in await _call(data_dir, "alice", "files_list")
         said = await _call(data_dir, "alice", "book_import", path=f"첨부:{first}", project_id=floor_id)
@@ -102,7 +103,7 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
             moved = c.get(old, follow_redirects=False)
             assert moved.status_code == 302 and moved.headers["location"].startswith(f"/shelf/book/{floor_id}?") \
                 and new in moved.headers["location"], old
-        assert c.get("/inbox", follow_redirects=False).headers["location"] == "/me/files"
+        assert c.get("/inbox", follow_redirects=False).headers["location"] == "/me/documents"
         # 5. 문서 책: Claude가 book_document를 부른다
         said = await _make_document(data_dir, "alice", project_id=floor_id, title="닿으려는 종 출처 확인 문서", title_by="author",
                                     preface="저자께서 먼저 보실 것을 모았습니다.")

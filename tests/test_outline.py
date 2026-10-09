@@ -43,7 +43,7 @@ def test_outline_fits_budget_and_lists_every_direct_issue(store: LocalStore):
     assert estimate_tokens(text) <= TOKEN_BUDGET
     # 목차: 35장 모두, 집계만 담은 줄. 장별 미해결 수에는 코멘트 유래도 들어간다(1장: 코멘트 3 + 사용자 1).
     first = next(line for line in text.splitlines() if line.startswith("- 제1장 "))
-    assert first.endswith("… · draft · 9,700자 · 확인 요청 4 · 미확인인용 0")  # 제목은 24자로 자른다
+    assert first.endswith("… · 초안 · 9,700자 · 확인 요청 4 · 미확인인용 0")  # 제목은 24자로 자른다
     for n in range(1, 36):
         assert f"\n- 제{n}장 " in text
     assert text.count("### 제") == 8
@@ -66,7 +66,7 @@ def test_outline_demo(store: LocalStore):
     assert text.splitlines()[0] == "프로젝트: 데모: 물에서 뭍으로 (demo)"
     assert "프로젝트는" not in text  # 프로젝트가 하나면 안내 줄 없음
     assert "### 제1부 물가" in text and "### 제2부 뭍" in text
-    assert "- 제1장 물가의 망설임 · draft · 68자 · 확인 요청 1 · 미확인인용 0" in text
+    assert "- 제1장 물가의 망설임 · 초안 · 68자 · 확인 요청 1 · 미확인인용 0" in text
     assert "2장 v2" in text and "2장 끝에 한 문장 추가" in text
     assert "- 코멘트 유래 확인 요청 1건(citation 1) — book_issues(kind)로 조회" in text
     assert "Daeschler 2006 원문 확인 필요" not in text

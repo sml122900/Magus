@@ -48,8 +48,9 @@ async def test_plus_project_is_title_only_and_documents_come_through_chat(server
         finally:
             store.close()
         assert c.get(f"/shelf/book/{pid_a}").status_code == 404  # 아직 올린 문서가 없다
-        # 2-가. 올린 파일 경로: 내 정보 › 올린 파일 › 올리기
-        assert "올림: 원고.docx" in c.post("/inbox/upload", data={"csrf": csrf}, files={"files": ("원고.docx", manuscript)}).text
+        # 2-가. 예전 올린 파일(inbox): 내 정보의 올리기는 2026-10-10에 없앴지만 이미 올린 파일은 그대로 쓴다
+        (data_dir / "users" / "alice" / "inbox").mkdir(parents=True)
+        (data_dir / "users" / "alice" / "inbox" / "원고.docx").write_bytes(manuscript)
         # 2-나. 첨부 경로: 다른 프로젝트의 가운데 노드에 새 책 → 게시판 글에 문서 첨부
         pid_b, _ = _new_project(c, csrf, "첨부로 채울 책")
         made = c.post(f"/shelf/new?project={pid_b}&node=center", data={"csrf": csrf, "name": "자료", "color": "#2f6db5"})
@@ -88,4 +89,4 @@ async def test_title_only_project_response_points_to_files_and_attachments(serve
     base, _, _ = server_proc({})
     async with Client(f"{base}/mcp") as chat:
         said = _text(await chat.call_tool("book_import", {"title": "새 책"}))
-    assert "올린 파일(내 정보)에 올리거나 게시판 글에 첨부한 뒤" in said and "책 추가" not in said and "문서 올리기" not in said
+    assert "게시판 글에 첨부한 뒤" in said and "올린 파일" not in said and "책 추가" not in said and "문서 올리기" not in said

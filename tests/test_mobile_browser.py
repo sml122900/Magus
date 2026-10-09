@@ -19,7 +19,7 @@ from magus.store import CategoryItem, LocalStore, Profile, Ref
 
 SCRIPT = Path(__file__).parent / "e2e" / "mobile_measure.mjs"
 PATHS = ["/shelf", "/shelf/p/common", "/shelf/p/common?view=list", "/shelf/notes", "/shelf/notes/20261009000000024-aaaaaa",
-         "/shelf/edit/notes", "/shelf/write/notes", "/shelf/book/city", "/shelf/notes?page=2", "/me/files", "/shelf/trash"]
+         "/shelf/edit/notes", "/shelf/write/notes", "/shelf/book/city", "/shelf/notes?page=2", "/me/documents", "/shelf/trash"]
 
 
 @needs_tools("node 또는 Chrome이 없다", NODE, CHROME)

@@ -138,7 +138,7 @@ async def test_every_tool_is_user_scoped(settings: Settings, store: LocalStore, 
         await client.call_tool("category_create", {"name": "앨리스의 사례", "template": "사례"})
         await client.call_tool("category_put", {"book": "앨리스의 사례", "author": "me", "content": "앨리스의 바다 사례", "untitled": True})
     bob = dataclasses.replace(settings, user_id="bob")
-    empty_markers = ("없습니다", "결과 없음", "0건", "비어 있다", "아직 없다", "올린 파일이 없다")
+    empty_markers = ("없습니다", "결과 없음", "0건", "비어 있다", "아직 없다", "문서가 없다")
     store.put_inbox(settings.user_id, "앨리스원고.docx", b"x")  # 받은함도 사용자별이다
     calls = {
         "book_outline": {},

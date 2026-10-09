@@ -78,7 +78,7 @@ def save_upload(store: Store, user_id: str, name: str, data: bytes | IO[bytes], 
     if used - replaced + size > max_user:
         raise LimitError(
             f"저장 용량 한도를 넘는다: 지금 {mb(used)} + 새 파일 {mb(size)} > 한도 {mb(max_user)}. "
-            "설정의 '올린 파일'에서 안 쓰는 파일을 지우세요."
+            "휴지통의 것도 용량에 들어간다."
         )
     return store.put_inbox(user_id, clean, data)
 
@@ -103,7 +103,7 @@ class FileResolver:
         if self.local_paths:  # 로컬(stdio) 개발용: 절대 경로나 FILES_DIR 기준 상대 경로
             path = resolve_input(name, self.files_root)
             return path, str(path)
-        raise FileNotFoundError(f"올린 파일에 {name!r}이 없다. files_list로 이름을 확인하거나, 저자에게 웹 책장에서 먼저 올려 달라고 한다.")
+        raise FileNotFoundError(f"올린 파일에 {name!r}이 없다. files_list로 이름을 확인하거나, 저자에게 그 문서를 게시판 글에 첨부해 달라고 한다.")
 
 
 def attached_file(store: Store, user_id: str, attachment_id: str) -> tuple[Path, str] | None:
@@ -172,14 +172,14 @@ def attached_lines(store: Store, user_id: str) -> list[str]:
 def describe(files: list[InboxFile], used: int, limit: int, attached: list[str] | None = None,
              done: dict[str, str] | None = None) -> str:
     """done: 올린 파일 이름 → 이미 가져온 판('수정본 E2(「제목」)' 등)."""
-    head = f"올린 파일 {len(files)}개 · 사용 {mb(used)} / 한도 {mb(limit)}"
+    head = f"예전에 올린 파일 {len(files)}개 · 사용 {mb(used)} / 한도 {mb(limit)}"
     lines = [
         f"- {f.name} · {size_text(f.size)} · {local_time(f.modified, STAMP)} · {INBOX_TYPES.get(Path(f.name).suffix.lower(), '')}"
         + (f" · 이미 가져옴: {done[f.name]}" if done and f.name in done else "")
         for f in files
     ]
     if not files and not attached:
-        return head + "\n올린 파일이 없다. 저자는 책의 게시판에 글을 쓰며 첨부하거나 내 정보의 '올린 파일'에서 올린다(로컬 개발: magus inbox --add <파일>)."
+        return head + "\n문서가 없다. 저자는 책의 게시판에 글을 쓰며 문서를 첨부한다(로컬 개발: magus inbox --add <파일>)."
     return "\n".join([head, *lines, *(attached or []),
                       "도구의 파일 인자에는 여기 나온 이름만 준다(예: book_import(path=\"문서.docx\"), 게시판 첨부는 path=\"첨부:<id>\")."])
 
@@ -207,7 +207,7 @@ def build_tools(store: Store, current_user: Callable[[], str], max_user_bytes: i
             name="files_list",
             description=(
                 (
-                "웹에서 올린 파일과 게시판 글의 첨부 문서(docx·pdf·md·txt) 목록(이름·크기·시각·어느 글, 가져온 문서는 '이미 가져옴'). 파일 인자(book_import·category_put "
+                "게시판 글의 첨부 문서와 예전에 올린 파일(docx·pdf·md·txt) 목록(이름·크기·시각·어느 글, 가져온 문서는 '이미 가져옴'). 파일 인자(book_import·category_put "
                 "file·idea_add_conversation)에는 여기 나온 이름만 준다(첨부는 '첨부:<id>')."
             )
             ),

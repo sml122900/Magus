@@ -218,26 +218,29 @@ def test_web_pages_are_per_user_even_with_same_project_id(server_proc, fake_issu
     with httpx2.Client(base_url=base, timeout=120) as alice, httpx2.Client(base_url=base, timeout=120) as bob:
         assert _login(alice, issuer_state, "sub-alice").status_code == 303
         assert _login(bob, issuer_state, "sub-bob").status_code == 303
-        a_csrf, b_csrf = _csrf(alice.get("/me/files").text), _csrf(bob.get("/me/files").text)
+        b_csrf = _csrf(bob.get("/me/documents").text)
         store = LocalStore(data_dir)  # 두 사람 모두 같은 id(synth)의 빈 층
         for who in ("alice", "bob"):
             store.create_project(who, f"{who}의 층", project_id="synth")
         store.close()
-        alice.post("/inbox/upload", data={"csrf": a_csrf}, files={"files": ("원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes())})
+        (data_dir / "users" / "alice" / "inbox").mkdir(parents=True)  # 앨리스의 예전 올린 파일(내 정보의 올리기는 2026-10-10에 없앰)
+        (data_dir / "users" / "alice" / "inbox" / "원고.docx").write_bytes((FIXTURES / "닿으려는_종_합성.docx").read_bytes())
         _import(data_dir, "alice", FIXTURES / "닿으려는_종_합성.docx")  # 게시판 첨부 → Claude의 book_import와 같은 일(2026-10-09)
-        # 밥: 앨리스가 올린 파일을 지우지 못하고, 이름에 경로를 넣어 올리지도 못한다
-        for name in ("../alice/inbox/원고.docx", "..\\alice\\inbox\\원고.docx", "원고.docx"):
-            bob.post("/inbox/delete", data={"csrf": b_csrf, "name": name})
-        page = bob.post("/inbox/upload", data={"csrf": b_csrf}, files={"files": ("../alice/inbox/x.pdf", b"%PDF")}).text
-        assert "파일 이름으로 쓸 수 없다" in page
-        assert "x.pdf" not in [p.name for p in (data_dir / "users" / "alice" / "inbox").iterdir()]
-        assert (data_dir / "users" / "alice" / "inbox" / "원고.docx").exists()
+        # 밥: 앨리스의 문서를 문서 업데이트로 바꾸지 못한다(이름에 경로를 넣어도). 옛 올리기·지우기 주소는 410
+        for key in ("inbox:원고.docx", "inbox:../alice/inbox/원고.docx", "inbox:..\\alice\\inbox\\원고.docx"):
+            r = bob.post("/me/documents/update", data={"csrf": b_csrf, "key": key}, files={"file": ("x.docx", b"x")})
+            assert r.status_code == 400 and "바꿀 문서가 없습니다" in r.text, key
+        assert bob.post("/inbox/delete", data={"csrf": b_csrf, "name": "원고.docx"}).status_code == 410
+        assert bob.post("/inbox/upload", data={"csrf": b_csrf}, files={"files": ("../alice/inbox/x.pdf", b"%PDF")}).status_code == 410
+        assert [p.name for p in (data_dir / "users" / "alice" / "inbox").iterdir()] == ["원고.docx"]
+        assert (data_dir / "users" / "alice" / "inbox" / "원고.docx").read_bytes() == (FIXTURES / "닿으려는_종_합성.docx").read_bytes()
         assert "올린 문서가 없습니다" in bob.post("/book/export", data={"csrf": b_csrf, "project_id": "synth"}).text  # 밥의 층은 아직 비었다
         # 밥도 같은 id(synth)의 자기 층에 원고 책을 올린다
-        bob.post("/inbox/upload", data={"csrf": b_csrf}, files={"files": ("밥.docx", b"x")})
+        (data_dir / "users" / "bob" / "inbox").mkdir(parents=True, exist_ok=True)
+        (data_dir / "users" / "bob" / "inbox" / "밥.docx").write_bytes(b"x")
         _import(data_dir, "bob", _mini_docx(tmp_path / "b.docx", "밥의 코멘트"))
         tabs = {"/book": "chapters", "/issues": "issues", "/checklist": "cites", "/questions": "cites&view=questions"}
-        pages = {who: {**{old: c.get(f"/shelf/book/synth?tab={tab}").text for old, tab in tabs.items()}, "/inbox": c.get("/me/files").text}
+        pages = {who: {**{old: c.get(f"/shelf/book/synth?tab={tab}").text for old, tab in tabs.items()}, "/inbox": c.get("/me/documents").text}
                  for who, c in (("alice", alice), ("bob", bob))}
     assert "물가의 망설임" in pages["alice"]["/book"] and "물가의 망설임" not in pages["bob"]["/book"]
     assert "인용 확인필요 — 쪽수 표기" in pages["alice"]["/issues"] and "밥의 코멘트" not in pages["alice"]["/issues"]
@@ -258,12 +261,12 @@ def test_web_session_ends_when_user_is_removed(server_proc, fake_issuer):  # noq
         _login(alice, issuer_state, "sub-alice")
         _login(bob, issuer_state, "sub-bob")
         cookie, bob_cookie = alice.cookies.get(SESSION_COOKIE), bob.cookies.get(SESSION_COOKIE)
-        csrf = _csrf(alice.get("/me/files").text)
+        csrf = _csrf(alice.get("/me/documents").text)
         pid = project_with_document(alice, data_dir1, csrf, "원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes())
         link = alice.post("/book/export", data={"csrf": csrf, "project_id": pid}, follow_redirects=False).headers["location"]
     base2, _, _ = server_proc({**env, "ALLOWED_USERS": "sub-bob=bob"})
     with httpx2.Client(base_url=base2, timeout=60, cookies={SESSION_COOKIE: bob_cookie}) as kept:  # 대조: 목록에 남은 밥은 그대로
-        assert kept.get("/me/files", follow_redirects=False).status_code == 200
+        assert kept.get("/me/documents", follow_redirects=False).status_code == 200
     with httpx2.Client(base_url=base2, timeout=60, cookies={SESSION_COOKIE: cookie}) as removed:
         for path in ("/inbox", "/me/files", "/shelf", "/book", "/issues", "/checklist", f"/shelf/book/{pid}", link):
             response = removed.get(path, follow_redirects=False)

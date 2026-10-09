@@ -85,36 +85,50 @@ def claude_call(data_dir: Path, user: str, tool: str, **args) -> str:
     return anyio.run(run)
 
 
+def attach_files(c, data_dir: Path, csrf: str, project_id: str, files: dict[str, bytes], user: str = "alice") -> dict[str, str]:
+    """그 프로젝트의 가운데 노드에 새 책 「자료」를 만들고 글 하나에 파일들을 첨부한다(2026-10-10: 문서는 게시판 첨부로). {이름: 첨부 id}."""
+    from magus.store import LocalStore
+
+    book_made = c.post(f"/shelf/new?project={project_id}&node=center", data={"csrf": csrf, "name": "자료", "color": "#2f6db5"},
+                       follow_redirects=False)
+    book = urllib.parse.urlparse(book_made.headers["location"]).path.split("/")[-1]
+    post = c.post(f"/shelf/write/{book}", data={"csrf": csrf, "title": "원고", "content": ""},
+                  files=[("files", (name, data, "application/octet-stream")) for name, data in files.items()], follow_redirects=False)
+    item = urllib.parse.urlparse(post.headers["location"]).path.split("/")[-1]
+    store = LocalStore(data_dir)
+    try:
+        return {a.name: a.id for a in store.list_attachments(user, f"{book}/{item}")}
+    finally:
+        store.close()
+
+
 def project_with_document(c, data_dir: Path, csrf: str, name: str, data: bytes, title: str = "원고", user: str = "alice") -> str:
-    """올린 문서가 있는 프로젝트를 웹 + 대화로 만든다(2026-10-10, '+ 프로젝트'는 제목만): '+ 프로젝트'(제목) →
-    내 정보 › 올린 파일에 올리기 → Claude가 book_import(올린 파일 이름, 올린 문서 없는 project_id). 프로젝트 id를 돌려준다."""
+    """올린 문서가 있는 프로젝트를 웹 + 대화로 만든다(2026-10-10: '+ 프로젝트'는 제목만, 내 정보의 올리기는 없음):
+    '+ 프로젝트'(제목) → 가운데 노드에 새 책 → 글에 문서 첨부 → Claude가 book_import('첨부:<id>', 올린 문서 없는 project_id). 프로젝트 id."""
     made = c.post("/shelf/projects", data={"csrf": csrf, "title": title}, follow_redirects=False)
     assert made.status_code == 303, made.text
     pid = urllib.parse.urlparse(made.headers["location"]).path.split("/")[-1]
-    up = c.post("/inbox/upload", data={"csrf": csrf}, files={"files": (name, data)}, follow_redirects=False)
-    assert up.status_code in (200, 303), up.text
-    claude_call(data_dir, user, "book_import", path=name, project_id=pid)
+    att = attach_files(c, data_dir, csrf, pid, {name: data}, user)[name]
+    claude_call(data_dir, user, "book_import", path=f"첨부:{att}", project_id=pid)
     return pid
 
 
 def test_local_round_trip_upload_import_checklist_download(server_proc):
-    """올린 파일(설정 아래, #94) → '+ 프로젝트'(제목만) → 대화에서 그 올린 파일을 올린 문서로(2026-10-10) → 인용 상태 →
-    docx 내려받기(로그인 필요한 링크)."""
+    """'+ 프로젝트'(제목만) → 게시판 글에 문서 첨부 → 대화에서 그 첨부를 올린 문서로(2026-10-10, 내 정보의 올리기는 없음) →
+    인용 상태 → docx 내려받기(로그인 필요한 링크). 옛 올린 파일 주소는 문서 업데이트로, 옛 올리기·지우기 POST는 410."""
     base, data_dir, log_path = server_proc({})
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         assert c.get("/me/files", follow_redirects=False).headers["location"].startswith("/login")  # 로그인 전
         assert c.get("/inbox", follow_redirects=False).headers["location"].startswith("/login")
-        page = c.get("/login?next=/me/files").text  # 로컬 개발: USER_ID로 바로 로그인
-        assert "<h1>올린 파일</h1>" in page and '<p class="empty">파일이 없습니다.</p>' in page
+        page = c.get("/login?next=/me/files").text  # 로컬 개발: USER_ID로 바로 로그인 → 옛 주소는 문서 업데이트로
+        assert "<h1>문서 업데이트</h1>" in page and '<p class="empty">올라간 문서가 없습니다.</p>' in page
         csrf = _csrf(page)
-        assert c.post("/inbox/upload", data={"csrf": "틀림"}, files={"files": ("x.md", b"a")}).status_code == 403
+        gone = c.post("/inbox/upload", data={"csrf": csrf}, files={"files": ("x.md", b"a")})
+        assert gone.status_code == 410 and "내 정보의 올리기는 없어졌습니다." in gone.text
+        assert c.post("/inbox/delete", data={"csrf": csrf, "name": "x.md"}).status_code == 410
         with (FIXTURES / "닿으려는_종_합성.docx").open("rb") as f:
             data = f.read()
-        page = c.post("/inbox/upload", data={"csrf": csrf}, files=[("files", ("원고.docx", data)), ("files", ("나쁜.exe", b"x"))]).text
-        assert "올림: 원고.docx" in page and "나쁜.exe: 받을 수 있는 형식은" in page
-        made = c.post("/shelf/projects", data={"csrf": csrf, "title": "닿으려는 종"})  # '+ 프로젝트'는 제목만(2026-10-10)
-        pid = urllib.parse.urlparse(str(made.url)).path.split("/")[-1]
-        claude_call(data_dir, "alice", "book_import", path="원고.docx", project_id=pid)  # 올린 파일 → 대화에서 가져오기
+        pid = project_with_document(c, data_dir, csrf, "원고.docx", data, title="닿으려는 종")
         assert '<p class="floor-meta">7장' in c.get(f"/shelf/book/{pid}").text
         page = c.get(f"/shelf/book/{pid}?tab=cites").text
         assert "🔴 참고문헌에 없음" in page and "🟡 미확인" in page and "<h2>장별</h2>" in page
@@ -122,8 +136,6 @@ def test_local_round_trip_upload_import_checklist_download(server_proc):
         exported = c.post("/book/export", data={"csrf": csrf, "project_id": pid})
         assert exported.status_code == 200 and exported.content[:2] == b"PK"  # docx(zip)
         token = str(exported.url).rsplit("/download/", 1)[1]
-        page = c.post("/inbox/delete", data={"csrf": csrf, "name": "원고.docx"}).text
-        assert "지움: 원고.docx" in page
     # 링크만으로는 받을 수 없다(로그인 필요), 위조·만료 링크는 거절
     with httpx2.Client(base_url=base, timeout=30) as anon:
         assert anon.get(f"/download/{token}").headers["location"].startswith("/login")
@@ -225,7 +237,7 @@ def test_remote_web_login_with_oauth(server_proc, fake_issuer):
     with httpx2.Client(base_url=base, timeout=60) as alice:
         done = _login(alice, issuer_state, "sub-alice")
         assert done.status_code == 303 and done.headers["location"] == "/inbox"
-        page = alice.get("/me/files").text
+        page = alice.get("/me/documents").text
         assert '<a href="/me" class="me" aria-label="내 정보, sub-alice@example.com">sub-alice@example.com</a>' in page
         csrf = _csrf(page)
         pid = project_with_document(alice, data_dir, csrf, "원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes())
@@ -236,7 +248,7 @@ def test_remote_web_login_with_oauth(server_proc, fake_issuer):
         assert alice.get("/auth/callback?code=x&state=y").status_code == 400
     with httpx2.Client(base_url=base, timeout=60) as bob:
         assert _login(bob, issuer_state, "sub-bob").status_code == 303
-        assert '<p class="empty">파일이 없습니다.</p>' in bob.get("/me/files").text  # 앨리스가 올린 파일이 보이지 않는다
+        assert '<p class="empty">올라간 문서가 없습니다.</p>' in bob.get("/me/documents").text  # 앨리스의 문서가 보이지 않는다
         assert bob.get(link).status_code == 403  # 앨리스의 내려받기 링크
     with httpx2.Client(base_url=base, timeout=60) as carol:
         denied = _login(carol, issuer_state, "sub-carol")

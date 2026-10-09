@@ -120,13 +120,14 @@ def test_reupload_replaces_only_changed_chapters_and_keeps_history(store: LocalS
     assert store.get_ref(U, "hsieh2019-2").bib["title"].startswith("Housing constraints")
     assert report.bib.created == ["hsieh2019-2"]
 
-    # 제목은 원고를 따른다. 판 기록은 project.json에
+    # 수정본은 프로젝트 제목·부제를 바꾸지 않는다(2026-10-10). 문서 속 제목이 다르면 리포트에 적기만. 판 기록은 project.json에
     project = store.get_project(U, P)
-    assert (project.title, project.subtitle) == ("가상 책", "바뀐 부제") and "첫 부제" in report.titles_changed
+    assert (project.title, project.subtitle) == ("가상 책", "첫 부제") and not report.titles_changed
+    assert report.title_differs == "가상 책 — 바뀐 부제" and "- 문서 제목이 다릅니다(바꾸지 않음): 「가상 책 — 바뀐 부제」" in report.full()
     editions = json.loads((root / "projects" / P / "project.json").read_text(encoding="utf-8"))["editions"]
     assert [(e["number"], e["file"], e.get("changed"), e.get("removed")) for e in editions] == [(1, "e1.docx", 5, None), (2, "e2.docx", 3, 1)]
     text = report.full()
-    assert "장: 본문 바뀜 2 · 그대로 2 · 새 장 1(제6장) · 빠진 장 1(제5장, removed/에 보관)" in text
+    assert "장: 본문 바뀜 2 · 그대로 2 · 새 장 1(제6장) · 빠진 장 1(제5장, 지우지 않고 따로 보관)" in text
     assert "해결됐을 수 있음 2(올린 문서에서 코멘트가 지워짐 1 · 걸린 문장이 올린 문서에 없음 1) — 닫지 않았다" in text
 
     # 인덱스는 파일에서 다시 만들어도 같다
@@ -149,10 +150,12 @@ def test_outline_shows_edition_and_asks_for_latest_upload(store: LocalStore, tmp
 def test_same_file_again_changes_nothing(store: LocalStore, tmp_path: Path, e1):
     reupload_manuscript(store, U, edition(tmp_path / "e2.docx", 2), P)
     issues = store.list_issues(U, P, None)
+    same = tmp_path / "e3.docx"  # 같은 파일(바이트 그대로 복사. 다시 만들면 docx 속 시각이 초를 넘겨 달라질 수 있다)
+    same.write_bytes((tmp_path / "e2.docx").read_bytes())
     with pytest.raises(ValueError, match="이미 올린 파일입니다. 마지막 수정본 E2"):  # 같은 파일은 멈춘다(점검 16-1)
-        reupload_manuscript(store, U, edition(tmp_path / "e3.docx", 2), P)
+        reupload_manuscript(store, U, same, P)
     assert [e.number for e in store.list_editions(U, P)] == [1, 2]
-    again = reupload_manuscript(store, U, edition(tmp_path / "e3.docx", 2), P, force=True)  # 그래도 올리라면 force
+    again = reupload_manuscript(store, U, same, P, force=True)  # 그래도 올리라면 force
     assert (again.edition, len(again.changed), again.unchanged, again.issues_new, again.added, again.removed) == (3, 0, 5, 0, [], [])
     assert store.list_issues(U, P, None) == issues  # 표시도 그대로(언제 그렇게 됐는지 stale_edition 2 유지)
 

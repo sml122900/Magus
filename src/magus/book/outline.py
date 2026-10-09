@@ -12,6 +12,7 @@ from magus.limits import TITLE_MAX
 from magus.category.maptext import outline_lines
 from magus.ids import STAMP, local_time
 from magus.store import ChapterMeta, Project, Store
+from magus.store.base import CHAPTER_STATUS_NAMES
 
 TOKEN_BUDGET = 3000
 STALE_UPLOAD_DAYS = 7  # 마지막 업로드 뒤 이만큼 지나면 최신본을 올렸는지 묻게 한다(#76, 아버지 작업 주기를 보고 바꾼다)
@@ -148,7 +149,7 @@ def build_outline(
         current_part = c.part_number
         # 번호 없는 장은 도구에 줄 번호를 괄호로 밝힌다(서장(0), 제2부 들어가며(102), 부록 1(91))
         toc_items.append(
-            f"- {c.display}{f'({c.number})' if c.label else ''} {_clip(c.title, 24)} · {c.status} · {c.char_count:,}자 · "
+            f"- {c.display}{f'({c.number})' if c.label else ''} {_clip(c.title, 24)} · {CHAPTER_STATUS_NAMES.get(c.status, c.status)} · {c.char_count:,}자 · "
             f"확인 요청 {issues_per_chapter[c.number]} · 미확인인용 {c.unverified_cite_count}"
         )
 

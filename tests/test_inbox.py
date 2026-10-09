@@ -58,7 +58,7 @@ async def test_files_list_and_import_from_inbox(settings: Settings, store: Local
     store.put_inbox(settings.user_id, "원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes())
     async with Client(build_server(settings, store)) as client:
         listed = "".join(b.text for b in (await client.call_tool("files_list", {})).content)
-        assert listed.startswith("올린 파일 1개 · 사용 ") and "- 원고.docx · " in listed and "올린 문서(book_import)" in listed
+        assert listed.startswith("예전에 올린 파일 1개 · 사용 ") and "- 원고.docx · " in listed and "올린 문서(book_import)" in listed
         imported = await client.call_tool("book_import", {"path": "원고.docx", "project_id": "synth"})
         assert not imported.is_error and "장 7개(" in imported.content[0].text
 
@@ -76,7 +76,7 @@ def test_inbox_cli(monkeypatch, tmp_path, capsys):
         main(["inbox", "--add", str(big)])
     assert "파일이 너무 크다" in capsys.readouterr().err
     main(["inbox", "--remove", "작은.md"])
-    assert "올린 파일이 없다" in capsys.readouterr().out
+    assert "문서가 없다" in capsys.readouterr().out
 
 
 def test_limits_from_env():

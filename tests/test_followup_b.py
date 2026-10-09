@@ -58,12 +58,16 @@ def test_body_limit_and_streamed_uploads(server_proc):  # noqa: F811
         over = c.post("/shelf/write/bk1", data={"csrf": csrf, "title": "큼", "content": "본문"},
                       files=[("files", ("c.txt", b"x" * 2_500_000, "text/plain"))])
         assert over.status_code == 400 and "파일 한 개 2.0 MB까지입니다." in over.text
-        # 올린 파일: 한도(3MB) 넘는 파일은 오류, 맞는 파일은 그대로
-        up = c.post("/inbox/upload", data={"csrf": csrf},
-                    files=[("files", ("큰.txt", b"x" * 3_500_000, "text/plain")), ("files", ("작은.txt", "내용".encode(), "text/plain"))],
-                    follow_redirects=True)
-        assert "큰.txt: 파일이 너무 크다" in up.text and "올림: 작은.txt" in up.text
-        assert (data_dir / "users" / "alice" / "inbox" / "작은.txt").read_text(encoding="utf-8") == "내용"
+        # 문서 업데이트(2026-10-10, 옛 올린 파일 올리기를 대신): 본문 한도(올린 파일·첨부 한도 중 큰 것 + 1MB)를 넘으면 받는 도중에 413,
+        # 첨부를 바꿀 때는 첨부 한 개 한도(2MB)를 넘으면 바꾸지 않는다
+        att = saved[1].parent.name
+        big = c.post("/me/documents/update", content=_chunked({"csrf": csrf, "key": f"att:{att}"}, "file", "큰.txt", 5_000_000),
+                     headers=headers)
+        assert big.status_code == 413
+        over = c.post("/me/documents/update", data={"csrf": csrf, "key": f"att:{att}"},
+                      files=[("file", ("c.txt", b"x" * 2_500_000, "text/plain"))])
+        assert over.status_code == 400 and "파일이 너무 큽니다" in over.text
+        assert saved[1].read_bytes() == "가나다".encode()  # 그대로
     assert "Traceback" not in log.read_text(encoding="utf-8")
 
 

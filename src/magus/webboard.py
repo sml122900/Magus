@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
@@ -39,6 +40,9 @@ from magus.search import relaxed_words
 from magus.store.base import EditConflict
 from magus.store import Attachment, CategoryItem, Chunk, Store
 from magus.store.formats import display_title, one_line
+from magus.docupdate import UpdateError, update_document
+from magus.store.fileio import data_size
+from magus.webdocs import SWAP_SCRIPT, revision_query, revision_text, swap_fields
 from magus.webshelf import (
     AI_MARK, AI_TITLE, Book, Kind, Upload, clean_query, find_hits, mark, paragraphs, snippet, state_url,
 )
@@ -112,9 +116,12 @@ ul.current label.drop{position:relative;margin:0 0 0 auto;display:inline-flex;al
 min-height:44px;padding:0 12px;border-radius:9999px;cursor:pointer;border:1px solid var(--mute);background:var(--canvas);font-weight:600}
 ul.current label.drop:focus-within{outline:3px solid var(--primary);outline-offset:2px}
 ul.current label.drop input{position:absolute;opacity:0;width:1px;height:1px}
-ul.current li:has(input:checked) .fname{text-decoration:line-through;color:var(--ink2)}
-ul.current li:has(input:checked) label.drop{background:var(--soft)}
-ul.current .undo{display:none}ul.current li:has(input:checked) .undo{display:inline}ul.current li:has(input:checked) .x{display:none}
+ul.current li:has(input[name=drop]:checked) .fname{text-decoration:line-through;color:var(--ink2)}
+ul.current li:has(input[name=drop]:checked) label.drop{background:var(--soft)}
+ul.current details.swap{margin:0}ul.current details.swap[open]{flex-basis:100%}
+ul.current details.swap>div{margin:6px 0;padding:8px 10px;border:1px dashed var(--mute);border-radius:8px;background:var(--soft)}
+.swap-name{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.swap-name input{flex:1 1 200px}.swap-name .ext{color:var(--ink2)}
+ul.current .undo{display:none}ul.current li:has(input[name=drop]:checked) .undo{display:inline}ul.current li:has(input[name=drop]:checked) .x{display:none}
 .dropzone{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:16px;border:2px dashed var(--mute);border-radius:12px;background:var(--soft)}
 .dropzone.over{border-color:var(--primary);background:#ecebff}
 .dropzone label.pick{display:inline-flex;align-items:center;min-height:44px;padding:8px 16px;border-radius:9999px;border:1px solid var(--primary);
@@ -651,6 +658,8 @@ class BoardPages:
             + (f' <a class="as-text" href="{html.escape(link)}/text/{html.escape(a.id)}">글자 보기</a>' if extractable(a.name) else "")
             + "</li>" for a in rest)
         done = DONE.get(params.get("done") or "")
+        if done and params.get("done") == "edited":  # 첨부를 바꿔 올린 문서의 수정본이 됐으면(2026-10-10)
+            done += revision_text(self.store, uid, params)
         star = star_html(link, obj.scrap, self._csrf_input(session), link, head=True) + STAR_SCRIPT
         body = ((f'<p class="msg">{done}</p>' if done else "")
                 + f'<div class="post-head">{star}<p class="post-meta">{html.escape(" · ".join(meta))}</p></div>'
@@ -709,14 +718,18 @@ class BoardPages:
 
     def _write_form(self, session: tuple[str, str], action: str, cancel: str, *, title: str = "", content: str = "",
                     heading: str = "", current: list[Attachment] | tuple[Attachment, ...] = (), limit: int = CONTENT_MAX,
-                    base: str = "") -> str:
+                    base: str = "", swap_error: tuple[str, str] | None = None) -> str:
         """글쓰기·고치기가 함께 쓰는 폼: 제목(문헌 글이면 서지 제목을 머리로)·본문·첨부(고치기면 기존 첨부마다 ✕ 빼기)."""
         attach_limit = int(self.settings.max_attach_bytes)
         rows = "".join(
             f'<li data-name="{html.escape(a.name)}" data-size="{a.size}"><span class="fname">{html.escape(a.name)}</span> <small>{html.escape(kind_of(a.name))} · {size_text(a.size)}</small>'
             f'<label class="drop" title="첨부 빼기"><input type="checkbox" name="drop" value="{html.escape(a.id)}" '
             f'aria-label="{html.escape(a.name)} 빼기"><span class="x" aria-hidden="true">✕ 빼기</span>'
-            '<span class="undo" aria-hidden="true">빼지 않기</span></label></li>' for a in current)
+            '<span class="undo" aria-hidden="true">빼지 않기</span></label>'
+            f'<details class="swap" data-swap{" open" if swap_error and swap_error[0] == a.id else ""}><summary class="btn quiet">바꾸기</summary><div>'
+            + swap_fields(f"swap_{a.id}", f"swapname_{a.id}", ACCEPT,
+                          force=bool(swap_error and swap_error[0] == a.id and swap_error[1] == "overlap"))
+            + "</div></details></li>" for a in current)
         head = (f'<h2 class="ref-title">{html.escape(heading)}</h2>' if heading else
                 f'<label class="block">제목 <input name="title" value="{html.escape(title)}" data-count-max="{TITLE_MAX}"></label>')
         return (
@@ -732,6 +745,7 @@ class BoardPages:
             f'<span class="drop-word">끌어다 놓기 · {MAX_FILES}개까지</span></div>'
             '<ul class="chosen" aria-label="담은 파일"></ul><p class="pick-note" role="status" aria-live="polite"></p></fieldset>'
             f'<p><button class="primary">저장</button> <a href="{html.escape(cancel)}">취소</a></p></form>{WRITE_SCRIPT}'
+            + (SWAP_SCRIPT if current else "")
         )
 
     # ---- 첨부 글자 보기(#100) ----------------------------------------------------------------------
@@ -824,6 +838,8 @@ class BoardPages:
         base = obj.updated_at or obj.created_at  # 다른 곳에서 그사이 저장했는지 볼 기준(2026-10-09)
         limit = max(CONTENT_MAX, len(text))  # 대화로 넣은 긴 글은 그 길이까지(고쳐 저장해도 뒷부분이 잘리지 않게)
         error = ""
+        swap_error: tuple[str, str] | None = None
+        swapped, form_base = None, None
         if request.method == "POST":
             if self._too_big(request):
                 return RedirectResponse(f"{here}?error=big", status_code=303)
@@ -836,9 +852,30 @@ class BoardPages:
             files, code = await self._read_files(uid, form)
             current = await run_in_threadpool(self.store.list_attachments, uid, owner)
             asked = {str(v) for v in form.getlist("drop")}
-            drops = [a.id for a in current if a.id in asked]
+            swaps = [(a, up) for a in current if isinstance(up := form.get(f"swap_{a.id}"), UploadFile) and up.filename]
+            drops = [a.id for a in current if a.id in asked and a.id not in {s[0].id for s in swaps}]  # 바꾸는 첨부는 빼지 않는다
             left = len(current) - len(drops) + len(files)
-            error = too_long("제목", title or "", TITLE_MAX) or too_long("본문", content, limit) or self._write_error(code)
+            error = (too_long("제목", title or "", TITLE_MAX) or too_long("본문", content, limit) or self._write_error(code)
+                     or ("첨부는 한 번에 하나만 바꿀 수 있습니다." if len(swaps) > 1 else ""))
+            if not error and swaps:  # 첨부 바꾸기(2026-10-10): 문서 업데이트와 같은 동작. 올린 문서의 원본이면 수정본을 먼저 만든다
+                swapped_at, up = swaps[0]
+                s = self.settings
+                size = up.size if up.size is not None else data_size(up.file)
+                try:
+                    swapped = await run_in_threadpool(
+                        lambda: update_document(self.store, uid, f"att:{swapped_at.id}", up.filename or "", up.file, size,
+                                                str(form.get(f"swapname_{swapped_at.id}") or ""), max_attach=s.max_attach_bytes,
+                                                max_upload=s.max_upload_bytes, max_user=s.max_user_bytes,
+                                                force=form.get("force") == "1", allowed=None))
+                except UpdateError as e:
+                    error, swap_error = str(e), (swapped_at.id, e.code)
+                else:  # 제목을 그대로 두었으면 바꾸기가 고친 제목(이전 파일 이름 → 새 이름)을 따른다. 그사이 저장 시각도 새로
+                    fresh = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
+                    if fresh is not None and is_item:
+                        if (title or None) == (obj.title or None):
+                            title = fresh[1].title
+                        obj = fresh[1]
+                    form_base = (fresh[1].updated_at or fresh[1].created_at) if fresh is not None and is_item else None
             if error:  # 자르지 않고 거절, 적은 것은 그대로 다시(2026-10-09)
                 title_text, text = title or "", content
             elif is_item and not (content or title or any(obj.fields.values()) or obj.passages or left > 0):
@@ -848,7 +885,7 @@ class BoardPages:
                     title = title_from_files([*(a.name for a in current if a.id not in drops), *(u.name for u in files)])
                 try:
                     await run_in_threadpool(self._save_edit, uid, kind, obj, owner, title, content, files, drops,
-                                            str(form.get("base") or "") or None)
+                                            form_base or str(form.get("base") or "") or None)
                 except EditConflict:  # 덮어쓰지 않는다. 적은 것은 보이게 두고 새로 열게 한다
                     body = (f'<p class="msg err">다른 곳에서 고쳐진 글입니다. 새로 열어 다시 고쳐 주세요. '
                             f'<a href="{html.escape(here)}">새로 열기</a></p>'
@@ -857,14 +894,14 @@ class BoardPages:
                                                base=str(form.get("base") or "")))
                     lead = await run_in_threadpool(self.trail, uid, kind.key, "고치기")
                     return self._shelf_page("고치기", body, session, 409, lead=lead)
-                return RedirectResponse(f"{link}?done=edited", status_code=303)
+                return RedirectResponse(f"{link}?done=edited" + revision_query(swapped), status_code=303)
         else:
             error = self._write_error(request.query_params.get("error") or "")
         current = await run_in_threadpool(self.store.list_attachments, uid, owner)
         heading = "" if is_item else cite_label(obj, obj.key)
         body = ((f'<p class="msg err">{html.escape(error)}</p>' if error else "")
                 + self._write_form(session, here, link, title=title_text, content=text, heading=heading, current=current, limit=limit,
-                                   base=str(form.get("base") or "") if request.method == "POST" else base))
+                                   base=str(form.get("base") or "") if request.method == "POST" else base, swap_error=swap_error))
         lead = await run_in_threadpool(self.trail, uid, kind.key, "고치기")
         return self._shelf_page("고치기", body, session, 400 if error else 200, lead=lead)
 

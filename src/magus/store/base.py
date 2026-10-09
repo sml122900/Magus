@@ -525,6 +525,15 @@ class Store(Protocol):
     def inbox_path(self, user_id: str, name: str) -> Path | None:
         """읽기용 로컬 경로(P1: 디스크 파일 그대로, P2: 객체 스토리지에서 받은 임시 파일). 없으면 None."""
         ...
+    def trash_inbox(self, user_id: str, name: str, note: str) -> str:
+        """예전 올린 파일을 지우지 않고 휴지통(trash/inbox/)으로 옮긴다(문서 업데이트, 2026-10-10). 휴지통 id. 없으면 ValueError."""
+        ...
+    def list_trashed_inbox(self, user_id: str) -> list[tuple[str, InboxFile, dict]]:
+        """휴지통의 예전 올린 파일 (휴지통 id, 파일, 기록{at, note, name}). 새것부터."""
+        ...
+    def restore_inbox(self, user_id: str, trash_id: str) -> str:
+        """되살린 이름. 막히면 ValueError(code: missing·taken, 이름)."""
+        ...
     def usage_bytes(self, user_id: str) -> int:
         """사용자 폴더 전체(원고·책장·받은함·휴지통) 크기. 저장 용량 한도에 쓴다."""
         ...
@@ -541,6 +550,10 @@ class Store(Protocol):
         ...
     def trash_attachment(self, user_id: str, owner: str, attachment_id: str, note: str) -> bool:
         """지우지 않고 trash/shelf/attachments/로 옮긴다. 없으면 False."""
+        ...
+    def replace_attachment(self, user_id: str, owner: str, attachment_id: str, name: str, data: bytes | IO[bytes],
+                           note: str) -> tuple[Attachment, str]:
+        """같은 첨부 id 자리에 새 파일(문서 업데이트). 이전 파일은 새 휴지통 id로 첨부 휴지통에. (새 첨부, 휴지통 id). 없으면 ValueError."""
         ...
     def attachment_thumb(self, user_id: str, owner: str, attachment_id: str) -> Path | None:
         """사진 첨부의 썸네일(긴 변 400px JPEG, 첨부 폴더 안 .thumb/, 없으면 만든다). 사진이 아니거나 만들지 못하면 None. 원본은 바꾸지 않는다."""

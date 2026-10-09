@@ -30,7 +30,6 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 from starlette.concurrency import run_in_threadpool
-from starlette.datastructures import UploadFile
 from starlette.requests import Request
 from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
@@ -39,13 +38,13 @@ from magus.auth import JwtVerifier
 from magus.book.export import export_docx
 from magus.config import Settings
 from magus.helpbot import CLEAR_SCRIPT, HELP_STYLE, UNAVAILABLE, HelpBot, screen_key, screen_label, user_key, widget
-from magus.ids import local_time, utcnow
-from magus.inbox import LimitError, mb, safe_filename, save_upload, size_text
+from magus.ids import utcnow
 from magus.signing import CsrfError, sign, unsign
 from magus.store import Profile, Store
 from magus.webboard import BoardPages
 from magus.webbooks import BookPages
 from magus.webcontexts import ContextPages
+from magus.webdocs import DocumentPages
 from magus.webmap import MapPages
 from magus.webshelf import ShelfPages
 
@@ -191,19 +190,6 @@ FORM_SCRIPT = """<script>
   });
 })();
 </script>"""
-# 받은함: 파일을 고르면 바로 올린다(자바스크립트가 꺼져 있으면 '올리기' 버튼으로). 올리는 동안 버튼 옆에 도는 표시가 보인다.
-UPLOAD_SCRIPT = """<script>
-document.querySelectorAll("form.upload input[type=file]").forEach(function (input) {
-  // 파일을 고르면 바로 올린다
-  input.addEventListener("change", function () {
-    if (!input.files.length) return;
-    var form = input.form;
-    form.classList.add("busy");
-    form.setAttribute("aria-busy", "true");
-    form.submit();
-  });
-});
-</script>"""
 
 
 class OAuthClient:
@@ -296,7 +282,7 @@ def _pkce() -> tuple[str, str]:
 
 
 @dataclass
-class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
+class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPages):
     store: Store
     settings: Settings
     base_url: str  # 바깥에서 보이는 주소(원격: PUBLIC_URL, 로컬: http://127.0.0.1:포트)
@@ -360,12 +346,12 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
     def register(self, server: MCPServer) -> None:
         routes: list[tuple[str, list[str], Callable[[Request], Awaitable[Response]]]] = [
             ("/", ["GET"], self.home), ("/login", ["GET"], self.login), ("/auth/callback", ["GET"], self.callback),
-            ("/logout", ["POST"], self.logout), ("/me", ["GET", "POST"], self.me), ("/me/files", ["GET"], self.inbox),
-            ("/inbox/upload", ["POST"], self.upload), ("/inbox/delete", ["POST"], self.delete),
+            ("/logout", ["POST"], self.logout), ("/me", ["GET", "POST"], self.me),
+            *self.document_routes(),  # 내 정보 › 문서 업데이트(2026-10-10). 옛 올린 파일 화면·올리기·지우기 주소도 여기서
             ("/book/export", ["POST"], self.do_export), ("/download/{token}", ["GET"], self.download),
             ("/help/ask", ["POST"], self.help_ask),  # 웹 도움말(#97 D)
             # 옛 주소는 책장의 새 화면으로(#94)
-            ("/inbox", ["GET"], self.files_moved), ("/book", ["GET"], self._old_page("chapters", ())),
+            ("/book", ["GET"], self._old_page("chapters", ())),
             ("/issues", ["GET"], self._old_page("issues", ("status", "kind"))),
             ("/checklist", ["GET"], self._old_page("cites", ("status",))),
             ("/questions", ["GET"], self._old_page("cites", ("status", "type"), {"view": "questions"})),
@@ -475,8 +461,10 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
         s = self.settings
         if re.fullmatch(r"/shelf/write/[^/]+|/shelf/[^/]+/[^/]+/edit", path):
             return s.max_attach_bytes * MAX_FILES + 2_000_000  # 글쓰기·고치기의 첨부(10개까지)
-        if path == "/inbox/upload":
-            return s.max_upload_bytes * INBOX_BATCH + 1_000_000  # 올린 파일(한 번에 여러 개)
+        if path == "/inbox/upload":  # 없앤 올리기(2026-10-10): 본문을 읽지 않고 410 안내를 보이게 넉넉히
+            return s.max_upload_bytes * INBOX_BATCH + 1_000_000
+        if path == "/me/documents/update":  # 문서 업데이트: 파일 하나(글의 첨부·예전 올린 파일 한도 중 큰 것)
+            return max(s.max_upload_bytes, s.max_attach_bytes) + 1_000_000
         return s.max_request_bytes
 
     async def http_error(self, request: Request, exc: Exception) -> Response:
@@ -650,7 +638,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
             f'data-count-max="{DISPLAY_NAME_MAX}"></label></p>'
             f"<p>메일 {html.escape(profile.email or '—')}</p>"
             '<p><button class="primary">저장</button></p></form>'
-            '<ul class="links"><li><a href="/me/contexts">자주 쓰는 컨텍스트</a></li><li><a href="/me/files">올린 파일</a></li></ul>'
+            '<ul class="links"><li><a href="/me/contexts">자주 쓰는 컨텍스트</a></li><li><a href="/me/documents">문서 업데이트</a></li></ul>'
         )
         return self._page("내 정보", body, session, 400 if message.startswith('<p class="msg err">') else 200)
 
@@ -665,66 +653,6 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
         response = self._page("로그아웃", f'<p><a href="/login">로그인</a></p>{CLEAR_SCRIPT}')  # 도움말 대화도 지운다
         response.delete_cookie(SESSION_COOKIE, path="/")
         return response
-
-    # --- 받은함 ---
-    async def inbox(self, request: Request, flash: str = "", error: bool = False) -> Response:
-        session = self.user_of(request)
-        if not session:
-            return self._need_login(request)
-        uid = session[0]
-        files = self.store.list_inbox(uid)
-        rows = "".join(
-            f'<tr><td>{html.escape(f.name)}</td><td class="num">{size_text(f.size)}</td><td class="num">{local_time(f.modified)}</td>'
-            f'<td><form method="post" action="/inbox/delete" class="inline">{self._csrf_input(session)}'
-            f'<input type="hidden" name="name" value="{html.escape(f.name)}"><button>지우기</button></form></td></tr>'
-            for f in files
-        )
-        message = f'<p class="msg{" err" if error else ""}">{html.escape(flash)}</p>' if flash else ""
-        table = (f'<table><tr><th>이름</th><th class="num">크기</th><th class="num">올린 시각</th><th></th></tr>{rows}</table>'
-                 if rows else '<p class="empty">파일이 없습니다.</p>')
-        body = f"""<p class="crumb"><a href="/me">← 내 정보</a></p>{message}
-<p>{mb(self.store.usage_bytes(uid))} / {mb(self.settings.max_user_bytes)}</p>
-<p class="muted usage-note">사용량에는 올린 파일, 글의 첨부, 올린 문서와 수정본, 휴지통에 있는 것이 모두 들어갑니다.</p>
-<form method="post" action="/inbox/upload" enctype="multipart/form-data" class="card upload">{self._csrf_input(session)}
-<input type="file" name="files" multiple accept=".docx,.pdf,.md,.txt" aria-label="올릴 파일"> <button class="primary">올리기</button></form>
-{table}
-{UPLOAD_SCRIPT}"""
-        return self._page("올린 파일", body, session, current="")
-
-    async def upload(self, request: Request) -> Response:
-        session = self.user_of(request)
-        if not session:
-            return self._need_login(request)
-        limit = self.settings.max_upload_bytes * INBOX_BATCH + 1_000_000  # 본문 한도(body_limit과 같다)
-        if int(request.headers.get("content-length") or 0) > limit:  # 다 받기 전에 거른다
-            return self._page("올린 파일", f'<p class="msg err">요청이 너무 큽니다(한도 {mb(limit)}).</p>', session, 413)
-        try:
-            form = await self._form(request, session)
-        except PermissionError:
-            return self._page("올린 파일", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-        saved, errors = [], []
-        for item in form.getlist("files"):
-            if not isinstance(item, UploadFile) or not item.filename:
-                continue
-            try:  # 읽지 않고 받은 임시 파일째 넘긴다(크기는 받으며 셌다, 점검 5-a)
-                saved.append((await run_in_threadpool(save_upload, self.store, session[0], item.filename, item.file,
-                                                      self.settings.max_upload_bytes, self.settings.max_user_bytes)).name)
-            except (LimitError, ValueError) as e:
-                errors.append(f"{item.filename}: {e}")
-        flash = "\n".join([*(f"올림: {n}" for n in saved), *errors]) or "올릴 파일을 골라 주세요."
-        return await self.inbox(request, flash, bool(errors))
-
-    async def delete(self, request: Request) -> Response:
-        session = self.user_of(request)
-        if not session:
-            return self._need_login(request)
-        try:
-            form = await self._form(request, session)
-            name = safe_filename(str(form.get("name", "")))  # 올릴 때와 같은 이름 검사(점검 4-4: secret.txt:zone 같은 이름이 지나갔다)
-            ok = self.store.delete_inbox(session[0], name)
-        except (PermissionError, ValueError):
-            return self._page("올린 파일", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-        return await self.inbox(request, f"지움: {name}" if ok else f"없음: {name}", not ok)
 
     # --- 옛 주소(#94): 원고·확인 요청·답해 주실 질문·인용 체크리스트·받은함 → 책장의 새 화면으로 ---
     def _moved_to(self, uid: str, project_id: str | None, tab: str, keep: dict[str, str]) -> str:
@@ -751,11 +679,6 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
             return RedirectResponse(target, status_code=302)
 
         return moved
-
-    async def files_moved(self, request: Request) -> Response:
-        if not self.user_of(request):
-            return self._need_login(request)
-        return RedirectResponse("/me/files", status_code=302)
 
     async def do_export(self, request: Request) -> Response:
         session = self.user_of(request)

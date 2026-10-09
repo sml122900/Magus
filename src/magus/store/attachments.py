@@ -142,6 +142,36 @@ class AttachmentMixin:
         self._attachments_changed(user_id, owner)
         return True
 
+    @locked
+    def replace_attachment(self, user_id: str, owner: str, attachment_id: str, name: str, data: bytes | IO[bytes],
+                           note: str) -> tuple[Attachment, str]:
+        """같은 첨부 id 자리에 새 파일을 둔다(문서 업데이트, 2026-10-10): 글 안의 순서·링크·대화의 '첨부:<id>'가 그대로다.
+        이전 파일(과 뽑아 둔 글자·썸네일)은 새 휴지통 id로 첨부 휴지통에 간다. 되살리면 그 글에 첨부 하나로 돌아온다.
+        새 파일을 다 받은 뒤에 옮기므로 받는 도중에 끊기면 이전 파일이 그대로다. (새 첨부, 휴지통 id)."""
+        folder = self._owner_dir(user_id, owner, must_exist=True)
+        src = folder / safe_id(attachment_id, "attachment id") if folder else None
+        if src is None or self._one(src) is None:
+            raise ValueError("바꿀 첨부가 없다")
+        if Path(name).name != name or name in ("", ".", ".."):
+            raise ValueError(f"파일 이름이 아니다: {name!r}")
+        tmp = src.parent / f".{src.name}.{secrets.token_hex(4)}{PART}"  # 글 폴더의 숨은 파일(첨부 목록은 하위 폴더만 본다)
+        write_data(tmp, data)
+        trash_id = new_id()
+        target = self._attachment_trash_dir(user_id, owner) / trash_id
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:  # 이전 파일과 파생 폴더(.text·.thumb)를 폴더째 한 번에 옮긴다. 못 옮기면 아무것도 바뀌지 않는다
+            shutil.move(str(src), str(target))
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
+        src.mkdir()
+        os.replace(tmp, src / name)
+        write_json(target.parent / f"{trash_id}.trash.json", {"at": utcnow(), "note": note})
+        self._attachments_changed(user_id, owner)
+        found = self._one(src)
+        assert found is not None
+        return found, trash_id
+
     def _attachment_trash_dir(self, user_id: str, owner: str) -> Path:
         """뺀 첨부가 가는 폴더(글: attachments/<책 id>/<글 id>, 문헌 글: attachments/ref/<key>)."""
         from magus.store.shelf import safe_ref_key  # noqa: PLC0415

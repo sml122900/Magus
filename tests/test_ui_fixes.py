@@ -168,8 +168,8 @@ def test_small_things(server_proc):  # noqa: F811
         panel = c.get(f"/login?next=/shelf/p/common?node={node.id}").text.split('id="pp-node"')[1]
         assert panel.count("현장 메모다.") == 2  # 머리의 칩 하나 + 노드 설정 폼의 칸 하나(펼치는 칸에 또 나오지 않는다)
         assert '<span class="ctx ctx-chip">현장 메모다.</span>' in panel and "<h3>컨텍스트</h3>" not in panel
-        files = c.get("/me/files").text
-        assert "사용량에는 올린 파일, 글의 첨부, 올린 문서와 수정본, 휴지통에 있는 것이 모두 들어갑니다." in files
+        files = c.get("/me/documents").text  # 사용량은 문서 업데이트 화면에(2026-10-10, 설명은 도움말)
+        assert '<p class="usage">' in files and " / 1,000.0 MB</p>" in files
         settings = c.get("/shelf/edit/notes").text
         assert '<a class="trash-link" href="/shelf/trash/notes"><span aria-hidden="true">🗑</span> 휴지통으로</a>' in settings
         confirm = c.get("/shelf/trash/notes").text
