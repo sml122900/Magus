@@ -159,3 +159,104 @@ async def test_broken_manuscript_book_import(store: LocalStore, settings: Settin
         for name in _broken_files(tmp_path):
             r = await c.call_tool("book_import", {"path": name, "project_id": "x"})
             assert r.is_error and UNREADABLE in r.content[0].text, (name, r.content[0].text)
+
+
+# ---- 1-8·1-10 JWKS: 뺀 키는 묶음을 다시 읽으면 무효, 조회가 이벤트 루프를 막지 않음 ----
+
+@pytest.fixture
+def jwks_server():
+    """바꿀 수 있는 JWKS 흉내: state["keys"]·state["delay"]."""
+    import http.server
+    import json
+    import threading
+    import time
+
+    state = {"keys": [], "delay": 0.0, "hits": 0}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            state["hits"] += 1
+            time.sleep(state["delay"])
+            body = json.dumps({"keys": state["keys"]}).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{httpd.server_port}/jwks", state
+    httpd.shutdown()
+
+
+def _rsa(kid: str):
+    import json
+
+    import jwt
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return key, {**json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key())), "kid": kid, "use": "sig", "alg": "RS256"}
+
+
+def _signed(key, kid: str) -> str:
+    import time
+
+    import jwt
+
+    now = int(time.time())
+    return jwt.encode({"sub": "sub-alice", "aud": "http://magus.test/mcp", "iss": "https://issuer.test", "iat": now, "exp": now + 600},
+                      key, algorithm="RS256", headers={"kid": kid})
+
+
+def _verifier(url: str):
+    from magus.auth import AuthConfig, JwtVerifier
+
+    config = AuthConfig.from_env({"AUTH_ISSUER": "https://issuer.test", "PUBLIC_URL": "http://magus.test", "ALLOWED_USERS": "sub-alice=alice",
+                                  "AUTH_JWKS_URL": url})
+    return JwtVerifier(config)
+
+
+async def test_removed_key_stops_working(jwks_server, monkeypatch: pytest.MonkeyPatch):
+    import time
+
+    from magus import auth
+
+    url, state = jwks_server
+    k1, jwk1 = _rsa("k1")
+    k2, jwk2 = _rsa("k2")
+    state["keys"] = [jwk1]
+    monkeypatch.setattr(auth, "JWKS_LIFESPAN", 1)
+    v = _verifier(url)
+    assert await v.verify_token(_signed(k1, "k1")) is not None
+    state["keys"] = [jwk2]  # 인증 서버가 k1을 뺐다
+    time.sleep(1.2)  # 묶음 수명이 지남
+    assert await v.verify_token(_signed(k2, "k2")) is not None
+    assert await v.verify_token(_signed(k1, "k1")) is None  # 전에는 키 캐시(lru_cache) 때문에 새로 서명한 k1 토큰도 통과했다
+
+
+async def test_jwks_fetch_does_not_block_event_loop(jwks_server):
+    import time
+
+    import anyio
+
+    url, state = jwks_server
+    k1, jwk1 = _rsa("k1")
+    state["keys"], state["delay"] = [jwk1], 1.5
+    v = _verifier(url)
+    lags: list[float] = []
+
+    async def ticker():
+        for _ in range(10):
+            started = time.monotonic()
+            await anyio.sleep(0.05)
+            lags.append(time.monotonic() - started)
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(ticker)
+        await anyio.sleep(0.02)  # 티커가 먼저 잠들어 있는 동안 검증한다
+        assert await v.verify_token(_signed(k1, "k1")) is not None  # JWKS가 1.5초 늦다
+    assert max(lags) < 0.5, lags  # 전에는 검증 동안 이벤트 루프가 멈춰 다른 요청(/healthz)도 기다렸다

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 import urllib.request
 from collections import OrderedDict
@@ -27,6 +28,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+import anyio
 import jwt
 from mcp.server.auth.provider import AccessToken
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -35,6 +37,8 @@ from magus.ids import safe_id
 
 log = logging.getLogger("magus.auth")
 ALGORITHMS = ["RS256", "RS384", "RS512", "ES256", "ES384", "PS256"]  # 비대칭만. none·HS*는 받지 않는다
+JWKS_LIFESPAN = 300  # 초. JWK 묶음을 이만큼 두고 다시 읽는다
+JWKS_TIMEOUT = 5  # 초
 LEEWAY = 30  # 초. 서버 시계 차이
 USER_ID_CLAIM = "magus_user_id"
 
@@ -106,11 +110,14 @@ class JwtVerifier:
         self._static = jwt.PyJWKSet.from_dict(dict(jwks)) if jwks else None
         self._client: jwt.PyJWKClient | None = None
         self._cache: OrderedDict[str, tuple[float, dict[str, Any] | None, str]] = OrderedDict()
+        self._lock = threading.Lock()  # 검증은 워커 스레드에서도 돈다(점검 1-10)
 
     def _jwks_client(self) -> jwt.PyJWKClient:
         if self._client is None:
             url = self.config.jwks_url or discover_jwks_url(self.config.issuer)
-            self._client = jwt.PyJWKClient(url, cache_keys=True, lifespan=3600)
+            # 키 하나하나는 캐시하지 않고 JWK 묶음만 5분(점검 1-8): 인증 서버가 키를 빼면 늦어도 5분 뒤 그 키 토큰을 받지 않는다
+            # (cache_keys=True는 만료 없는 lru_cache라 뺀 키를 계속 믿었다). JWKS가 늦어도 5초에서 끊는다(기본 30초)
+            self._client = jwt.PyJWKClient(url, cache_keys=False, lifespan=JWKS_LIFESPAN, timeout=JWKS_TIMEOUT)
         return self._client
 
     def _key(self, token: str) -> Any:
@@ -130,7 +137,9 @@ class JwtVerifier:
         """(클레임, 실패 이유). 성공이면 이유는 "". 실패 이유(iss·aud 불일치, 만료, 서명 …)는 서버 로그에도 남긴다.
         토큰 값은 로그에 남기지 않는다. 설정을 맞추는 데 필요한 iss·aud·kid 같은 공개 값만 함께 적는다."""
         now = time.time()
-        if (hit := self._cache.get(token)) and hit[0] > now:
+        with self._lock:
+            hit = self._cache.get(token)
+        if hit and hit[0] > now:
             return hit[1], hit[2]
         reason = ""
         try:
@@ -150,9 +159,10 @@ class JwtVerifier:
             claims, reason = None, explain(e, token, self.config)
             log.warning("auth=invalid reason=%s", reason)
         expires = min(now + 60, float(claims["exp"])) if claims else now + 10
-        self._cache[token] = (expires, claims, reason)
-        while len(self._cache) > 256:
-            self._cache.popitem(last=False)
+        with self._lock:
+            self._cache[token] = (expires, claims, reason)
+            while len(self._cache) > 256:
+                self._cache.popitem(last=False)
         return claims, reason
 
     def id_token_claims(self, token: str, client_id: str) -> dict[str, Any] | None:
@@ -168,7 +178,8 @@ class JwtVerifier:
         return self.config.allowed.get(str(claims.get("sub", "")))
 
     async def verify_token(self, token: str) -> AccessToken | None:
-        claims = self.decode(token)
+        # JWKS를 읽는 동기 호출(urllib)이 이벤트 루프를 막지 않게 워커 스레드에서(점검 1-10: JWKS가 5초 늦으면 /healthz도 4.5초)
+        claims = await anyio.to_thread.run_sync(self.decode, token)
         if claims is None:
             return None
         user_id = self.user_of(claims)
@@ -267,7 +278,7 @@ class ForbiddenGate:
         if scope["type"] == "http" and scope.get("path", "").rstrip("/") == self.path:
             header = dict(scope.get("headers") or []).get(b"authorization", b"").decode("latin-1")
             if header.lower().startswith("bearer "):
-                claims = self.verifier.decode(header[7:])
+                claims = await anyio.to_thread.run_sync(self.verifier.decode, header[7:])  # 이벤트 루프를 막지 않게(점검 1-10)
                 if claims is not None and self.verifier.user_of(claims) is None:
                     log.warning("auth=forbidden sub_hash=%s", _hash(str(claims.get("sub", ""))))
                     body = json.dumps(
