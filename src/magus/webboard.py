@@ -198,16 +198,21 @@ STAR_SCRIPT = """<script>
     var form = e.target;
     if (!form.matches || !form.matches("form.star") || !window.fetch) return;
     e.preventDefault();
+    // 단추를 바꾸거나 막지(disabled) 않고 상태만 바꾼다: 막으면 초점이 단추에서 빠진다(2026-10-09). 누르는 중 다시 누르면 무시
     var button = form.querySelector("button"), on = form.querySelector("input[name=on]");
-    button.disabled = true;
+    if (form.getAttribute("data-busy")) return;
+    form.setAttribute("data-busy", "1"); button.setAttribute("aria-busy", "true");
+    var focused = document.activeElement === button;
     fetch(form.action, { method: "POST", body: new FormData(form), credentials: "same-origin", headers: { "Accept": "application/json" } })
       .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
       .then(function (d) {
         button.setAttribute("aria-pressed", d.scrap ? "true" : "false"); button.textContent = d.scrap ? "★" : "☆";
-        on.value = d.scrap ? "0" : "1"; button.disabled = false;
+        on.value = d.scrap ? "0" : "1";
+        form.removeAttribute("data-busy"); button.removeAttribute("aria-busy");
+        if (focused && document.activeElement !== button) button.focus();
         var n = document.querySelector("[data-scrap-count]"); if (n) n.textContent = String(d.count);
       })
-      .catch(function () { button.disabled = false; form.submit(); });
+      .catch(function () { form.removeAttribute("data-busy"); form.submit(); });
   });
 })();
 </script>"""
