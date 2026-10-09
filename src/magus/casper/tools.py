@@ -33,6 +33,9 @@ def add_conversation(store: Store, user_id: str, markdown: str, origin: str | No
     return split.render(), items
 
 
+CONVERSATION_SUFFIXES = (".md", ".txt")  # 대화 기록으로 읽는 파일(그 밖은 안내 오류)
+
+
 def build_tools(
     store: Store, current_user: Callable[[], str], embedder: Embedder | None = None, files: ResolveFile | None = None
 ) -> list[Tool]:
@@ -50,7 +53,14 @@ def build_tools(
                 file = resolve_file(user, path)[0]
             except (FileNotFoundError, ValueError) as e:
                 raise ToolError(str(e)) from e
-            markdown, origin = file.read_text(encoding="utf-8"), origin or file.stem
+            if file.suffix.lower() not in CONVERSATION_SUFFIXES:  # Word·PDF는 내부 오류였다(2026-10-09 점검 15-3)
+                raise ToolError(f"대화 기록은 .md·.txt 파일만 받는다({file.name}). Word·PDF로 저장한 기록이면 저자에게 .md나 .txt로 "
+                                "저장해 올려 달라고 하거나, 기록을 대화에 붙여 달라고 해서 markdown으로 넘긴다.")
+            try:
+                markdown = file.read_text(encoding="utf-8")
+            except UnicodeDecodeError as e:
+                raise ToolError(f"{file.name}을 UTF-8 글자로 읽지 못했다. 저자에게 UTF-8로 저장해 다시 올려 달라고 한다.") from e
+            origin = origin or file.stem
         report, items = add_conversation(store, user, markdown or "", origin, key)
         if not items:
             raise ToolError("발화를 하나도 나누지 못했다. 지원 마커: **사용자:**/**Claude:**, 질문:/답변:, > 인용 뒤 **Claude 요지**\n" + report)

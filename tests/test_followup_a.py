@@ -58,3 +58,26 @@ async def test_restoring_link_node_recounts(store: LocalStore, settings: Setting
     assert _unverified(store) == shared + 1  # 연결 노드가 없으면 clack2012가 이 원고에서 미확인으로
     restore_node(store, "alice", f"book/{link.id}")
     assert _unverified(store) == shared  # 전에는 다음 문헌 변경·재시작까지 shared + 1이 남았다
+
+
+# ---- 15-3 대화 기록이 Word·PDF·UTF-8 아님 ----
+
+async def test_conversation_rejects_word_and_bad_encoding(store: LocalStore, settings: Settings):
+    from pathlib import Path
+
+    store.create_category("alice", "대화", "blank", "#1f2f5c", (), "common", category_id="talk")
+    inbox = store.root / "users" / "alice" / "inbox"
+    inbox.mkdir(parents=True)
+    synth = Path(__file__).parent / "fixtures" / "synthetic"
+    (inbox / "기록.docx").write_bytes((synth / "닿으려는_종_합성.docx").read_bytes())
+    (inbox / "기록.pdf").write_bytes((synth / "닿으려는_종_합성.pdf").read_bytes())
+    (inbox / "옛기록.txt").write_bytes("**사용자:** 안녕\n**Claude:** 네\n".encode("cp949"))
+    (inbox / "기록.md").write_text("**사용자:** 안녕\n\n**Claude:** 네\n", encoding="utf-8")
+    async with Client(build_server(settings, store)) as c:
+        for name in ("기록.docx", "기록.pdf"):
+            r = await c.call_tool("idea_add_conversation", {"book": "대화", "path": name})
+            assert r.is_error and "대화 기록은 .md·.txt 파일만 받는다" in r.content[0].text, r.content[0].text
+        r = await c.call_tool("idea_add_conversation", {"book": "대화", "path": "옛기록.txt"})
+        assert r.is_error and "UTF-8 글자로 읽지 못했다" in r.content[0].text
+        ok = await c.call_tool("idea_add_conversation", {"book": "대화", "path": "기록.md"})
+        assert not ok.is_error and "발화 2개" in ok.content[0].text
