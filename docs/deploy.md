@@ -232,6 +232,9 @@ instructions 규칙 12(커넥터 재연결), 의존성 `anthropic`(이미지 다
    수치·전체 현황 전후 → 찾기(raw·ra, 읽기만) → data 해시(index 제외, 아직 아무도 쓰지 않았으므로 같아야 한다) → 컨테이너 안 /tmp 점검(`smoke.py`).
 4. **커넥터 재연결 한 번**(도구 설명·instructions 규칙 6·7이 바뀜).
 
+반영 기록(2026-10-09 13:50 서버 시각): `0e0c89e` → `d692855`. 백업 `3313cc70`, healthy·재시작 0, 인덱스 v22 재생성, data 2,328개 해시 같음,
+수치·전체 현황 전후 같음(default 299·297·0·86, father 337·335·5·129·E3), 찾기 `ra` 0 → 150·156(raw 1번째), /tmp 점검 21/21. 기록 `/root/deploy-20261009-webfix/`.
+
 **되돌리기**: 데이터 이전이 없으므로 이미지만 되돌린다. `docker tag magus:rollback-0e0c89e magus:latest && docker compose up -d --no-build`
 (옛 코드가 인덱스 v20을 다시 만든다). 옛 코드는 `"scrap"` 키와 첨부 휴지통 기록을 읽지 않고 무시한다. 다만 옛 코드로 대화에서 그 글을 고치면
 (category_put item_id) 옛 put_category_item이 모르는 칸을 쓰지 않아 그 글의 스크랩 표시가 빠진다(글 내용은 그대로).

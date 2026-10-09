@@ -34,7 +34,8 @@
   응답 머리에 컨텍스트 전문. 이전은 `magus maps apply`에 합침(`docs/decisions/contexts.md`, 문구 전후 `contexts-texts.md`, status.md 0-19절). 2026-10-08 21:47 묶음 배포(`p1-contexts`).
   **사용자 답(2026-10-08 저녁)**: d·s는 바꿔서, 나머지 승인. d = 노드 → 책 순서로 컨텍스트를 이어 읽는다(합쳐 1,000자). s = 일반 기능의 '원고' → '올린 문서'
   (instructions 머리말·1·4·6·7·8·12, 화면·도구 응답·설명). 도구 목록 8,450토큰, instructions 2,259토큰. #93~#96 묶음은 사용자 확인 뒤 배포했다(status.md 0-20절).
-- **서버(2026-10-09 03:13부터): master `p1-board`(`0e0c89e`, #98 + 배포 전 수정, 데이터 이전 없음, status.md 0-24절, `docs/deploy.md` 2-4절). 되돌리기 기준 `ed15ffb`(이미지 `magus:rollback-ed15ffb`, 이미지만 되돌리면 된다).**
+- **서버(2026-10-09 13:50부터): master `p1-edit-scrap`(`d692855`, #99 웹 수정 묶음, 데이터 이전 없음·인덱스 v22, status.md 0-25절, `docs/deploy.md` 2-5절). 되돌리기 기준 `0e0c89e`(이미지 `magus:rollback-0e0c89e`, 이미지만 되돌리면 된다).**
+- 그 전 서버(2026-10-09 03:13부터): master `p1-board`(`0e0c89e`, #98 + 배포 전 수정, 데이터 이전 없음, status.md 0-24절, `docs/deploy.md` 2-4절). 되돌리기 기준 `ed15ffb`(이미지 `magus:rollback-ed15ffb`).
 - 그 전 서버(2026-10-09 00:33부터): master `p1-razor`(`ed15ffb`, #97, 데이터 이전 없음, status.md 0-22절). 되돌리기 기준 `efc19ac`(이미지 `magus:rollback-efc19ac`).
 - 그 전 서버(2026-10-08 21:47부터): master `p1-contexts`(`efc19ac`: #93 층 + #94 책 종류 + #95 프로젝트·지도 + #96 컨텍스트 묶음, 데이터 이전 `magus maps apply --all-users`, status.md 0-20절).
   되돌리기 기준은 `ec6c40b`(`p1-profile-email`, 이미지 `magus:rollback-ec6c40b`, 그 앞 `magus:rollback-e08bb79`). **되돌릴 때는 먼저 새 코드로 `magus maps revert --all-users`**(서버 `/root/deploy-20261008-contexts/ROLLBACK.txt`).
@@ -54,7 +55,7 @@
   `/shelf/<책>/<글>/thumbs/<첨부>` 못 만들면 원본, `magus thumbs [--all-users]`)과 글 보기 사진 격자·크게 보기, 원문 확인 표시 떼기·붙이기 `category_edit(item_id, checked)`
   (새 도구 없음, 붙일 때 쓸 부분 하나 이상, status_by.via=chat), 규칙 7 끝 "어느 파일인지 분명하지 않으면(후보가 여럿이거나 없으면) 파일 이름을 보여 주고 묻는다.",
   휴대폰 화면(지도 맞춤·목록에서 노드 아래 책장·'?' 여백), '🗑 휴지통으로'·'⚙ 책 설정'·'📎 N', 컨텍스트 줄은 책 설정 안에만. 도구 23개·8,639토큰.
-- **웹 수정 묶음(2026-10-09, 사용자 요청 #99, 서버 배포 `p1-edit-scrap`)**: 글 고치기 되돌림(바꾼 칸만 파일에서 고침 `Store.patch_category_item`·문헌 글은 `set_ref_memo`,
+- **웹 수정 묶음(2026-10-09, 사용자 요청 #99, 2026-10-09 13:50 서버 배포 `p1-edit-scrap`)**: 글 고치기 되돌림(바꾼 칸만 파일에서 고침 `Store.patch_category_item`·문헌 글은 `set_ref_memo`,
   기존 첨부 ✕ → 휴지통 종류 `attachment`, 프로젝트 휴지통에서 그 글로 되살림. 원칙: 웹에서 없애는 것은 모두 휴지통), 제목 자동 채움(웹 쓰기·고치기에서 제목이 비고 첨부가 있으면
   첫 첨부 이름, 저장된 글은 보일 때만 `attachments.shown_title`), 스크랩(글 파일·bib.json `"scrap": true`, 웹 ☆·'★ 스크랩만' `?scrap=1`,
   `category_search(scrap_only)`·`category_edit(scrap, item_id)`), 찾기 보강(`search.find_chunks` 웹·대화 공통: 앞부분 일치·따옴표 구절·낱말 하나면 가까운 낱말부터 →
