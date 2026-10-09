@@ -496,7 +496,8 @@ def build_tools(
             raise ToolError(f"「{only.name}」에는 올린 문서가 들어 있다. 장은 book_read_chapter, 확인 요청은 book_issues로 본다.")
         scope = search_projects(store, user, project)
         books = {c.id: c for c in store.list_categories(user, floors=scope)}
-        lanes: list[Any] = ["category", "ref_picked", *(["ref_full"] if full else [])]
+        # 문헌 글은 서지·key·한글 표기·첨부 이름(ref_bib)으로도 찾는다(2026-10-09 #100: 웹 찾기와 같게). 찾기는 넓게, 인용은 원문 확인 글의 쓸 부분만
+        lanes: list[Any] = ["category", "ref_bib", "ref_picked", *(["ref_full"] if full else [])]
         hits: list[tuple[str, Any, Any]] = []  # (책 id, 글 또는 문헌, 맞은 청크)
         seen: set[str] = set()
         if not query:  # 스크랩한 글 전체(최근 것부터)
@@ -521,8 +522,8 @@ def build_tools(
                 if ref is None or ref.book not in books or (only and ref.book != only.key) or author == "ai" or (scrap_only and not ref.scrap):
                     continue
                 mark = f"{ref.key}/{chunk.lane}/{chunk.text[:40]}"
-                if mark in seen:
-                    continue
+                if mark in seen or (chunk.lane == "ref_bib" and any(isinstance(h[1], Ref) and h[1].key == ref.key for h in hits)):
+                    continue  # 서지로 맞은 문헌은 한 번(쓸 부분으로 이미 보였으면 다시 보이지 않는다)
                 seen.add(mark)
                 hits.append((ref.book, ref, chunk))
             if len(hits) >= k * 2:
@@ -587,10 +588,20 @@ def build_tools(
 
     def source_lines(user: str, n: int, ref: Ref, chunk: Any) -> list[str]:
         title = one_line(str(ref.bib.get("title") or ref.bib.get("raw") or ""))[:80]
-        head = f"{n}. {ref.key} · 문헌 글 · {SOURCE_LIGHT[ref.status]}" + (" · ★스크랩" if ref.scrap else "") + f" · {title}"
+        state = "원문 확인" if ref.status == "verified" else "미확인(원문 확인 전 — 인용하지 않는다)"
+        head = f"{n}. {ref.key} · 문헌 글 · {state}" + (" · ★스크랩" if ref.scrap else "") + f" · {title}"
         if chunk is None:  # 스크랩 목록(검색어 없이): 쓸 부분 하나만
             picked = store.get_passages(user, ref.key)[:1]
             return [head, *(f"   쓸 부분 “{one_line(p.text)[:300]}”" for p in picked), *attached(user, f"ref:{ref.key}")]
+        if chunk.lane == "ref_bib":  # 서지·key·한글 표기·첨부 이름으로 맞음: 서지와 쓸 부분(있으면 둘까지)
+            bib = ref.bib
+            who = " ".join(str(bib.get(k) or "") for k in ("authors", "author", "year") if bib.get(k)).strip()
+            picked = store.get_passages(user, ref.key)
+            return [head + " · 서지로 맞음", *([f"   서지: {one_line(who)[:120]}"] if who else []),
+                    *([f"   한글 표기: {', '.join(ref.aliases[:5])}"] if ref.aliases else []),
+                    *(f"   쓸 부분 “{one_line(p.text)[:200]}”" + (f" · {p.locator}" if p.locator else "") for p in picked[:2]),
+                    *([f"   쓸 부분 {len(picked) - 2}개 더"] if len(picked) > 2 else []),
+                    *([] if picked else ["   쓸 부분 없음"]), *attached(user, f"ref:{ref.key}")]
         if chunk.lane == "ref_picked":
             passage = next((p for p in store.get_passages(user, ref.key) if p.text == chunk.text), None)
             return [head + (f" · {passage.locator}" if passage and passage.locator else ""), f"   쓸 부분 “{one_line(chunk.text)[:300]}”",
@@ -693,7 +704,8 @@ def build_tools(
         Tool.from_function(
             category_search, name="category_search",
             description=(
-                "책의 글에서 찾는다(문헌 글의 쓸 부분 포함, full=true면 원문 전체도). book을 주면 그 책만, project를 주면 그 프로젝트와 연결 노드. "
+                "책의 글에서 찾는다(문헌 글은 서지·key·첨부 이름과 쓸 부분, full=true면 원문 전체도. 원문 확인 전 문헌은 '미확인'으로 보이고 인용하지 않는다). "
+                "book을 주면 그 책만, project를 주면 그 프로젝트와 연결 노드. "
                 "author=me|ai|all(기본, 저자의 말을 먼저). k=8. scrap_only=true면 저자가 스크랩(★)한 글만(query 없이 부르면 스크랩 전체, "
                 "최근 것부터). 결과는 책마다 컨텍스트와 함께."
             ),
