@@ -802,7 +802,7 @@ class ShelfPages:
         lead = f'<nav class="trail" aria-label="위치">{SEP.join(crumbs)}</nav>'
         body = (
             f'{error}'
-            f'<form method="post" action="/shelf/new?{html.escape(query)}" class="colors">{self._csrf_input(session)}'
+            f'<form method="post" action="/shelf/new?{html.escape(query)}" class="colors" data-guard>{self._csrf_input(session)}'
             f'<label class="block">이름 <input name="name" value="{html.escape(values["name"])}" data-count-max="{NAME_MAX}" required></label>'
             + context_fieldset(saved, attached)
             + color_fieldset(values["color"], settings.my_colors, choice)
@@ -882,7 +882,7 @@ class ShelfPages:
         reading = await run_in_threadpool(lambda: contexts_view_html(view_for_book(self.store, uid, kind.key)))  # 노드 → 이 책 읽는 순서
         body = (
             f'{error}{reading}'
-            f'<form method="post" action="/shelf/edit/{kind.key}" class="colors">{self._csrf_input(session)}'
+            f'<form method="post" action="/shelf/edit/{kind.key}" class="colors" data-guard>{self._csrf_input(session)}'
             f'<label class="block">이름 <input name="name" value="{html.escape(name)}" data-count-max="{NAME_MAX}" required></label>'
             + context_fieldset(saved, attached)
             + color_fieldset(current, settings.my_colors, choice)

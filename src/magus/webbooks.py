@@ -563,7 +563,7 @@ class BookPages:
             place = await run_in_threadpool(self.location_form, uid, session, Kind(key, name, [], "", None, floor_id, "doc"))
         body = (
             f'{error}'
-            f'<form method="post" action="/shelf/edit/{html.escape(key)}" class="colors">{self._csrf_input(session)}'
+            f'<form method="post" action="/shelf/edit/{html.escape(key)}" class="colors" data-guard>{self._csrf_input(session)}'
             f'<label class="block">이름 <input name="name" value="{html.escape(name)}" data-count-max="120" required></label>'
             + context_fieldset(saved, attached)
             + color_fieldset(color, settings.my_colors)

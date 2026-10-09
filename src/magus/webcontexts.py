@@ -231,7 +231,7 @@ class ContextPages:
         items = await run_in_threadpool(self.store.list_saved_contexts, uid)
         csrf = self._csrf_input(session)
         cards = "".join(
-            f'<section class="saved-ctx" aria-label="{html.escape(c.name)}"><form method="post" action="/me/contexts">{csrf}'
+            f'<section class="saved-ctx" aria-label="{html.escape(c.name)}"><form method="post" action="/me/contexts" data-guard>{csrf}'
             f'<input type="hidden" name="id" value="{html.escape(c.id)}">'
             f'<label class="block">이름 <input name="name" value="{html.escape(c.name)}" data-count-max="{CONTEXT_NAME_MAX}" required></label>'
             f'<label class="block">내용 <textarea name="text" data-count-max="{CONTEXT_MAX}" rows="3" required>{html.escape(c.text)}</textarea></label>'
@@ -241,7 +241,7 @@ class ContextPages:
         ) or '<p class="empty">없습니다.</p>'
         room = len(items) < MAX_SAVED
         add = (
-            f'<h2>새로 더하기</h2><form method="post" action="/me/contexts" class="card">{csrf}'
+            f'<h2>새로 더하기</h2><form method="post" action="/me/contexts" class="card" data-guard>{csrf}'
             f'<label class="block">이름 <input name="name" data-count-max="{CONTEXT_NAME_MAX}" required></label>'
             f'<label class="block">내용 <textarea name="text" data-count-max="{CONTEXT_MAX}" rows="3" required></textarea></label>'
             '<p><button name="action" value="add" class="primary">더하기</button></p></form>'

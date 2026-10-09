@@ -35,6 +35,7 @@ from magus.book_migrate import legacy_book_id
 from magus.category.rules import BUILTINS, CONTENT_MAX, TITLE_MAX
 from magus.ids import local_time, new_id, utcnow
 from magus.melchior.author_report import cite_label
+from magus.store.base import EditConflict
 from magus.store import Attachment, CategoryItem, Chunk, Store
 from magus.store.formats import one_line
 from magus.webshelf import (
@@ -277,6 +278,11 @@ WRITE_SCRIPT = """<script>
   ["dragenter", "dragover"].forEach(function (t) { zone.addEventListener(t, function (e) { e.preventDefault(); zone.classList.add("over"); }); });
   ["dragleave", "drop"].forEach(function (t) { zone.addEventListener(t, function () { zone.classList.remove("over"); }); });
   zone.addEventListener("drop", function (e) { e.preventDefault(); if (e.dataTransfer) add(e.dataTransfer.files); });
+  window.addEventListener("pageshow", function (e) {  // 저장한 뒤 뒤로 가기: 담은 파일과 저장 단추를 처음 모습으로(2026-10-09)
+    if (!e.persisted) return;
+    chosen = []; show(); note.textContent = "";
+    var b = form.querySelector("button.primary"); if (b) b.disabled = false;
+  });
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     var data = new FormData(form), button = form.querySelector("button.primary");
@@ -685,7 +691,8 @@ class BoardPages:
         return self._shelf_page("글쓰기", body, session, 400 if error else 200, lead=lead)
 
     def _write_form(self, session: tuple[str, str], action: str, cancel: str, *, title: str = "", content: str = "",
-                    heading: str = "", current: list[Attachment] | tuple[Attachment, ...] = (), limit: int = CONTENT_MAX) -> str:
+                    heading: str = "", current: list[Attachment] | tuple[Attachment, ...] = (), limit: int = CONTENT_MAX,
+                    base: str = "") -> str:
         """글쓰기·고치기가 함께 쓰는 폼: 제목(문헌 글이면 서지 제목을 머리로)·본문·첨부(고치기면 기존 첨부마다 ✕ 빼기)."""
         attach_limit = int(self.settings.max_attach_bytes)
         rows = "".join(
@@ -696,9 +703,10 @@ class BoardPages:
         head = (f'<h2 class="ref-title">{html.escape(heading)}</h2>' if heading else
                 f'<label class="block">제목 <input name="title" value="{html.escape(title)}" data-count-max="{TITLE_MAX}"></label>')
         return (
-            f'<form method="post" action="{html.escape(action)}" enctype="multipart/form-data" class="card write-form">'
+            f'<form method="post" action="{html.escape(action)}" enctype="multipart/form-data" class="card write-form" data-guard>'
             f'{self._csrf_input(session)}{head}'
-            f'<label class="block">본문 <textarea name="content" rows="10" data-count-max="{limit}" data-count-quiet>{html.escape(content)}</textarea></label>'
+            + (f'<input type="hidden" name="base" value="{html.escape(base)}">' if base else "")  # 고치기 시작할 때의 저장 시각
+            + f'<label class="block">본문 <textarea name="content" rows="10" data-count-max="{limit}" data-count-quiet>{html.escape(content)}</textarea></label>'
             '<fieldset><legend>첨부</legend>'
             + (f'<ul class="current" aria-label="지금 첨부">{rows}</ul>' if rows else "")
             + f'<div class="dropzone" data-dropzone data-max="{MAX_FILES}" data-limit="{attach_limit}" data-limit-text="{mb(attach_limit)}" '
@@ -797,6 +805,7 @@ class BoardPages:
         here = f"{link}/edit"
         title_text = (obj.title or "") if is_item else ""
         text = obj.content if is_item else str(obj.bib.get("memo") or "")
+        base = obj.updated_at or obj.created_at  # 다른 곳에서 그사이 저장했는지 볼 기준(2026-10-09)
         limit = max(CONTENT_MAX, len(text))  # 대화로 넣은 긴 글은 그 길이까지(고쳐 저장해도 뒷부분이 잘리지 않게)
         error = ""
         if request.method == "POST":
@@ -821,19 +830,31 @@ class BoardPages:
             else:
                 if is_item and not title:  # 제목이 비고 첨부가 남으면 첫 첨부의 파일 이름(2026-10-09)
                     title = title_from_files([*(a.name for a in current if a.id not in drops), *(name for name, _ in files)])
-                await run_in_threadpool(self._save_edit, uid, kind, obj, owner, title, content, files, drops)
+                try:
+                    await run_in_threadpool(self._save_edit, uid, kind, obj, owner, title, content, files, drops,
+                                            str(form.get("base") or "") or None)
+                except EditConflict:  # 덮어쓰지 않는다. 적은 것은 보이게 두고 새로 열게 한다
+                    body = (f'<p class="msg err">다른 곳에서 고쳐진 글입니다. 새로 열어 다시 고쳐 주세요. '
+                            f'<a href="{html.escape(here)}">새로 열기</a></p>'
+                            + self._write_form(session, here, link, title=title or "", content=content,
+                                               heading="" if is_item else cite_label(obj, obj.key), current=current, limit=limit,
+                                               base=str(form.get("base") or "")))
+                    lead = await run_in_threadpool(self.trail, uid, kind.key, "고치기")
+                    return self._shelf_page("고치기", body, session, 409, lead=lead)
                 return RedirectResponse(f"{link}?done=edited", status_code=303)
         else:
             error = self._write_error(request.query_params.get("error") or "")
         current = await run_in_threadpool(self.store.list_attachments, uid, owner)
         heading = "" if is_item else cite_label(obj, obj.key)
         body = ((f'<p class="msg err">{html.escape(error)}</p>' if error else "")
-                + self._write_form(session, here, link, title=title_text, content=text, heading=heading, current=current, limit=limit))
+                + self._write_form(session, here, link, title=title_text, content=text, heading=heading, current=current, limit=limit,
+                                   base=str(form.get("base") or "") if request.method == "POST" else base))
         lead = await run_in_threadpool(self.trail, uid, kind.key, "고치기")
         return self._shelf_page("고치기", body, session, 400 if error else 200, lead=lead)
 
     def _save_edit(self, uid: str, kind: Kind, obj: Any, owner: str, title: str | None, content: str,
-                   files: list[tuple[str, bytes]], drops: list[str]) -> None:
+                   files: list[tuple[str, bytes]], drops: list[str], base: str | None = None) -> None:
+        """base: 고치기 시작할 때의 저장 시각. 그사이 다른 저장이 있었으면 EditConflict(첨부도 건드리지 않는다)."""
         assert kind.category is not None
         if isinstance(obj, CategoryItem):
             changes: dict[str, Any] = {}
@@ -843,9 +864,9 @@ class BoardPages:
                 changes["content"] = content
             if changes or files or drops:  # 고친 시각(목록 정렬은 그대로 만든 순서)
                 changes |= {"edited_at": utcnow(), "edited_by": "author"}
-                self.store.patch_category_item(uid, kind.category.id, obj.id, changes)
+                self.store.patch_category_item(uid, kind.category.id, obj.id, changes, if_updated_at=base)
         else:
-            self.store.set_ref_memo(uid, obj.key, content)
+            self.store.set_ref_memo(uid, obj.key, content, if_updated_at=base)
         for att in drops:  # 뺀 첨부는 지우지 않고 휴지통으로(프로젝트 휴지통에서 되살린다)
             self.store.trash_attachment(uid, owner, att, "웹에서 뺌")
         made = []

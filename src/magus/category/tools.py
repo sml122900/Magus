@@ -45,6 +45,7 @@ from magus.attachments import describe, title_from_files
 from magus.extract import page_of, pages
 from magus.textindex import query_parts, tokens
 from magus.store import Category, CategoryItem, MapNode, Passage, Ref, ShelfSettings, Store
+from magus.store.base import EditConflict
 from magus.store.floors import MoveError
 from magus.store.formats import one_line
 from magus.store.maps import MapError
@@ -55,6 +56,7 @@ KEPT = "지운 것이 아니라 옮긴 것이라 운영자가 되살릴 수 있�
 SOURCE_LIGHT = {"verified": "원문 확인", "unverified": "원문 확인 전"}
 SEARCH_POOL = 300  # 대화 찾기에서 살펴보는 조각 수(책별 개수를 세는 범위, #101)
 PER_BOOK = 4  # 책을 말하지 않은 찾기에서 한 책이 먼저 차지하는 칸(#101)
+CONFLICT = "그사이 다른 곳(웹 등)에서 저장된 글이라 바꾸지 않았다. category_search로 새로 읽은 뒤 다시 고친다."  # 동시 고치기(2026-10-09)
 
 
 class PartIn(BaseModel):
@@ -306,7 +308,11 @@ def build_tools(
             raise ToolError(f"문헌 글 {key!r}이 없다. category_search로 key를 확인한다. 문헌 글이 아니면 category_put으로 넣는다.")
         if book and ref.book and find_book(user, book, project).key != ref.book:
             raise ToolError(f"그 문헌 글은 「{book}」 책에 있지 않다.")
-        added, total = store.add_passages(user, ref.key, [Passage(p.text, p.reason or "", p.where) for p in parts])
+        try:
+            added, total = store.add_passages(user, ref.key, [Passage(p.text, p.reason or "", p.where) for p in parts],
+                                              if_updated_at=ref.updated_at or ref.created_at)
+        except EditConflict as e:
+            raise ToolError(CONFLICT) from e
         label = cite_label(ref, ref.key)
         state = ("원문 확인 표시는 그대로다." if ref.status == "verified"
                  else "원문 확인 전이라 아직 인용하지 않는다(저자가 원문을 확인했다고 하면 checked=true).")
@@ -350,7 +356,11 @@ def build_tools(
             raise ToolError(f"{label}에는 쓸 부분이 없다. 원문 확인 글로 넣으려면 저자가 고른 대목을 parts에 담아 "
                             "category_put(source, checked=true)로 넣는다.")
         before = ref.status == "verified"
-        store.set_ref_status(user, ref.key, "verified" if checked else "unverified", via="chat")
+        try:  # 읽은 뒤 쓰기 전에 다른 곳(웹 고치기 등)에서 저장했으면 덮어쓰지 않는다(2026-10-09, 인자 추가 없음)
+            store.set_ref_status(user, ref.key, "verified" if checked else "unverified", via="chat",
+                                 if_updated_at=ref.updated_at or ref.created_at)
+        except EditConflict as e:
+            raise ToolError(CONFLICT) from e
         after_refs_changed(store, user)  # 장별 미확인 수·확인 요청 연결을 다시 센다
         if before == checked:
             return f"{label}: 원문 확인 표시는 이미 {'붙어' if checked else '떨어져'} 있다(바꾸지 않음)."

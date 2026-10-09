@@ -421,6 +421,15 @@ class MapNode:
     contexts: tuple[Context, ...] = ()  # 노드의 컨텍스트(#96). 연결 노드는 원본 노드의 것
 
 
+class EditConflict(ValueError):
+    """고치는 동안 다른 곳(웹의 다른 창·대화)에서 그 글이 저장됐다(2026-10-09). 덮어쓰지 않고 거절한다."""
+
+
+def edit_stamp(record: dict[str, Any]) -> str:
+    """글·문헌 글 파일의 '마지막으로 저장한 시각'(고친 시각, 기록 전이면 만든 시각). 동시 고치기 검사에 쓴다."""
+    return str(record.get("updated_at") or record.get("created_at") or "")
+
+
 @dataclass(frozen=True)
 class NodeTrashInfo:
     """웹의 노드 삭제 확인 창에 보일 것(#97). blocked: 옮길 수 없는 까닭 코드(center | linked | has_refs | unknown_book), 없으면 None."""

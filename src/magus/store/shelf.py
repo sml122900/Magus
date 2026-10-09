@@ -25,7 +25,9 @@ from magus.category.rules import DEFAULT_COLORS
 from magus.contexts import DEFAULTS, LEGACY_CONTEXT, find_saved
 from magus.floors import COMMON
 from magus.ids import utcnow
-from magus.store.base import WEB_ONLY_LANES, Chunk, Context, Lane, Passage, Ref, RefStatus, TrashItem, TrashKind
+from magus.store.base import (
+    WEB_ONLY_LANES, Chunk, Context, EditConflict, Lane, Passage, Ref, RefStatus, TrashItem, TrashKind, edit_stamp,
+)
 from magus.store.fileio import locked, read_json, read_text, write_json, write_text
 from magus.store.floors import Layout
 from magus.textindex import chunk_text, index_text
@@ -198,7 +200,7 @@ class ShelfMixin:
         return found
 
     @locked
-    def set_ref_status(self, user_id: str, key: str, status: str, via: str = "chat") -> Ref:
+    def set_ref_status(self, user_id: str, key: str, status: str, via: str = "chat", *, if_updated_at: str | None = None) -> Ref:
         """원문 확인 표시만 바꾼다(저자가 한 것: #97 웹 체크 → 2026-10-09부터 대화의 category_edit checked). 쓸 부분·전문·서지는 그대로.
         누가 언제 어디서 바꿨는지 bib.json "status_by"에 남긴다(옛 코드는 이 키를 읽지 않는다)."""
         if status not in ("verified", "unverified"):
@@ -207,6 +209,8 @@ class ShelfMixin:
         if not path.exists():
             raise ValueError(f"문헌 {key!r}가 없다")
         data = read_json(path)
+        if if_updated_at is not None and edit_stamp(data) != if_updated_at:  # 동시 고치기(2026-10-09)
+            raise EditConflict(f"문헌 {key}가 그사이 저장됐다")
         if data.get("status") != status:
             data.update({"status": status, "updated_at": utcnow(), "status_by": {"by": "author", "at": utcnow(), "via": via}})
             write_json(path, data)
@@ -217,11 +221,13 @@ class ShelfMixin:
         return found
 
     @locked
-    def add_passages(self, user_id: str, key: str, passages: list[Passage]) -> tuple[int, int]:
+    def add_passages(self, user_id: str, key: str, passages: list[Passage], *, if_updated_at: str | None = None) -> tuple[int, int]:
         """문헌 글에 쓸 부분을 더한다(#100). passages.json만 고치고(같은 대목은 한 번) bib.json·원문 확인 표시는 그대로. (더한 수, 모두)."""
         rdir = self._melchior_dir(user_id) / safe_ref_key(key)
         if not (rdir / "bib.json").exists():
             raise ValueError(f"문헌 {key!r}가 없다")
+        if if_updated_at is not None and edit_stamp(read_json(rdir / "bib.json")) != if_updated_at:  # 동시 고치기(2026-10-09)
+            raise EditConflict(f"문헌 {key}가 그사이 저장됐다")
         old = self.get_passages(user_id, key)
         seen = {p.text.strip() for p in old}
         new = []
@@ -256,13 +262,15 @@ class ShelfMixin:
         return on
 
     @locked
-    def set_ref_memo(self, user_id: str, key: str, memo: str) -> Ref:
+    def set_ref_memo(self, user_id: str, key: str, memo: str, *, if_updated_at: str | None = None) -> Ref:
         """문헌 글의 본문(메모, bib.memo)만 바꾼다(2026-10-09 웹의 글 고치기). 서지·쓸 부분·전문·원문 확인 표시와
         그 기록(status_by)·옮긴 기록은 파일에서 그대로다(put_ref는 bib.json을 다시 쓰므로 여기서는 쓰지 않는다)."""
         path = self._melchior_dir(user_id) / safe_ref_key(key) / "bib.json"
         if not path.exists():
             raise ValueError(f"문헌 {key!r}가 없다")
         data = read_json(path)
+        if if_updated_at is not None and edit_stamp(data) != if_updated_at:  # 동시 고치기(2026-10-09)
+            raise EditConflict(f"문헌 {key}가 그사이 저장됐다")
         bib = dict(data.get("bib") or {})
         if (bib.get("memo") or "") != memo:
             bib.pop("memo", None)

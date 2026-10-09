@@ -31,7 +31,7 @@ from magus.category.rules import (
 from magus.contexts import from_record, to_record
 from magus.floors import COMMON
 from magus.ids import new_id, safe_id, utcnow
-from magus.store.base import Category, CategoryItem, Context, Passage, ShelfSettings
+from magus.store.base import Category, CategoryItem, Context, EditConflict, Passage, ShelfSettings, edit_stamp
 from magus.store.fileio import locked, read_json, write_json
 from magus.textindex import chunk_text
 
@@ -185,14 +185,17 @@ class CategoryMixin:
 
     @locked
     def patch_category_item(self, user_id: str, category_id: str, item_id: str, changes: dict[str, Any], *,
-                            touch: bool = True) -> CategoryItem:
+                            touch: bool = True, if_updated_at: str | None = None) -> CategoryItem:
         """글 파일에서 준 칸만 바꾼다(2026-10-09 웹의 글 고치기·스크랩). 나머지 칸(누가·이유·위치·쓸 부분·태그·칸·장·응답 관계 등)은
         파일에서 바이트까지 그대로 둔다. 값이 None이면 그 칸을 뺀다(제목·제목 지은 사람은 null로 남긴다: 원래 늘 있는 칸).
-        touch=False면 updated_at도 그대로(스크랩은 글을 고친 것이 아니다)."""
+        touch=False면 updated_at도 그대로(스크랩은 글을 고친 것이 아니다).
+        if_updated_at: 고치기 시작할 때 본 '마지막 저장 시각'. 그 뒤에 다른 저장이 있었으면 EditConflict(덮어쓰지 않는다)."""
         path = self._category_dir(user_id, category_id) / "items" / f"{safe_id(item_id, 'item id')}.json"
         if not path.exists():
             raise ValueError(f"글 {category_id}/{item_id}가 없다")
         data = read_json(path)
+        if if_updated_at is not None and edit_stamp(data) != if_updated_at:
+            raise EditConflict(f"글 {category_id}/{item_id}가 그사이 저장됐다")
         for key, value in changes.items():
             if value is None and key not in ("title", "title_by"):
                 data.pop(key, None)

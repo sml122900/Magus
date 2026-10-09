@@ -64,3 +64,78 @@ def test_trash_list_counts_links_and_earlier_posts(server_proc):  # noqa: F811
         assert '<p class="trash-count">2개</p>' in after and 'name="item" value="walk/20261009000000001-aaaaaa"' in after
         back = c.post("/shelf/p/city/trash", data={"csrf": csrf, "item": "walk/20261009000000001-aaaaaa"})
         assert "먼저 버린 글" in back.text and back.url.path == "/shelf/walk/20261009000000001-aaaaaa"
+
+
+def test_edit_conflict_is_refused(server_proc):  # noqa: F811
+    """동시 고치기: 고치기 폼을 연 뒤 다른 곳에서 저장했으면 덮어쓰지 않고 거절(적은 것은 보이게). 대화(category_edit)도 같은 검사."""
+    import re  # noqa: PLC0415
+
+    from test_web import _csrf  # noqa: PLC0415
+
+    from magus.store import CategoryItem, Ref  # noqa: PLC0415
+
+    base, data_dir, _ = server_proc({})
+    store = LocalStore(data_dir)
+    store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="notes")
+    store.put_category_item("alice", CategoryItem("20261009000000001-aaaaaa", "notes", "처음 본문", "me", "제목", "author"))
+    store.put_ref("alice", Ref(key="clack2012", status="unverified", bib={"title": "Gaining ground", "authors": "Clack, J."}, book="notes"))
+    store.close()
+    with httpx2.Client(base_url=base, follow_redirects=True, timeout=60) as c:
+        form = c.get("/login?next=/shelf/notes/20261009000000001-aaaaaa/edit").text
+        csrf = _csrf(form)
+        assert 'class="card write-form" data-guard>' in form and "beforeunload" in form and "pageshow" in form
+        stamp = re.search(r'name="base" value="([^"]+)"', form).group(1)
+        other = LocalStore(data_dir)  # 다른 창(또는 대화)에서 먼저 저장
+        other.patch_category_item("alice", "notes", "20261009000000001-aaaaaa", {"content": "다른 곳에서 고침"})
+        other.close()
+        late = c.post("/shelf/notes/20261009000000001-aaaaaa/edit", data={"csrf": csrf, "base": stamp, "title": "제목", "content": "내 고침"})
+        assert late.status_code == 409 and "다른 곳에서 고쳐진 글입니다. 새로 열어 다시 고쳐 주세요." in late.text and ">내 고침</textarea>" in late.text
+        assert LocalStore(data_dir).get_category_item("alice", "notes", "20261009000000001-aaaaaa").content == "다른 곳에서 고침"
+        fresh = c.get("/shelf/notes/20261009000000001-aaaaaa/edit").text  # 새로 열면 저장된다
+        new_stamp = re.search(r'name="base" value="([^"]+)"', fresh).group(1)
+        ok = c.post("/shelf/notes/20261009000000001-aaaaaa/edit", data={"csrf": csrf, "base": new_stamp, "title": "제목", "content": "내 고침"})
+        assert ok.status_code == 200 and "<p>내 고침</p>" in ok.text
+        # 문헌 글(본문 = 메모)도 같다
+        ref_form = c.get("/shelf/notes/clack2012/edit").text
+        ref_stamp = re.search(r'name="base" value="([^"]+)"', ref_form).group(1)
+        other = LocalStore(data_dir)
+        other.set_ref_status("alice", "clack2012", "verified")
+        other.close()
+        assert c.post("/shelf/notes/clack2012/edit", data={"csrf": csrf, "base": ref_stamp, "content": "메모"}).status_code == 409
+
+
+def test_category_edit_checks_conflict(store: LocalStore, settings):
+    """대화의 category_edit(checked·parts)도 읽은 뒤 쓰기 전에 다른 저장이 있었으면 바꾸지 않는다(인자 추가 없이)."""
+    import anyio  # noqa: PLC0415
+    import pytest  # noqa: PLC0415
+    from mcp import Client  # noqa: PLC0415
+
+    from magus.server import build_server  # noqa: PLC0415
+    from magus.store import Passage, Ref  # noqa: PLC0415
+    from magus.store.base import EditConflict  # noqa: PLC0415
+
+    store.create_category("alice", "문헌", "blank", "#1f2f5c", (), "common", category_id="refs-x")
+    store.put_ref("alice", Ref(key="clack2012", status="unverified", bib={"title": "Gaining ground", "authors": "Clack, J."}, book="refs-x"),
+                  passages=[Passage("쓸 부분", "근거", "p.1")])
+    with pytest.raises(EditConflict):
+        store.set_ref_status("alice", "clack2012", "verified", if_updated_at="2000-01-01T00:00:00.000Z")
+    with pytest.raises(EditConflict):
+        store.add_passages("alice", "clack2012", [Passage("새 부분", "", None)], if_updated_at="2000-01-01T00:00:00.000Z")
+    real = store.get_ref
+
+    def stale(user_id, key, floors=None):  # 도구가 읽은 뒤 다른 곳에서 저장된 것처럼(읽은 시각이 옛것)
+        found = real(user_id, key, floors=floors)
+        return Ref(**{**found.__dict__, "updated_at": "2000-01-01T00:00:00.000Z", "created_at": "2000-01-01T00:00:00.000Z"}) if found else None
+
+    store.get_ref = stale  # type: ignore[method-assign]
+
+    async def call() -> tuple[str, str]:
+        async with Client(build_server(settings, store)) as c:
+            checked = await c.call_tool("category_edit", {"item_id": "clack2012", "checked": True})
+            parts = await c.call_tool("category_edit", {"item_id": "clack2012", "parts": [{"text": "또 다른 부분", "reason": "x"}]})
+            return checked.content[0].text, parts.content[0].text
+
+    checked, parts = anyio.run(call)
+    assert "그사이 다른 곳(웹 등)에서 저장된 글이라 바꾸지 않았다." in checked and "그사이 다른 곳" in parts
+    store.get_ref = real  # type: ignore[method-assign]
+    assert store.get_ref("alice", "clack2012").status == "unverified" and len(store.get_passages("alice", "clack2012")) == 1

@@ -642,7 +642,7 @@ class MapPages:
         contexts = ""
         if not node.link:  # 연결 노드의 컨텍스트는 원본 지도에서 바꾼다
             saved = self.store.list_saved_contexts(uid)
-            contexts = (f'<h3>컨텍스트</h3><form method="post" action="{post}" class="pm-form">{hidden}'
+            contexts = (f'<h3>컨텍스트</h3><form method="post" action="{post}" class="pm-form" data-guard>{hidden}'
                         '<input type="hidden" name="action" value="contexts">'
                         + context_fieldset(saved, node.contexts) + '<p><button>저장</button></p></form>')
         return (f'<details class="pp-set"><summary>⚙ 설정</summary>{rename}{color}{contexts}'

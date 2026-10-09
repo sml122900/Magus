@@ -142,11 +142,33 @@ COUNT_SCRIPT = """<script>
       el.setAttribute("aria-invalid", big ? "true" : "false");
     }
     el.addEventListener("input", show); show();
+    if (el.form) el.form.addEventListener("reset", function () { setTimeout(show); });
   });
   document.addEventListener("submit", function (e) {  // 잡는 단계: 다른 저장 스크립트보다 먼저
     var bad = Array.prototype.find.call(e.target.querySelectorAll("[data-count-max]"), over);
     if (bad) { e.preventDefault(); e.stopPropagation(); bad.focus(); }
   }, true);
+})();
+</script>"""
+# 폼 상태(2026-10-09): data-guard 폼(글쓰기·고치기·책 설정·컨텍스트)에서 바꾼 것이 있으면 떠날 때 브라우저가 묻는다(저장하면 묻지 않음).
+# 저장한 뒤 뒤로 가기(bfcache로 그대로 돌아온 페이지)는 폼·저장 단추·안내를 처음 모습으로 돌린다.
+FORM_SCRIPT = """<script>
+(function () {
+  var dirty = false;
+  document.querySelectorAll("form[data-guard]").forEach(function (form) {
+    ["input", "change"].forEach(function (t) { form.addEventListener(t, function () { dirty = true; }); });
+  });
+  document.addEventListener("submit", function (e) {  // 잡는 단계: 글자 수가 넘쳐 막힌 저장(defaultPrevented)이면 그대로 묻는다
+    if (!e.defaultPrevented && e.target.matches && e.target.matches("form[data-guard]")) dirty = false;
+  }, true);
+  window.addEventListener("beforeunload", function (e) { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+  window.addEventListener("pageshow", function (e) {
+    if (!e.persisted) return;
+    dirty = false;
+    document.querySelectorAll("form").forEach(function (f) { f.reset(); f.classList.remove("busy"); f.removeAttribute("aria-busy"); });
+    document.querySelectorAll("form button[disabled]").forEach(function (b) { b.disabled = false; });
+    document.querySelectorAll(".pick-note,[role=status]").forEach(function (n) { n.textContent = ""; });
+  });
 })();
 </script>"""
 # 받은함: 파일을 고르면 바로 올린다(자바스크립트가 꺼져 있으면 '올리기' 버튼으로). 올리는 동안 버튼 옆에 도는 표시가 보인다.
@@ -367,7 +389,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
             f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)} · Magus</title><style>{STYLE}{css}{HELP_STYLE if helper else ""}</style></head><body data-screen="{screen}">
 <header class="site"><div class="site-in"><span class="brand">Magus</span>{nav}</div></header>
-<main>{lead}<h1>{html.escape(title)}</h1>{body}</main>{helper}{COUNT_SCRIPT if 'data-count-max="' in body + helper else ""}</body></html>""",
+<main>{lead}<h1>{html.escape(title)}</h1>{body}</main>{helper}{COUNT_SCRIPT if 'data-count-max="' in body + helper else ""}{FORM_SCRIPT}</body></html>""",
             status_code=status,
         )
 
