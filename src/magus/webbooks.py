@@ -44,7 +44,7 @@ from magus.melchior.cache import warm as warm_cites
 from magus.melchior.questions import build_questions
 from magus.melchior.report import build_cite_report
 from magus.store import BookTitles, Store
-from magus.store.base import STALE_REASONS
+from magus.store.base import CHAPTER_STATUS_NAMES, STALE_REASONS
 from magus.webshelf import color_fieldset, chosen_color, safe_color, state_url
 
 LIGHTS = {"verified": ("🟢", "확인"), "unverified": ("🟡", "미확인"), "unknown": ("🔴", "참고문헌에 없음"),
@@ -261,17 +261,20 @@ class BookPages:
             per[i.chapter_number] = per.get(i.chapter_number, 0) + 1
         parts = {p.number: p.title for p in self.store.list_parts(uid, project.id)}
         rows, current = [], None
-        for c in self.store.list_chapters(uid, project.id):
+        chapters = self.store.list_chapters(uid, project.id)
+        shown = any(c.status != "draft" for c in chapters)  # 모두 초안이면 상태 칸을 숨긴다(2026-10-09)
+        for c in chapters:
             if c.part_number is not None and c.part_number != current:
-                rows.append(f'<tr><th colspan="6">제{c.part_number}부 {html.escape(parts.get(c.part_number, ""))}</th></tr>')
+                rows.append(f'<tr><th colspan="{6 if shown else 5}">제{c.part_number}부 {html.escape(parts.get(c.part_number, ""))}</th></tr>')
             current = c.part_number
-            rows.append(f"<tr><td>{html.escape(c.display)}</td><td>{html.escape(c.title)}</td><td>{html.escape(c.status)}</td>"
+            status = f"<td>{html.escape(CHAPTER_STATUS_NAMES.get(c.status, c.status))}</td>" if shown else ""
+            rows.append(f"<tr><td>{html.escape(c.display)}</td><td>{html.escape(c.title)}</td>{status}"
                         f'<td class="num">{c.char_count:,}</td><td class="num">{per.get(c.number, 0)}</td>'
                         f'<td class="num">{c.unverified_cite_count}</td></tr>')
         return (
             f'<form method="post" action="/book/export" class="doc-actions">{self._csrf_input(session)}'
             f'<input type="hidden" name="project_id" value="{html.escape(project.id)}"><button>내려받기(docx)</button></form>'
-            '<table><tr><th>장</th><th>제목</th><th>상태</th><th class="num">글자</th><th class="num">확인 요청</th>'
+            '<table><tr><th>장</th><th>제목</th>' + ("<th>상태</th>" if shown else "") + '<th class="num">글자</th><th class="num">확인 요청</th>'
             f'<th class="num">미확인 인용</th></tr>{"".join(rows)}</table>'
         )
 

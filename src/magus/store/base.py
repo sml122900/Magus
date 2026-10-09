@@ -23,6 +23,8 @@ ANCHOR_MAX = 1000  # 미해결에 남기는 걸린 문장의 최대 길이(#73)
 IssueStale = Literal["comment_removed", "anchor_missing"]  # 다시 올린 뒤 "해결됐을 수 있음"(#76)
 ChapterStatus = Literal["draft", "revising", "done"]
 CHAPTER_STATUSES: tuple[str, ...] = ("draft", "revising", "done")
+# 저자에게 보이는 장 상태 이름(웹·내려받기, 2026-10-09). 도구 인자·파일 값은 영문 그대로
+CHAPTER_STATUS_NAMES: dict[str, str] = {"draft": "초안", "revising": "고치는 중", "done": "완성"}
 RefStatus = Literal["unverified", "verified"]
 # style_passage·ref_bib는 웹 책장 검색 전용이다(문체 구절·문헌 서지). 도구 검색(style_search·ref_search)은 쓰지 않고 임베딩도 하지 않는다.
 # category는 저자가 만든 카테고리의 항목(#92). owner_id는 "<카테고리 id>/<항목 id>"다.

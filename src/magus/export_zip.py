@@ -25,6 +25,7 @@ from magus.ids import local_time, utcnow
 from magus.contexts import book_contexts
 from magus.maps import BOOK_NAMES, LIBRARY_NAME, local_key
 from magus.store import MapNode, Store
+from magus.store.base import CHAPTER_STATUS_NAMES
 
 _BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
 WHEN = "%Y-%m-%d %H%M"
@@ -163,7 +164,7 @@ def _manuscript(store: Store, user: str, z: _Zip, folder: str, project_id: str) 
         if chapter is None:
             continue
         z.text(f"{folder}/장", f"{meta.number:03d} {safe_name(meta.title, 40)}.md",
-               _front([("장", meta.display), ("제목", meta.title), ("상태", meta.status), ("버전", meta.version)])
+               _front([("장", meta.display), ("제목", meta.title), ("상태", CHAPTER_STATUS_NAMES.get(meta.status, meta.status)), ("버전", meta.version)])
                + f"# {meta.display} {meta.title}\n\n{chapter.content.strip()}\n")
     issues = store.list_issues(user, project_id, None)
     if issues:
