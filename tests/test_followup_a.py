@@ -260,3 +260,27 @@ async def test_jwks_fetch_does_not_block_event_loop(jwks_server):
         await anyio.sleep(0.02)  # 티커가 먼저 잠들어 있는 동안 검증한다
         assert await v.verify_token(_signed(k1, "k1")) is not None  # JWKS가 1.5초 늦다
     assert max(lags) < 0.5, lags  # 전에는 검증 동안 이벤트 루프가 멈춰 다른 요청(/healthz)도 기다렸다
+
+
+# ---- 3-4·4-4 세션 없는 로그아웃, 올린 파일 지우기 이름 검사 ----
+
+def test_logout_without_session_and_inbox_delete_name(server_proc):  # noqa: F811
+    import httpx2
+    from test_web import _csrf
+
+    base, data_dir, _ = server_proc({})
+    with httpx2.Client(base_url=base, follow_redirects=False, timeout=60) as c:
+        r = c.post("/logout", data={"csrf": "다른 사이트"})
+        assert r.status_code == 303 and r.headers["location"] == "/login" and "set-cookie" not in r.headers  # 쿠키를 지우지 않는다
+        c.get("/login?next=/me/files")
+        csrf = _csrf(c.get("/me/files").text)
+        inbox = data_dir / "users" / "alice" / "inbox"
+        inbox.mkdir(parents=True, exist_ok=True)
+        (inbox / "secret.txt").write_text("x", encoding="utf-8")
+        for bad in ("secret.txt:zone", "../secret.txt", ".secret.txt"):
+            assert c.post("/inbox/delete", data={"csrf": csrf, "name": bad}).status_code == 403, bad
+        assert (inbox / "secret.txt").exists()
+        ok = c.post("/inbox/delete", data={"csrf": csrf, "name": "secret.txt"}, follow_redirects=True)
+        assert ok.status_code == 200 and not (inbox / "secret.txt").exists()
+        out = c.post("/logout", data={"csrf": csrf})
+        assert out.status_code == 200 and "magus_session" in out.headers.get("set-cookie", "")  # 세션이 있으면 지운다

@@ -38,7 +38,7 @@ from magus.book.export import export_docx
 from magus.config import Settings
 from magus.helpbot import CLEAR_SCRIPT, HELP_STYLE, UNAVAILABLE, HelpBot, screen_key, screen_label, user_key, widget
 from magus.ids import local_time, utcnow
-from magus.inbox import LimitError, mb, save_upload, size_text
+from magus.inbox import LimitError, mb, safe_filename, save_upload, size_text
 from magus.signing import CsrfError, sign, unsign
 from magus.store import Profile, Store
 from magus.webboard import BoardPages
@@ -636,11 +636,12 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
 
     async def logout(self, request: Request) -> Response:
         session = self.user_of(request)
-        if session:
-            try:
-                await self._form(request, session)
-            except PermissionError:
-                return self._page("로그아웃", '<p class="msg err">잘못된 요청입니다.</p>', status=403)
+        if not session:  # 세션이 없으면 쿠키를 건드리지 않는다(점검 3-4: 다른 사이트의 폼이 Lax 쿠키 없이 보내 강제 로그아웃시킬 수 있었다)
+            return RedirectResponse("/login", status_code=303)
+        try:
+            await self._form(request, session)
+        except PermissionError:
+            return self._page("로그아웃", '<p class="msg err">잘못된 요청입니다.</p>', status=403)
         response = self._page("로그아웃", f'<p><a href="/login">로그인</a></p>{CLEAR_SCRIPT}')  # 도움말 대화도 지운다
         response.delete_cookie(SESSION_COOKIE, path="/")
         return response
@@ -700,7 +701,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
             return self._need_login(request)
         try:
             form = await self._form(request, session)
-            name = str(form.get("name", ""))
+            name = safe_filename(str(form.get("name", "")))  # 올릴 때와 같은 이름 검사(점검 4-4: secret.txt:zone 같은 이름이 지나갔다)
             ok = self.store.delete_inbox(session[0], name)
         except (PermissionError, ValueError):
             return self._page("올린 파일", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
