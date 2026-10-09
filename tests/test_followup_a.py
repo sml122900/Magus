@@ -284,3 +284,21 @@ def test_logout_without_session_and_inbox_delete_name(server_proc):  # noqa: F81
         assert ok.status_code == 200 and not (inbox / "secret.txt").exists()
         out = c.post("/logout", data={"csrf": csrf})
         assert out.status_code == 200 and "magus_session" in out.headers.get("set-cookie", "")  # 세션이 있으면 지운다
+
+
+# ---- 3-5 로컬 모드 Host 허용 목록 ----
+
+def test_local_mode_refuses_foreign_host(server_proc):  # noqa: F811
+    import httpx2
+
+    from magus.transports import host_of
+
+    assert [host_of(h) for h in ("127.0.0.1:8000", "[::1]:8000", "localhost", "evil.example:80", "[::1]")] == [
+        "127.0.0.1", "::1", "localhost", "evil.example", "::1"]
+    base, _, _ = server_proc({})
+    with httpx2.Client(base_url=base, follow_redirects=False, timeout=60) as c:
+        for path in ("/login", "/shelf", "/healthz", "/mcp"):
+            r = c.get(path, headers={"host": "evil.example:8000"})
+            assert r.status_code == 400 and "허용하지 않는 Host" in r.text, path
+        assert c.get("/login", headers={"host": "localhost"}).status_code == 303  # 루프백 이름은 그대로
+        assert c.get("/healthz").status_code == 200

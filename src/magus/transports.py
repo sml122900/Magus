@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable
 from mcp.server.mcpserver import MCPServer
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from magus.auth import ForbiddenGate, JwtVerifier
 
@@ -31,6 +31,32 @@ def is_loopback(host: str) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
+
+
+def host_of(header: str) -> str:
+    """Host 머리 → 이름(포트 뗌). [::1]:8000 → ::1."""
+    header = header.strip().lower()
+    if header.startswith("["):
+        return header[1:header.find("]")] if "]" in header else ""
+    return header.rsplit(":", 1)[0] if header.count(":") == 1 else header
+
+
+class LoopbackHostGate:
+    """인증 없는 로컬 모드(루프백 전용)에서 Host가 루프백 이름이 아니면 막는다(2026-10-09 점검 3-5).
+    악성 페이지가 DNS 리바인딩으로 개발 PC의 로컬 서버(실제 저자 데이터)를 같은 출처처럼 읽고 쓰는 길을 막는다.
+    SDK의 Host 검사는 /mcp에만 걸려 웹(/login·/shelf)은 열려 있었다."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] in ("http", "websocket"):
+            header = dict(scope.get("headers") or []).get(b"host", b"").decode("latin-1")
+            if not is_loopback(host_of(header)):
+                await Response("허용하지 않는 Host입니다(로컬 모드는 127.0.0.1·localhost로만 연다).", status_code=400,
+                               media_type="text/plain; charset=utf-8")(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 ErrorHandler = Callable[[Request, Exception], Awaitable[Response]]
@@ -54,7 +80,7 @@ def http_app(
     if error_handler is not None:
         for status in (400, 404, 405):
             app.add_exception_handler(status, error_handler)
-    return ForbiddenGate(app, verifier, MCP_PATH) if verifier else app
+    return ForbiddenGate(app, verifier, MCP_PATH) if verifier else LoopbackHostGate(app)
 
 
 def run_http(
