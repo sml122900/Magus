@@ -81,7 +81,13 @@ def main(argv: list[str] | None = None) -> None:
     extract.add_argument("--user", action="append", default=None, help="사용자(여러 번 줄 수 있다). 없으면 USER_ID")
     extract.add_argument("--all-users", action="store_true", help="데이터 폴더의 모든 사용자")
     extract.add_argument("--force", action="store_true", help="이미 뽑은 것도 다시")
+    warm = sub.add_parser("warm-cache", help="인용 계산 캐시를 미리 만든다(배포 때, 프로젝트 폴더 .cache/, 결정 f). 원본은 읽기만")
+    warm.add_argument("--user", action="append", default=None, help="사용자(여러 번 줄 수 있다). 없으면 USER_ID")
+    warm.add_argument("--all-users", action="store_true", help="데이터 폴더의 모든 사용자")
     args = parser.parse_args(argv)
+    from magus.melchior import warmer
+
+    warmer.ENABLED = args.cmd == "serve"  # 뒤에서 데우기는 서버에서만(다른 명령은 곧 끝나 계산이 잘린다)
 
     # stdio 전송에서 stdout은 MCP 프로토콜 전용이다. 로그는 반드시 stderr로 보낸다. 내용은 로그에 남기지 않는다(logsafe).
     # ERROR는 운영자 알림(ALERT_*)으로도 간다. 설정이 없으면 알림은 꺼져 있다.
@@ -278,6 +284,18 @@ def main(argv: list[str] | None = None) -> None:
         for user in everyone if args.all_users else (args.user or [settings.user_id]):
             counts = store.extract_all(user, force=args.force)
             print(f"{user}: " + " · ".join(f"{k} {v}" for k, v in counts.items()))
+    elif args.cmd == "warm-cache":  # 인용 계산 캐시(결정 f). 프로젝트 id·시간만 보인다
+        import time
+
+        from magus.melchior.cache import warm as warm_cites
+
+        folders = store.root / "users"
+        everyone = sorted(p.name for p in folders.iterdir() if p.is_dir()) if folders.is_dir() else []
+        for user in everyone if args.all_users else (args.user or [settings.user_id]):
+            for project_id in warmer.projects_with_manuscript(store, user):
+                started = time.monotonic()
+                warm_cites(store, user, project_id)
+                print(f"{user}/{project_id}: {time.monotonic() - started:.1f}초")
     elif args.cmd in ("maps", "floors"):  # 프로젝트·지도 이전(#95, 층 이전 #93을 포함). 실행은 백업 뒤에, 전후 비교를 보인다
         from magus import map_migrate as floor_migrate
 

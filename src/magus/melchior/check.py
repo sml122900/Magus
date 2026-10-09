@@ -277,7 +277,11 @@ def link_citation_issues(store: Store, user_id: str) -> int:
 
 def after_refs_changed(store: Store, user_id: str) -> int:
     refresh_cite_counts(store, user_id)
-    return link_citation_issues(store, user_id)
+    linked = link_citation_issues(store, user_id)
+    from magus.melchior.warmer import schedule  # noqa: PLC0415 — 인용 계산 캐시를 뒤에서 데운다(결정 f)
+
+    schedule(store, user_id)
+    return linked
 
 
 def chapters_citing(store: Store, user_id: str, key: str) -> dict[str, list[int]]:

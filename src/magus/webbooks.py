@@ -22,7 +22,6 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from starlette.requests import Request
@@ -40,7 +39,6 @@ from magus.melchior.author_report import cite_label, write_docx
 from magus.melchior.check import cite_floors
 from magus.melchior.questions import TYPES as QUESTION_TYPES
 from magus.melchior.cache import CiteCache
-from magus.melchior.cache import warm as warm_cites
 from magus.melchior.questions import build_questions
 from magus.melchior.report import build_cite_report
 from magus.store import BookTitles, Store
@@ -197,9 +195,8 @@ class BookPages:
         except (ValueError, FileNotFoundError, LimitError) as e:
             return self._book_page("문서 올리기", f'<p class="msg err">{html.escape(str(e))}</p><p><a href="/shelf">프로젝트</a></p>',
                                    session, 400)
-        # 응답 뒤에 인용 계산 캐시를 미리 만든다(첫 인용 상태 탭이 빠르게, 2026-10-09)
-        return RedirectResponse(f"/shelf/book/{report.project_id}?done=imported", status_code=303,
-                                background=BackgroundTask(warm_cites, self.store, uid, report.project_id))
+        # 인용 계산 캐시는 가져오기 끝(after_refs_changed)에 예약되어 뒤에서 데워진다(magus.melchior.warmer, 결정 f)
+        return RedirectResponse(f"/shelf/book/{report.project_id}?done=imported", status_code=303)
 
     # ---- 원고 책 ------------------------------------------------------------------------------
     def _manuscript_head(self, uid: str, project: Any, tab: str) -> str:
