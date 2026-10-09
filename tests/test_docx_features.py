@@ -195,11 +195,14 @@ async def test_ai_comments_are_marked_in_tools(settings, store: LocalStore, tmp_
 def test_web_marks_ai_comments(server_proc, tmp_path: Path):  # noqa: F811 - test_web의 픽스처
     import httpx2
 
-    base, _, _ = server_proc({})
+    from test_web import project_with_document
+
+    base, data_dir, _ = server_proc({})
     docx_bytes = _authored_manuscript(tmp_path / "a.docx").read_bytes()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         csrf = re.search(r'name="csrf" value="([0-9a-f]+)"', c.get("/login?next=/shelf").text).group(1)
-        made = c.post("/shelf/manuscript", data={"csrf": csrf, "floor": "new"}, files={"file": ("원고.docx", docx_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")})
+        pid = project_with_document(c, data_dir, csrf, "원고.docx", docx_bytes)  # '+ 프로젝트'(제목) → 올린 파일 → 대화(2026-10-10)
+        made = c.get(f"/shelf/book/{pid}")
         page = made.text  # 올린 문서(#94 → #96)
         assert "1장 + " not in page and '<p class="floor-meta">1장 ·' in page  # outline과 같은 장 수 표기
         assert "열린 확인 요청 2 " in page

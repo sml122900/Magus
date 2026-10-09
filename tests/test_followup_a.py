@@ -131,7 +131,8 @@ def _broken_files(tmp_path):
             "깨진.pdf": b"%PDF-1.7\n%broken\n"}
 
 
-def test_broken_manuscript_upload_is_400(server_proc, tmp_path):  # noqa: F811
+async def test_broken_manuscript_through_files_and_chat(server_proc, tmp_path):  # noqa: F811
+    """웹의 문서 올리기는 없앴다(2026-10-10): 깨진 문서를 올린 파일에 올리고 대화(이 서버의 /mcp)에서 가져오면 알아듣는 오류, 서버 로그에 traceback 없음."""
     import httpx2
     from test_web import _csrf
 
@@ -140,12 +141,14 @@ def test_broken_manuscript_upload_is_400(server_proc, tmp_path):  # noqa: F811
     base, _, log = server_proc({})
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=60) as c:
         csrf = _csrf(c.get("/login?next=/shelf").text)
+        made = c.post("/shelf/projects", data={"csrf": csrf, "title": "깨진 문서 시험"})
+        pid = str(made.url).split("/shelf/p/")[1].split("?")[0]
         for name, data in _broken_files(tmp_path).items():
-            r = c.post("/shelf/manuscript", data={"csrf": csrf, "project": "new"}, files={"file": (name, data, "application/octet-stream")})
-            assert r.status_code == 400 and UNREADABLE in r.text, (name, r.status_code)
-        wrong = c.post("/shelf/manuscript", data={"csrf": "틀림", "project": "new"},
-                       files={"file": ("a.docx", b"x", "application/octet-stream")})
-        assert wrong.status_code == 403 and "잘못된 요청입니다." in wrong.text
+            assert f"올림: {name}" in c.post("/inbox/upload", data={"csrf": csrf}, files={"files": (name, data)}).text
+    async with Client(f"{base}/mcp") as chat:
+        for name in _broken_files(tmp_path):
+            r = await chat.call_tool("book_import", {"path": name, "project_id": pid})
+            assert r.is_error and UNREADABLE in r.content[0].text, (name, r.content[0].text)
     assert "Traceback" not in log.read_text(encoding="utf-8") and " ERROR " not in log.read_text(encoding="utf-8")
 
 

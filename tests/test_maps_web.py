@@ -51,7 +51,8 @@ def test_project_list_and_new_project(server_proc):  # noqa: F811
         names = re.findall(r'<span class="pname">([^<]+)</span>', listed)
         assert names[-1] == "내 서재" and set(names[:-1]) == {"도시는 어떻게 태어났나", "강과 사람"}  # 「내 서재」는 끝에
         assert listed.count("최근 수정 ") >= 3 and '<span class="pmeta">노드 4 · 1장</span>' in listed and '<span class="pmeta">노드 1</span>' in listed
-        assert '<h2>+ 프로젝트</h2>' in listed and 'name="project" value="new"' in listed and 'action="/shelf/projects"' in listed
+        assert '<h2>+ 프로젝트</h2>' in listed and 'action="/shelf/projects"' in listed  # 제목만(2026-10-10, 문서 올리기 칸 없음)
+        assert 'name="project" value="new"' not in listed and 'type="file"' not in listed
         assert c.post("/shelf/projects", data={"csrf": "틀림", "title": "x"}).status_code == 403
         assert "projecterr=empty" in str(c.post("/shelf/projects", data={"csrf": csrf, "title": "  "}).url)
         made = c.post("/shelf/projects", data={"csrf": csrf, "title": "다음 책 <b>메모</b>"})

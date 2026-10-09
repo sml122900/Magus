@@ -48,9 +48,6 @@ def test_body_limit_and_streamed_uploads(server_proc):  # noqa: F811
         # 작은 폼 주소(지도 바꾸기)는 2MB
         small = c.post("/shelf/p/common/map", content=_chunked(fields, "files", "big.txt", 5_000_000), headers=headers)
         assert small.status_code == 413 and "2.0 MB까지" in small.text
-        # 문서 올리기: 한 개 한도 + 1MB
-        ms = c.post("/shelf/manuscript", content=_chunked(fields, "file", "원고.docx", 5_000_000), headers=headers)
-        assert ms.status_code == 413
         # 정상 첨부는 그대로 저장된다(임시 파일에서 흘려 씀)
         ok = c.post("/shelf/write/bk1", data={"csrf": csrf, "title": "첨부", "content": "본문"},
                     files=[("files", ("a.txt", b"x" * 1_500_000, "text/plain")), ("files", ("b.txt", "가나다".encode(), "text/plain"))])

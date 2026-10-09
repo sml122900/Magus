@@ -30,7 +30,7 @@ from mcp import Client
 from starlette.requests import Request
 from test_auth import ISSUER, _client, _config, _token, auth_server, jwks_url, keys  # noqa: F401 - 픽스처
 from test_http import FIXTURES
-from test_web import _csrf, _login, fake_issuer, server_proc  # noqa: F401 - 픽스처
+from test_web import _csrf, _login, fake_issuer, project_with_document, server_proc  # noqa: F401 - 픽스처
 
 from magus.auth import USER_ID_CLAIM, AuthConfig, ForbiddenGate, JwtVerifier
 from magus.book.demo import seed_demo
@@ -253,15 +253,13 @@ def test_web_session_ends_when_user_is_removed(server_proc, fake_issuer):  # noq
     """같은 SESSION_SECRET으로 다시 띄웠는데 ALLOWED_USERS에서 앨리스를 뺐다: 앨리스의 세션 쿠키와 내려받기 링크가 통하지 않는다."""
     issuer, issuer_state, _ = fake_issuer
     env = {"PUBLIC_URL": "http://127.0.0.1:{port}", "AUTH_ISSUER": issuer, "SESSION_SECRET": "x" * 40, "WEB_CLIENT_ID": "web-client"}
-    base1, _, _ = server_proc({**env, "ALLOWED_USERS": "sub-alice=alice,sub-bob=bob"})
+    base1, data_dir1, _ = server_proc({**env, "ALLOWED_USERS": "sub-alice=alice,sub-bob=bob"})
     with httpx2.Client(base_url=base1, timeout=120) as alice, httpx2.Client(base_url=base1, timeout=60) as bob:
         _login(alice, issuer_state, "sub-alice")
         _login(bob, issuer_state, "sub-bob")
         cookie, bob_cookie = alice.cookies.get(SESSION_COOKIE), bob.cookies.get(SESSION_COOKIE)
         csrf = _csrf(alice.get("/me/files").text)
-        made = alice.post("/shelf/manuscript", data={"csrf": csrf, "floor": "new"},
-                          files={"file": ("원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")})
-        pid = made.headers["location"].split("/shelf/book/")[1].split("?")[0]
+        pid = project_with_document(alice, data_dir1, csrf, "원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes())
         link = alice.post("/book/export", data={"csrf": csrf, "project_id": pid}, follow_redirects=False).headers["location"]
     base2, _, _ = server_proc({**env, "ALLOWED_USERS": "sub-bob=bob"})
     with httpx2.Client(base_url=base2, timeout=60, cookies={SESSION_COOKIE: bob_cookie}) as kept:  # 대조: 목록에 남은 밥은 그대로

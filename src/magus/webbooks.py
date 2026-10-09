@@ -1,10 +1,11 @@
-"""모든 동작을 책장에서(사용자 결정 #94, 2026-10-07 → #96 종류 없음): 올린 문서 화면, 올린 문서에서 만든 문서 화면,
-'+ 프로젝트'의 문서 올리기. Web에 섞는 BookPages.
+"""모든 동작을 책장에서(사용자 결정 #94, 2026-10-07 → #96 종류 없음): 올린 문서 화면, 올린 문서에서 만든 문서 화면.
+Web에 섞는 BookPages.
 #96: 화면에 '원고 책·모음 책·문서 책' 같은 종류 이름을 쓰지 않는다. 올린 문서·문서에도 컨텍스트를 붙인다(책 설정, 머리에 표시).
 
 - 2026-10-09: 책장에는 책 목록과 '새 책' 하나(옛 책 추가 /shelf/add는 새 책으로 넘긴다). 웹의 수정본 올리기는 없앴다.
   수정본·나중에 올리는 문서는 게시판에 첨부하고 대화에서 말하면 Claude가 files_list의 첨부를 book_import로 가져간다.
-  문서 올리기(/shelf/manuscript)는 프로젝트 목록의 '+ 프로젝트'(새 프로젝트)만. 화면 위에 위치 표시(프로젝트 › 노드 › 책).
+  2026-10-10: 웹의 문서 올리기(/shelf/manuscript, '+ 프로젝트'의 파일 칸)도 없앴다. '+ 프로젝트'는 제목만이고, 올린 문서는
+  올린 파일(내 정보)이나 게시판 글의 첨부로 두고 대화에서 가져온다(book_import, 올린 문서 없는 project_id). 화면 위에 위치 표시(프로젝트 › 노드 › 책).
 - 원고 책(/shelf/book/<id>): 장 목록 · 확인 요청 · 인용 상태(체크리스트 + 답해 주실 질문) · 수정본 이력 탭.
   옛 주소 /book·/issues·/checklist·/questions는 여기로 넘긴다.
 - 문서 책(/shelf/doc/<id>): 읽기용. 기준 원고에 새 수정본이 오면 '옛 판 기준'과 '다시 만들기'. docx 내려받기, 인쇄·PDF로 저장(브라우저 인쇄).
@@ -23,22 +24,16 @@ from pathlib import Path
 from typing import Any
 
 from starlette.concurrency import run_in_threadpool
-from starlette.datastructures import UploadFile
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from magus.book.documents import DOC_TYPES, STALE_WORDS, build_source_check, is_stale, latest_edition
-from magus.book.importer import import_manuscript
 from magus.book.outline import chapter_count
-from magus.contexts import attach_manuscript_context, view_for_book
+from magus.contexts import view_for_book
 from magus.webcontexts import CONTEXT_SCRIPT, context_fieldset, contexts_from_form, contexts_view_html, register_row
 from magus.ids import local_time
-from magus.inbox import LimitError, mb, safe_filename
-from magus.signing import CsrfError
-from magus.store.fileio import data_size, write_data
 from magus.mdlite import to_html
 from magus.melchior.author_report import cite_label, write_docx
-from magus.melchior.check import cite_floors
 from magus.melchior.questions import TYPES as QUESTION_TYPES
 from magus.melchior.cache import CiteCache
 from magus.melchior.questions import build_questions
@@ -55,7 +50,6 @@ ISSUE_KIND_NAMES = {"citation": "문헌 확인", "fact": "사실·수치 확인"
 TABS = (("chapters", "장 목록"), ("issues", "확인 요청"), ("cites", "인용 상태"), ("editions", "수정본 이력"))
 MANUSCRIPT_COLOR = "#4b2e1e"  # 원고 책의 처음 색(짙은 가죽색). 저자가 바꿀 수 있다
 WHEN = "%Y-%m-%d %H:%M"
-IMPORTING = "가져오는 중…"
 
 BOOK_STYLE = """
 .tabs{display:flex;flex-wrap:wrap;gap:4px 8px;margin:12px 0 16px;border-bottom:2px solid var(--line)}
@@ -64,10 +58,6 @@ border-bottom:3px solid transparent;margin-bottom:-2px}
 .tabs a[aria-current=page]{color:var(--primary);border-bottom-color:var(--primary)}
 a.button{display:inline-flex;align-items:center;min-height:44px;padding:8px 16px;border-radius:999px;background:var(--primary);color:#fff;
 text-decoration:none;font-weight:600}a.button:hover{background:var(--press);color:#fff}
-.progress{display:none;margin:12px 0}.progress.on{display:block}
-.progress .bar{height:12px;border-radius:6px;background:var(--line);overflow:hidden}
-.progress .bar i{display:block;height:100%;width:0;background:var(--primary);transition:width .2s}
-.progress .say{margin:8px 0 0;font-weight:600}
 .doc{background:var(--canvas);border:1px solid var(--line);border-radius:12px;padding:4px 28px 24px;box-shadow:var(--shadow);max-width:880px}
 .doc-history{max-width:880px;box-sizing:border-box}
 .doc h2{font-size:24px}.doc h3{font-size:19px;margin-top:28px}.doc li{margin:6px 0}.doc blockquote{margin:8px 0;color:var(--ink2)}
@@ -78,41 +68,6 @@ text-decoration:none;font-weight:600}a.button:hover{background:var(--press);colo
 @media print{.site,.crumb,.floor-meta,.doc-actions,.tabs,.no-print{display:none!important}body{background:#fff}main{max-width:none;padding:0}
 .doc{border:0;box-shadow:none;padding:0;max-width:none}h1{margin-top:0}}
 """
-
-# 파일을 고르고 올리면: 올리는 % → 가져오는 중 → 끝난 화면으로. 자바스크립트가 꺼져 있으면 보통 폼으로 보낸다(같은 결과).
-UPLOAD_PROGRESS = """<script>
-(function () {
-  document.querySelectorAll("form[data-progress]").forEach(function (form) {
-    form.addEventListener("submit", function (e) {
-      var file = form.querySelector("input[type=file]");
-      if (!window.FormData || !window.XMLHttpRequest || !file || !file.files.length) return;
-      e.preventDefault();
-      var box = form.querySelector(".progress"), bar = box.querySelector("i"), say = box.querySelector(".say");
-      var button = form.querySelector("button");
-      box.classList.add("on"); if (button) button.disabled = true;
-      var xhr = new XMLHttpRequest();
-      xhr.open("POST", form.getAttribute("action"));
-      xhr.upload.onprogress = function (ev) {
-        if (!ev.lengthComputable) return;
-        var p = Math.round(ev.loaded * 100 / ev.total); bar.style.width = p + "%"; say.textContent = "올리는 중 " + p + "%";
-      };
-      xhr.upload.onload = function () { bar.style.width = "100%"; say.textContent = form.getAttribute("data-progress"); };
-      xhr.onload = function () {
-        var done = xhr.status === 200 && xhr.responseURL && xhr.responseURL.indexOf(form.getAttribute("action")) < 0;
-        if (done) { location.href = xhr.responseURL; return; }
-        document.open(); document.write(xhr.responseText); document.close();
-      };
-      xhr.onerror = function () { say.textContent = "올리지 못했습니다."; if (button) button.disabled = false; };
-      xhr.send(new FormData(form));
-    });
-  });
-})();
-</script>"""
-
-
-def progress_box() -> str:
-    return '<div class="progress" role="status" aria-live="polite"><div class="bar"><i></i></div><p class="say"></p></div>'
-
 
 def short_name(title: str, width: int = 12) -> str:
     """책등에 들어갈 짧은 이름: 부제(— 뒤, : 뒤)를 떼고 width자까지."""
@@ -139,7 +94,6 @@ class BookPages:
     def book_routes(self) -> list[tuple[str, list[str], Callable[..., Any]]]:
         return [
             ("/shelf/add", ["GET"], self.add_book),
-            ("/shelf/manuscript", ["POST"], self.manuscript_upload),
             ("/shelf/book/{project}", ["GET"], self.manuscript_page),
             ("/shelf/doc/{doc}", ["GET"], self.document_page),
             ("/shelf/doc/{doc}/redo", ["POST"], self.document_redo),
@@ -154,52 +108,11 @@ class BookPages:
         return self._page(title, body, session, status, current="프로젝트", css=SHELF_STYLE + BOOK_STYLE + CONTEXT_STYLE + BOARD_STYLE,
                           lead=lead)
 
-    # ---- 책 추가(옛 주소)·문서 올리기 ------------------------------------------------------------------
+    # ---- 책 추가(옛 주소) ------------------------------------------------------------------------------
     async def add_book(self, request: Request) -> Response:
         """옛 '책 추가'(새 책·문서 올리기 두 칸)는 없앴다(2026-10-09). 같은 자리의 새 책으로 넘긴다."""
         query = urllib.parse.urlencode([(k, v) for k, v in request.query_params.items() if k in ("project", "floor", "node")])
         return RedirectResponse("/shelf/new" + (f"?{query}" if query else ""), status_code=303)
-
-    async def _uploaded(self, request: Request, session: tuple[str, str]) -> tuple[Any, Any, str]:
-        """(폼, 파일 내용, 안전한 파일 이름). 한도·형식이 맞지 않으면 ValueError(저자에게 보일 문장)."""
-        limit = self.settings.max_upload_bytes + 1_000_000
-        if int(request.headers.get("content-length") or 0) > limit:
-            raise ValueError(f"파일이 너무 큽니다(한 개 한도 {mb(self.settings.max_upload_bytes)}).")
-        form = await self._form(request, session)
-        item = form.get("file")
-        if not isinstance(item, UploadFile) or not item.filename:
-            raise ValueError("올릴 문서 파일을 골라 주세요.")
-        name = safe_filename(item.filename)
-        if Path(name).suffix.lower() not in (".docx", ".pdf"):
-            raise ValueError("올릴 문서는 docx 또는 pdf 파일이어야 합니다.")
-        size = item.size if item.size is not None else data_size(item.file)  # 읽지 않고 받은 크기로(점검 5-a)
-        if size > self.settings.max_upload_bytes:
-            raise ValueError(f"파일이 너무 큽니다: {mb(size)}(한 개 한도 {mb(self.settings.max_upload_bytes)}).")
-        used = await run_in_threadpool(self.store.usage_bytes, session[0])
-        if used + size > self.settings.max_user_bytes:
-            raise ValueError(f"저장 용량을 넘습니다: 지금 {mb(used)} + 새 파일 {mb(size)} > 한도 {mb(self.settings.max_user_bytes)}.")
-        return form, item.file, name
-
-    async def manuscript_upload(self, request: Request) -> Response:
-        session = self.user_of(request)
-        if not session:
-            return self._need_login(request)
-        uid = session[0]
-        try:
-            _, upload, name = await self._uploaded(request, session)
-            # 프로젝트 목록의 '+ 프로젝트': 올린 문서로 새 프로젝트를 만든다. 임시 폴더를 지우지 못해도(Windows에서 깨진 PDF가 파일을 잡고 있을 때) 실패로 보지 않는다
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-                path = Path(tmp) / name
-                await run_in_threadpool(write_data, path, upload)  # 받은 임시 파일에서 흘려 쓴다
-                report = await run_in_threadpool(import_manuscript, self.store, uid, path)
-                await run_in_threadpool(attach_manuscript_context, self.store, uid, report.project_id)  # 「원고」 컨텍스트(#96)
-        except CsrfError:  # CSRF만 403(전에는 모든 PermissionError가 '잘못된 요청입니다'였다, 점검 7-d)
-            return self._book_page("문서 올리기", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-        except (ValueError, FileNotFoundError, LimitError) as e:
-            return self._book_page("문서 올리기", f'<p class="msg err">{html.escape(str(e))}</p><p><a href="/shelf">프로젝트</a></p>',
-                                   session, 400)
-        # 인용 계산 캐시는 가져오기 끝(after_refs_changed)에 예약되어 뒤에서 데워진다(magus.melchior.warmer, 결정 f)
-        return RedirectResponse(f"/shelf/book/{report.project_id}?done=imported", status_code=303)
 
     # ---- 원고 책 ------------------------------------------------------------------------------
     def _manuscript_head(self, uid: str, project: Any, tab: str) -> str:
@@ -217,12 +130,6 @@ class BookPages:
 
     def _manuscript_done(self, uid: str, project: Any, request: Request) -> str:
         done = request.query_params.get("done")
-        if done == "imported":
-            chapters = self.store.list_chapters(uid, project.id)
-            issues = self.store.list_issues(uid, project.id, None)
-            refs = self.store.list_refs(uid, floors=cite_floors(self.store, uid, project.id))
-            return (f'<p class="msg">올렸습니다: {chapter_count(chapters)} · {len(self.store.list_parts(uid, project.id))}부 · '
-                    f"확인 요청 {len(issues)} · 문헌 {len(refs)}</p>")
         if done == "edit":
             return '<p class="msg">저장했습니다.</p>'
         return ""

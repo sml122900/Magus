@@ -469,8 +469,6 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
         s = self.settings
         if re.fullmatch(r"/shelf/write/[^/]+|/shelf/[^/]+/[^/]+/edit", path):
             return s.max_attach_bytes * MAX_FILES + 2_000_000  # 글쓰기·고치기의 첨부(10개까지)
-        if path == "/shelf/manuscript":
-            return s.max_upload_bytes + 1_000_000  # 문서 하나
         if path == "/inbox/upload":
             return s.max_upload_bytes * INBOX_BATCH + 1_000_000  # 올린 파일(한 번에 여러 개)
         return s.max_request_bytes

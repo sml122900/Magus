@@ -156,14 +156,11 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
         assert "휴지통으로 옮겼습니다." in gone.text and str(gone.url).startswith(f"{base}/shelf/p/{floor_id}")
         assert f'data-key="doc.{doc_id}"' in c.get(f"/shelf/p/{floor_id}?node=center").text
         assert c.get(f"/shelf/book/{floor_id}").status_code == 404
-        # 9. 프로젝트 목록의 '+ 프로젝트': 문서를 올리면 새 프로젝트(받은함을 거치지 않음, 진행 표시)
-        assert c.post("/shelf/manuscript", data={"csrf": "틀림", "project": "new"},
-                      files={"file": (manuscript.name, manuscript.read_bytes(), DOCX)}).status_code == 403
-        bad = c.post("/shelf/manuscript", data={"csrf": csrf, "project": "new"}, files={"file": ("메모.txt", b"x", "text/plain")})
-        assert bad.status_code == 400 and "올릴 문서는 docx 또는 pdf 파일이어야 합니다." in bad.text
-        fresh = c.post("/shelf/manuscript", data={"csrf": csrf, "project": "new"}, files={"file": (manuscript.name, manuscript.read_bytes(), DOCX)})
-        assert re.search(r"/shelf/book/[^/?]+\?done=imported$", str(fresh.url)) and f"/shelf/book/{floor_id}?" not in str(fresh.url)
-        assert re.search(r"올렸습니다: 7장 · 3부 · 확인 요청 \d+ · 문헌 \d+", fresh.text)
+        # 9. 프로젝트 목록의 '+ 프로젝트'는 제목과 '만들기'만(2026-10-10). 웹의 문서 올리기 주소는 없다
+        card = c.get("/shelf").text.split('<li class="pcard new">')[1].split("</li>")[0]
+        assert 'type="file"' not in card and "올리기" not in card and 'action="/shelf/projects"' in card
+        assert c.post("/shelf/manuscript", data={"csrf": csrf}, files={"file": (manuscript.name, manuscript.read_bytes(), DOCX)},
+                      follow_redirects=False).status_code == 405
     store = LocalStore(data_dir)
     assert store.list_chapters("alice", floor_id) == [] and store.get_document("alice", doc_id) is not None
     assert list((data_dir / "users" / "alice" / "trash").glob(f"{floor_id}-*/project.json"))

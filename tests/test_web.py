@@ -62,9 +62,45 @@ def server_proc(tmp_path: Path):
         log.close()
 
 
+def claude_call(data_dir: Path, user: str, tool: str, **args) -> str:
+    """Claude 역할(시험에서 대신): 같은 데이터 폴더에 프로세스 안 서버로 도구를 부른다(원격처럼 파일은 이름으로만)."""
+    import anyio
+    from mcp import Client
+
+    from magus.config import Settings
+    from magus.server import build_server
+    from magus.store import LocalStore
+
+    async def run() -> str:
+        store = LocalStore(data_dir)
+        try:
+            async with Client(build_server(Settings.from_env({"USER_ID": user, "DATA_DIR": str(data_dir)}), store)) as c:
+                result = await c.call_tool(tool, args)
+                text = "".join(block.text for block in result.content)
+                assert not result.is_error, text
+                return text
+        finally:
+            store.close()
+
+    return anyio.run(run)
+
+
+def project_with_document(c, data_dir: Path, csrf: str, name: str, data: bytes, title: str = "원고", user: str = "alice") -> str:
+    """올린 문서가 있는 프로젝트를 웹 + 대화로 만든다(2026-10-10, '+ 프로젝트'는 제목만): '+ 프로젝트'(제목) →
+    내 정보 › 올린 파일에 올리기 → Claude가 book_import(올린 파일 이름, 올린 문서 없는 project_id). 프로젝트 id를 돌려준다."""
+    made = c.post("/shelf/projects", data={"csrf": csrf, "title": title}, follow_redirects=False)
+    assert made.status_code == 303, made.text
+    pid = urllib.parse.urlparse(made.headers["location"]).path.split("/")[-1]
+    up = c.post("/inbox/upload", data={"csrf": csrf}, files={"files": (name, data)}, follow_redirects=False)
+    assert up.status_code in (200, 303), up.text
+    claude_call(data_dir, user, "book_import", path=name, project_id=pid)
+    return pid
+
+
 def test_local_round_trip_upload_import_checklist_download(server_proc):
-    """올린 파일(설정 아래, #94) → 책장에서 원고 책 만들기 → 인용 상태 → docx 내려받기(로그인 필요한 링크)."""
-    base, _, log_path = server_proc({})
+    """올린 파일(설정 아래, #94) → '+ 프로젝트'(제목만) → 대화에서 그 올린 파일을 올린 문서로(2026-10-10) → 인용 상태 →
+    docx 내려받기(로그인 필요한 링크)."""
+    base, data_dir, log_path = server_proc({})
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         assert c.get("/me/files", follow_redirects=False).headers["location"].startswith("/login")  # 로그인 전
         assert c.get("/inbox", follow_redirects=False).headers["location"].startswith("/login")
@@ -76,9 +112,10 @@ def test_local_round_trip_upload_import_checklist_download(server_proc):
             data = f.read()
         page = c.post("/inbox/upload", data={"csrf": csrf}, files=[("files", ("원고.docx", data)), ("files", ("나쁜.exe", b"x"))]).text
         assert "올림: 원고.docx" in page and "나쁜.exe: 받을 수 있는 형식은" in page
-        made = c.post("/shelf/manuscript", data={"csrf": csrf, "floor": "new"}, files={"file": ("원고.docx", data, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")})
-        assert "올렸습니다: 7장" in made.text
-        pid = str(made.url).split("/shelf/book/")[1].split("?")[0]
+        made = c.post("/shelf/projects", data={"csrf": csrf, "title": "닿으려는 종"})  # '+ 프로젝트'는 제목만(2026-10-10)
+        pid = urllib.parse.urlparse(str(made.url)).path.split("/")[-1]
+        claude_call(data_dir, "alice", "book_import", path="원고.docx", project_id=pid)  # 올린 파일 → 대화에서 가져오기
+        assert '<p class="floor-meta">7장' in c.get(f"/shelf/book/{pid}").text
         page = c.get(f"/shelf/book/{pid}?tab=cites").text
         assert "🔴 참고문헌에 없음" in page and "🟡 미확인" in page and "<h2>장별</h2>" in page
         assert "🔴 참고문헌에 없음" in c.get(f"/shelf/book/{pid}?tab=cites&status=unknown").text
@@ -191,10 +228,7 @@ def test_remote_web_login_with_oauth(server_proc, fake_issuer):
         page = alice.get("/me/files").text
         assert '<a href="/me" class="me" aria-label="내 정보, sub-alice@example.com">sub-alice@example.com</a>' in page
         csrf = _csrf(page)
-        alice.post("/inbox/upload", data={"csrf": csrf}, files={"files": ("원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes())})
-        made = alice.post("/shelf/manuscript", data={"csrf": csrf, "floor": "new"},  # 원고 책은 책장에서(#94)
-                          files={"file": ("원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}, follow_redirects=False)
-        pid = made.headers["location"].split("/shelf/book/")[1].split("?")[0]
+        pid = project_with_document(alice, data_dir, csrf, "원고.docx", (FIXTURES / "닿으려는_종_합성.docx").read_bytes())
         exported = alice.post("/book/export", data={"csrf": csrf, "project_id": pid}, follow_redirects=False)
         link = exported.headers["location"]
         assert link.startswith("/download/") and alice.get(link).content[:2] == b"PK"
@@ -395,7 +429,7 @@ def test_shelf_books_and_board_lists(server_proc):
         assert c.get("/shelf/nothing").status_code == 404
         for page in (styles, ideas, refs):  # 로그아웃과 줄마다 스크랩(☆)만(찾기는 GET, 글쓰기는 별도 페이지)
             assert page.count('method="post"') - page.count('<form class="star"') == 1
-        assert shelf.count('method="post"') == 3  # 로그아웃 · 끌어 옮기기(숨은 폼) · 새 프로젝트 만들기
+        assert shelf.count('method="post"') == 2  # 로그아웃 · 새 프로젝트 만들기(제목만, 2026-10-10에 문서 올리기 폼을 뗐다)
         assert "<h1>생각</h1>" in ideas and 'aria-current=page>프로젝트</a>' in styles
 
 

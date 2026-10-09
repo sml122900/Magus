@@ -96,14 +96,17 @@ async def test_zip_bomb_through_book_import(store: LocalStore, settings: Setting
     assert r.is_error and "열 수 없는 문서입니다." in r.content[0].text
 
 
-def test_zip_bomb_through_web_upload(server_proc, tmp_path: Path):  # noqa: F811
+async def test_zip_bomb_through_files_and_chat(server_proc, tmp_path: Path):  # noqa: F811
+    """웹의 문서 올리기는 없앴다(2026-10-10): 올린 파일에 올리고 대화(이 서버의 /mcp)에서 가져와도 압축 폭탄은 곧바로 거절."""
     base, _, _ = server_proc({})
     data = _bomb(tmp_path / "폭탄.docx").read_bytes()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=60) as c:
         csrf = _csrf(c.get("/login?next=/shelf").text)
+        assert "올림: 폭탄.docx" in c.post("/inbox/upload", data={"csrf": csrf}, files={"files": ("폭탄.docx", data)}).text
+    async with Client(f"{base}/mcp") as chat:
         started = time.monotonic()
-        r = c.post("/shelf/manuscript", data={"csrf": csrf, "project": "new"}, files={"file": ("폭탄.docx", data, "application/octet-stream")})
-        assert r.status_code == 400 and "열 수 없는 문서입니다." in r.text and time.monotonic() - started < 5
+        r = await chat.call_tool("book_import", {"path": "폭탄.docx", "project_id": "bomb"})
+        assert r.is_error and "열 수 없는 문서입니다." in r.content[0].text and time.monotonic() - started < 5
 
 
 # ---- 12-b·15-1 색인 다시 만들기 ----

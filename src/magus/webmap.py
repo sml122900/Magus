@@ -1,6 +1,7 @@
 """웹 프로젝트·지도(사용자 결정 #95, 2026-10-08. #93의 3D 책장을 대신한다). Web에 섞어 쓰는 MapPages.
 
-- 첫 화면(/shelf): 프로젝트 목록(이름·최근 수정·노드 수)과 '+ 프로젝트'(원고 올리기 또는 제목만). 검색은 모든 프로젝트에서.
+- 첫 화면(/shelf): 프로젝트 목록(이름·최근 수정·노드 수)과 '+ 프로젝트'(제목만, 2026-10-10). 검색은 모든 프로젝트에서.
+  올린 문서는 올린 파일(내 정보)이나 게시판 글의 첨부로 두고 대화에서 가져온다(book_import, 올린 문서 없는 project_id).
 - 프로젝트 화면(/shelf/p/<프로젝트>)에서 끝낸다: 지도(마인드맵) + 패널. 상태는 주소에 둔다(?node=…&book=…&at=…, pushState).
   노드를 누르면 패널에 그 노드의 정면 2D 책장, 책을 누르면 같은 패널 아래(게시판 자리, iframe)에 그 책 화면
   (책은 게시판, 올린 문서는 탭, 올린 문서에서 만든 문서는 본문)이 뜬다. #96: 노드 머리에 노드의 컨텍스트, '+ 노드'와 노드 설정에서 컨텍스트를 붙인다. 데스크톱(1200px 이상)은 패널이 지도 오른쪽, 좁으면 아래.
@@ -209,17 +210,13 @@ class MapPages:
                 '<input type="search" name="q" value="" aria-label="모든 프로젝트에서 찾기"><button>찾기</button></form>')
         notices = error + await run_in_threadpool(self._notices, uid, request, session, "/shelf")
         cards = await run_in_threadpool(self._project_cards, uid, floors, session, draft_title)
-        from magus.webbooks import UPLOAD_PROGRESS  # noqa: PLC0415
-
         trashed = len(await run_in_threadpool(self.store.list_trashed_projects, uid))
-        body = (f"{notices}{form}<ul class=\"projects\">{cards}</ul>{UPLOAD_PROGRESS}"
+        body = (f"{notices}{form}<ul class=\"projects\">{cards}</ul>"
                 '<p class="muted"><a href="/shelf/export.zip">전체 내려받기(zip)</a> · '
                 f'<a href="/shelf/trash">휴지통{f" {trashed}" if trashed else ""}</a></p>')
         return self._map_page("프로젝트", body, session, status, css=PROJECTS_STYLE)
 
     def _project_cards(self, uid: str, floors: list[Floor], session: tuple[str, str], draft_title: str = "") -> str:
-        from magus.webbooks import IMPORTING, progress_box  # noqa: PLC0415
-
         library = [f for f in floors if f.common]
         works = sorted((f for f in floors if not f.common), key=lambda f: f.updated_at, reverse=True)
         cards = []
@@ -233,16 +230,13 @@ class MapPages:
                          f'<span class="pmeta">노드 {nodes}{what}</span></a></li>')
         room = sum(1 for f in floors if not f.common) < MAX_FLOORS
         csrf = self._csrf_input(session)
+        # '+ 프로젝트'는 제목만(2026-10-10). 만들면 올린 문서 없는 프로젝트(가운데 노드만)의 지도로 간다
         new = (
             '<li class="pcard new"><h2>+ 프로젝트</h2>'
-            f'<form method="post" action="/shelf/manuscript" enctype="multipart/form-data" data-progress="{IMPORTING}">{csrf}'
-            '<input type="hidden" name="project" value="new">'
-            '<input type="file" name="file" accept=".docx,.pdf" required aria-label="문서 파일(docx·pdf)">'
-            f'<p><button class="primary">올리기</button></p>{progress_box()}</form>'
             f'<form method="post" action="/shelf/projects">{csrf}'
             f'<label class="block">제목 <input name="title" value="{html.escape(draft_title)}" data-count-max="{PROJECT_TITLE_MAX}" required>'
             '</label>'
-            '<p><button>만들기</button></p></form></li>'
+            '<p><button class="primary">만들기</button></p></form></li>'
             if room else f'<li class="pcard new"><p class="muted">{MAX_FLOORS}개 가득</p></li>'
         )
         return "".join(cards) + new

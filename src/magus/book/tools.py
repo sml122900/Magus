@@ -250,7 +250,7 @@ def build_tools(
             except ValueError as e:
                 raise ToolError(str(e)) from e
             return (f"올린 문서가 없는 프로젝트를 만듦: 「{made.title}」({made.id}). 지도에 가운데 노드가 있다. "
-                    f"문서는 저자가 가운데 노드의 '책 추가 → 문서 올리기'로 올리거나, book_import(path=올린 파일 이름, project_id={made.id})로 가져온다.")
+                    f"문서는 저자가 올린 파일(내 정보)에 올리거나 게시판 글에 첨부한 뒤, book_import(path=files_list의 이름, project_id={made.id})로 가져온다.")
         if new_edition:
             if not project_id:
                 raise ToolError("수정본으로 올릴 책의 project_id를 주세요(book_outline 첫 줄의 괄호 안).")

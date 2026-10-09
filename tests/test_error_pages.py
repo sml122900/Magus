@@ -43,7 +43,7 @@ def test_error_pages(server_proc):  # noqa: F811
         # POST 전용 주소를 주소창에서 열면 그 화면으로
         for path, screen in [("/shelf/projects", "/shelf"), ("/shelf/p/common/map", "/shelf/p/common"), ("/inbox/upload", "/inbox"),
                              (f"/shelf/{BOOK}/{ITEM}/trash", f"/shelf/{BOOK}/{ITEM}"), (f"/shelf/{BOOK}/{ITEM}/scrap", f"/shelf/{BOOK}/{ITEM}"),
-                             ("/shelf/move", "/shelf"), ("/shelf/manuscript", "/shelf"), ("/logout", "/")]:
+                             ("/shelf/move", "/shelf"), ("/logout", "/")]:
             moved = c.get(path)
             assert moved.status_code == 303 and moved.headers["location"] == screen, (path, moved.status_code, moved.headers.get("location"))
         _error(c.request("PUT", "/shelf"), 405, "이 주소는 그렇게 열 수 없습니다.")
