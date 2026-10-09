@@ -248,5 +248,9 @@ def test_late_extraction_is_retried_when_opened(store: LocalStore, data_dir: Pat
     assert status["status"] == "later" and text is None
     status_file = data_dir / "users" / "alice" / "shelf" / "categories" / book / "files" / POST / att.id / ".text" / "status.json"
     assert json.loads(status_file.read_text(encoding="utf-8"))["status"] == "later"
-    status, text = store.attachment_text("alice", f"{book}/{POST}", att.id)  # 처음 열 때 다시
+    status, text = store.attachment_text("alice", f"{book}/{POST}", att.id)  # 60초 안에는 다시 뽑지 않는다(점검 7-e)
+    assert status["status"] == "later" and text is None
+    data = json.loads(status_file.read_text(encoding="utf-8"))
+    status_file.write_text(json.dumps({**data, "at": "2026-01-01T00:00:00.000Z"}), encoding="utf-8")  # 마지막 시도가 오래전
+    status, text = store.attachment_text("alice", f"{book}/{POST}", att.id)  # 그 뒤 처음 열 때 다시
     assert status["status"] == "ok" and text == "늦게 뽑힌 글자"
