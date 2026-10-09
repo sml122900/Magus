@@ -169,11 +169,33 @@ def spine_parts(book: Book) -> tuple[str, str]:
     return count, label
 
 
+_RUN = re.compile(r"[A-Za-z0-9]+")
+SPINE_LONG = "side"  # 5자 이상 영문·숫자 묶음: side(눕혀 한 줄로) | up(한 글자씩 세움). 두 가지를 캡처해 골랐다(2026-10-09)
+
+
+def spine_html(name: str, long: str | None = None) -> str:
+    """책등 글자(이스케이프한 HTML, 2026-10-09): 한글과 함께 숫자·영문도 모두 세운다(text-orientation: upright).
+    2~4자 숫자·영문 묶음은 한 칸에 모으고(text-combine-upright: all, "2026"·"AI"가 한 덩어리), 5자 이상은 SPINE_LONG."""
+    long = long or SPINE_LONG
+    out, last = [], 0
+    for m in _RUN.finditer(name):
+        word = m.group()
+        out.append(html.escape(name[last : m.start()]))
+        if 2 <= len(word) <= 4:
+            out.append(f'<span class="tcy">{html.escape(word)}</span>')
+        elif len(word) >= 5 and long == "side":
+            out.append(f'<span class="side">{html.escape(word)}</span>')
+        else:
+            out.append(html.escape(word))
+        last = m.end()
+    return "".join([*out, html.escape(name[last:])])
+
+
 def book_html(book: Book, floor: str | None = None) -> str:
     """floor를 주면 끌어 옮길 수 있는 책(data-book·data-from, #93)."""
     count, label = spine_parts(book)
     inner = (f'<span class="band top" aria-hidden="true">{html.escape(book.band)}</span>'
-             f'<span class="spine-title" aria-hidden="true">{html.escape(book.name)}</span>'
+             f'<span class="spine-title" aria-hidden="true" data-long="{SPINE_LONG}">{spine_html(book.name)}</span>'
              f'<span class="band bottom{" stale" if book.stale else ""}" aria-hidden="true">{count}</span>')
     if book.href is None:
         return f'<li><span class="book" style="{book_style(book)}" role="img" aria-label="{label}">{inner}</span></li>'
@@ -231,8 +253,9 @@ border-bottom:2px solid rgb(var(--fgrgb)/.45);font-variant-numeric:tabular-nums;
 .band.top{margin-top:14px;white-space:normal;word-break:keep-all;font-size:13px;min-height:2.6em;display:flex;align-items:center;
 justify-content:center}.band.bottom{margin-bottom:12px}.band .line{display:block;font-size:13px;line-height:1.35}
 .band.bottom.stale{background:#fff0a8;color:#1a1a1a;border-color:#1a1a1a}
-.spine-title{writing-mode:vertical-rl;text-orientation:mixed;font-size:var(--fs);font-weight:600;line-height:1.1;
+.spine-title{writing-mode:vertical-rl;text-orientation:upright;font-size:var(--fs);font-weight:600;line-height:1.1;
 letter-spacing:.06em;margin:auto 0;padding:10px 0;white-space:nowrap}
+.spine-title .tcy{text-combine-upright:all;letter-spacing:0}.spine-title .side{text-orientation:sideways;letter-spacing:.02em}
 .book.add{--fs:18px;background:transparent;color:var(--ink2);border:2px dashed var(--ink2);box-shadow:none;justify-content:center;
 gap:10px;width:60px;height:252px}
 .book.add .plus{font-size:28px;line-height:1;font-weight:600}
@@ -340,8 +363,17 @@ COLOR_SCRIPT = """<script>
   form.querySelectorAll("input[name=color]").forEach(function (el) { el.addEventListener("change", function () {
     if (el.value !== "custom") fill(el.value, false); else show(hex.value); }); });
   var name = form.querySelector("input[name=name]"), title = document.querySelector(".preview .spine-title");
-  var initial = title ? title.textContent : "";
-  if (name && title) name.addEventListener("input", function () { title.textContent = name.value.trim() || initial; });
+  var initial = title ? title.textContent : "", LONG = title ? title.getAttribute("data-long") : "side";
+  function spine(text) {  // 서버의 spine_html과 같은 규칙: 2~4자 영문·숫자는 한 칸, 5자 이상은 눕힘
+    title.textContent = "";
+    text.split(/([A-Za-z0-9]+)/).forEach(function (part, i) {
+      if (!part) return;
+      var cls = i % 2 && part.length >= 2 && part.length <= 4 ? "tcy" : i % 2 && part.length >= 5 && LONG === "side" ? "side" : "";
+      if (!cls) { title.appendChild(document.createTextNode(part)); return; }
+      var s = document.createElement("span"); s.className = cls; s.textContent = part; title.appendChild(s);
+    });
+  }
+  if (name && title) name.addEventListener("input", function () { spine(name.value.trim() || initial); });
 })();
 </script>"""
 
