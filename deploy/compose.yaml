@@ -19,6 +19,11 @@ services:
       - ./data:/data
     expose:
       - "8000"
+    logging:   # 로그 회전(2026-10-09 점검 18-3): 10MB × 5개까지(docker 기본 json-file은 끝없이 쌓인다)
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   caddy:
     image: caddy:2
@@ -33,6 +38,11 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+    logging:   # 로그 회전(2026-10-09): magus와 같다
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   backup:
     image: restic/restic:0.19.1   # 고정(2026-10-05 첫 백업에서 확인). 올릴 때는 docs/deploy.md 4절

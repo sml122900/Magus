@@ -4,7 +4,17 @@
 # index.sqlite는 빼도 된다(원본 파일에서 `magus reindex`로 다시 만든다). 그래서 실행 중인 DB의 일관성 문제가 없다.
 # 환경변수(deploy/.env): RESTIC_REPOSITORY, RESTIC_PASSWORD, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
 #                        HEALTHCHECK_URL(선택: healthchecks.io 핑. 안 오면 그쪽이 알린다)
+# BACKUP_TAG(선택, 2026-10-09): 배포 전 손 백업이면 배포 태그 이름(예: p1-fix-ui). 스냅샷에 predeploy와 그 이름을 붙인다
+#   (`docker compose --profile backup run --rm -e BACKUP_TAG=<태그> backup`). 없으면 매일 백업(daily).
 set -eu
+
+TAGS="--tag daily"
+if [ -n "${BACKUP_TAG:-}" ]; then
+	case "$BACKUP_TAG" in
+		*[!A-Za-z0-9._-]*) echo "BACKUP_TAG에는 영문·숫자·. _ -만 쓴다" >&2; exit 2 ;;
+	esac
+	TAGS="--tag predeploy --tag $BACKUP_TAG"
+fi
 
 ping() {
 	if [ -n "${HEALTHCHECK_URL:-}" ]; then
@@ -15,7 +25,8 @@ ping() {
 ping /start
 restic snapshots --host magus >/dev/null 2>&1 || restic init
 
-if restic backup /data --host magus --tag daily \
+# shellcheck disable=SC2086  # TAGS는 위에서 만든 낱말들(띄어 나눈다)
+if restic backup /data --host magus $TAGS \
 		--exclude '/data/index.sqlite' --exclude '/data/index.sqlite-wal' --exclude '/data/index.sqlite-shm' \
 	&& restic forget --host magus --keep-daily 30 --keep-monthly 12 --prune \
 	&& restic check --read-data-subset=1/30; then
