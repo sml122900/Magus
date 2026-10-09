@@ -67,7 +67,7 @@ def test_board_write_view_and_attachments(server_proc):  # noqa: F811
         # 첨부만 있는 글도 된다(제목 자리에 파일 이름)
         only = c.post(f"/shelf/write/{NOTES}", data={"csrf": csrf, "title": "", "content": ""},
                       files={"files": ("녹취.txt", "음성 받아쓰기".encode(), "text/plain")})
-        assert "<h1>녹취.txt</h1>" in only.text
+        assert "<h1>녹취</h1>" in only.text  # 제목이 비고 첨부만 있으면 첫 첨부 이름이 제목(#99-2)
         txt = c.get(re.search(rf'href="(/shelf/{NOTES}/[^"]+/files/[^"]+)"[^>]*>녹취.txt', only.text).group(1))
         assert txt.headers["content-disposition"].startswith("attachment") and "filename*=utf-8''" in txt.headers["content-disposition"].lower()
         # 받지 않는 형식·너무 큰 파일·많은 파일·빈 글은 아무것도 저장하지 않는다
@@ -83,7 +83,7 @@ def test_board_write_view_and_attachments(server_proc):  # noqa: F811
         board = c.get(f"/shelf/{NOTES}").text
         rows = re.findall(r'<li><a class="post" href="(/shelf/[^"]+)">(.*?)</a>', board)
         assert [href for href, _ in rows][:2] == [f"/shelf/{NOTES}/{re.search(r'[^/]+$', str(only.url)).group(0)}", f"/shelf/{NOTES}/{item}"]
-        assert '<span class="pt none">녹취.txt</span>' in rows[0][1] and '📎' in rows[0][1]
+        assert '<span class="pt">녹취</span>' in rows[0][1] and '📎' in rows[0][1]
         assert f'<img class="thumb" src="/shelf/{NOTES}/{item}/thumbs/' in rows[1][1] and '📎 2</span>' in rows[1][1]
         assert '<span class="pt">답사</span>' in rows[1][1] and '📎 1</span>' in rows[0][1]  # 하나여도 개수
         assert rows[-1][0] == f"/shelf/{NOTES}/20261008000000000-aaaaaa"  # 가장 오래된 글이 아래

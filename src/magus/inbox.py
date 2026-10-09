@@ -105,6 +105,8 @@ def attached_file(store: Store, user_id: str, attachment_id: str) -> tuple[Path,
 
 def attached_lines(store: Store, user_id: str) -> list[str]:
     """files_list의 게시판 첨부 줄: '첨부:<id>' · 파일 이름 · 크기 · 올린 시각 · 어느 책의 어느 글(최근 ATTACHED_SHOWN개)."""
+    from magus.attachments import shown_title  # noqa: PLC0415  (magus.attachments가 이 모듈을 가져온다)
+
     found = store.file_attachments(user_id, tuple(INBOX_TYPES))
     if not found:
         return []
@@ -116,7 +118,8 @@ def attached_lines(store: Store, user_id: str) -> list[str]:
         else:
             book, _, item = owner.partition("/")
             post = store.get_category_item(user_id, book, item)
-            title = (post.title or post.content[:30]) if post else item
+            files = [x.name for x in store.list_attachments(user_id, owner)] if post else []
+            title = (shown_title(post.title, files) or post.content[:30]) if post else item  # 제목이 없으면 첫 첨부 이름
             where = f"「{names.get(book, book)}」 책의 글 「{title}」"
         lines.append(f"- {ATTACHED}{a.id} · {a.name} · {size_text(a.size)} · {local_time(a.at)} · {where}")
     more = f" 중 최근 {ATTACHED_SHOWN}개" if len(found) > ATTACHED_SHOWN else ""

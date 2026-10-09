@@ -177,10 +177,11 @@ class AttachmentMixin:
                 found.append((f"ref:{folder.parents[1].name}", a))
         return sorted(((o, a) for o, a in found if Path(a.name).suffix.lower() in suffixes), key=lambda x: x[1].id, reverse=True)
 
-    def trashed_item_attachments(self, user_id: str, book: str, item: str) -> int:
-        """휴지통에 있는 글의 첨부 수(프로젝트 휴지통 화면의 '첨부 N개 함께')."""
+    def trashed_item_attachments(self, user_id: str, book: str, item: str) -> list[str]:
+        """휴지통에 있는 글의 첨부 이름(올린 순서. 프로젝트 휴지통 화면의 '첨부 N개 함께'와 제목 없는 글의 보일 제목)."""
         folder = self._user_dir(user_id) / "trash" / "shelf" / "category-items" / safe_id(book, "book id") / "files" / safe_id(item, "item id")
-        return sum(1 for d in folder.iterdir() if d.is_dir() and self._one(d)) if folder.is_dir() else 0
+        found = [self._one(d) for d in sorted(folder.iterdir()) if d.is_dir()] if folder.is_dir() else []
+        return [a.name for a in found if a is not None]
 
     # 글 휴지통·되살리기 때 첨부도 함께(CategoryMixin이 부른다)
     def _move_item_files(self, user_id: str, book: str, item: str, *, to_trash: bool) -> None:

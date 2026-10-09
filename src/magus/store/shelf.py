@@ -280,7 +280,8 @@ class ShelfMixin:
             mark = data.get("_trash") or {}
             preview = (f"책 「{data.get('name', '')}」" if kind == "category"
                        else str(data.get("title") or data.get("content") or "")[:80])
-            items.append(TrashItem(kind, item_id, at, mark.get("note", ""), preview, mark.get("with")))  # type: ignore[arg-type]
+            items.append(TrashItem(kind, item_id, at, mark.get("note", ""), preview, mark.get("with"),  # type: ignore[arg-type]
+                                   title=bool(data.get("title"))))
         for ref, data in self._trashed_nodes(user_id):  # type: ignore[attr-defined]  # 지도의 노드(#95)
             mark = data.get("_trash") or {}
             books = len(data.get("books") or [])  # 책째 옮긴 노드(#97)면 책 수

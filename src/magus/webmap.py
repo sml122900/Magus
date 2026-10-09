@@ -26,6 +26,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
+from magus.attachments import shown_title
 from magus.category.moves import add_link, book_name, error_message, move_book, trash_node_with_books, undo_move, web_message
 from magus.category.rules import PALETTE, parse_color
 from magus.floors import MAX_FLOORS, josa
@@ -750,8 +751,9 @@ class MapPages:
             elif t.kind == "category_item" and not t.with_id and (book := books.get(t.id.partition("/")[0])) is not None:
                 replies = sum(1 for x in self.store.list_trash(uid) if x.kind == "category_item" and x.with_id
                               and x.id.partition("/")[0] == book.id and x.with_id == t.id.partition("/")[2])
-                title = one_line(t.preview) or "제목 없는 글"  # 휴지통 기록의 제목·본문 앞부분
-                files = self.store.trashed_item_attachments(uid, book.id, t.id.partition("/")[2])
+                names = self.store.trashed_item_attachments(uid, book.id, t.id.partition("/")[2])
+                title = one_line(t.preview if t.title else shown_title(None, names) or t.preview) or "제목 없는 글"  # 휴지통 기록
+                files = len(names)
                 along = [f"응답한 글 {replies}개" if replies else "", f"첨부 {files}개" if files else ""]  # 확인 창 문구와 같게
                 out.append((t, f"글 「{title[:60]}{'…' if len(title) > 60 else ''}」 · 책 「{book.name}」"
                             + (f" · {'·'.join(a for a in along if a)} 함께" if any(along) else "")))
@@ -769,7 +771,8 @@ class MapPages:
             book, _, item_id = owner.partition("/")
             item = self.store.get_category_item(uid, book, item_id)
             if item is not None:
-                name = item.title or item_preview(item, self.store.list_attachments(uid, owner))
+                files = self.store.list_attachments(uid, owner)
+                name = shown_title(item.title, (a.name for a in files)) or item_preview(item, files)
             else:
                 name = next((one_line(x.preview) for x in trash if x.kind == "category_item" and x.id == owner), "")
         name = name or "제목 없는 글"

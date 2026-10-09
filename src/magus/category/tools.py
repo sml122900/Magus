@@ -41,7 +41,7 @@ from magus.project_args import (
     PROJECT_PUT, find_project, floor_name, match_project, projects_text, resolve_project, search_projects, short,
 )
 from magus.search import Embedder, hybrid_search
-from magus.attachments import describe
+from magus.attachments import describe, title_from_files
 from magus.store import Category, CategoryItem, MapNode, Passage, Ref, ShelfSettings, Store
 from magus.store.floors import MoveError
 from magus.store.formats import one_line
@@ -514,6 +514,8 @@ def build_tools(
     def item_lines(user: str, n: int, item: CategoryItem, names: dict[str, dict[int, str]]) -> list[str]:
         head = f"{n}. {item.id} · [{item.author}] {local_time(item.created_at, '%Y-%m-%d')}"
         head += f" · 제목 「{item.title}」" + (" (AI가 지은 제목)" if item.title_by == "ai" else "") if item.title else ""
+        if not item.title and (stem := title_from_files(a.name for a in store.list_attachments(user, f"{item.category_id}/{item.id}"))):
+            head += f" · 제목 「{stem}」(첫 첨부의 파일 이름)"  # 제목 없는 글은 보일 때만 첫 첨부 이름(파일은 그대로)
         out = [head, f"   “{summary(item)[:300]}”"]
         out += [f"   이유: {one_line(item.reason)[:150]}"] if item.reason else []
         out += [f"   위치: {one_line(item.where)[:80]}"] if item.where else []

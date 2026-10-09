@@ -26,7 +26,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from magus.attachments import ACCEPT, MAX_FILES, kind_of, mb, media_type, size_text
+from magus.attachments import ACCEPT, MAX_FILES, kind_of, mb, media_type, shown_title, size_text, title_from_files
 from magus.book_migrate import legacy_book_id
 from magus.category.rules import BUILTINS, CONTENT_MAX, TITLE_MAX
 from magus.ids import local_time, new_id, utcnow
@@ -357,7 +357,8 @@ class BoardPages:
             badge = (AI_MARK if i.author == "ai" else "") + (AI_TITLE if i.title and i.title_by == "ai" else "")
             text = "\n".join([i.content, i.reason or "", i.where or "", *(p.text for p in i.passages),
                               *(f"{k} {v}" for k, v in i.fields.items()), " ".join(i.tags)]) if q else ""
-            pairs.append((i.id, Post(i.id, link, i.created_at, i.title, preview, badge, files, text)))
+            title = shown_title(i.title, (a.name for a in files))
+            pairs.append((i.id, Post(i.id, link, i.created_at, title, preview, badge, files, text)))
         if not author and not tag:
             for r in self.store.list_refs(uid, book=c.id):
                 link = f"/shelf/{c.id}/{urllib.parse.quote(r.key)}"
@@ -496,7 +497,7 @@ class BoardPages:
             owner = f"{kind.category.id}/{obj.id}"
             files = self.store.list_attachments(uid, owner)
             preview = item_preview(obj, files)  # 게시판 줄과 같은 규칙
-            title = obj.title or (preview[:40] + ("…" if len(preview) > 40 else "")) or "제목 없음"
+            title = shown_title(obj.title, (a.name for a in files)) or (preview[:40] + ("…" if len(preview) > 40 else "")) or "제목 없음"
             meta = ([local_time(obj.created_at, WHEN)] + (["AI가 쓴 글"] if obj.author == "ai" else [])
                     + (["제목은 AI가 지음"] if obj.title and obj.title_by == "ai" else []))
             # 칸(인물·사례 등)은 본문의 일부로 보인다. 이유·위치·쓸 부분·태그는 파일에 그대로(보이지 않을 뿐)
@@ -553,6 +554,7 @@ class BoardPages:
                 return RedirectResponse(f"{here}?error={code}", status_code=303)
             if not content and not title and not files:
                 return RedirectResponse(f"{here}?error=empty", status_code=303)
+            title = title or title_from_files(name for name, _ in files)  # 제목이 비고 첨부가 있으면 첫 첨부의 파일 이름(2026-10-09)
 
             def save() -> CategoryItem:
                 item = self.store.put_category_item(uid, CategoryItem(new_id(), book, content, "me", title, "author" if title else None))
@@ -635,6 +637,8 @@ class BoardPages:
             if is_item and not (content or title or any(obj.fields.values()) or obj.passages or left > 0):
                 error, title_text, text = self._write_error("empty"), title or "", content
             else:
+                if is_item and not title:  # 제목이 비고 첨부가 남으면 첫 첨부의 파일 이름(2026-10-09)
+                    title = title_from_files([*(a.name for a in current if a.id not in drops), *(name for name, _ in files)])
                 await run_in_threadpool(self._save_edit, uid, kind, obj, owner, title, content, files, drops)
                 return RedirectResponse(f"{link}?done=edited", status_code=303)
         else:

@@ -467,6 +467,7 @@ class TrashItem:
     preview: str
     with_id: str | None = None  # 함께 옮겨진 AI 발화면 그 발화가 응답한 생각의 id
     owner: str | None = None  # 첨부(attachment)면 그 글("<책 id>/<글 id>" 또는 "ref:<key>"). id는 "<owner>/<첨부 id>"
+    title: bool = False  # 글이면 제목이 있었나(preview가 제목인지 본문 앞부분인지)
 
 
 @dataclass(frozen=True)
@@ -527,8 +528,8 @@ class Store(Protocol):
     def attachment_thumb(self, user_id: str, owner: str, attachment_id: str) -> Path | None:
         """사진 첨부의 썸네일(긴 변 400px JPEG, 첨부 폴더 안 .thumb/, 없으면 만든다). 사진이 아니거나 만들지 못하면 None. 원본은 바꾸지 않는다."""
         ...
-    def trashed_item_attachments(self, user_id: str, book: str, item: str) -> int:
-        """휴지통에 있는 글의 첨부 수."""
+    def trashed_item_attachments(self, user_id: str, book: str, item: str) -> list[str]:
+        """휴지통에 있는 글의 첨부 이름(올린 순서)."""
         ...
     def file_attachments(self, user_id: str, suffixes: tuple[str, ...]) -> list[tuple[str, Attachment]]:
         """모든 글·문헌 글의 첨부 중 이름이 suffixes(소문자 확장자)로 끝나는 것 (owner, 첨부). 새것부터.

@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable
 from pathlib import Path
 
+from magus.category.rules import TITLE_MAX
 from magus.inbox import mb, size_text
 
 # 확장자 → (저자에게 보이는 종류, 미디어 타입, 브라우저에서 바로 열기)
@@ -60,6 +62,21 @@ def clean_name(name: str) -> str:
     return base
 
 
+def title_from_files(names: Iterable[str]) -> str | None:
+    """첫 첨부의 파일 이름(확장자 제외, 제목 길이까지). 첨부가 없으면 None(2026-10-09 제목 자동 채움)."""
+    for name in names:
+        stem = " ".join(Path(name).stem.split())
+        if stem:
+            return stem[:TITLE_MAX]
+    return None
+
+
+def shown_title(title: str | None, names: Iterable[str]) -> str | None:
+    """보일 제목: 제목이 있으면 그것, 없고 첨부가 있으면 첫 첨부의 파일 이름(확장자 제외). 파일은 바꾸지 않는다(보일 때만).
+    웹 글쓰기·고치기는 저장할 때 같은 규칙으로 제목을 채운다. 대화(category_put)로 넣는 글은 제목 규칙(instructions) 그대로."""
+    return title or title_from_files(names)
+
+
 def kind_of(name: str) -> str:
     return ATTACH_TYPES.get(Path(name).suffix.lower(), ("파일", "", False))[0]
 
@@ -75,4 +92,5 @@ def describe(name: str, size: int) -> str:
     return f"{name}({kind_of(name)}, {size_text(size)})"
 
 
-__all__ = ["ACCEPT", "ATTACH_TYPES", "MAX_FILES", "clean_name", "describe", "kind_of", "mb", "media_type", "size_text"]
+__all__ = ["ACCEPT", "ATTACH_TYPES", "MAX_FILES", "clean_name", "describe", "kind_of", "mb", "media_type", "shown_title", "size_text",
+           "title_from_files"]
