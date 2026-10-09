@@ -39,7 +39,7 @@ from magus.store.base import EditConflict
 from magus.store import Attachment, CategoryItem, Chunk, Store
 from magus.store.formats import one_line
 from magus.webshelf import (
-    AI_MARK, AI_TITLE, Book, Kind, clean_query, find_hits, mark, paragraphs, snippet, state_url,
+    AI_MARK, AI_TITLE, Book, Kind, Upload, clean_query, find_hits, mark, paragraphs, snippet, state_url,
 )
 
 BOARD_SIZE = 20  # 게시판 한 쪽
@@ -391,7 +391,7 @@ class BoardPages:
     _kind_any: Callable[..., Kind | None]
     _legacy_target: Callable[[str, str, str | None], str | None]
     book_objects: Callable[[str, Any], list[Book]]
-    _read_files: Callable[[str, Any], Awaitable[tuple[list[tuple[str, bytes]], str]]]
+    _read_files: Callable[[str, Any], Awaitable[tuple[list[Upload], str]]]
     _too_big: Callable[[Request], bool]
     _write_error: Callable[[str], str]
     _post_actions: Callable[..., str]  # 글 고치기·지우기(🗑, webshelf)
@@ -676,13 +676,13 @@ class BoardPages:
                         + self._write_form(session, here, f"/shelf/{book}", title=title or "", content=content))
                 lead = await run_in_threadpool(self.trail, uid, kind.key, "글쓰기")
                 return self._shelf_page("글쓰기", body, session, 400, lead=lead)
-            title = title or title_from_files(name for name, _ in files)  # 제목이 비고 첨부가 있으면 첫 첨부의 파일 이름(2026-10-09)
+            title = title or title_from_files(u.name for u in files)  # 제목이 비고 첨부가 있으면 첫 첨부의 파일 이름(2026-10-09)
 
             def save() -> CategoryItem:
                 item = self.store.put_category_item(uid, CategoryItem(new_id(), book, content, "me", title, "author" if title else None))
                 made = []
-                for name, data in files:
-                    att = self.store.put_attachment(uid, f"{book}/{item.id}", name, data)
+                for up in files:
+                    att = self.store.put_attachment(uid, f"{book}/{item.id}", up.name, up.file)  # 받은 임시 파일에서 흘려 쓴다
                     self.store.attachment_thumb(uid, f"{book}/{item.id}", att.id)  # 사진이면 썸네일(못 만들면 화면이 원본을 쓴다)
                     made.append(att)
                 self._extract_texts(uid, f"{book}/{item.id}", made)
@@ -834,7 +834,7 @@ class BoardPages:
                 error, title_text, text = self._write_error("empty"), title or "", content
             else:
                 if is_item and not title:  # 제목이 비고 첨부가 남으면 첫 첨부의 파일 이름(2026-10-09)
-                    title = title_from_files([*(a.name for a in current if a.id not in drops), *(name for name, _ in files)])
+                    title = title_from_files([*(a.name for a in current if a.id not in drops), *(u.name for u in files)])
                 try:
                     await run_in_threadpool(self._save_edit, uid, kind, obj, owner, title, content, files, drops,
                                             str(form.get("base") or "") or None)
@@ -858,7 +858,7 @@ class BoardPages:
         return self._shelf_page("고치기", body, session, 400 if error else 200, lead=lead)
 
     def _save_edit(self, uid: str, kind: Kind, obj: Any, owner: str, title: str | None, content: str,
-                   files: list[tuple[str, bytes]], drops: list[str], base: str | None = None) -> None:
+                   files: list[Upload], drops: list[str], base: str | None = None) -> None:
         """base: 고치기 시작할 때의 저장 시각. 그사이 다른 저장이 있었으면 EditConflict(첨부도 건드리지 않는다)."""
         assert kind.category is not None
         if isinstance(obj, CategoryItem):
@@ -875,8 +875,8 @@ class BoardPages:
         for att in drops:  # 뺀 첨부는 지우지 않고 휴지통으로(프로젝트 휴지통에서 되살린다)
             self.store.trash_attachment(uid, owner, att, "웹에서 뺌")
         made = []
-        for name, data in files:
-            att = self.store.put_attachment(uid, owner, name, data)
+        for up in files:
+            att = self.store.put_attachment(uid, owner, up.name, up.file)
             self.store.attachment_thumb(uid, owner, att.id)
             made.append(att)
         self._extract_texts(uid, owner, made)

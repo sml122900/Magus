@@ -18,6 +18,7 @@ import hmac
 import html
 import json
 import logging
+import re
 import secrets
 import urllib.error
 import urllib.parse
@@ -33,6 +34,7 @@ from starlette.datastructures import UploadFile
 from starlette.requests import Request
 from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
+from magus.attachments import MAX_FILES
 from magus.auth import JwtVerifier
 from magus.book.export import export_docx
 from magus.config import Settings
@@ -49,6 +51,7 @@ from magus.webshelf import ShelfPages
 
 log = logging.getLogger("magus.web")
 SCREEN: contextvars.ContextVar[str] = contextvars.ContextVar("magus_screen", default="other")  # 도움말에 보낼 화면 이름 열쇠(#97)
+INBOX_BATCH = 4  # 올린 파일을 한 번에 몇 개 크기까지 받나(요청 본문 한도, 점검 5-a)
 HELP_BODY_MAX = 32_000  # 도움말 질문 요청 본문 한도(바이트). 이전 대화 3번(한글 3바이트 × 3,000자 남짓)이 들어간다
 SESSION_COOKIE, OAUTH_COOKIE = "magus_session", "magus_oauth"
 DISPLAY_NAME_MAX = 40  # 상단 바 표시 이름 길이 한도
@@ -459,6 +462,19 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
                 return target
         return "/shelf"
 
+    def body_limit(self, method: str, path: str) -> int | None:
+        """웹 요청 본문 한도(바이트, 점검 5-a). /mcp는 SDK가 따로 본다(None). 첨부·문서·올린 파일 주소만 크게, 나머지 폼은 MAX_REQUEST_MB."""
+        if path.startswith(("/mcp", "/.well-known")) or method in ("GET", "HEAD", "OPTIONS"):
+            return None
+        s = self.settings
+        if re.fullmatch(r"/shelf/write/[^/]+|/shelf/[^/]+/[^/]+/edit", path):
+            return s.max_attach_bytes * MAX_FILES + 2_000_000  # 글쓰기·고치기의 첨부(10개까지)
+        if path == "/shelf/manuscript":
+            return s.max_upload_bytes + 1_000_000  # 문서 하나
+        if path == "/inbox/upload":
+            return s.max_upload_bytes * INBOX_BATCH + 1_000_000  # 올린 파일(한 번에 여러 개)
+        return s.max_request_bytes
+
     async def http_error(self, request: Request, exc: Exception) -> Response:
         """라우터에서 난 404·405·400(없는 주소, 맞지 않는 방법, 폼을 읽지 못함). MCP·메타데이터·스크립트(JSON) 요청은 그대로 짧게."""
         status = int(getattr(exc, "status_code", 500))
@@ -468,7 +484,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
         if path.startswith(("/mcp", "/.well-known", "/healthz")):
             return Response(detail or str(status), status_code=status, headers=headers, media_type="text/plain; charset=utf-8")
         messages = {400: "보낸 내용을 읽지 못했습니다. 화면을 새로 고쳐 다시 해 주세요.", 404: "없는 주소입니다.",
-                    405: "이 주소는 그렇게 열 수 없습니다."}
+                    405: "이 주소는 그렇게 열 수 없습니다.", 413: detail or "보낸 내용이 너무 큽니다."}
         if "application/json" in request.headers.get("accept", ""):
             return JSONResponse({"ok": False, "error": messages.get(status, "요청을 처리하지 못했습니다.")}, status_code=status)
         if status == 405 and request.method in ("GET", "HEAD"):  # POST 전용 주소를 주소창에서 열면 그 화면으로
@@ -675,7 +691,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
         session = self.user_of(request)
         if not session:
             return self._need_login(request)
-        limit = self.settings.max_upload_bytes * 20 + 1_000_000
+        limit = self.settings.max_upload_bytes * INBOX_BATCH + 1_000_000  # 본문 한도(body_limit과 같다)
         if int(request.headers.get("content-length") or 0) > limit:  # 다 받기 전에 거른다
             return self._page("올린 파일", f'<p class="msg err">요청이 너무 큽니다(한도 {mb(limit)}).</p>', session, 413)
         try:
@@ -686,10 +702,9 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
         for item in form.getlist("files"):
             if not isinstance(item, UploadFile) or not item.filename:
                 continue
-            data = await item.read()
-            try:
-                saved.append(save_upload(self.store, session[0], item.filename, data,
-                                         self.settings.max_upload_bytes, self.settings.max_user_bytes).name)
+            try:  # 읽지 않고 받은 임시 파일째 넘긴다(크기는 받으며 셌다, 점검 5-a)
+                saved.append((await run_in_threadpool(save_upload, self.store, session[0], item.filename, item.file,
+                                                      self.settings.max_upload_bytes, self.settings.max_user_bytes)).name)
             except (LimitError, ValueError) as e:
                 errors.append(f"{item.filename}: {e}")
         flash = "\n".join([*(f"올림: {n}" for n in saved), *errors]) or "올릴 파일을 골라 주세요."

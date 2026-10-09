@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, NamedTuple, Protocol
+from typing import IO, Any, Literal, NamedTuple, Protocol
 
 from magus.contexts import Context, SavedContext  # 컨텍스트(#96). 규칙과 함께 magus.contexts에 둔다(순환 import를 피해)
 
@@ -517,7 +517,7 @@ class Store(Protocol):
     def list_inbox(self, user_id: str) -> list[InboxFile]:
         """이름순."""
         ...
-    def put_inbox(self, user_id: str, name: str, data: bytes) -> InboxFile:
+    def put_inbox(self, user_id: str, name: str, data: bytes | IO[bytes]) -> InboxFile:
         """같은 이름이면 덮어쓴다. name은 magus.inbox.safe_filename을 거친 것이어야 한다."""
         ...
     def delete_inbox(self, user_id: str, name: str) -> bool: ...
@@ -532,7 +532,7 @@ class Store(Protocol):
     def list_attachments(self, user_id: str, owner: str) -> list[Attachment]:
         """올린 순서. 글이 없거나 첨부가 없으면 []."""
         ...
-    def put_attachment(self, user_id: str, owner: str, name: str, data: bytes) -> Attachment:
+    def put_attachment(self, user_id: str, owner: str, name: str, data: bytes | IO[bytes]) -> Attachment:
         """name은 magus.attachments.clean_name을 거친 것. 글이 없으면 ValueError."""
         ...
     def attachment_path(self, user_id: str, owner: str, attachment_id: str) -> tuple[Path, Attachment] | None:

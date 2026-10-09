@@ -41,6 +41,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, RedirectResponse, Response
 
 from magus.attachments import MAX_FILES, clean_name, mb, media_type
+from magus.store.fileio import data_size
 from magus.book_migrate import legacy_book_id
 from magus.contexts import band as context_band
 from magus.contexts import view_for_book
@@ -441,6 +442,15 @@ def paragraphs(text: str, q: str = "") -> str:
     return "".join(f"<p>{mark(p, q).replace(chr(10), '<br>')}</p>" for p in re.split(r"\n\s*\n", text.strip()) if p.strip())
 
 
+
+@dataclass(frozen=True)
+class Upload:
+    """받은 첨부 하나: 이름(다듬은 것), 크기, 받은 임시 파일(읽지 않고 저장소에 넘긴다, 점검 5-a)."""
+
+    name: str
+    size: int
+    file: Any
+
 @dataclass
 class Kind:
     """목록 화면 하나 = 책 하나(#96: 종류 없음). 올린 문서·문서의 설정 화면은 base("ms"·"doc")로 이것을 함께 쓴다."""
@@ -702,24 +712,25 @@ class ShelfPages:
                 "full": "저장 용량이 가득 찼습니다.", "many": f"첨부는 한 번에 {MAX_FILES}개까지입니다.",
                 "name": "파일 이름을 쓸 수 없습니다."}.get(code, "")
 
-    async def _read_files(self, uid: str, form: Any) -> tuple[list[tuple[str, bytes]], str]:
-        """폼의 첨부 → [(이름, 내용)]와 오류 코드(없으면 ""). 하나라도 맞지 않으면 아무것도 저장하지 않는다."""
+    async def _read_files(self, uid: str, form: Any) -> tuple[list[Upload], str]:
+        """폼의 첨부 → [Upload(이름, 크기, 받은 임시 파일)]와 오류 코드(없으면 ""). 하나라도 맞지 않으면 아무것도 저장하지 않는다.
+        내용을 메모리에 읽지 않는다: 크기는 받는 동안 센 UploadFile.size로 보고, 저장은 임시 파일에서 흘려 쓴다(점검 5-a)."""
         uploads = [x for x in form.getlist("files") if isinstance(x, UploadFile) and x.filename]
         if len(uploads) > MAX_FILES:
             return [], "many"
-        out: list[tuple[str, bytes]] = []
+        out: list[Upload] = []
         for up in uploads:
             try:
                 name = clean_name(up.filename or "")
             except ValueError as e:
                 return [], "type" if "형식" in str(e) else "name"
-            data = await up.read()
-            if len(data) > self.settings.max_attach_bytes:
+            size = up.size if up.size is not None else data_size(up.file)
+            if size > self.settings.max_attach_bytes:
                 return [], "big"
-            out.append((name, data))
+            out.append(Upload(name, size, up.file))
         if out:
             used = await run_in_threadpool(self.store.usage_bytes, uid)
-            if used + sum(len(d) for _, d in out) > self.settings.max_user_bytes:
+            if used + sum(u.size for u in out) > self.settings.max_user_bytes:
                 return [], "full"
         return out, ""
 

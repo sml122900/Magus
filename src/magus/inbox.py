@@ -13,9 +13,11 @@ import re
 import unicodedata
 from collections.abc import Callable
 from pathlib import Path
+from typing import IO
 
 from magus.ids import local_time
 from magus.paths import resolve_input
+from magus.store.fileio import data_size
 from magus.store import Store
 from magus.store.base import InboxFile
 
@@ -63,15 +65,17 @@ def safe_filename(name: str) -> str:
     return clean
 
 
-def save_upload(store: Store, user_id: str, name: str, data: bytes, max_upload: int, max_user: int) -> InboxFile:
+def save_upload(store: Store, user_id: str, name: str, data: bytes | IO[bytes], max_upload: int, max_user: int) -> InboxFile:
+    """data: 내용 또는 받은 업로드의 임시 파일(흘려 쓴다, 점검 5-a)."""
     clean = safe_filename(name)
-    if len(data) > max_upload:
-        raise LimitError(f"파일이 너무 크다: {mb(len(data))} (한 개 한도 {mb(max_upload)})")
+    size = data_size(data)
+    if size > max_upload:
+        raise LimitError(f"파일이 너무 크다: {mb(size)} (한 개 한도 {mb(max_upload)})")
     replaced = next((f.size for f in store.list_inbox(user_id) if f.name == clean), 0)
     used = store.usage_bytes(user_id)
-    if used - replaced + len(data) > max_user:
+    if used - replaced + size > max_user:
         raise LimitError(
-            f"저장 용량 한도를 넘는다: 지금 {mb(used)} + 새 파일 {mb(len(data))} > 한도 {mb(max_user)}. "
+            f"저장 용량 한도를 넘는다: 지금 {mb(used)} + 새 파일 {mb(size)} > 한도 {mb(max_user)}. "
             "설정의 '올린 파일'에서 안 쓰는 파일을 지우세요."
         )
     return store.put_inbox(user_id, clean, data)

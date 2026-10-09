@@ -6,10 +6,11 @@ import functools
 import json
 import os
 import secrets
+import shutil
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import IO, Any, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -62,3 +63,22 @@ def to_int(value: str | None, default: int | None = None) -> int | None:
         return int(value) if value not in (None, "") else default
     except ValueError:
         return default
+
+
+def write_data(path: Path, data: bytes | IO[bytes]) -> None:
+    """bytes면 그대로, 파일이면 처음부터 흘려 쓴다(업로드를 메모리에 통째로 올리지 않는다, 점검 5-a)."""
+    with path.open("wb") as out:
+        if isinstance(data, bytes | bytearray):
+            out.write(data)
+        else:
+            data.seek(0)
+            shutil.copyfileobj(data, out, 1024 * 1024)
+
+
+def data_size(data: bytes | IO[bytes]) -> int:
+    if isinstance(data, bytes | bytearray):
+        return len(data)
+    data.seek(0, os.SEEK_END)
+    size = data.tell()
+    data.seek(0)
+    return size

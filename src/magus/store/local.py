@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from magus.ids import safe_id, utcnow
 from magus.store import formats
@@ -25,6 +25,7 @@ from magus.store.attachments import AttachmentMixin
 from magus.store.fileio import mtime as _mtime
 from magus.store.fileio import read_json as _read_json
 from magus.store.fileio import write_bytes as _write_bytes
+from magus.store.fileio import write_data as _write_data
 from magus.store.fileio import read_text as _read_text
 from magus.store.fileio import to_int as _int
 from magus.store.fileio import write_json as _write_json
@@ -592,11 +593,11 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
             return []
         return [_inbox_entry(p) for p in sorted(folder.iterdir(), key=lambda p: p.name) if p.is_file()]
 
-    def put_inbox(self, user_id: str, name: str, data: bytes) -> InboxFile:
+    def put_inbox(self, user_id: str, name: str, data: bytes | IO[bytes]) -> InboxFile:
         path = self._inbox_file(user_id, name)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.part")
-        tmp.write_bytes(data)
+        _write_data(tmp, data)  # 업로드는 임시 파일에서 흘려 쓴다(점검 5-a)
         tmp.replace(path)  # 받는 도중에 끊겨도 반쪽 파일이 받은함에 보이지 않는다
         return _inbox_entry(path)
 

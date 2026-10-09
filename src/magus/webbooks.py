@@ -35,6 +35,7 @@ from magus.webcontexts import CONTEXT_SCRIPT, context_fieldset, contexts_from_fo
 from magus.ids import local_time
 from magus.inbox import LimitError, mb, safe_filename
 from magus.signing import CsrfError
+from magus.store.fileio import data_size, write_data
 from magus.mdlite import to_html
 from magus.melchior.author_report import cite_label, write_docx
 from magus.melchior.check import cite_floors
@@ -159,7 +160,7 @@ class BookPages:
         query = urllib.parse.urlencode([(k, v) for k, v in request.query_params.items() if k in ("project", "floor", "node")])
         return RedirectResponse("/shelf/new" + (f"?{query}" if query else ""), status_code=303)
 
-    async def _uploaded(self, request: Request, session: tuple[str, str]) -> tuple[Any, bytes, str]:
+    async def _uploaded(self, request: Request, session: tuple[str, str]) -> tuple[Any, Any, str]:
         """(폼, 파일 내용, 안전한 파일 이름). 한도·형식이 맞지 않으면 ValueError(저자에게 보일 문장)."""
         limit = self.settings.max_upload_bytes + 1_000_000
         if int(request.headers.get("content-length") or 0) > limit:
@@ -171,13 +172,13 @@ class BookPages:
         name = safe_filename(item.filename)
         if Path(name).suffix.lower() not in (".docx", ".pdf"):
             raise ValueError("올릴 문서는 docx 또는 pdf 파일이어야 합니다.")
-        data = await item.read()
-        if len(data) > self.settings.max_upload_bytes:
-            raise ValueError(f"파일이 너무 큽니다: {mb(len(data))}(한 개 한도 {mb(self.settings.max_upload_bytes)}).")
+        size = item.size if item.size is not None else data_size(item.file)  # 읽지 않고 받은 크기로(점검 5-a)
+        if size > self.settings.max_upload_bytes:
+            raise ValueError(f"파일이 너무 큽니다: {mb(size)}(한 개 한도 {mb(self.settings.max_upload_bytes)}).")
         used = await run_in_threadpool(self.store.usage_bytes, session[0])
-        if used + len(data) > self.settings.max_user_bytes:
-            raise ValueError(f"저장 용량을 넘습니다: 지금 {mb(used)} + 새 파일 {mb(len(data))} > 한도 {mb(self.settings.max_user_bytes)}.")
-        return form, data, name
+        if used + size > self.settings.max_user_bytes:
+            raise ValueError(f"저장 용량을 넘습니다: 지금 {mb(used)} + 새 파일 {mb(size)} > 한도 {mb(self.settings.max_user_bytes)}.")
+        return form, item.file, name
 
     async def manuscript_upload(self, request: Request) -> Response:
         session = self.user_of(request)
@@ -185,11 +186,11 @@ class BookPages:
             return self._need_login(request)
         uid = session[0]
         try:
-            _, data, name = await self._uploaded(request, session)
+            _, upload, name = await self._uploaded(request, session)
             # 프로젝트 목록의 '+ 프로젝트': 올린 문서로 새 프로젝트를 만든다. 임시 폴더를 지우지 못해도(Windows에서 깨진 PDF가 파일을 잡고 있을 때) 실패로 보지 않는다
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
                 path = Path(tmp) / name
-                path.write_bytes(data)
+                await run_in_threadpool(write_data, path, upload)  # 받은 임시 파일에서 흘려 쓴다
                 report = await run_in_threadpool(import_manuscript, self.store, uid, path)
                 await run_in_threadpool(attach_manuscript_context, self.store, uid, report.project_id)  # 「원고」 컨텍스트(#96)
         except CsrfError:  # CSRF만 403(전에는 모든 PermissionError가 '잘못된 요청입니다'였다, 점검 7-d)

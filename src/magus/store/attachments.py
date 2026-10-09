@@ -22,10 +22,11 @@ import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import IO
 
 from magus.ids import new_id, safe_id, utcnow
 from magus.store.base import Attachment
-from magus.store.fileio import locked, read_json, write_json
+from magus.store.fileio import locked, read_json, write_data, write_json
 
 PART = ".part"  # 받는 도중의 임시 파일(목록에 보이지 않는다)
 
@@ -88,7 +89,8 @@ class AttachmentMixin:
         return [a for a in out if a is not None]
 
     @locked
-    def put_attachment(self, user_id: str, owner: str, name: str, data: bytes) -> Attachment:
+    def put_attachment(self, user_id: str, owner: str, name: str, data: bytes | IO[bytes]) -> Attachment:
+        """data: 내용(bytes) 또는 받은 업로드의 임시 파일(처음부터 흘려 쓴다, 점검 5-a)."""
         folder = self._owner_dir(user_id, owner, must_exist=True)
         if folder is None:
             raise ValueError("첨부할 글이 없다")
@@ -97,7 +99,7 @@ class AttachmentMixin:
         target = folder / new_id() / name
         target.parent.mkdir(parents=True, exist_ok=False)
         tmp = target.with_name(f".{secrets.token_hex(4)}{PART}")
-        tmp.write_bytes(data)
+        write_data(tmp, data)
         os.replace(tmp, target)  # 받는 도중에 끊겨도 반쪽 파일이 목록에 보이지 않는다
         found = self._one(target.parent)
         assert found is not None
