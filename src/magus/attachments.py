@@ -15,7 +15,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from magus.category.rules import TITLE_MAX
-from magus.inbox import mb, size_text
+from magus.inbox import has_format_chars, mb, size_text
 
 # 확장자 → (저자에게 보이는 종류, 미디어 타입, 브라우저에서 바로 열기)
 ATTACH_TYPES: dict[str, tuple[str, str, bool]] = {
@@ -54,8 +54,8 @@ _RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)), *(f
 def clean_name(name: str) -> str:
     """브라우저가 준 파일 이름 → 저장할 이름. 받을 수 없으면 ValueError(저자에게 보일 짧은 문장)."""
     base = unicodedata.normalize("NFC", str(name or "")).replace("\\", "/").rsplit("/", 1)[-1].strip()
-    if (not base or base.startswith(".") or base in ("..",) or _BAD.search(base) or len(base.encode("utf-8")) > 200
-            or Path(base).stem.upper() in _RESERVED):
+    if (not base or base.startswith(".") or base in ("..",) or _BAD.search(base) or has_format_chars(base)
+            or len(base.encode("utf-8")) > 200 or Path(base).stem.upper() in _RESERVED):
         raise ValueError(f"쓸 수 없는 파일 이름: {name}")
     if Path(base).suffix.lower() not in ATTACH_TYPES:
         raise ValueError(f"받지 않는 형식: {name}")

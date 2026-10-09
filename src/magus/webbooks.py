@@ -490,7 +490,7 @@ class BookPages:
                 return out.read_bytes()
 
         data = await run_in_threadpool(build)
-        name = urllib.parse.quote(f"{doc.title}.docx")
+        name = urllib.parse.quote(f"{doc.title}.docx", safe="")  # '/'도 인코딩(점검 6-c)
         return Response(data, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{name}"})
 

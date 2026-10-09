@@ -23,7 +23,7 @@ INBOX_TYPES = {".docx": "올린 문서(book_import)", ".pdf": "올린 문서·�
                ".md": "대화 기록(idea_add_conversation)", ".txt": "논문 전문(category_put file)"}
 ATTACHED = "첨부:"  # 게시판 글의 첨부를 도구의 파일 인자로 줄 때의 이름 앞머리(2026-10-09)
 ATTACHED_SHOWN = 20  # files_list에 보이는 게시판 첨부 수(새것부터)
-_BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+_BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')  # \x7f(DEL)도(점검 5-d, 첨부 이름과 같게)
 _RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)), *(f"LPT{n}" for n in range(1, 10))}
 
 
@@ -40,6 +40,12 @@ def size_text(n: int) -> str:
     return mb(n) if n >= 1_000_000 else f"{max(1, round(n / 1000)):,} KB"
 
 
+def has_format_chars(name: str) -> bool:
+    """보이지 않는 서식 문자(유니코드 Cf: 오른쪽→왼쪽 U+202E·폭 없는 공백 U+200B 등)가 있으면 True.
+    화면의 이름을 속일 수 있다(‮gnp.exe.png가 'png.exe…'처럼 보임, 점검 5-d)."""
+    return any(unicodedata.category(ch) == "Cf" for ch in name)
+
+
 def safe_filename(name: str) -> str:
     """받은함 파일 이름. 폴더 구분자·상대 경로·숨김 파일·제어 문자를 막고, 형식은 docx·pdf·md·txt만 받는다."""
     clean = unicodedata.normalize("NFC", name.strip())
@@ -47,6 +53,7 @@ def safe_filename(name: str) -> str:
         not clean
         or clean.startswith(".")
         or _BAD.search(clean)
+        or has_format_chars(clean)
         or len(clean.encode("utf-8")) > 200
         or Path(clean).stem.upper() in _RESERVED
     ):

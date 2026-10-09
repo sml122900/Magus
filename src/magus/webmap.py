@@ -1127,6 +1127,6 @@ def _count_text(book: Book) -> str:
 
 
 def _zip_response(data: bytes, name: str) -> Response:
-    quoted = urllib.parse.quote(name)
+    quoted = urllib.parse.quote(name, safe="")  # '/'도 인코딩(점검 6-c)
     return Response(data, media_type="application/zip",
                     headers={"Content-Disposition": f"attachment; filename=\"magus.zip\"; filename*=UTF-8''{quoted}"})

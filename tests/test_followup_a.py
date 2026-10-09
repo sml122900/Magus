@@ -373,3 +373,20 @@ def test_write_is_atomic_with_random_temp_name(tmp_path, monkeypatch: pytest.Mon
     with pytest.raises(OSError):
         fileio.write_text(target, "셋\n")
     assert target.read_text(encoding="utf-8") == "둘\n" and [p.name for p in tmp_path.iterdir()] == ["a.json"]  # 임시 파일이 남지 않는다
+
+
+# ---- 5-d·6-c 파일 이름의 보이지 않는 서식 문자·DEL, 내려받기 이름 인코딩 ----
+
+def test_format_chars_in_names_and_download_quote():
+    import urllib.parse
+
+    from magus.attachments import clean_name
+    from magus.inbox import safe_filename
+
+    for bad in ("‮gnp.exe.png", "사진​.png", "a\x7f.png"):
+        with pytest.raises(ValueError):
+            clean_name(bad)
+        with pytest.raises(ValueError):
+            safe_filename(bad.replace(".png", ".txt"))
+    assert clean_name("현장 사진.png") == "현장 사진.png" and safe_filename("원고 E2.docx") == "원고 E2.docx"
+    assert urllib.parse.quote("a/b<c>.docx", safe="") == "a%2Fb%3Cc%3E.docx"
