@@ -603,7 +603,7 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
 - 호스팅: **Vultr 서울 VPS($5) + Docker Compose + Caddy(자동 HTTPS)**(`docs/decisions/hosting.md`). 서버리스는 쓰지 않는다.
   - 이미지: `Dockerfile`(python:3.12-slim, uv, 비root uid 10001, /data 볼륨, healthz 헬스체크). 구성: `deploy/compose.yaml`(magus·caddy·backup·restore).
   - **서버 되돌리기 기준 커밋은 status.md에 기록된 값을 따른다**(`HEAD~1`을 쓰지 않는다). 배포할 때마다 반영 전 커밋을 status.md와 `docs/deploy.md` 반영 기록에 적는다.
-- 백업: 매일 04:00 restic → Cloudflare R2(`deploy/backup.sh`). `index.sqlite`는 빼고(재생성), `forget --keep-daily 30 --keep-monthly 12 --prune`(일별 30 + 월별 12), `check --read-data-subset=1/30`. R2 버킷에 수명 주기 규칙은 걸지 않는다.
+- 백업: 매일 04:00 restic → Cloudflare R2(`deploy/backup.sh`). `index.sqlite`는 빼고(재생성), `forget --tag daily --keep-daily 30 --keep-monthly 12`(일별 30 + 월별 12)·`forget --tag predeploy --keep-within 30d`(배포 전 백업 30일, 결정 h), `check --read-data-subset=1/30`. R2 버킷에 수명 주기 규칙은 걸지 않는다.
   - 복구: `docs/deploy.md` 5절. 정기 시험은 `deploy/restore-test.sh <사용자…>`(복구본 reindex 뒤 outline 비교). 로컬 훈련 결과와 기록 표도 그 문서에 있다.
 - 알림: `magus/alerts.py`(텔레그램 `ALERT_TELEGRAM_*` 또는 웹훅 `ALERT_WEBHOOK_URL`). logsafe의 ERROR를 받아 백그라운드로 보낸다. 백업 누락은 healthchecks.io(`HEALTHCHECK_URL`, magus-backup)가, 서버·HTTPS 정지는 `deploy/alive.sh`(호스트 cron 5분, `HEALTHCHECK_ALIVE_URL`, magus-alive)가 알린다. 시험은 `magus alert-test`.
 - **로그**: 도구 이름, user_id, 소요 시간, 결과만 남긴다(`magus/audit.py`). 본문·발췌·원고 내용은 절대 남기지 않는다.

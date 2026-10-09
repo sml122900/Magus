@@ -25,10 +25,16 @@ ping() {
 ping /start
 restic snapshots --host magus >/dev/null 2>&1 || restic init
 
+# 보관(2026-10-09 결정 h): 매일 백업(daily)과 배포 전 백업(predeploy)을 따로 정리한다.
+#   daily: 일별 30 + 월별 12(결정 #62). predeploy 스냅샷은 이 규칙에 들지 않아 같은 날 뒤 백업에 밀려 지워지지 않는다(전에는 지워졌다).
+#   predeploy: 30일 지난 것만 지운다(무한히 쌓이지 않게).
+#   한 forget에 --keep-tag predeploy를 더하는 방식은 쓰지 않는다: 그달 마지막 스냅샷이 predeploy이면 그것이 월별 보관을 차지했다가
+#   30일 뒤 지워져 그달 월별 백업이 사라진다.
 # shellcheck disable=SC2086  # TAGS는 위에서 만든 낱말들(띄어 나눈다)
 if restic backup /data --host magus $TAGS \
 		--exclude '/data/index.sqlite' --exclude '/data/index.sqlite-wal' --exclude '/data/index.sqlite-shm' \
-	&& restic forget --host magus --keep-daily 30 --keep-monthly 12 --prune \
+	&& restic forget --host magus --tag daily --keep-daily 30 --keep-monthly 12 --prune \
+	&& restic forget --host magus --tag predeploy --keep-within 30d --prune \
 	&& restic check --read-data-subset=1/30; then
 	ping ""
 	echo "backup ok"

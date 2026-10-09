@@ -348,9 +348,11 @@ sudo crontab -e
 - 시간대를 바꾼 뒤라면 `sudo systemctl restart cron`(cron은 시작할 때의 시간대로 돈다).
 - 처음 한 번은 손으로 돌려 본다: `sudo docker compose --profile backup run --rm backup` → `backup ok`.
   - 첫 실행이 R2에 저장소를 만든다(init). 2026-10-05: 24초, 스냅샷 7.7MiB.
-- 하는 일: `restic backup /data`(index.sqlite 제외) → `forget --keep-daily 30 --keep-monthly 12 --prune`(일별 30개 + 월별 12개, 결정 #62) → `check --read-data-subset=1/30`.
+- 하는 일: `restic backup /data`(index.sqlite 제외) → `forget --tag daily --keep-daily 30 --keep-monthly 12 --prune`(일별 30개 + 월별 12개, 결정 #62)
+  → `forget --tag predeploy --keep-within 30d --prune`(배포 전 백업은 30일, 2026-10-09 결정 h) → `check --read-data-subset=1/30`.
 - 스냅샷 태그(2026-10-09): 매일 백업은 `daily`, 배포 전 손 백업은 `-e BACKUP_TAG=<배포 태그>`로 `predeploy`와 그 태그(영문·숫자·`.`·`_`·`-`만).
-  태그는 이름표일 뿐 보관 규칙은 같다: 같은 날 뒤에 백업이 또 있으면 forget이 그날의 마지막 하나만 남긴다(배포 전 스냅샷이 그날 다른 배포의 것에 밀려 지워질 수 있다).
+  두 태그는 따로 정리한다(결정 h): 배포 전 스냅샷은 일별·월별 규칙에 들지 않아 같은 날 뒤 백업에 밀려 지워지지 않고, 30일 지나면 지워진다.
+  한 forget에 `--keep-tag predeploy`를 더하지 않는 까닭: 그달 마지막 스냅샷이 predeploy이면 월별 보관을 차지했다가 30일 뒤 지워져 그달 월별 백업이 사라진다.
 - 이미지 버전: compose.yaml에 `restic/restic:0.19.1`로 고정했다(2026-10-05). 올릴 때는 새 버전으로 한 번 손으로 돌려 `backup ok`를 본 뒤 바꾼다.
 - 스크립트에서 `docker compose exec`·`run`을 부를 때는 `</dev/null`을 붙인다. 붙이지 않으면 표준입력을 읽어, 뒤에 이어지는 명령을 먹어 버린다.
 
