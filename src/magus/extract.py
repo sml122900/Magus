@@ -5,7 +5,7 @@
   썸네일(.thumb/)과 같은 방식이라 옛 코드는 첨부 폴더에서 파일만 세므로 무시한다. 첨부 폴더째 움직이므로 휴지통 왕복에도 함께 간다.
 - 한도: 첨부 하나 30만 자(넘으면 앞부분만 두고 status=truncated). 시간 20초(넘으면 status=later, 처음 열 때 다시 뽑는다).
   시간은 쪽(PDF)·문단(docx)·덩어리(txt)마다 살펴 멈춘다(프로세스를 따로 띄우지 않는다: 서버 메모리 1GB).
-- 메모리: PDF는 pymupdf로 한 쪽씩 읽는다(문서 전체를 올리지 않는다). docx는 zip 안 word/document.xml을 lxml iterparse로 문단마다 읽고 버린다.
+- 메모리: PDF는 pymupdf로 한 쪽씩 읽는다(문서 전체를 올리지 않는다). docx는 zip 안 word/document.xml을 lxml iterparse로 글자(w:t)마다 읽고 버린다(점검 7-b).
   txt·md는 1MB씩 읽어 30만 자에서 멈춘다. 새 라이브러리는 없다(pymupdf·lxml은 원고 읽기에 이미 쓴다).
 - 로그에는 개수·시간·상태만 남긴다(파일 이름·뽑은 글자는 남기지 않는다).
 """
@@ -141,18 +141,38 @@ def _docx(path: Path, check) -> tuple[str, bool]:
     total = 0
     with zipfile.ZipFile(path) as z:
         zipguard.check(z)  # 압축 폭탄은 풀기 전에 막는다(2026-10-09 점검 7-c) → 글자를 뽑지 못함(failed)
+    # 글자(w:t)·탭·줄바꿈이 끝날 때마다 모으고, 읽은 요소와 그 앞 형제를 바로 버린다(2026-10-09 점검 7-b).
+    # 전에는 문단(w:p)이 끝나야 내보내 run 150만 개짜리 문단 하나가 통째로 트리에 올라갔다(84KB → 637MB).
+    # 시간은 요소 1만 개마다, 30만 자는 문단 안에서도 본다.
+    tags = {f"{_W}t": "t", f"{_W}tab": "\t", f"{_W}br": "\n", f"{_W}r": "", f"{_W}p": "p"}
+    pending: list[str] = []
+    room = TEXT_MAX
     with zipfile.ZipFile(path) as z, z.open("word/document.xml") as f:
-        for n, (_, p) in enumerate(etree.iterparse(f, events=("end",), tag=f"{_W}p")):
-            if n % 200 == 0:
+        for n, (_, el) in enumerate(etree.iterparse(f, events=("end",), tag=tuple(tags))):
+            if n % 10_000 == 0:
                 check()
-            pieces = []
-            for el in p.iter(f"{_W}t", f"{_W}tab", f"{_W}br"):
-                pieces.append(el.text or "" if el.tag == f"{_W}t" else ("\t" if el.tag == f"{_W}tab" else "\n"))
-            total, cut = _limit(parts, total, "".join(pieces) + "\n")
-            p.clear()  # 읽은 문단은 버린다
-            if cut:
-                return "".join(parts), True
-    return "".join(parts), False
+            kind = tags[el.tag]
+            if kind == "t":
+                pending.append(el.text or "")
+                room -= len(pending[-1])
+            elif kind in ("\t", "\n"):
+                pending.append(kind)
+                room -= 1
+            elif kind == "p":
+                pending.append("\n")
+                room -= 1
+            if kind == "p" or room < 0:
+                total, cut = _limit(parts, total, "".join(pending))
+                pending, room = [], TEXT_MAX - total
+                if cut:
+                    return "".join(parts), True
+            el.clear(keep_tail=True)
+            parent = el.getparent()
+            if parent is not None:
+                while el.getprevious() is not None:
+                    del parent[0]
+    total, cut = _limit(parts, total, "".join(pending))
+    return "".join(parts), cut
 
 
 def _plain(path: Path, check) -> tuple[str, bool]:

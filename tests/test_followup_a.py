@@ -81,3 +81,34 @@ async def test_conversation_rejects_word_and_bad_encoding(store: LocalStore, set
         assert r.is_error and "UTF-8 글자로 읽지 못했다" in r.content[0].text
         ok = await c.call_tool("idea_add_conversation", {"book": "대화", "path": "기록.md"})
         assert not ok.is_error and "발화 2개" in ok.content[0].text
+
+
+# ---- 7-b 첨부 docx 글자 뽑기: 낱말(w:t) 단위로 모으고 버림 ----
+
+def _docx(path, body: str):
+    import zipfile
+
+    w = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", "<Types/>")
+        z.writestr("word/document.xml", f'<?xml version="1.0"?><w:document {w}><w:body>{body}</w:body></w:document>')
+    return path
+
+
+def test_docx_text_streams_by_run(tmp_path):
+    import random
+    import string
+    import time
+
+    from magus.extract import TEXT_MAX, extract
+
+    small = _docx(tmp_path / "a.docx", "<w:p><w:pPr/><w:r><w:t>첫 </w:t></w:r><w:r><w:t>문단</w:t><w:tab/><w:t>탭</w:t></w:r></w:p>"
+                  "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>칸</w:t><w:br/><w:t>둘째 줄</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"
+                  "<w:p><w:hyperlink><w:r><w:t>링크</w:t></w:r></w:hyperlink></w:p>")
+    assert extract(small).text == "첫 문단\t탭\n칸\n둘째 줄\n링크\n"
+    rnd = random.Random(7)
+    runs = "".join(f"<w:r><w:t>{''.join(rnd.choices(string.ascii_letters, k=8))}</w:t></w:r>" for _ in range(200_000))
+    one = _docx(tmp_path / "one.docx", f"<w:p>{runs}</w:p>")  # 문단 하나에 run 20만 개(160만 자)
+    started = time.monotonic()
+    got = extract(one)
+    assert got.status == "truncated" and len(got.text) == TEXT_MAX and time.monotonic() - started < 2
