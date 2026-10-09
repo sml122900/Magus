@@ -80,21 +80,20 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
         Tool.from_function(
             book_questions, name="book_questions",
             description=(
-                "저자만 답할 수 있는 인용 질문 목록(조회 전용): 연도 불일치(year), 참고문헌에만 있음(bibonly), 한글 표기 추정(translit), "
-                "연도 a/b 모호(ab), 같은 저자·연도 두 편(pair), 미연결 표기(unlinked), 중복 서지(dup). "
-                "질문은 매번 지금 올린 문서와 문헌에서 계산한다(수정본을 올리면 저절로 새 문서 기준). 본문은 싣지 않고 본문 표기와 장만 싣는다. "
-                "status=open(기본, 아직 답 없음)|waiting(답했고 Word 수정 대기)|all. 질문마다 [id]와 선택지 코드가 있다."
+                (
+                "저자만 답할 수 있는 인용 질문 목록(조회 전용): year 연도 불일치·bibonly 참고문헌에만·translit 한글 표기 추정·ab 연도 a/b·pair 같은 저자·연도 두 편·unlinked 미연결·dup "
+                "중복 서지. 매번 지금 문서·문헌에서 계산한다. 본문 대신 표기와 장만. status=open(기본)|waiting(답함, Word 수정 대기)|all. 질문마다 [id]와 선택지 코드."
+            )
             ),
             structured_output=False,
         ),
         Tool.from_function(
             book_answer, name="book_answer",
             description=(
-                "저자가 그 질문에 분명히 답했을 때만 부른다. Claude가 짐작해서 답하지 않는다. "
-                "question_id는 book_questions의 [ ] 안 id, choice는 그 질문의 선택지 코드다(ref:<key>는 다른 문헌을 고를 때 그 문헌의 key). "
-                "본문 표기를 문헌에 잇는 답과 '사람 이름이 아니다'는 바로 반영되고 수가 다시 계산된다. "
-                "'Word에서'라고 적힌 답은 결정으로 남는다(저자가 Word에서 고친 뒤 수정본을 올리면 질문이 사라진다). "
-                "note에는 저자의 말을 짧게 적는다. 답은 올린 문서와 함께 남아 다시 묻지 않는다."
+                (
+                "저자가 그 질문에 분명히 답했을 때만 부른다(짐작해서 답하지 않는다). question_id: book_questions의 [id], choice: 선택지 코드(ref:<key>는 다른 문헌). 표기 잇기·'사람 "
+                "이름 아님'은 바로 반영되고, 'Word에서' 답은 결정으로 남는다(수정본이 오면 질문이 사라진다). note: 저자의 말을 짧게."
+            )
             ),
             structured_output=False,
         ),

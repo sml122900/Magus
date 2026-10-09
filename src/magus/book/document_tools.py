@@ -82,11 +82,10 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
             book_document,
             name="book_document",
             description=(
-                "저자가 올린 문서에서 읽기용 문서를 만들어 책장에 넣으라고 분명히 말했을 때만 부른다. "
-                "kind=출처 확인 문서: 질문·본문 불일치·사실 확인 요청·우선 확인 문헌·장별 미확인 수·바뀐 점을 서버가 데이터로 만든다"
-                "(Claude는 그 수치·목록을 쓰거나 preface에 옮기지 않는다). preface: 저자가 원하면 짧은 머리말(AI가 쓴 것으로 표시). "
-                "project_id: 기준 문서(없으면 최근). node: 그 프로젝트 지도의 노드(없으면 가운데). 제목은 글과 같은 규칙. "
-                "document_id를 주면 그 문서를 지금 올린 문서로 다시 만든다(이전 것은 이력으로 남는다)."
+                (
+                "저자가 올린 문서에서 읽기용 문서를 만들어 책장에 넣으라고 분명히 말했을 때만 부른다. kind=출처 확인 문서: 내용(질문·불일치·사실 확인·우선 문헌·장별 미확인 수·바뀐 점)은 서버가 만든다. Claude는 그 "
+                "수치를 옮기지 않고, 저자가 원하면 preface(머리말, AI 표시)만. node가 없으면 가운데. 제목은 글과 같은 규칙. document_id면 지금 문서로 다시 만든다(이전 것은 이력)."
+            )
             ),
             structured_output=False,
         ),

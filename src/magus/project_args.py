@@ -14,8 +14,6 @@ from magus.floors import COMMON
 from magus.maps import LIBRARY, LIBRARY_NAME
 from magus.store import Floor, Ref, Store
 
-# 도구 설명에 붙이는 한 줄(자세한 규칙은 instructions)
-PROJECT_PUT = "project: 넣을 프로젝트(instructions의 프로젝트 규칙). "
 _LIBRARY_WORDS = {"내서재", COMMON, "공용", "공용층", "library"}
 
 

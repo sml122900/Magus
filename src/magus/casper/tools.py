@@ -75,9 +75,10 @@ def build_tools(
             idea_add_conversation,
             name="idea_add_conversation",
             description=(
-                "대화 기록 markdown을 발화 단위로 나눠 책(book)에 글로 넣는다. markdown 본문 또는 올린 .md 파일 이름(path) 중 하나. "
-                "마커: **사용자:**/**Claude:**, 질문:/답변:, '> 인용' 뒤의 **Claude 요지**. "
-                "사용자 발화 → author=me, 바로 뒤 AI 발화 → author=ai(응답한 발화를 parent_id로). 리포트: me N건, ai N건, 분리 실패 구간."
+                (
+                "대화 기록 markdown(본문, 또는 올린 .md·.txt 이름 path)을 발화로 나눠 책(book)에 글로 넣는다. 마커: **사용자:**/**Claude:**, 질문:/답변:, '> 인용' 뒤 **Claude "
+                "요지**. 사용자 → me, 바로 뒤 AI → ai(parent_id). 리포트: me·ai 건수, 분리 실패 구간."
+            )
             ),
             structured_output=False,
         ),

@@ -13,7 +13,7 @@ from mcp.server.mcpserver.tools import Tool
 
 from magus.category.books import writable_book
 from magus.contexts import view_for_book
-from magus.project_args import PROJECT_PUT, floor_name, resolve_project
+from magus.project_args import floor_name, resolve_project
 from magus.melchior.bibliography import import_bibliography
 from magus.melchior.check import after_refs_changed, check_chapter
 from magus.inbox import ResolveFile
@@ -61,10 +61,10 @@ def build_tools(
             ref_import_bibliography,
             name="ref_import_bibliography",
             description=(
-                "참고문헌 목록 텍스트(한 줄에 한 문헌)를 원문 확인 전의 문헌 글로 넣는다(book을 주면 그 책, 없으면 그 프로젝트의 문헌이 든 책). "
-                "key는 첫 저자 성(소문자 영문)+연도(예: daeschler2006)이고, '[국역: …]'이 있으면 한글 성+연도를 aliases에 넣는다. "
-                "이미 있는 key는 건드리지 않는다(다른 프로젝트에만 있던 문헌이면 「내 서재」로 옮기고 두 지도에 연결 노드를 붙인다). "
-                "파싱 실패 줄은 raw로 보관하고 리포트한다. " + PROJECT_PUT
+                (
+                "참고문헌 텍스트(한 줄에 한 문헌)를 원문 확인 전 문헌 글로 넣는다(book, 없으면 그 프로젝트의 문헌 책). key는 첫 저자 성(영문 소문자)+연도, '[국역: …]'은 한글 성+연도를 aliases에. 있는 "
+                "key는 그대로(다른 프로젝트에만 있으면 「내 서재」로 옮기고 연결 노드를 붙인다). 파싱 실패 줄은 raw로 보관·리포트. project: instructions의 프로젝트 규칙."
+            )
             ),
             structured_output=False,
         ),
@@ -72,9 +72,7 @@ def build_tools(
             ref_check,
             name="ref_check",
             description=(
-                "장 본문의 인용을 문헌 글과 대조한다. JSON: verified(원문 확인) / unverified(원문 확인 전) / "
-                "unknown(문헌 글에 없음) 세 목록과 needs_source([출처 필요: …] 표시 수). 그 프로젝트와 연결 노드의 문헌만 본다. "
-                "인용 표기: (Daeschler, Shubin & Jenkins, 2006), Clack(2012), Hu et al.(2023), 갤러(2022), (헨릭, 2016)."
+                "장 본문의 인용을 문헌 글과 대조한다. JSON: verified(원문 확인)/unverified(원문 확인 전)/unknown(문헌 글에 없음)과 needs_source. 범위는 그 프로젝트와 연결 노드의 문헌."
             ),
             structured_output=False,
         ),

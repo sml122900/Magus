@@ -27,10 +27,10 @@ from magus.category.maptext import Counts, project_block
 from magus.category.moves import add_link, error_message, move_book, tool_message, trash_node, undo_move as undo_last
 from magus.category.moves import scope_names
 from magus.category.rules import (
-    CONTENT_MAX, FIELD_MAX, MAX_CATEGORIES, NEW_COLOR_ORDER, PALETTE_BY_NAME, TEMPLATE_BY_KEY, TEMPLATE_NAMES, TITLE_MAX,
+    CONTENT_MAX, FIELD_MAX, MAX_CATEGORIES, NEW_COLOR_ORDER, PALETTE_BY_NAME, TEMPLATE_BY_KEY, TITLE_MAX,
     TITLE_MODES, check_name, clean_tags, color_label, name_key, parse_color, template_of,
 )
-from magus.category.titles import TITLE_RULE, decide_title
+from magus.category.titles import decide_title
 from magus.contexts import View, from_values, view_for_book, view_for_node
 from magus.ids import local_time, new_id
 from magus.inbox import FileResolver, ResolveFile
@@ -40,7 +40,7 @@ from magus.melchior.author_report import cite_label
 from magus.melchior.check import after_refs_changed, chapters_citing
 from magus.melchior.refs import add_ref
 from magus.project_args import (
-    PROJECT_PUT, find_project, floor_name, match_project, projects_text, resolve_project, search_projects, short,
+    find_project, floor_name, match_project, projects_text, resolve_project, search_projects, short,
 )
 from magus.search import Embedder, find_all_words
 from magus.attachments import describe, title_from_files
@@ -846,77 +846,74 @@ def build_tools(
                 "ai": "Claude가 제목을 지어 넣는다(AI가 지은 제목으로 표시된다)", "none": "제목 없이 넣는다"}[mode]
         return f"제목 기본값을 '{TITLE_MODES[mode]}'로 저장함. 앞으로 글을 넣을 때 저자가 제목을 말하지 않으면 {then}."
 
-    template_names = "·".join(TEMPLATE_NAMES)
     return [
         Tool.from_function(
             category_list, name="category_list",
             description=(
-                "프로젝트마다 지도(노드·선·연결 노드)와 노드에 꽂힌 책(글 수, [ ]는 컨텍스트 이름), 자주 쓰는 컨텍스트, 제목 기본값. "
-                "'지도·책장 보여 줘', 넣을 곳을 묻기 전에 부른다. project를 주면 그 프로젝트만."
+                "프로젝트마다 지도(노드·선·연결 노드), 노드의 책(글 수, [ ]는 컨텍스트), 자주 쓰는 컨텍스트, 제목 기본값. '지도·책장 보여 줘'와 넣을 곳을 묻기 전에 부른다."
             ),
             structured_output=False,
         ),
         Tool.from_function(
             category_create, name="category_create",
             description=(
-                "저자가 새 책이나 노드를 만들자고 분명히 말했을 때만 부른다(이름을 확인받은 뒤). "
-                f"template: {template_names}(책. 템플릿마다 칸 몇 개) · 노드 · 연결 노드(다른 프로젝트의 노드를 잇는다. name에 '프로젝트 · 노드'). "
-                "node: 책을 꽂을 노드(없으면 이름이 같은 새 노드). context: 붙일 컨텍스트(자주 쓰는 컨텍스트 이름이나 저자가 말한 글, 순서대로). "
-                "color: 색 이름(빨강·파랑·겨자 등) 또는 #RRGGBB. 책 이름은 12자까지. " + PROJECT_PUT
+                (
+                "저자가 새 책이나 노드를 만들자고 분명히 말했을 때만 부른다(이름을 확인받은 뒤). template: 빈 책·인물·사례·수치·용어(칸이 다름)·노드·연결 노드(name에 '프로젝트 · 노드'). node: 꽂을 "
+                "노드(없으면 같은 이름의 새 노드). context: 자주 쓰는 컨텍스트 이름이나 글. color: 색 이름 또는 #RRGGBB. 책 이름 12자까지."
+            )
             ),
             structured_output=False,
         ),
         Tool.from_function(
             category_edit, name="category_edit",
             description=(
-                "저자가 책·노드의 이름·색·컨텍스트·위치나 선, 문헌 글의 원문 확인 표시·쓸 부분, 또는 글의 스크랩을 바꾸라고 분명히 말했을 때만 부른다. "
-                "book(책 이름) 또는 node(노드 이름). "
-                "context: 새 컨텍스트 목록(자주 쓰는 컨텍스트 이름이나 글, []이면 뗀다). move_to: 책을 옮길 노드('프로젝트 · 노드'나 프로젝트). "
-                "undo_move=true: 마지막 옮기기 되돌리기. node와 함께 link=이을 노드, unlink=끊을 노드. 같은 이름이 여러 프로젝트에 있으면 project. "
-                "checked=true|false와 item_id(문헌 글 key): 원문 확인 표시를 붙이거나 뗀다(저자가 그렇게 말했을 때만. 쓸 부분·서지는 그대로). "
-                "scrap=true|false와 item_id(글 id 또는 문헌 글 key): 글을 스크랩(★)하거나 뗀다(저자가 '스크랩해 줘'라고 했을 때만). "
-                "parts([{text, reason, where}])와 item_id(문헌 글 key): 저자가 고른 대목을 그 문헌 글의 쓸 부분으로 더한다(원문 확인 표시는 그대로)."
+                (
+                "저자가 책·노드(이름·색·컨텍스트·위치·선)나 글(원문 확인 표시·쓸 부분·스크랩)을 바꾸라고 분명히 말했을 때만 부른다. 한 번에 한 가지만. 대상은 book 또는 node(같은 이름이 여러 프로젝트에 있으면 "
+                "project). context: 새 목록([]이면 뗌). move_to: '프로젝트 · 노드'나 프로젝트, undo_move: 마지막 옮기기 되돌리기. node와 link/unlink: 선 잇기·끊기. "
+                "item_id(문헌 글 key)와 checked: 원문 확인 표시 붙이기·떼기, parts([{text, reason, where}], 쓸 부분마다 reason): 저자가 고른 대목을 쓸 부분으로 더함(원문 확인 "
+                "표시는 그대로). item_id(글 id·key)와 scrap: 스크랩(★) 켜기·끄기('스크랩해 줘'일 때만)."
+            )
             ),
             structured_output=False,
         ),
         Tool.from_function(
             category_put, name="category_put",
             description=(
-                "글 넣기. 저자가 그 책에 넣으라고 분명히 말했을 때만 부른다. 넣을 책이 대화에서 분명하지 않으면 부르지 말고 "
-                "책 이름과 컨텍스트를 보여 주며 묻는다(category_list). item_id를 주면 그 글을 고친다. 응답 머리의 컨텍스트를 따른다. "
-                "author: 저자의 말이면 me, Claude가 쓴 글(요약·설명)이면 ai. reason(이유)·where(위치: 출전·쪽)·tags·fields(그 책의 칸)·"
-                "chapters(장 번호)는 저자가 말한 것만 넣고 지어내지 않는다. "
-                "문헌이면 source에 서지({authors, year, title…} 또는 {key}). checked=true는 저자가 원문을 읽고 확인한 것이고 "
-                "parts([{text, reason, where}], 원문에서 고른 대목) 하나 이상이 필요하다. 인용 점검은 checked 글만 확인으로 본다. "
-                "file: 원문 파일(올린 파일 이름), aliases: 한글 표기(예: 갤러2022). " + TITLE_RULE
+                (
+                "글 넣기. 저자가 그 책에 넣으라고 분명히 말했을 때만 부른다. 넣을 책이 대화에서 분명하지 않으면 부르지 말고 책 이름과 컨텍스트를 보여 주며 묻는다(category_list). item_id면 그 글을 고친다. "
+                "응답 머리의 컨텍스트를 따른다. author: 저자의 말 me, Claude가 쓴 글 ai. reason·where(출전·쪽)·tags·fields·chapters는 저자가 말한 것만. 문헌이면 source(서지 "
+                "{authors, year, title…} 또는 {key}). checked=true(저자가 원문을 읽고 확인)는 parts(원문에서 고른 대목) 하나 이상 필요, 인용 점검은 checked만 확인으로 본다. "
+                "file: 원문 파일(올린 파일 이름), aliases: 한글 표기(갤러2022). 제목을 넣으면 title_by도 반드시(저자가 말한 제목 author, Claude가 지은 제목 ai). 제목을 말하지 않았으면 "
+                "instructions의 제목 규칙(기본값이 없으면 먼저 묻고, 비우기로 했으면 untitled=true)."
+            )
             ),
             structured_output=False,
         ),
         Tool.from_function(
             category_search, name="category_search",
             description=(
-                "책의 글에서 찾는다(문헌 글은 서지·key·첨부 이름과 쓸 부분, full=true면 원문 전체도. 원문 확인 전 문헌은 '미확인'으로 보이고 인용하지 않는다). "
-                "book을 주면 그 책만, project를 주면 그 프로젝트와 연결 노드. "
-                "author=me|ai|all(기본, 저자의 말을 먼저). k=8. scrap_only=true면 저자가 스크랩(★)한 글만(query 없이 부르면 스크랩 전체, "
-                "최근 것부터). 결과는 책마다 컨텍스트와 함께. 첨부(docx·pdf·txt·md)에서 뽑은 글자도 찾는다(맞은 곳 앞뒤와 쪽). "
-                "attachment='첨부:<id>'와 page=N이면 그 첨부의 글자를 3,000자씩 한 쪽 읽는다(한 번에 전체를 읽지 않는다)."
+                (
+                "책의 글에서 찾는다(문헌 글은 서지·key·첨부 이름·쓸 부분, full=true면 원문까지. 원문 확인 전 문헌은 '미확인'이고 인용하지 않는다). 낱말 여럿은 모두 맞는 글만. book: 그 책만, "
+                "project: 그 프로젝트와 연결 노드. author 기본 all(저자의 말 먼저). scrap_only=true: 스크랩(★)만(query 없으면 전체, 최근순). 첨부(docx·pdf·txt·md) 글자도 "
+                "찾는다. attachment='첨부:<id>'와 page=N: 그 첨부를 3,000자씩 한 쪽 읽는다."
+            )
             ),
             structured_output=False,
         ),
         Tool.from_function(
             category_trash, name="category_trash",
             description=(
-                "저자가 그 글·책·노드를 지우라고 분명히 말했을 때만 부른다. 여러 개면 목록을 보여 주고 확인받는다. "
-                "item_id면 그 글(응답한 글도 함께), 없으면 책 통째(글 수를 말하고 확인받은 뒤), node만 주면 그 노드(책이 있으면 먼저 옮긴다). "
-                "문헌 글과 문헌이 든 책은 옮기지 않는다. 휴지통으로 옮길 뿐 지우지 않는다. note: 이유."
+                (
+                "저자가 그 글·책·노드를 지우라고 분명히 말했을 때만 부른다. 여러 개면 목록을 보여 주고 확인받는다. item_id: 그 글(응답한 글도), 없으면 책 통째(글 수를 말하고 확인 뒤), node만: 그 노드(책은 "
+                "먼저 옮긴다). 문헌 글·문헌이 든 책은 옮기지 않는다. 휴지통으로 옮길 뿐. note: 이유."
+            )
             ),
             structured_output=False,
         ),
         Tool.from_function(
             category_title_default, name="category_title_default",
             description=(
-                "저자가 앞으로 제목을 어떻게 할지 정해 말했을 때만 부른다: '매번 물어봐' → ask, '앞으로는 제목 지어 줘' → ai, "
-                "'앞으로는 비워 둬' → none. 글을 넣을 때 이 기본값을 따른다(대화가 바뀌어도 서버에 남는다)."
+                "저자가 앞으로의 제목 방식을 정해 말했을 때만 부른다: '매번 물어봐' ask, '앞으로는 지어 줘' ai, '앞으로는 비워 둬' none. 대화가 바뀌어도 서버에 남는다."
             ),
             structured_output=False,
         ),

@@ -206,8 +206,10 @@ def build_tools(store: Store, current_user: Callable[[], str], max_user_bytes: i
             files_list,
             name="files_list",
             description=(
-                "저자가 웹에서 올린 파일과 게시판 글에 첨부한 문서(docx·pdf·md·txt) 목록: 이름, 크기, 올린 시각, 쓰임·어느 글. "
-                "book_import·category_put(file)·idea_add_conversation의 파일 인자에는 여기 나온 **이름만** 준다(게시판 첨부는 '첨부:<id>')."
+                (
+                "웹에서 올린 파일과 게시판 글의 첨부 문서(docx·pdf·md·txt) 목록(이름·크기·시각·어느 글, 가져온 문서는 '이미 가져옴'). 파일 인자(book_import·category_put "
+                "file·idea_add_conversation)에는 여기 나온 이름만 준다(첨부는 '첨부:<id>')."
+            )
             ),
             structured_output=False,
         )

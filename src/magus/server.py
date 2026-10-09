@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings
@@ -25,6 +26,17 @@ from magus.search import Embedder
 from magus.store import Store
 
 SERVER_NAME = "Magus"
+
+
+def plain_schema(schema: Any) -> Any:
+    """입력 스키마에서 'title' 주석(예: "Item Id", "book_importArguments")과 "default": null을 뺀다(주지 않은 인자는 원래 null).
+    이름이 title·default인 인자(값이 스키마 dict)와 값이 있는 기본값("open", 50 등)은 그대로."""
+    if isinstance(schema, dict):
+        return {k: plain_schema(v) for k, v in schema.items()
+                if not (k == "title" and isinstance(v, str)) and not (k == "default" and v is None)}
+    if isinstance(schema, list):
+        return [plain_schema(v) for v in schema]
+    return schema
 
 
 def build_server(
@@ -64,6 +76,8 @@ def build_server(
         *category_tools(store, current_user, embedder, files),
         *inbox_tools(store, current_user, settings.max_user_bytes),
     ]
+    for tool in tools:  # 도구 목록 토큰을 줄인다(2026-10-09 점검 26). 입력 검증은 SDK의 pydantic 모델이 따로 한다
+        tool.parameters = plain_schema(tool.parameters)
     # instructions는 실제로 등록된 도구만 언급하도록 도구 목록에서 조립한다.
     return MCPServer(
         name=SERVER_NAME,

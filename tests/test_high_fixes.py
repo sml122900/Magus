@@ -163,7 +163,7 @@ async def test_chapter_number_range(store: LocalStore, settings: Settings):
     store.create_project("alice", "책", project_id="b")
     async with Client(build_server(settings, store)) as c:
         tool = next(t for t in (await c.list_tools()).tools if t.name == "book_write_chapter")
-        assert tool.input_schema["properties"]["number"] == {"maximum": 9999, "minimum": 0, "title": "Number", "type": "integer"}
+        assert tool.input_schema["properties"]["number"] == {"maximum": 9999, "minimum": 0, "type": "integer"}  # title 주석은 뺀다(점검 26)
         for bad in (2**63, -1, 10_000, "x"):
             r = await c.call_tool("book_write_chapter", {"number": bad, "content": "본문", "note": "x", "project_id": "b"})
             assert r.is_error, bad

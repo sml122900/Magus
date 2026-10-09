@@ -276,3 +276,21 @@ async def test_same_name_everywhere(store: LocalStore, settings: Settings):
     assert "“장터 답사 기록”" in trashed  # 전: 휴지통 응답은 첨부 이름 없이 본문
     entry = next(t for t in store.list_trash("alice") if t.kind == "category_item")
     assert entry.preview == "장터 답사 기록"  # 휴지통 기록(웹 휴지통 줄)도 같은 규칙
+
+
+# ---- 26 도구 설명 줄이기: 스키마의 title 주석·default null만 빼고, 이름이 title인 인자·값 있는 기본값은 그대로 ----
+
+async def test_plain_schema(store: LocalStore, settings: Settings):
+    import json
+
+    from magus.server import plain_schema
+
+    assert plain_schema({"title": "X", "properties": {"title": {"title": "Title", "type": "string"}, "k": {"default": None},
+                                                         "s": {"default": "open"}}}) == {
+        "properties": {"title": {"type": "string"}, "k": {}, "s": {"default": "open"}}}
+    async with Client(build_server(settings, store)) as c:
+        tools = {t.name: t.input_schema for t in (await c.list_tools()).tools}
+    text = json.dumps(tools, ensure_ascii=False)
+    assert '"title": "' not in text and '"default": null' not in text
+    assert "title" in tools["category_put"]["properties"] and tools["book_issues"]["properties"]["status"]["default"] == "open"
+    assert "items" in tools["category_put"]["properties"]["parts"]["anyOf"][0]

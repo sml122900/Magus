@@ -18,12 +18,6 @@ from magus.category.rules import TITLE_MAX, TITLE_MODES
 from magus.store import Store
 from magus.store.formats import one_line
 
-TITLE_RULE = (
-    "제목: 제목을 넣을 때는 title_by를 반드시 함께 준다(저자가 말한 제목이면 author, Claude가 지었으면 ai). "
-    "저자가 제목을 말하지 않았으면 저장하기 전에 직접 지을지·지어 드릴지·비워 둘지 묻는다"
-    "(저자의 제목 기본값이 정해져 있으면 묻지 않고 따른다. category_list에 보인다). 비워 두기로 했으면 untitled=true. "
-    "저자가 '앞으로는 …'이라고 정하면 category_title_default로 기본값을 저장한다. "
-)
 NEED_BY = ("제목을 넣을 때는 title_by를 함께 준다: 저자가 말한 제목이면 author, Claude가 지었으면 ai. "
            "기본값은 없다(저자가 지은 제목이 AI 것으로, 또는 그 반대로 기록되지 않게). 저장하지 않았다.")
 ASK_TITLE = (
