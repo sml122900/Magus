@@ -634,9 +634,9 @@ class BoardPages:
         return self._shelf_page("글쓰기", body, session, 400 if error else 200, lead=lead)
 
     def _write_form(self, session: tuple[str, str], action: str, cancel: str, *, title: str = "", content: str = "",
-                    heading: str = "", current: list[Attachment] | tuple[Attachment, ...] = ()) -> str:
+                    heading: str = "", current: list[Attachment] | tuple[Attachment, ...] = (), limit: int = CONTENT_MAX) -> str:
         """글쓰기·고치기가 함께 쓰는 폼: 제목(문헌 글이면 서지 제목을 머리로)·본문·첨부(고치기면 기존 첨부마다 ✕ 빼기)."""
-        limit = int(self.settings.max_attach_bytes)
+        attach_limit = int(self.settings.max_attach_bytes)
         rows = "".join(
             f'<li data-name="{html.escape(a.name)}" data-size="{a.size}"><span class="fname">{html.escape(a.name)}</span> <small>{html.escape(kind_of(a.name))} · {size_text(a.size)}</small>'
             f'<label class="drop" title="첨부 빼기"><input type="checkbox" name="drop" value="{html.escape(a.id)}" '
@@ -647,10 +647,10 @@ class BoardPages:
         return (
             f'<form method="post" action="{html.escape(action)}" enctype="multipart/form-data" class="card write-form">'
             f'{self._csrf_input(session)}{head}'
-            f'<label class="block">본문 <textarea name="content" rows="10" maxlength="{CONTENT_MAX}">{html.escape(content)}</textarea></label>'
+            f'<label class="block">본문 <textarea name="content" rows="10" maxlength="{limit}">{html.escape(content)}</textarea></label>'
             '<fieldset><legend>첨부</legend>'
             + (f'<ul class="current" aria-label="지금 첨부">{rows}</ul>' if rows else "")
-            + f'<div class="dropzone" data-dropzone data-max="{MAX_FILES}" data-limit="{limit}" data-limit-text="{mb(limit)}" '
+            + f'<div class="dropzone" data-dropzone data-max="{MAX_FILES}" data-limit="{attach_limit}" data-limit-text="{mb(attach_limit)}" '
             f'data-types="{ACCEPT}">'
             f'<label class="pick">파일 고르기<input type="file" name="files" multiple accept="{ACCEPT}"></label>'
             '<label class="pick camera">사진 찍기<input type="file" name="files" accept="image/*" capture="environment"></label>'
@@ -710,6 +710,7 @@ class BoardPages:
         here = f"{link}/edit"
         title_text = (obj.title or "") if is_item else ""
         text = obj.content if is_item else str(obj.bib.get("memo") or "")
+        limit = max(CONTENT_MAX, len(text))  # 대화로 넣은 긴 글은 그 길이까지(고쳐 저장해도 뒷부분이 잘리지 않게)
         error = ""
         if request.method == "POST":
             if self._too_big(request):
@@ -718,7 +719,7 @@ class BoardPages:
                 form = await self._form(request, session)
             except PermissionError:
                 return self._shelf_page("고치기", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-            content = str(form.get("content") or "").strip()[:CONTENT_MAX]
+            content = str(form.get("content") or "").strip()[:limit]
             title = one_line(str(form.get("title") or ""))[:TITLE_MAX] or None
             files, code = await self._read_files(uid, form)
             current = await run_in_threadpool(self.store.list_attachments, uid, owner)
@@ -739,7 +740,7 @@ class BoardPages:
         current = await run_in_threadpool(self.store.list_attachments, uid, owner)
         heading = "" if is_item else cite_label(obj, obj.key)
         body = ((f'<p class="msg err">{error}</p>' if error else "")
-                + self._write_form(session, here, link, title=title_text, content=text, heading=heading, current=current))
+                + self._write_form(session, here, link, title=title_text, content=text, heading=heading, current=current, limit=limit))
         lead = await run_in_threadpool(self.trail, uid, kind.key, "고치기")
         return self._shelf_page("고치기", body, session, 400 if error else 200, lead=lead)
 

@@ -100,6 +100,23 @@ def test_edit_keeps_hidden_fields_and_trashes_dropped_files(server_proc):  # noq
     store.close()
 
 
+def test_long_post_from_chat_is_not_cut_when_edited(server_proc):  # noqa: F811
+    base, data_dir, _ = server_proc({})
+    ids = _setup(data_dir)
+    long = "가" * 25_000  # 대화로 넣은 긴 글(웹 글쓰기 한도 2만 자보다 길다)
+    store = LocalStore(data_dir)
+    store.put_category_item("alice", CategoryItem("20261009000000008-eeeeee", ids["notes"], long, "me", title="긴 글"))
+    store.close()
+    with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
+        form = c.get(f"/login?next=/shelf/{ids['notes']}/20261009000000008-eeeeee/edit").text
+        assert 'maxlength="25000"' in form
+        c.post(f"/shelf/{ids['notes']}/20261009000000008-eeeeee/edit", data={"csrf": _csrf(form), "title": "긴 글 고침", "content": long})
+    store = LocalStore(data_dir)
+    item = store.get_category_item("alice", ids["notes"], "20261009000000008-eeeeee")
+    assert item.title == "긴 글 고침" and item.content == long
+    store.close()
+
+
 def _files(data_dir, book: str, item: str):
     store = LocalStore(data_dir)
     try:
