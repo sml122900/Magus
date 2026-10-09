@@ -294,7 +294,9 @@ class ShelfMixin:
         )
         self._replace_chunks(user_id, "ref", record["key"], "ref_picked", [p["text"] for p in passages])
         self._replace_chunks(user_id, "ref", record["key"], "ref_full", chunk_text(full) if full.strip() else [])
-        self._replace_chunks(user_id, "ref", record["key"], "ref_bib", [bib_text(record)])  # 웹 책장 검색 전용
+        names = [a.name for a in self.list_attachments(user_id, f"ref:{record['key']}")]  # type: ignore[attr-defined]
+        self._replace_chunks(user_id, "ref", record["key"], "ref_bib",  # 웹 책장 검색 전용. 첨부 파일 이름도(2026-10-09)
+                             [bib_text(record) + ("\n첨부: " + ", ".join(names) if names else "")])
 
     @locked
     def list_trash(self, user_id: str) -> list[TrashItem]:
@@ -371,10 +373,19 @@ class ShelfMixin:
 
     @locked
     def search_substring(self, user_id: str, lanes: list[Lane], needle: str, limit: int) -> list[Chunk]:
+        """글자 그대로 포함(대소문자 무시). 최근 글부터(글·문헌 글의 만든 시각, 그 밖은 뒤에)."""
         marks = ",".join("?" * len(lanes))
         rows = self._db.execute(
-            f"SELECT id, owner_type, owner_id, lane, text FROM chunks "
-            f"WHERE user_id = ? AND lane IN ({marks}) AND instr(lower(text), lower(?)) > 0 ORDER BY id DESC LIMIT ?",
+            f"""
+            SELECT c.id, c.owner_type, c.owner_id, c.lane, c.text, COALESCE(i.created_at, r.created_at, '') AS at
+              FROM chunks c
+              LEFT JOIN category_items i ON c.owner_type = 'category' AND i.user_id = c.user_id
+                   AND i.category_id = substr(c.owner_id, 1, instr(c.owner_id, '/') - 1)
+                   AND i.id = substr(c.owner_id, instr(c.owner_id, '/') + 1)
+              LEFT JOIN refs r ON c.owner_type = 'ref' AND r.user_id = c.user_id AND r.key = c.owner_id
+             WHERE c.user_id = ? AND c.lane IN ({marks}) AND instr(lower(c.text), lower(?)) > 0
+             ORDER BY at DESC, c.id DESC LIMIT ?
+            """,
             (user_id, *lanes, needle, limit),
         )
         return [Chunk(r["id"], r["owner_type"], r["owner_id"], r["lane"], r["text"]) for r in rows]

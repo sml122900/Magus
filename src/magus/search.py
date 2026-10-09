@@ -7,11 +7,12 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from typing import Protocol
 
 from magus.store import Chunk, Store
 from magus.store.base import Lane
-from magus.textindex import match_query
+from magus.textindex import match_query, needle_of, search_match
 
 RRF_K = 60
 log = logging.getLogger("magus.search")
@@ -46,6 +47,37 @@ def hybrid_search(
         except Exception as e:  # 임베딩 API가 실패해도 검색은 FTS 결과로 계속한다
             log.warning("벡터 검색 실패, FTS만 사용: %s", e)
     return rrf(rankings)[:k]
+
+
+def find_chunks(store: Store, user_id: str, lanes: list[Lane], query: str, limit: int, embedder: Embedder | None = None) -> list[Chunk]:
+    """웹 찾기와 category_search가 함께 쓰는 찾기(2026-10-09). 사람이 떠올리는 대로 쳐도 찾게:
+    1단계(색인, 순위 먼저): textindex.search_match(앞부분 일치·구절·2글자 조각). 임베딩 제공자가 있으면 벡터와 RRF로 합친다.
+    2단계(글자 그대로 포함, 대소문자 무시): 1단계에 없는 글을 최근 것부터 뒤에 붙인다(한 글자·낱말 중간·기호도 찾는다).
+    같은 글(owner)은 한 번. 공백만 있으면 []."""
+    query = " ".join((query or "").split())
+    if not query:
+        return []
+    pool = max(limit, 20)
+    rankings: list[list[Chunk]] = []
+    if match := search_match(query):
+        try:
+            rankings.append(store.search_fts(user_id, lanes, match, pool))
+        except sqlite3.OperationalError as e:  # 식은 토큰만으로 만들어 문법 오류가 나지 않아야 한다. 나더라도 2단계로 계속한다
+            log.warning("FTS 식 오류, 글자 포함 찾기로 계속: %s", type(e).__name__)
+    if embedder is not None:
+        try:
+            embed_missing(store, user_id, embedder)
+            rankings.append(store.search_vector(user_id, lanes, embedder.embed([query])[0], pool))
+        except Exception as e:  # 임베딩 API가 실패해도 검색은 키워드 결과로 계속한다
+            log.warning("벡터 검색 실패, 키워드만 사용: %s", e)
+    first = rrf(rankings) if rankings else []
+    owners = {(c.owner_type, c.owner_id) for c in first}
+    second = []
+    for c in store.search_substring(user_id, lanes, needle_of(query), pool) if needle_of(query) else []:
+        if (c.owner_type, c.owner_id) not in owners:
+            owners.add((c.owner_type, c.owner_id))
+            second.append(c)
+    return [*first, *second]
 
 
 def embed_missing(store: Store, user_id: str, embedder: Embedder, batch: int = 64) -> int:

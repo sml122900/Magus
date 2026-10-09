@@ -330,10 +330,26 @@ class CategoryMixin:
              item.edited_by, item.reason, item.where, json.dumps([_passage(p) for p in item.passages], ensure_ascii=False),
              item.parent_id, item.origin, item.kind, item.tags_by, int(item.scrap)),
         )
-        # 글의 모든 칸을 찾는다(#96: 옛 문체는 이유·태그만 찾았지만, 이제 무엇을 볼지는 컨텍스트가 정한다)
+        # 글의 모든 칸을 찾는다(#96: 옛 문체는 이유·태그만 찾았지만, 이제 무엇을 볼지는 컨텍스트가 정한다). 첨부 파일 이름도(2026-10-09)
+        names = [a.name for a in self.list_attachments(user_id, f"{item.category_id}/{item.id}")]  # type: ignore[attr-defined]
         text = "\n".join([item.title or "", item.content, item.reason or "", item.where or "",
-                          *(p.text for p in item.passages), *(f"{k}: {v}" for k, v in item.fields.items() if v), " ".join(item.tags)])
+                          *(p.text for p in item.passages), *(f"{k}: {v}" for k, v in item.fields.items() if v), " ".join(item.tags),
+                          *(["첨부: " + ", ".join(names)] if names else [])])
         self._replace_chunks(user_id, "category", f"{item.category_id}/{item.id}", "category", chunk_text(text.strip()))
+
+    def _attachments_changed(self, user_id: str, owner: str) -> None:
+        """첨부가 늘거나 줄면 그 글(또는 문헌 글)의 색인을 파일에서 다시 만든다(첨부 이름을 찾게, 2026-10-09)."""
+        if owner.startswith("ref:"):
+            rdir = self._melchior_dir(user_id) / owner[4:]  # type: ignore[attr-defined]
+            if (rdir / "bib.json").exists():
+                with self._db:
+                    self._index_ref(user_id, rdir)  # type: ignore[attr-defined]
+            return
+        book, _, item = owner.partition("/")
+        path = self._category_dir(user_id, book) / "items" / f"{item}.json"
+        if path.exists():
+            with self._db:
+                self._index_item(user_id, _item_from_record(book, read_json(path)))
 
     def _reindex_category(self, user_id: str, cdir: Path, known: set[str]) -> None:
         record = read_json(cdir / "category.json")

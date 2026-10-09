@@ -29,6 +29,34 @@ def index_text(text: str) -> str:
     return " ".join(tokens(text))
 
 
+_QUOTED = re.compile(r'"([^"]*)"')
+
+
+def query_parts(q: str) -> tuple[list[str], list[str]]:
+    """검색어 → (따옴표로 묶은 구절들, 나머지 낱말들). 짝이 맞지 않는 따옴표는 버린다."""
+    phrases = [" ".join(p.split()) for p in _QUOTED.findall(q) if p.strip()]
+    return phrases, _QUOTED.sub(" ", q).replace('"', " ").split()
+
+
+def search_match(q: str) -> str | None:
+    """찾기용 FTS5 MATCH 식(2026-10-09). 따옴표로 묶은 구절은 그 토큰이 이어진 구절("raw 3fb7a700"), 나머지 라틴·숫자 낱말과
+    한 글자 토큰은 앞부분 일치("ra"*), 한글·한자 2글자 조각은 그대로("도시"). OR로 묶어 많이 맞을수록 위(bm25).
+    식에는 토큰(글자·숫자)만 큰따옴표로 묶어 넣으므로 검색어의 ( ) " * : - 같은 글자가 FTS 문법이 되지 않는다. 토큰이 없으면 None."""
+    phrases, words = query_parts(q)
+    parts = []
+    for phrase in phrases:
+        if toks := tokens(phrase):
+            parts.append('"' + " ".join(toks) + '"')
+    for tok in dict.fromkeys(tokens(" ".join(words))):
+        parts.append(f'"{tok}"*' if tok.isascii() or len(tok) == 1 else f'"{tok}"')
+    return " OR ".join(dict.fromkeys(parts)) or None
+
+
+def needle_of(q: str) -> str:
+    """2단계(글자 그대로 포함)에 쓸 글: 따옴표를 뗀 검색어(공백은 하나로)."""
+    return " ".join(q.replace('"', " ").split())
+
+
 def match_query(text: str) -> str | None:
     """FTS5 MATCH 식. 토큰이 없으면 None."""
     unique = list(dict.fromkeys(tokens(text)))

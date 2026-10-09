@@ -89,7 +89,7 @@ def test_web_star_toggle_filter_and_count(server_proc):  # noqa: F811
         # 스크랩만: 개수, 찾기와 함께
         only = c.get(f"/shelf/{notes}?scrap=1").text
         assert only.count('<li><a class="post"') == 2 and '<span class="n" data-scrap-count>2</span>' in only
-        assert f'aria-current="true"' in only and f'href="/shelf/{notes}"' in only  # 다시 누르면 끈다
+        assert 'aria-current="true"' in only and f'href="/shelf/{notes}"' in only  # 다시 누르면 끈다
         both = c.get(f"/shelf/{notes}", params={"q": "물안개", "scrap": "1"}).text
         assert both.count('<li><a class="post"') == 1 and "물안개" in both
         none = c.get(f"/shelf/{notes}", params={"q": "나루", "scrap": "1"}).text

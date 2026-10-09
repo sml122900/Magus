@@ -6,8 +6,8 @@
 (magus.webcontexts). 옛 주소(/shelf/ideas…, ideas.<프로젝트>)는 이전으로 생긴 책(<종류>-<프로젝트>)으로 넘긴다.
 
 - 글마다 고유 주소(/shelf/<책 id>/<글 id>, 옛 /shelf/ideas/<id>는 넘긴다)가 있고, 그 주소가 글 보기 페이지다.
-- 검색은 서버에서 한다(GET ?q=). 두 글자 이상은 기존 FTS 인덱스(2글자 조각)로 찾아 많이 맞은 것부터,
-  한 글자는 2글자 조각 색인으로 찾을 수 없어 그 글자가 그대로 들어 있는 항목을 최근 것부터 보인다.
+- 검색은 서버에서 한다(GET ?q=). category_search와 같은 함수(magus.search.find_chunks, 2026-10-09): 색인(라틴·숫자 앞부분 일치,
+  한글 2글자 조각, 따옴표 구절)으로 많이 맞은 것부터, 그 뒤에 글자 그대로 들어 있는 글(대소문자 무시, 한 글자·낱말 중간)을 최근 것부터.
 - 책 만들기·이름 바꾸기·색 바꾸기·휴지통은 이 화면과 대화(category_* 도구) 양쪽에서 된다.
 - #97(오캄의 면도날, 2026-10-08): 화면에는 제목·버튼·입력칸 이름·날짜·개수만 둔다. 설명 문장은 도움말(docs/help, 웹의 '?')로 옮겼다.
   게시판의 글은 제목·본문·첨부만 보이고 쓴다(누가 = 저자). 칸·이유·위치·쓸 부분·태그는 파일에 그대로 두고 보이지 않을 뿐이다.
@@ -53,7 +53,8 @@ from magus.store import Category, CategoryItem, ShelfSettings, Store
 from magus.webcontexts import CONTEXT_SCRIPT, CONTEXT_STYLE, context_fieldset, contexts_from_form, contexts_view_html, register_row
 from magus.store.base import Lane
 from magus.store.formats import one_line
-from magus.textindex import match_query, tokens
+from magus.search import find_chunks
+from magus.textindex import query_parts, tokens
 
 GROUP_SIZE = 5  # 책장 전체 검색에서 카테고리마다 먼저 보이는 수
 PER_SHELF = 6  # 선반 한 칸에 꽂는 책 수(넘으면 선반이 하나 늘어난다). 노드의 책장은 옆 패널이라 한 줄 여섯 권
@@ -347,15 +348,11 @@ def clean_query(q: str | None) -> str:
 
 
 def find(store: Store, user_id: str, lanes: list[Lane], q: str) -> list[str]:
-    """검색어에 맞는 항목 id(owner_id)를 차례대로. 두 글자 이상 → FTS(많이 맞은 것부터), 한 글자 → 그대로 포함(최근 것부터)."""
-    if not q:
+    """검색어에 맞는 항목 id(owner_id)를 차례대로. category_search와 같은 찾기(magus.search.find_chunks, 2026-10-09):
+    색인(앞부분 일치·구절, 많이 맞은 것부터) 뒤에 글자 그대로 포함(최근 것부터)."""
+    if not q.strip():
         return []
-    words = tokens(q)
-    if any(len(t) >= 2 for t in words) and (match := match_query(q)):
-        chunks = store.search_fts(user_id, lanes, match, SEARCH_LIMIT)
-    else:
-        chunks = store.search_substring(user_id, lanes, q, SEARCH_LIMIT)
-    return list(dict.fromkeys(c.owner_id for c in chunks))
+    return list(dict.fromkeys(c.owner_id for c in find_chunks(store, user_id, lanes, q, SEARCH_LIMIT)))
 
 
 def one_char(q: str) -> bool:
@@ -363,8 +360,10 @@ def one_char(q: str) -> bool:
 
 
 def _pattern(q: str, text: str) -> re.Pattern[str] | None:
-    """맞은 부분 표시: 검색어의 낱말이 그대로 있으면 그것을, 없으면 색인 조각(2글자·영단어)을 표시한다."""
-    for terms in (q.split(), tokens(q)):
+    """맞은 부분 표시: 따옴표 구절·검색어 낱말이 그대로(대소문자 무시) 있으면 그것을, 없으면 색인 조각(2글자·영단어)을 표시한다.
+    앞부분 일치("ra" → raw)는 맞은 앞부분만 표시된다."""
+    phrases, words = query_parts(q)
+    for terms in ([*phrases, *words], tokens(q)):
         terms = sorted({t for t in terms if t}, key=len, reverse=True)
         if terms:
             pattern = re.compile("|".join(re.escape(t) for t in terms), re.IGNORECASE)

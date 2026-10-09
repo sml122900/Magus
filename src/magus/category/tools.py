@@ -40,7 +40,7 @@ from magus.melchior.refs import add_ref
 from magus.project_args import (
     PROJECT_PUT, find_project, floor_name, match_project, projects_text, resolve_project, search_projects, short,
 )
-from magus.search import Embedder, hybrid_search
+from magus.search import Embedder, find_chunks
 from magus.attachments import describe, title_from_files
 from magus.store import Category, CategoryItem, MapNode, Passage, Ref, ShelfSettings, Store
 from magus.store.floors import MoveError
@@ -506,7 +506,7 @@ def build_tools(
                 *((r.book, r, None) for r in store.list_refs(user)
                   if r.scrap and r.book in books and (not only or r.book == only.key) and author != "ai")]
             hits = sorted(starred, key=lambda h: h[1].created_at, reverse=True)
-        for chunk in (hybrid_search(store, user, query, lanes, k * 6, embedder) if query else []):
+        for chunk in (find_chunks(store, user, lanes, query, k * 6, embedder) if query else []):
             if chunk.lane == "category":
                 cid, _, iid = chunk.owner_id.partition("/")
                 if cid not in books or (only and cid != only.key) or chunk.owner_id in seen:
