@@ -7,6 +7,7 @@ front matter는 도구 경계를 넘지 않는다. 읽기는 본문(content)과 
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from typing import Annotated, Any, Literal
 
@@ -217,7 +218,7 @@ def build_tools(
     def book_issue_close(id: str, note: str | None = None, project_id: str | None = None) -> str:
         project = resolve_project(project_id)
         number = id.strip().upper().removeprefix("I")
-        if not number.isdigit():
+        if not re.fullmatch(r"[0-9]+", number):  # isdigit은 '²'·'１'도 참이다(점검 15-4: int('²')에서 내부 오류)
             raise ToolError(f"확인 요청 번호 형식이 아닙니다: {id!r} (예: I3 또는 3)")
         issue = store.close_issue(current_user(), project.id, int(number), note)
         if issue is None:
@@ -227,7 +228,10 @@ def build_tools(
     def book_export(path: str | None = None, project_id: str | None = None) -> str:
         project = resolve_project(project_id)
         user = current_user()
-        location = export_docx(store, user, project, path)
+        try:
+            location = export_docx(store, user, project, path)
+        except ValueError as e:  # 이름이 너무 김 등(점검 15-5)
+            raise ToolError(str(e)) from e
         where = f"내려받기(24시간 안, 같은 계정으로 로그인 필요): {export_link(user, location)}" if export_link else location
         return f"docx를 만들었다: {where}\n(코멘트·그림은 복원하지 않는다. 자리표시자 [그림 N]·[수식]이 그대로 남는다. 표는 Word 표로 나간다.)"
 

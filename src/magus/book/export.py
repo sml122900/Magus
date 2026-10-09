@@ -35,7 +35,20 @@ def assemble_markdown(store: Store, user_id: str, project: Project) -> str:
     return "\n\n".join(out) + "\n"
 
 
+EXPORT_NAME_MAX = 120  # 바이트. 내보내기 파일 이름(점검 15-5: 20만 자 이름은 파일 시스템 오류였다)
+
+
+def export_name(project: Project, filename: str | None) -> str:
+    name = Path(filename).name if filename else f"{project.id}-{re.sub(r'[^0-9]', '', utcnow())[:14]}.docx"
+    if not name.lower().endswith(".docx"):
+        name += ".docx"
+    if len(name.encode("utf-8")) > EXPORT_NAME_MAX or any(ord(ch) < 32 for ch in name) or name.startswith("."):
+        raise ValueError(f"내보낼 파일 이름은 .docx를 붙여 {EXPORT_NAME_MAX}바이트까지(제어 문자·점으로 시작 없이)이다. 이름을 줄이거나 비워 둔다.")
+    return name
+
+
 def export_docx(store: Store, user_id: str, project: Project, filename: str | None = None) -> str:
+    name = export_name(project, filename)  # 변환 전에 이름부터 본다
     markdown = assemble_markdown(store, user_id, project)
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "book.docx"
@@ -44,7 +57,4 @@ def export_docx(store: Store, user_id: str, project: Project, filename: str | No
                         *(["--metadata", f"subtitle={project.subtitle}"] if project.subtitle else [])]
         )
         data = out.read_bytes()
-    name = Path(filename).name if filename else f"{project.id}-{re.sub(r'[^0-9]', '', utcnow())[:14]}.docx"
-    if not name.lower().endswith(".docx"):
-        name += ".docx"
     return store.save_export(user_id, project.id, name, data)

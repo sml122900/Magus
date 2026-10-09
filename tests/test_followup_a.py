@@ -302,3 +302,20 @@ def test_local_mode_refuses_foreign_host(server_proc):  # noqa: F811
             assert r.status_code == 400 and "허용하지 않는 Host" in r.text, path
         assert c.get("/login", headers={"host": "localhost"}).status_code == 303  # 루프백 이름은 그대로
         assert c.get("/healthz").status_code == 200
+
+
+# ---- 15-4·15-5 확인 요청 번호 I²·아주 긴 내보내기 이름 ----
+
+async def test_issue_close_odd_digits_and_long_export_name(store: LocalStore, settings: Settings):
+    store.create_project("alice", "책", project_id="b")
+    store.write_chapter("alice", "b", 1, "본문", "x", title="하나")
+    store.add_issue("alice", "b", "확인", origin="user", chapter_number=1)
+    async with Client(build_server(settings, store)) as c:
+        for odd in ("I²", "１", "I1a"):
+            r = await c.call_tool("book_issue_close", {"id": odd, "project_id": "b"})
+            assert r.is_error and "확인 요청 번호 형식이 아닙니다" in r.content[0].text, odd
+        r = await c.call_tool("book_export", {"path": "a" * 200_000, "project_id": "b"})
+        assert r.is_error and "120바이트까지" in r.content[0].text
+        ok = await c.call_tool("book_issue_close", {"id": "I1", "project_id": "b"})
+        assert not ok.is_error
+    assert not list((store.root / "users" / "alice" / "projects" / "b").glob("exports/*"))
