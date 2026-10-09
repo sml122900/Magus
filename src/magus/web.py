@@ -97,11 +97,17 @@ a.tag{text-decoration:none;margin:2px 0}a.tag:hover{color:var(--press)}
 .msg{padding:12px 16px;margin:16px 0;white-space:pre-wrap}
 .err{border-left:4px solid var(--ruby)}
 .tag{display:inline-block;background:var(--tag);color:var(--deep);border-radius:9999px;padding:2px 10px;white-space:nowrap}
-button,input[type=file]::file-selector-button{font:inherit;font-size:16px;line-height:1.2;min-height:40px;padding:8px 16px;
-border-radius:9999px;border:1px solid var(--primary);background:var(--canvas);color:var(--primary);cursor:pointer}
-button:hover,input[type=file]::file-selector-button:hover{background:var(--soft)}
-button.primary{background:var(--primary);color:#ffffff}
-button.primary:hover{background:var(--deep)}button.primary:active{background:var(--press)}
+/* 버튼 규격 하나(2026-10-10): <button>, 버튼 모양 링크(a.btn), 접는 버튼(summary.btn)의 높이·padding·글자·테두리·box-sizing이 같다.
+   링크 버튼과 폼(접는) 버튼을 나란히 둘 때는 .acts(한 줄 flex, 세로 가운데)에 넣는다 */
+button,a.btn,summary.btn,input[type=file]::file-selector-button{box-sizing:border-box;font:inherit;font-size:16px;line-height:1.2;min-height:40px;
+padding:8px 16px;border-radius:9999px;border:1px solid var(--primary);background:var(--canvas);color:var(--primary);cursor:pointer;vertical-align:middle}
+a.btn,summary.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;margin:0;text-decoration:none;list-style:none}
+summary.btn::-webkit-details-marker{display:none}
+button:hover,a.btn:hover,summary.btn:hover,input[type=file]::file-selector-button:hover{background:var(--soft)}
+button.primary,a.btn.primary,summary.btn.primary{background:var(--primary);color:#ffffff}
+button.primary:hover,a.btn.primary:hover,summary.btn.primary:hover{background:var(--deep);color:#ffffff}button.primary:active{background:var(--press)}
+.btn.quiet{color:var(--ink);border-color:var(--mute);font-weight:600}
+.acts{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:12px 0}.acts>form,.acts>details{margin:0}
 button:disabled{opacity:.5;cursor:default}
 input[type=file]{font:inherit;color:var(--ink2);max-width:100%}
 input[type=file]::file-selector-button{margin-right:12px}
@@ -125,10 +131,10 @@ form.busy button::after{content:"";display:inline-block;width:14px;height:14px;m
 border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (max-width:767px){main{padding:16px 12px 24px}h1{font-size:22px}table{min-width:640px}
-button,input[type=file]::file-selector-button,input:not([type=radio]):not([type=checkbox]):not([type=hidden]),select{min-height:44px}}
+button,a.btn,summary.btn,input[type=file]::file-selector-button,input:not([type=radio]):not([type=checkbox]):not([type=hidden]),select{min-height:44px}}
 /* 누르는 것의 크기(2026-10-09): 넓은 화면 32px 이상, 휴대폰(390px) 44px 이상. 위치 표시·돌아가기·쪽 번호·파일·취소 같은 글자 링크와 접는 칸 */
 nav.trail a,.crumb a,p.muted>a,nav.pages a,nav.pages span,ul.files a,form p>a,.picker label,label.drop,.nlist p>a,.nl-books a,a.back{
-display:inline-flex;align-items:center;min-height:32px}
+display:inline-flex;align-items:center;min-height:32px;vertical-align:middle}
 details>summary{min-height:32px;padding-top:3px;padding-bottom:3px}
 @media (max-width:767px){
 nav.trail a,.crumb a,p.muted>a,nav.pages a,nav.pages span,ul.files a,form p>a,.picker label,label.drop,.nlist p>a,.nl-books a,a.back,

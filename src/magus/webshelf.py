@@ -590,17 +590,17 @@ class ShelfPages:
 
     def _post_actions(self, uid: str, session: tuple[str, str], kind: Kind, obj: Any, link: str) -> str:
         """글 보기 아래 '고치기'와 🗑(화면 안의 작은 확인 창, 노드 삭제와 같은 방식, confirm() 쓰지 않음). 문헌 글에는 🗑이 없다."""
-        edit = f'<a class="act" href="{html.escape(link)}/edit"><span aria-hidden="true">✎</span> 고치기</a>'
+        edit = f'<a class="btn quiet" href="{html.escape(link)}/edit"><span aria-hidden="true">✎</span> 고치기</a>'
         if kind.category is None:
             return ""
         if not isinstance(obj, CategoryItem):
-            return f'<div class="post-acts">{edit}</div>'
+            return f'<div class="acts post-acts">{edit}</div>'
         replies = sum(1 for i in self.store.list_category_items(uid, kind.category.id) if i.parent_id == obj.id)
         files = len(self.store.list_attachments(uid, f"{kind.category.id}/{obj.id}"))
         along = [f"응답한 글 {replies}개" if replies else "", f"첨부 {files}개" if files else ""]
         ask = "이 글을 휴지통으로 옮길까요?" + (f" {'·'.join(a for a in along if a)}도 함께 옮깁니다." if any(along) else "")
         close = '<button type="button" class="del-cancel" onclick="this.closest(\'details\').open=false">취소</button>'
-        return (f'<div class="post-acts">{edit}<details class="del"><summary><span aria-hidden="true">🗑</span> 휴지통으로</summary>'
+        return (f'<div class="acts post-acts">{edit}<details class="del"><summary class="btn quiet"><span aria-hidden="true">🗑</span> 휴지통으로</summary>'
                 f'<div class="del-box" role="dialog" aria-label="글 휴지통으로"><p>{html.escape(ask)}</p>'
                 f'<form method="post" action="{html.escape(link)}/trash">{self._csrf_input(session)}'
                 f'<p><button class="primary">옮기기</button> {close}</p></form></div></details></div>')

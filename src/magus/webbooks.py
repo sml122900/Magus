@@ -346,7 +346,7 @@ class BookPages:
                         + (f"E{current.edition}" if current.edition else "수정본 기록 전") + f" → E{now} "
                         f'<form method="post" action="/shelf/doc/{html.escape(doc.id)}/redo" class="inline">{self._csrf_input(session)}'
                         "<button>다시 만들기</button></form></div>")
-        actions = (f'<div class="doc-actions"><a href="/shelf/doc/{html.escape(doc.id)}/docx?v={number}">내려받기(docx)</a>'
+        actions = (f'<div class="doc-actions"><a class="btn" href="/shelf/doc/{html.escape(doc.id)}/docx?v={number}">내려받기(docx)</a>'
                    '<button type="button" onclick="window.print()">인쇄</button>'
                    + ("" if number != current.number or is_stale(self.store, uid, doc) else
                       f'<form method="post" action="/shelf/doc/{html.escape(doc.id)}/redo" class="inline">{self._csrf_input(session)}'

@@ -108,7 +108,7 @@ def test_project_trash_web(server_proc):  # noqa: F811
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=60) as c:
         page = c.get("/login?next=/shelf/p/city").text
         csrf = _csrf(page)
-        assert '<summary><span aria-hidden="true">🗑</span> 휴지통으로</summary>' in page
+        assert '<summary class="btn quiet"><span aria-hidden="true">🗑</span> 휴지통으로</summary>' in page
         assert "프로젝트 「도시의 책」을 휴지통으로 옮길까요?" in page and '<p class="big-warn">수정본 1개가 함께 옮겨집니다.</p>' in page
         assert "node-del proj-del" not in c.get("/shelf/p/common").text  # 「내 서재」에는 없다
         gone = c.post("/shelf/p/city/discard", data={"csrf": csrf})

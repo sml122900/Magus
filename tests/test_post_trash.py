@@ -40,10 +40,10 @@ def test_post_trash_dialog_trash_page_and_restore(server_proc):  # noqa: F811
         post = c.get(f"/login?next=/shelf/{notes}/{FIRST}").text
         csrf = _csrf(post)
         # 글 보기: 고치기·🗑과 화면 안 확인 창(응답한 글·첨부도 함께라고 알린다)
-        assert '<details class="del"><summary><span aria-hidden="true">🗑</span> 휴지통으로</summary>' in post  # 글자를 붙여 누르기 쉽게
+        assert '<details class="del"><summary class="btn quiet"><span aria-hidden="true">🗑</span> 휴지통으로</summary>' in post  # 글자를 붙여 누르기 쉽게
         assert "이 글을 휴지통으로 옮길까요? 응답한 글 1개·첨부 1개도 함께 옮깁니다." in post
         assert f'<form method="post" action="/shelf/{notes}/{FIRST}/trash">' in post and 'class="del-cancel"' in post
-        assert f'<a class="act" href="/shelf/{notes}/{FIRST}/edit">' in post and "confirm(" not in post
+        assert f'<a class="btn quiet" href="/shelf/{notes}/{FIRST}/edit">' in post and "confirm(" not in post
         # 문헌 글: 🗑·체크 없음
         ref = c.get(f"/shelf/{refs_book}/clack2012").text
         assert 'class="del"' not in ref and "/check" not in ref and 'type="checkbox"' not in ref

@@ -54,7 +54,7 @@ def test_edit_keeps_hidden_fields_and_trashes_dropped_files(server_proc):  # noq
         view = c.get(f"/login?next=/shelf/{notes}/{AI_POST}").text
         csrf = _csrf(view)
         # 글 보기: '고치기'가 🗑 휴지통으로 옆에(같은 크기의 단추)
-        assert (f'<div class="post-acts"><a class="act" href="/shelf/{notes}/{AI_POST}/edit"><span aria-hidden="true">✎</span> 고치기</a>'
+        assert (f'<div class="acts post-acts"><a class="btn quiet" href="/shelf/{notes}/{AI_POST}/edit"><span aria-hidden="true">✎</span> 고치기</a>'
                 '<details class="del">') in view
         form = c.get(f"/shelf/{notes}/{AI_POST}/edit").text
         assert 'name="title" value="장날 정리"' in form and ">AI가 정리한 장날 이야기</textarea>" in form
@@ -140,7 +140,7 @@ def test_edit_source_post_keeps_check_and_citation_counts(server_proc):  # noqa:
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         view = c.get(f"/login?next=/shelf/{refs_book}/clack2012").text
         csrf = _csrf(view)
-        assert f'<a class="act" href="/shelf/{refs_book}/clack2012/edit">' in view and 'class="del"' not in view  # 문헌 글: 🗑 없음
+        assert f'<a class="btn quiet" href="/shelf/{refs_book}/clack2012/edit">' in view and 'class="del"' not in view  # 문헌 글: 🗑 없음
         form = c.get(f"/shelf/{refs_book}/clack2012/edit").text
         assert '<h2 class="ref-title">' in form and 'name="title"' not in form and 'type="checkbox" name="checked"' not in form
         done = c.post(f"/shelf/{refs_book}/clack2012/edit", data={"csrf": csrf, "content": "다시 읽을 것"},

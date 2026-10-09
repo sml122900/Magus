@@ -552,7 +552,7 @@ class MapPages:
             inner = (f"<p>{html.escape(ask)}</p>{warn}"
                      f'<form method="post" action="/shelf/p/{urllib.parse.quote(floor.id)}/discard">{self._csrf_input(session)}'
                      f'<p><button class="primary">옮기기</button> {close.format("취소")}</p></form>')
-        return ('<details class="node-del proj-del"><summary><span aria-hidden="true">🗑</span> 휴지통으로</summary>'
+        return ('<details class="node-del proj-del"><summary class="btn quiet"><span aria-hidden="true">🗑</span> 휴지통으로</summary>'
                 f'<div class="del-box" role="dialog" aria-label="프로젝트 휴지통으로">{inner}</div></details>')
 
     async def project_discard(self, request: Request) -> Response:

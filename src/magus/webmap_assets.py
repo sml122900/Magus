@@ -17,9 +17,6 @@ main>h1{display:none}
 .pm-bar{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:4px 0 12px}
 .pm-bar .search{margin:0;flex:1 1 320px}
 .pm-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-a.btn,summary.btn{display:inline-flex;align-items:center;min-height:40px;padding:8px 16px;border-radius:9999px;border:1px solid var(--primary);
-background:var(--canvas);color:var(--primary);text-decoration:none;font-size:16px;line-height:1.2;cursor:pointer}
-a.btn:hover,summary.btn:hover{background:var(--soft)}
 button[aria-pressed=true]{background:var(--primary);color:#ffffff}
 .pm-meta{color:var(--ink2);margin:0 0 8px}
 .pm-head{position:relative}
@@ -102,12 +99,12 @@ list-style:none;position:relative}
 .pp-title{margin:4px 0;font-size:22px}.pp-title:focus{outline:none}.pp-title:focus-visible{outline:3px solid var(--primary)}
 .pp-kind{color:var(--ink2)}
 .node-del{position:relative;margin-left:auto}
-.node-del>summary{list-style:none;display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;border-radius:9999px;
-cursor:pointer;font-size:20px}.node-del>summary::-webkit-details-marker{display:none}.node-del>summary:hover{background:var(--soft)}
+.node-del>summary:not(.btn){list-style:none;display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;border-radius:9999px;
+cursor:pointer;font-size:20px}.node-del>summary::-webkit-details-marker{display:none}.node-del>summary:not(.btn):hover{background:var(--soft)}
 .del-box{position:absolute;right:0;top:48px;z-index:30;width:min(340px,80vw);background:var(--canvas);border:1px solid var(--line);
 border-left:4px solid var(--ruby);border-radius:10px;padding:4px 16px;box-shadow:0 8px 24px rgb(0 0 0/.18)}
 .del-box p{margin:10px 0}
-.proj-del{margin-left:0}.proj-del>summary{font-size:16px;gap:6px;padding:0 16px;border:1px solid var(--line);background:var(--canvas)}
+.proj-del{margin-left:0}
 .del-box .big-warn{font-size:19px;font-weight:600;border-left:4px solid var(--ruby);padding:4px 0 4px 10px}
 .pp-link{background:var(--soft);border-radius:8px;padding:8px 12px}
 .pm-panel .case{margin:12px 0}.pm-panel .books{padding:26px 10px 0}

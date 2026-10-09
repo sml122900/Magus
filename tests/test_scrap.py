@@ -74,7 +74,7 @@ def test_web_star_toggle_filter_and_count(server_proc):  # noqa: F811
         board = c.get(f"/login?next=/shelf/{notes}").text
         csrf = _csrf(board)
         assert board.count('aria-label="스크랩" title="스크랩">☆</button>') == 3 and 'aria-pressed="false"' in board
-        assert f'<a class="scrap-only" href="/shelf/{notes}?scrap=1" aria-current="false">' in board
+        assert f'<a class="btn quiet scrap-only" href="/shelf/{notes}?scrap=1" aria-current="false">' in board
         assert '<span class="n" data-scrap-count>0</span>' in board
         # 스크립트(fetch)가 부르면 JSON
         on = c.post(f"/shelf/{notes}/{FIRST}/scrap", data={"csrf": csrf, "on": "1"}, headers={"Accept": "application/json"})
