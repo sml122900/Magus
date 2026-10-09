@@ -64,6 +64,13 @@ def test_one_letter_symbols_and_blank_never_error(store: LocalStore):
     assert search_match('"raw-3fb7a700()" 도시') == '"raw 3fb7a700" OR "도시"'
 
 
+def test_one_word_prefers_the_closest_word(store: LocalStore):
+    book = _seed(store)
+    for n, text in enumerate(("Ravallion rate ratio random rapid", "rational rates rather rapidly", "Raymond ranks rarely")):
+        store.put_category_item("alice", CategoryItem(f"2026100900000002{n}-cccccc", book, text, "me"))
+    assert _owners(store, "ra")[0] == "raw-3fb7a700"  # 남는 글자가 가장 적은 낱말(raw)부터
+
+
 def test_contained_results_come_after_ranked_and_newest_first(store: LocalStore):
     book = _seed(store)
     store.put_category_item("alice", CategoryItem("20261009000000009-bbbbbb", book, "그 도시의 골목", "me"))
