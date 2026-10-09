@@ -9,11 +9,10 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
-from pydantic import Field
 
 from magus.book.comments import source_label
 from magus.book.export import export_docx
@@ -24,7 +23,8 @@ from magus.contexts import attach_manuscript_context, view_for_book
 from magus.melchior.check import CheckResult, Resolver, check_chapter, check_text, terms_of
 from magus.inbox import FileResolver, ResolveFile
 from magus.store import BookTitles, Issue, Project, Store
-from magus.store.base import CHAPTER_NUMBER_MAX, CHAPTER_RANGE, STALE_REASONS, ChapterStatus, chapter_number_ok
+from magus.limits import ChapterNumber, Note, Text, Title
+from magus.store.base import CHAPTER_RANGE, STALE_REASONS, ChapterStatus, chapter_number_ok
 from magus.store.formats import one_line, strip_front_matter
 
 FRONT_MATTER_WARNING = (
@@ -37,7 +37,6 @@ UNVERIFIED_CITES_MEANING = (
     "needs_source는 본문의 [출처 필요: …] 표시 수."
 )
 ISSUE_LIST_MAX = 200
-ChapterNumber = Annotated[int, Field(ge=0, le=CHAPTER_NUMBER_MAX)]  # 장 번호 0(서장)~9,999(2026-10-09 점검 15-1)
 
 
 def check_number(number: int | None) -> None:
@@ -88,7 +87,7 @@ def build_tools(
     def book_outline(project_id: str | None = None) -> str:
         return build_outline(store, current_user(), project_id)
 
-    def book_read_chapter(number: int, project_id: str | None = None) -> str:
+    def book_read_chapter(number: ChapterNumber, project_id: str | None = None) -> str:
         user, project = current_user(), resolve_project(project_id)
         check_number(number)
         chapter = store.read_chapter(user, project.id, number)
@@ -124,8 +123,8 @@ def build_tools(
     def book_write_chapter(
         number: ChapterNumber,
         content: str,
-        note: str,
-        title: str | None = None,
+        note: Note,
+        title: Title | None = None,
         status: ChapterStatus | None = None,
         project_id: str | None = None,
     ) -> str:
@@ -156,7 +155,7 @@ def build_tools(
 
     def book_issues(
         status: Literal["open", "closed", "all"] = "open",
-        chapter_number: int | None = None,
+        chapter_number: ChapterNumber | None = None,
         origin: Literal["import_comment", "user", "agent"] | None = None,
         kind: Literal["citation", "fact", "general"] | None = None,
         limit: int = 50,
@@ -188,7 +187,7 @@ def build_tools(
         context = view_for_book(store, current_user(), f"ms.{project.id}").header()
         return "\n".join([context, head, *(_issue_line(i, labels) for i in issues[:limit])])
 
-    def book_decide(text: str, project_id: str | None = None) -> str:
+    def book_decide(text: Text, project_id: str | None = None) -> str:
         project = resolve_project(project_id)
         try:
             d = store.add_decision(current_user(), project.id, text)
@@ -197,8 +196,8 @@ def build_tools(
         return f"D{d.id} 기록함 ({project.id}): {one_line(d.text)[:120]}"
 
     def book_issue_add(
-        text: str,
-        chapter_number: int | None = None,
+        text: Text,
+        chapter_number: ChapterNumber | None = None,
         origin: Literal["user", "agent"] = "user",
         project_id: str | None = None,
     ) -> str:
@@ -215,7 +214,7 @@ def build_tools(
             raise ToolError(str(e)) from e
         return f"I{issue.id} 열림 ({project.id}{where} · {origin}): {one_line(issue.text)[:120]}"
 
-    def book_issue_close(id: str, note: str | None = None, project_id: str | None = None) -> str:
+    def book_issue_close(id: str, note: Note | None = None, project_id: str | None = None) -> str:
         project = resolve_project(project_id)
         number = id.strip().upper().removeprefix("I")
         if not re.fullmatch(r"[0-9]+", number):  # isdigit은 '²'·'１'도 참이다(점검 15-4: int('²')에서 내부 오류)
@@ -238,8 +237,8 @@ def build_tools(
     def book_import(
         path: str | None = None,
         project_id: str | None = None,
-        title: str | None = None,
-        subtitle: str | None = None,
+        title: Title | None = None,
+        subtitle: Title | None = None,
         replace: bool = False,
         new_edition: bool = False,
         force: bool = False,

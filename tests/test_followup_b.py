@@ -129,3 +129,40 @@ def test_pending_index_is_repaired_at_start(data_dir):
     assert [i.content for i in again.list_category_items("alice", "notes")] == ["글"]
     assert not (data_dir / "index-pending.json").exists()
     again.close()
+
+
+# ---- 15-6 칸별 입력 길이 상한, 15-2 장 번호 범위(스키마) ----
+
+async def test_input_limits_in_schema_and_enforced(store: LocalStore, settings: Settings):
+    store.create_project("alice", "책", project_id="b")
+    store.write_chapter("alice", "b", 1, "본문(Clack, 2012).", "x", title="하나")
+    store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="notes")
+    async with Client(build_server(settings, store)) as c:
+        tools = {t.name: t.input_schema for t in (await c.list_tools()).tools}
+
+        def prop(tool: str, name: str) -> dict:
+            p = tools[tool]["properties"][name]
+            return next((x for x in p.get("anyOf", [p]) if x.get("type") != "null"), p)
+
+        assert prop("book_import", "title")["maxLength"] == 120 and prop("book_import", "subtitle")["maxLength"] == 120
+        assert prop("book_write_chapter", "title")["maxLength"] == 120 and prop("book_write_chapter", "note")["maxLength"] == 500
+        assert prop("book_decide", "text")["maxLength"] == 4000 and prop("book_issue_add", "text")["maxLength"] == 4000
+        assert prop("book_issue_close", "note")["maxLength"] == 500 and prop("book_answer", "note")["maxLength"] == 500
+        assert prop("category_put", "aliases")["items"]["maxLength"] == 40
+        assert prop("idea_add_conversation", "origin")["maxLength"] == 100
+        part = tools["category_put"]["$defs"]["PartIn"]["properties"]
+        assert part["text"]["maxLength"] == 2000 and part["reason"]["anyOf"][0]["maxLength"] == 500
+        for tool, name in (("book_read_chapter", "number"), ("book_issues", "chapter_number"), ("book_issue_add", "chapter_number"),
+                           ("ref_check", "chapter_number"), ("book_write_chapter", "number")):
+            assert (prop(tool, name)["minimum"], prop(tool, name)["maximum"]) == (0, 9999), tool
+        long = "가" * 200_000
+        for tool, args in (("book_decide", {"text": long}), ("book_issue_add", {"text": long}),
+                           ("book_import", {"title": "책", "subtitle": long}), ("book_issue_close", {"id": "I1", "note": long}),
+                           ("book_write_chapter", {"number": 1, "content": "본문", "note": "x", "title": long}),
+                           ("category_put", {"book": "메모", "author": "me", "source": {"key": "clack2012"}, "aliases": [long]}),
+                           ("category_edit", {"book": "메모", "item_id": "clack2012", "parts": [{"text": long, "reason": "근거"}]})):
+            r = await c.call_tool(tool, {**args, "project_id": "b"} if tool.startswith("book_") else args)
+            assert r.is_error and "at most" in r.content[0].text, (tool, r.content[0].text[:200])
+        ok = await c.call_tool("book_decide", {"text": "가" * 4000, "project_id": "b"})
+        assert not ok.is_error
+    assert store.read_chapter("alice", "b", 1).meta.title == "하나"  # 긴 제목은 저장되지 않았다

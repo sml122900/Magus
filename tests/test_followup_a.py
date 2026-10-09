@@ -24,7 +24,8 @@ async def test_read_tools_check_chapter_range(store: LocalStore, settings: Setti
                            ("book_issues", {"chapter_number": 2**63}), ("ref_check", {"chapter_number": 10_000}),
                            ("book_issue_add", {"text": "x", "chapter_number": 2**63})]:
             r = await c.call_tool(name, {**args, "project_id": "b"})
-            assert r.is_error and RANGE in r.content[0].text, (name, r.content[0].text)
+            text = r.content[0].text  # 후속 B부터 스키마(0~9999)가 입구에서 먼저 거절한다. 서버 검사는 그대로 둔다
+            assert r.is_error and (RANGE in text or "less than or equal to 9999" in text or "greater than or equal to 0" in text), (name, text)
         ok = await c.call_tool("book_read_chapter", {"number": 1, "project_id": "b"})
         assert not ok.is_error
     assert store.read_chapter("alice", "b", 2**63) is None and store.list_issues("alice", "b", None, chapter_number=2**63) == []

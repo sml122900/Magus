@@ -12,6 +12,7 @@ from collections.abc import Callable
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 
+from magus.limits import Origin
 from magus.casper.conversation import split_conversation
 from magus.category.books import writable_book
 from magus.contexts import view_for_book
@@ -41,7 +42,7 @@ def build_tools(
 ) -> list[Tool]:
     resolve_file = files or FileResolver(store)
 
-    def idea_add_conversation(book: str, markdown: str | None = None, path: str | None = None, origin: str | None = None,
+    def idea_add_conversation(book: str, markdown: str | None = None, path: str | None = None, origin: Origin | None = None,
                               project: str | None = None) -> str:
         if bool(markdown) == bool(path):
             raise ToolError("markdown(대화 기록 본문)과 path(올린 .md 파일 이름) 중 하나만 준다")

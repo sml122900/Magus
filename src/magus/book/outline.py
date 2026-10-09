@@ -8,6 +8,7 @@ from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+from magus.limits import TITLE_MAX
 from magus.category.maptext import outline_lines
 from magus.ids import local_time
 from magus.store import ChapterMeta, Project, Store
@@ -112,8 +113,8 @@ def build_outline(
     # 첫 줄은 항상 어느 프로젝트인지 밝힌다. project_id를 생략하면 최근 프로젝트가 골라지기 때문이다.
     header_lines = [f"프로젝트: {project.title} ({project.id})"]
     if project.subtitle or project.title_en:  # 제목과 부제를 따로 둔다(#77)
-        english = " — ".join(x for x in (project.title_en, project.subtitle_en) if x)
-        header_lines.append(" · ".join(x for x in (f"부제: {project.subtitle}" if project.subtitle else "",
+        english = _clip(" — ".join(x for x in (project.title_en, project.subtitle_en) if x), TITLE_MAX)  # 옛 긴 값도 줄 하나로(점검 15-6)
+        header_lines.append(" · ".join(x for x in (f"부제: {_clip(project.subtitle, TITLE_MAX)}" if project.subtitle else "",
                                                    f"영문: {english}" if english else "") if x))
     others = [p for p in store.list_projects(user_id) if p.id != project.id]
     if others:

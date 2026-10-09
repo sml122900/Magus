@@ -8,6 +8,7 @@ from typing import Literal
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 
+from magus.limits import Note
 from magus.book.outline import estimate_tokens
 from magus.melchior.questions import TYPES, answer_question, build_questions
 from magus.store import Project, Store
@@ -55,7 +56,7 @@ def build_tools(store: Store, current_user: Callable[[], str]) -> list[Tool]:
             lines.append("없음")
         return "\n".join(lines)
 
-    def book_answer(question_id: str, choice: str, note: str = "", project_id: str | None = None) -> str:
+    def book_answer(question_id: str, choice: str, note: Note = "", project_id: str | None = None) -> str:
         user, project = current_user(), project_of(project_id)
         question = next((q for q in build_questions(store, user, project.id) if q.id == question_id.strip()), None)
         if question is None:

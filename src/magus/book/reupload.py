@@ -18,6 +18,7 @@ from collections import Counter
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from magus.limits import TITLE_MAX
 from magus.book.comments import COMMENT_ANCHOR_SPLIT
 from magus.book.importer import (
     EMPTY_BODY,
@@ -131,7 +132,8 @@ class ReuploadReport:
             + (f"({names(self.added)})" if self.added else "")
             + f" · 빠진 장 {len(self.removed)}"
             + (f"({names(self.removed)}, removed/에 보관)" if self.removed else ""),
-            *(["  - 제목이 바뀐 장: " + ", ".join(f"{c.display} '{c.title_from}' → '{c.title}'" for c in renamed)] if renamed else []),
+            *(["  - 제목이 바뀐 장: " + ", ".join(f"{c.display} '{c.title_from[:TITLE_MAX]}' → '{c.title[:TITLE_MAX]}'" for c in renamed)]
+              if renamed else []),
             *([f"- ⚠ Magus에서 고친 뒤 이번 수정본으로 덮인 장: {', '.join(self.overwritten_magus)} (이전본은 versions/에 있다)"]
               if self.overwritten_magus else []),
             f"- 문서 코멘트 {self.comments_total}건 → 이어진 확인 요청 {self.issues_kept}(장을 옮긴 것 {self.issues_moved}) · 새 확인 요청 {self.issues_new}"
@@ -156,7 +158,7 @@ class ReuploadReport:
                 old = f"{c.old_chars:,}" if c.old_chars is not None else "-"
                 new = f"{c.new_chars:,}" if c.new_chars is not None else "-"
                 kept = f"{c.kept:.0%}" if c.kept is not None else "-"
-                note = kind + (f", 제목 바뀜(이전 '{c.title_from}')" if c.title_from else "")
+                note = kind + (f", 제목 바뀜(이전 '{c.title_from[:TITLE_MAX]}')" if c.title_from else "")
                 rows.append(f"| {c.display} | {old} | {new} | {kept} | {note} |")
         return "\n".join(rows)
 

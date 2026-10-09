@@ -17,6 +17,7 @@ from magus.project_args import PROJECT_PUT, floor_name, resolve_project
 from magus.melchior.bibliography import import_bibliography
 from magus.melchior.check import after_refs_changed, check_chapter
 from magus.inbox import ResolveFile
+from magus.limits import ChapterNumber
 from magus.search import Embedder
 from magus.store import Store
 
@@ -40,7 +41,7 @@ def build_tools(
             # 규칙 2·category_edit 설명과 같은 길(점검 22-b, 전에는 category_put(checked=true))
         )
 
-    def ref_check(chapter_number: int, project_id: str | None = None) -> str:
+    def ref_check(chapter_number: ChapterNumber, project_id: str | None = None) -> str:
         user = current_user()
         project = store.get_project(user, project_id)
         if project is None:

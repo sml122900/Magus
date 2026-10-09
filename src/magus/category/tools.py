@@ -20,6 +20,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 from pydantic import BaseModel, Field
 
+from magus.limits import ALIAS_MAX, PART_MAX, Alias
 from magus.category.books import BookRef, writable_book
 from magus.category.books import find_book as find_book_
 from magus.category.maptext import Counts, project_block
@@ -60,9 +61,9 @@ CONFLICT = "그사이 다른 곳(웹 등)에서 저장된 글이라 바꾸지 �
 
 
 class PartIn(BaseModel):
-    text: str = Field(description="원문에서 고른 대목")
-    reason: str | None = Field(default=None, description="왜 골랐는지")
-    where: str | None = Field(default=None, description="쪽·장 등 위치")
+    text: str = Field(description="원문에서 고른 대목", max_length=PART_MAX)
+    reason: str | None = Field(default=None, description="왜 골랐는지", max_length=FIELD_MAX)
+    where: str | None = Field(default=None, description="쪽·장 등 위치", max_length=FIELD_MAX)
 
 
 def _template_line(c: Category) -> str:
@@ -423,7 +424,7 @@ def build_tools(
         source: dict[str, Any] | None = None,
         checked: bool = False,
         file: str | None = None,
-        aliases: list[str] | None = None,
+        aliases: list[Alias] | None = None,
         fields: dict[str, str] | None = None,
         tags: list[str] | None = None,
         chapters: list[int] | None = None,
@@ -773,7 +774,7 @@ def build_tools(
             who = " ".join(str(bib.get(k) or "") for k in ("authors", "author", "year") if bib.get(k)).strip()
             picked = store.get_passages(user, ref.key)
             return [head + " · 서지로 맞음", *([f"   서지: {one_line(who)[:120]}"] if who else []),
-                    *([f"   한글 표기: {', '.join(ref.aliases[:5])}"] if ref.aliases else []),
+                    *([f"   한글 표기: {', '.join(a[:ALIAS_MAX] for a in ref.aliases[:5])}"] if ref.aliases else []),
                     *(f"   쓸 부분 “{one_line(p.text)[:200]}”" + (f" · {p.locator}" if p.locator else "") for p in picked[:2]),
                     *([f"   쓸 부분 {len(picked) - 2}개 더"] if len(picked) > 2 else []),
                     *([] if picked else ["   쓸 부분 없음"]), *attached(user, f"ref:{ref.key}")]
