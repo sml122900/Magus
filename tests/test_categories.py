@@ -46,8 +46,8 @@ def test_name_rules():
     for ok in ("생각", "문 체", "원고", "문헌"):  # #96: 옛 기본 책 이름도 여느 책 이름
         assert check_name(ok, taken) == ok
     for bad, why in (
-        ("전체", "정해진 이름"), ("확인요청", "정해진 이름"), ("책장 카테고리", "정해진 이름"), ("컨텍스트", "정해진 이름"),
-        ("카테고리", "정해진 이름"), ("Casper", "정해진 이름"), ("책", "정해진 이름"),
+        ("전체", "Magus가 쓰는 말"), ("확인요청", "Magus가 쓰는 말"), ("책장 카테고리", "Magus가 쓰는 말"), ("컨텍스트", "Magus가 쓰는 말"),
+        ("카테고리", "Magus가 쓰는 말"), ("Casper", "Magus가 쓰는 말"), ("책", "Magus가 쓰는 말"),
         ("사례 카테고리", "이미 있습니다"), ("사 례", "이미 있습니다"), ("가" * (NAME_MAX + 1), f"{NAME_MAX}자까지"),
         ("<b>굵게</b>", "쓸 수 없는 글자"), ('따옴표"', "쓸 수 없는 글자"), ("2026", "숫자만"), ("   ", "비어 있습니다"),
     ):
@@ -152,7 +152,7 @@ async def test_category_tools_round_trip(settings: Settings, store: LocalStore):
                                                             "context": ["사례는 출처가 있는 이야기만 모은다."]}))
         assert made.splitlines()[0] == "컨텍스트(책 「사례」): 사례는 출처가 있는 이야기만 모은다."
         assert made.splitlines()[1].startswith("책을 만듦: 「사례」 · 사례(칸: 시기, 장소, 출처) · 색 빨강(#b3261e) · 「책」 · 노드 「사례」")
-        for args, why in (({"name": "사례"}, "이미 있습니다"), ({"name": "전체"}, "정해진 이름"),
+        for args, why in (({"name": "사례"}, "이미 있습니다"), ({"name": "전체"}, "Magus가 쓰는 말"),
                           ({"name": "새것", "color": "#fff;}"}, "기본 색 이름"), ({"name": "새것", "context": ["가" * 501]}, "500자까지")):
             result = await c.call_tool("category_create", {"project": "book", **args})
             assert result.is_error and why in _text(result), args
@@ -288,7 +288,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         assert 'name="template"' not in form and form.count('name="color" value="#') == 18 and 'value="custom"' in form  # 칸 모양은 대화로(#97)
         assert 'name="ctx_pick" value="ctx-style"' in form and 'data-name="문체"' in form and 'name="ctx_new"' in form
         assert c.post("/shelf/new", data={"csrf": "틀림", "name": "사례", "template": "case", "color": "#b3261e"}).status_code == 403
-        for data, why in (({"name": "전체"}, "정해진 이름"), ({"name": "<b>x</b>"}, "쓸 수 없는 글자"),
+        for data, why in (({"name": "전체"}, "Magus가 쓰는 말"), ({"name": "<b>x</b>"}, "쓸 수 없는 글자"),
                           ({"name": "새것", "color": "red;}"}, "책 색을 골라 주세요"),
                           ({"name": "새것", "color": "custom", "hex": '"><script>', "r": "300", "g": "0", "b": "0"}, "직접 고른 색을 읽지 못했습니다"),
                           ({"name": "새것", "ctx_new": "가" * 501}, "500자까지")):

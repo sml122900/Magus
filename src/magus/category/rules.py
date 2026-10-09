@@ -12,6 +12,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from magus.floors import josa
+
 SCHEMA_VERSION = 1  # 책·글·책장 설정 파일 형식. 형식이 바뀌면 올리고 읽을 때 옮긴다
 ITEM_SCHEMA = 2  # #96에서 더한 칸(이유·위치·쓸 부분·응답한 글 등)이 있는 글. 없는 글은 1 그대로
 NAME_MAX = 12  # 책등에 세로로 들어가는 길이(한글 12자)
@@ -104,12 +106,17 @@ def template_of(value: str) -> Template:
 
 # ---- 이름 규칙 --------------------------------------------------------------------------------
 # #96: 생각·문체·문헌·원고는 여느 책 이름으로 쓸 수 있다(옛 기본 책도 그 이름의 책이 됐다)
-RESERVED = (
-    "전체", "확인 요청", "AI 확인 요청", "결정", "수정본", "책장", "카테고리", "받은함", "컨텍스트",
-    "휴지통", "인용 체크리스트", "책", "영감", "미해결", "이슈", "책 지도", "새 판", "서랍", "공용", "층",
+# 책 이름으로 쓸 수 없는 이름. 대화에서 '수정본 올렸어'·'전체 보여 줘' 같은 말이 책 이름과 헷갈리지 않게 막는다.
+# 안내에 보이는 것은 저자에게 보이는 이름(RESERVED_SHOWN)만이다. 옛 이름·코어 이름(RESERVED_HIDDEN)은 막기만 한다(용어집 규칙 #85·#87)
+RESERVED_SHOWN = (
+    "전체", "확인 요청", "AI 확인 요청", "결정", "수정본", "책장", "컨텍스트", "휴지통", "책",
     "프로젝트", "지도", "노드", "연결 노드", "내 서재", "게시판",
+)
+RESERVED_HIDDEN = (
+    "카테고리", "받은함", "인용 체크리스트", "영감", "미해결", "이슈", "책 지도", "새 판", "서랍", "공용", "층",
     "Casper", "Melchior", "Balthasar", "idea", "style", "ref", "book",
 )
+RESERVED = RESERVED_SHOWN + RESERVED_HIDDEN
 _NAME_CHARS = set(" ·-()&")
 
 
@@ -141,8 +148,10 @@ def check_name(name: str, taken: dict[str, str]) -> str:
     if clean.replace(" ", "").isdigit():
         raise ValueError("숫자만으로는 책 이름을 지을 수 없습니다")
     key = name_key(clean)
-    if key in RESERVED_KEYS:
-        raise ValueError(f"'{clean}'은 정해진 이름이라 책 이름으로 쓸 수 없습니다")
+    if key in RESERVED_KEYS:  # 이유와 다음 행동, 쓸 수 없는 이름(2026-10-09)
+        said = josa(f"'{clean}'", "은/는")
+        raise ValueError(f"{said} Magus가 쓰는 말이라 책 이름으로는 쓸 수 없어요. 다른 이름을 붙여 주세요. "
+                         f"(쓸 수 없는 이름: {', '.join(RESERVED_SHOWN)} 등)")
     if key in taken:
         raise ValueError(f"'{taken[key]}' 책이 이미 있습니다. 다른 이름을 지어 주세요")
     return clean
