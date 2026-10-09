@@ -14,7 +14,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from magus.category.rules import clean_name, name_key
 from magus.contexts import view_for_book
 from magus.project_args import find_project, floor_name, short
-from magus.store import Category, ProjectMap, Store
+from magus.store import Category, Store
 from magus.store.formats import one_line
 
 
@@ -54,20 +54,40 @@ def books_text(store: Store, user: str, books: list[BookRef], limit: int = 15) -
     return " · ".join(parts) + (f" 외 {len(books) - limit}권" if len(books) > limit else "")
 
 
+def linked_books(store: Store, user: str, project_id: str) -> set[str]:
+    """그 프로젝트 지도의 연결 노드가 가리키는 원본 노드의 책(연결 노드 자체는 책을 갖지 않는다)."""
+    found = store.get_map(user, project_id)
+    out: set[str] = set()
+    for n in (found.nodes if found else ()):
+        if n.link and not n.missing and (target := store.get_map(user, n.link[0])) and (node := target.node(n.link[1])):
+            out.update(node.books)
+    return out
+
+
 def find_book(store: Store, user: str, text: str, project: str | None = None) -> BookRef:
+    """이름(또는 주소 이름) → 책. project를 주면 그 프로젝트의 책과 그 지도의 연결 노드가 가리키는 책에서만 찾는다(2026-10-09 점검 16-2:
+    전에는 이름이 하나뿐이면 project를 보지 않아, project='둘째'로 「첫째」의 책에 넣거나 통째 휴지통으로 옮겼다. 없는 project도 지나갔다)."""
     raw = " ".join(str(text or "").split()).strip("「」")
     key = name_key(clean_name(raw))
     books = all_books(store, user)
     found = [b for b in books if b.key == raw or name_key(b.name) == key]
-    if project and project.strip() and len(found) > 1:
-        here = find_project(store, user, project).id
+    if project and project.strip():
+        here = find_project(store, user, project).id  # 없는 프로젝트면 오류(프로젝트 목록)
+        linked = linked_books(store, user, here)
         own = [b for b in found if b.floor == here]
+        via = [b for b in found if b.floor != here and b.key in linked]
         if len(own) == 1:
             return own[0]
-        linked = {k for n in (store.get_map(user, here) or ProjectMap("", "", (), ())).nodes if n.link for k in n.books}
-        via = [b for b in found if b.key in linked]
-        if len(via) == 1:
+        if not own and len(via) == 1:
             return via[0]
+        if found and not own and not via:
+            elsewhere = ", ".join(dict.fromkeys(floor_name(store, user, b.floor) for b in found))
+            raise ToolError(f"{floor_name(store, user, here)}에는 「{found[0].name}」 책이 없다({elsewhere}에 있다). "
+                            "저자에게 어느 프로젝트의 책인지 묻는다.")
+        if not found:
+            mine = [b for b in books if b.floor == here or b.key in linked]
+            raise ToolError(f"{floor_name(store, user, here)}에 '{raw}' 책이 없다. 저자에게 어느 책인지 묻는다. "
+                            f"책: {books_text(store, user, mine) or '없음'}")
     if len(found) == 1:
         return found[0]
     if not found:

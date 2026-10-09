@@ -193,3 +193,27 @@ async def test_same_file_edition_and_timestamps(store: LocalStore, settings: Set
         empty = await c.call_tool("book_import", {"title": "아직 문서 없는 책", "project_id": "empty"})
         assert not empty.is_error
         assert "올린 문서 없음" in (await c.call_tool("book_outline", {"project_id": "empty"})).content[0].text
+
+
+# ---- 16-2 project를 주면 그 프로젝트(와 연결 노드가 가리키는 책)의 책만 ----
+
+async def test_project_scopes_book(store: LocalStore, settings: Settings):
+    from magus.category.moves import add_link
+
+    store.create_project("alice", "첫째", project_id="one")
+    store.create_project("alice", "둘째", project_id="two")
+    book = store.create_category("alice", "책B", "blank", "#1f2f5c", (), "one").id
+    store.put_category_item("alice", CategoryItem("20261009000000001-aaaaaa", book, "남길 글", "me", "남길 글", "author"))
+    async with Client(build_server(settings, store)) as c:
+        wrong = await c.call_tool("category_put", {"book": "책B", "project": "둘째", "author": "me", "content": "x", "untitled": True})
+        assert wrong.is_error and "「둘째」에는 「책B」 책이 없다(「첫째」에 있다)" in wrong.content[0].text
+        nowhere = await c.call_tool("category_put", {"book": "책B", "project": "셋째", "author": "me", "content": "x", "untitled": True})
+        assert nowhere.is_error and "셋째" in nowhere.content[0].text
+        trash = await c.call_tool("category_trash", {"book": "책B", "project": "둘째", "note": "시험"})
+        assert trash.is_error and len(store.list_category_items("alice", book)) == 1  # 전에는 「첫째」의 책B를 통째 옮겼다
+        ok = await c.call_tool("category_put", {"book": "책B", "project": "첫째", "author": "me", "content": "넣음", "untitled": True})
+        assert not ok.is_error
+        add_link(store, "alice", "two", "one", store.node_of_book("alice", book)[1])  # 둘째 지도에 책B의 노드로 가는 연결 노드
+        via = await c.call_tool("category_put", {"book": "책B", "project": "둘째", "author": "me", "content": "연결로", "untitled": True})
+        assert not via.is_error, via.content[0].text
+    assert len(store.list_category_items("alice", book)) == 3
