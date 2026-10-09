@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
+from pathlib import PurePath
 
 from magus.store.base import Decision, Issue
 
@@ -13,6 +15,23 @@ _FM = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?", re.S)
 
 def one_line(text: str) -> str:
     return " ".join(text.split())
+
+
+UNTITLED = "제목 없는 글"
+
+
+def clip(text: str, width: int | None) -> str:
+    return text if width is None or len(text) <= width else text[: width - 1] + "…"
+
+
+def display_title(title: str | None, content: str | None, fields: Mapping[str, str] | None, file_names: Iterable[str],
+                  width: int | None = None) -> str:
+    """글의 보일 이름(2026-10-09 점검 22-a: 웹·도구·zip이 9곳에서 다르던 것을 하나로). 제목 → 첫 첨부의 파일 이름(확장자 뺌) →
+    본문 한 줄 → 채워진 칸('키: 값') → '제목 없는 글'. width를 넘으면 자르고 '…'. 파일은 바꾸지 않는다(보일 때만)."""
+    stem = next((s for s in (" ".join(PurePath(n).stem.split()) for n in file_names) if s), "")
+    shown = (one_line(title or "") or stem or one_line(content or "")
+             or " · ".join(f"{k}: {v}" for k, v in (fields or {}).items() if v) or UNTITLED)
+    return clip(one_line(shown), width)
 
 
 def dump_chapter(meta: dict[str, object], body: str) -> str:

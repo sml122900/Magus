@@ -27,7 +27,6 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from magus.attachments import shown_title
 from magus.category.moves import (add_link, book_name, error_message, move_book, restore_node, trash_node_with_books, undo_move,
                                   web_message)
 from magus.category.rules import PALETTE, parse_color
@@ -37,7 +36,7 @@ from magus.melchior.check import after_refs_changed
 from magus.maps import CENTER, LIBRARY_NAME, MAX_NODES, NODE_NAME_MAX
 from magus.store import Floor, MapNode, ProjectMap, Store
 from magus.store.floors import MoveError
-from magus.store.formats import one_line
+from magus.store.formats import UNTITLED, clip, display_title, one_line
 from magus.store.maps import MapError
 from magus.webboard import post_row_html, search_line
 from magus.webmap_assets import MAP_SCRIPT, MAP_STYLE, PROJECTS_STYLE, TRASH_STYLE
@@ -903,25 +902,24 @@ class MapPages:
             if t.kind == "node" and t.id.startswith(f"{floor.id}/"):
                 out.append((t, t.preview, t.detail, True))
             elif t.kind == "category_item" and not t.with_id and (held := in_nodes.get(t.id.partition("/")[0])) is not None:
-                title = one_line(t.preview) or "제목 없는 글"
-                out.append((t, f"글 「{title[:60]}{'…' if len(title) > 60 else ''}」 · 책 「{held[0]}」",
+                title = clip(t.preview, 60) or UNTITLED  # 휴지통 기록의 보일 이름(점검 22-a)
+                out.append((t, f"글 「{title}」 · 책 「{held[0]}」",
                             f"노드 {josa(f'「{held[1]}」', '과/와')} 함께 휴지통에 있는 책의 글입니다. 노드를 먼저 되살리면 따로 되살릴 수 있습니다.",
                             False))
             elif t.kind == "category_item" and not t.with_id and (book := books.get(t.id.partition("/")[0])) is not None:
                 replies = sum(1 for x in self.store.list_trash(uid) if x.kind == "category_item" and x.with_id
                               and x.id.partition("/")[0] == book.id and x.with_id == t.id.partition("/")[2])
                 names = self.store.trashed_item_attachments(uid, book.id, t.id.partition("/")[2])
-                title = one_line(t.preview if t.title else shown_title(None, names) or t.preview) or "제목 없는 글"  # 휴지통 기록
+                title = clip(t.preview, 60) or UNTITLED  # 휴지통 기록의 보일 이름(점검 22-a)
                 files = len(names)
                 along = [f"응답한 글 {replies}개" if replies else "", f"첨부 {files}개" if files else ""]  # 확인 창 문구와 같게
-                out.append((t, f"글 「{title[:60]}{'…' if len(title) > 60 else ''}」 · 책 「{book.name}」"
+                out.append((t, f"글 「{title}」 · 책 「{book.name}」"
                             + (f" · {'·'.join(a for a in along if a)} 함께" if any(along) else ""), "", True))
         return out
 
     def _post_name(self, uid: str, owner: str, trash: list[Any]) -> str:
         """휴지통 목록에 보일 글 이름(60자). 글이 휴지통에 있으면 그 기록에서."""
         from magus.melchior.author_report import cite_label  # noqa: PLC0415
-        from magus.webboard import item_preview  # noqa: PLC0415
 
         if owner.startswith("ref:"):
             ref = self.store.get_ref(uid, owner[4:])
@@ -931,11 +929,10 @@ class MapPages:
             item = self.store.get_category_item(uid, book, item_id)
             if item is not None:
                 files = self.store.list_attachments(uid, owner)
-                name = shown_title(item.title, (a.name for a in files)) or item_preview(item, files)
+                name = display_title(item.title, item.content, item.fields, (a.name for a in files))
             else:
-                name = next((one_line(x.preview) for x in trash if x.kind == "category_item" and x.id == owner), "")
-        name = name or "제목 없는 글"
-        return name[:60] + ("…" if len(name) > 60 else "")
+                name = next((x.preview for x in trash if x.kind == "category_item" and x.id == owner), "")
+        return clip(name or UNTITLED, 60)
 
     # ---- 책 옮기기·되돌리기 ---------------------------------------------------------------------
     def _move_form(self, session: tuple[str, str], here: str) -> str:

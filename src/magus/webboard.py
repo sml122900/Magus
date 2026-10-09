@@ -37,7 +37,7 @@ from magus.ids import local_time, new_id, utcnow
 from magus.melchior.author_report import cite_label
 from magus.store.base import EditConflict
 from magus.store import Attachment, CategoryItem, Chunk, Store
-from magus.store.formats import one_line
+from magus.store.formats import UNTITLED, clip, display_title, one_line
 from magus.webshelf import (
     AI_MARK, AI_TITLE, Book, Kind, Upload, clean_query, find_hits, mark, paragraphs, snippet, state_url,
 )
@@ -355,8 +355,7 @@ def post_row_html(post: Post, q: str = "", star: str = "") -> str:
         shown = mark(post.title, q)
         head = f'<span class="pt">{shown}{post.badge}</span>'
     else:
-        preview = one_line(post.preview)
-        shown = mark(preview[:80] + ("…" if len(preview) > 80 else "") or "(제목 없음)", q)
+        shown = mark(clip(one_line(post.preview), 80) or UNTITLED, q)  # 제목도 첨부도 없는 글: 본문 → 칸을 흐리게(점검 22-a)
         head = f'<span class="pt none">{shown}{post.badge}</span>'
     hit = ""
     if q and "<mark>" not in shown:  # 제목 밖에서 맞았으면 맞은 곳 한 줄: 낱말 그대로 맞은 본문 → 첨부 파일 이름(📎, 사진 포함) → 조각
@@ -369,9 +368,9 @@ def post_row_html(post: Post, q: str = "", star: str = "") -> str:
     pic = next((a for a in post.files if _inline_image(a.name)), None)
     thumb = (f'<img class="thumb" src="{html.escape(post.link)}/thumbs/{html.escape(pic.id)}" alt="" loading="lazy">' if pic else "")
     count = len(post.files)
-    clip = f'<span class="clip" aria-label="첨부 {count}개" title="첨부 {count}개">📎 {count}</span>' if count else ""
+    paperclip = f'<span class="clip" aria-label="첨부 {count}개" title="첨부 {count}개">📎 {count}</span>' if count else ""
     mark_only = '<span class="scrapped" title="스크랩" aria-label="스크랩">★</span>' if post.scrap and not star else ""
-    return (f'<li><a class="post" href="{html.escape(post.link)}">{head}<span class="pa">{mark_only}{thumb}{clip}</span>'
+    return (f'<li><a class="post" href="{html.escape(post.link)}">{head}<span class="pa">{mark_only}{thumb}{paperclip}</span>'
             f'<time class="pd" datetime="{html.escape(post.at)}">{local_time(post.at, WHEN)}</time></a>{star}'
             + (f'<small class="hit">{hit}</small>' if hit else "") + "</li>")
 
@@ -612,8 +611,7 @@ class BoardPages:
             link = f"/shelf/{kind.category.id}/{obj.id}"
             owner = f"{kind.category.id}/{obj.id}"
             files = self.store.list_attachments(uid, owner)
-            preview = item_preview(obj, files)  # 게시판 줄과 같은 규칙
-            title = shown_title(obj.title, (a.name for a in files)) or (preview[:40] + ("…" if len(preview) > 40 else "")) or "제목 없음"
+            title = display_title(obj.title, obj.content, obj.fields, (a.name for a in files), 40)  # 보일 이름 규칙 하나(점검 22-a)
             meta = ([local_time(obj.created_at, WHEN)] + (["AI가 쓴 글"] if obj.author == "ai" else [])
                     + (["제목은 AI가 지음"] if obj.title and obj.title_by == "ai" else []))
             # 칸(인물·사례 등)은 본문의 일부로 보인다. 이유·위치·쓸 부분·태그는 파일에 그대로(보이지 않을 뿐)

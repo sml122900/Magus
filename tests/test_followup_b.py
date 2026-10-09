@@ -238,3 +238,40 @@ async def test_category_edit_one_job_and_reason(store: LocalStore, settings: Set
         assert not ok.is_error
         checked = await c.call_tool("category_edit", {"item_id": "ahlberg2019", "checked": True})
         assert not checked.is_error and store.get_ref("alice", "ahlberg2019").status == "verified"
+
+
+# ---- 22-a 제목 없는 글의 보일 이름 규칙 하나 ----
+
+def test_display_title_rule():
+    from magus.store.formats import UNTITLED, display_title
+
+    assert display_title("제목", "본문", {"장소": "엘알토"}, ["사진.jpg"]) == "제목"
+    assert display_title(None, "본문", {}, ["현장 사진.jpg", "b.txt"]) == "현장 사진"
+    assert display_title("", "  본문\n둘째 줄 ", {}, []) == "본문 둘째 줄"
+    assert display_title(None, "", {"장소": "엘알토", "빈칸": ""}, []) == "장소: 엘알토"
+    assert display_title(None, "", {}, []) == UNTITLED == "제목 없는 글"
+    assert display_title(None, "가" * 50, {}, [], 30) == "가" * 29 + "…"
+
+
+async def test_same_name_everywhere(store: LocalStore, settings: Settings):
+    import io
+    import zipfile
+
+    from magus.export_zip import build_zip
+
+    store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="notes")
+    item = "20261009000000001-aaaaaa"
+    store.put_category_item("alice", CategoryItem(item, "notes", "본문은 따로 있다", "me"))
+    store.put_attachment("alice", f"notes/{item}", "장터 답사 기록.docx", b"PK")
+    async with Client(build_server(settings, store)) as c:
+        scrap = (await c.call_tool("category_edit", {"item_id": item, "scrap": True})).content[0].text
+        listed = (await c.call_tool("files_list", {})).content[0].text
+    names = zipfile.ZipFile(io.BytesIO(build_zip(store, "alice", ["common"]))).namelist()
+    assert "“장터 답사 기록”" in scrap  # 전: 제목 → 첫 첨부 → 본문(같음)
+    assert "책의 글 「장터 답사 기록」" in listed  # 전: 제목 → 첫 첨부 → 본문 30자(같음, 줄바꿈이 섞일 수 있었다)
+    assert any(n.endswith(" 장터 답사 기록.md") for n in names)  # 전: zip은 첨부 이름을 보지 않고 본문 30자
+    async with Client(build_server(settings, store)) as c:
+        trashed = (await c.call_tool("category_trash", {"book": "메모", "item_id": item, "note": "시험"})).content[0].text
+    assert "“장터 답사 기록”" in trashed  # 전: 휴지통 응답은 첨부 이름 없이 본문
+    entry = next(t for t in store.list_trash("alice") if t.kind == "category_item")
+    assert entry.preview == "장터 답사 기록"  # 휴지통 기록(웹 휴지통 줄)도 같은 규칙

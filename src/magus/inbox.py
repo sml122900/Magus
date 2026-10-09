@@ -21,6 +21,7 @@ from magus.paths import resolve_input
 from magus.store.fileio import data_size
 from magus.store import Store
 from magus.store.base import InboxFile
+from magus.store.formats import display_title
 
 INBOX_TYPES = {".docx": "올린 문서(book_import)", ".pdf": "올린 문서·논문(book_import, category_put file)",
                ".md": "대화 기록(idea_add_conversation)", ".txt": "논문 전문(category_put file)"}
@@ -145,8 +146,6 @@ def imported_editions(store: Store, user_id: str) -> dict[str, str]:
 
 def attached_lines(store: Store, user_id: str) -> list[str]:
     """files_list의 게시판 첨부 줄: '첨부:<id>' · 파일 이름 · 크기 · 올린 시각 · 어느 책의 어느 글(최근 ATTACHED_SHOWN개)."""
-    from magus.attachments import shown_title  # noqa: PLC0415  (magus.attachments가 이 모듈을 가져온다)
-
     found = store.file_attachments(user_id, tuple(INBOX_TYPES))
     if not found:
         return []
@@ -160,7 +159,7 @@ def attached_lines(store: Store, user_id: str) -> list[str]:
             book, _, item = owner.partition("/")
             post = store.get_category_item(user_id, book, item)
             files = [x.name for x in store.list_attachments(user_id, owner)] if post else []
-            title = (shown_title(post.title, files) or post.content[:30]) if post else item  # 제목이 없으면 첫 첨부 이름
+            title = display_title(post.title, post.content, post.fields, files, 30) if post else item  # 보일 이름 규칙 하나(점검 22-a)
             where = f"「{names.get(book, book)}」 책의 글 「{title}」"
         hit = store.attachment_path(user_id, owner, a.id)
         done = imported.get(file_sha(hit[0])) if hit and Path(a.name).suffix.lower() in MANUSCRIPT_TYPES else None

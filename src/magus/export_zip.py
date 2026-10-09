@@ -24,6 +24,7 @@ from typing import Any
 from magus.ids import local_time, utcnow
 from magus.contexts import book_contexts
 from magus.maps import BOOK_NAMES, LIBRARY_NAME, local_key
+from magus.store.formats import display_title
 from magus.store import MapNode, Store
 from magus.store.base import CHAPTER_STATUS_NAMES
 
@@ -82,9 +83,9 @@ class _Zip:
         return self.buffer.getvalue()
 
 
-def _item_file(when: str, title: str | None, preview: str) -> str:
-    head = title or " ".join(preview.split())[:30] or "제목 없음"
-    return f"{local_time(when, WHEN) if when else '날짜 없음'} {safe_name(head, 40)}.md"
+def _item_file(when: str, shown: str) -> str:
+    """'날짜 시각 보일 이름.md'(보일 이름은 store.formats.display_title — 웹·도구와 같은 규칙, 점검 22-a)."""
+    return f"{local_time(when, WHEN) if when else '날짜 없음'} {safe_name(shown, 40)}.md"
 
 
 def _who(author: str) -> str:
@@ -143,7 +144,8 @@ def _book_folder(store: Store, user: str, z: _Zip, folder: str, key: str) -> str
         fields = [f"{k}: {v}" for k, v in item.fields.items() if v]
         parts = "".join(f"\n> {p.text.strip()}\n" + (f"\n이유: {p.reason}" if p.reason else "") + (f" ({p.locator})" if p.locator else "") + "\n"
                         for p in item.passages)
-        z.text(where, _item_file(item.created_at, item.title, item.content or " ".join(fields)), _front([
+        names = [a.name for a in store.list_attachments(user, f"{category.id}/{item.id}")]
+        z.text(where, _item_file(item.created_at, display_title(item.title, item.content, item.fields, names)), _front([
             ("날짜", local_time(item.created_at, "%Y-%m-%d %H:%M")), ("제목", item.title), ("작성자", _who(item.author)),
             ("제목을 지은 이", {"ai": "Claude(AI)", "author": "저자"}.get(item.title_by or "")), ("이유", item.reason), ("위치", item.where),
             ("칸", fields), ("태그", list(item.tags)), ("태그를 정한 이", {"ai": "Claude(AI)", "author": "저자"}.get(item.tags_by or "")),

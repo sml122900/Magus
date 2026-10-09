@@ -25,6 +25,7 @@ from magus.category.rules import DEFAULT_COLORS
 from magus.contexts import DEFAULTS, LEGACY_CONTEXT, find_saved
 from magus.floors import COMMON
 from magus.ids import utcnow
+from magus.store.formats import display_title
 from magus.store.base import (
     WEB_ONLY_LANES, Chunk, Context, EditConflict, Lane, Passage, Ref, RefStatus, TrashItem, TrashKind, edit_stamp,
 )
@@ -336,8 +337,12 @@ class ShelfMixin:
         items = []
         for kind, item_id, data, at in self._trashed_categories(user_id):  # 책 통째·글(#92, #96: 옛 생각·문체도 글)
             mark = data.get("_trash") or {}
-            preview = (f"책 「{data.get('name', '')}」" if kind == "category"
-                       else str(data.get("title") or data.get("content") or "")[:80])
+            if kind == "category":
+                preview = f"책 「{data.get('name', '')}」"
+            else:  # 글: 보일 이름 규칙 하나(점검 22-a). 휴지통의 첨부 이름까지 본다
+                book, _, item = item_id.partition("/")
+                names = self.trashed_item_attachments(user_id, book, item)  # type: ignore[attr-defined]
+                preview = display_title(data.get("title"), str(data.get("content") or ""), data.get("fields") or {}, names, 80)
             items.append(TrashItem(kind, item_id, at, mark.get("note", ""), preview, mark.get("with"),  # type: ignore[arg-type]
                                    title=bool(data.get("title"))))
         for ref, data in self._trashed_nodes(user_id):  # type: ignore[attr-defined]  # 지도의 노드(#95)

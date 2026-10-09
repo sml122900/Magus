@@ -49,7 +49,7 @@ from magus.textindex import query_parts, tokens
 from magus.store import Category, CategoryItem, MapNode, Passage, Ref, ShelfSettings, Store
 from magus.store.base import EditConflict
 from magus.store.floors import MoveError
-from magus.store.formats import one_line
+from magus.store.formats import display_title, one_line
 from magus.store.maps import MapError
 
 WHO = {"me": "저자의 말", "ai": "Claude가 쓴 글"}
@@ -341,7 +341,7 @@ def build_tools(
             if item is not None:
                 owner, was = f"{c.id}/{item.id}", item.scrap
                 files = (a.name for a in store.list_attachments(user, owner))
-                label = f"「{c.name}」의 글 “{(item.title or title_from_files(files) or summary(item))[:60]}”"
+                label = f"「{c.name}」의 글 “{display_title(item.title, item.content, item.fields, files, 60)}”"
                 break
         if owner is None:
             ref = store.get_ref(user, ident)
@@ -728,7 +728,9 @@ def build_tools(
             book, _, item_id = owner.partition("/")
             item = store.get_category_item(user, book, item_id)
             category = store.get_category(user, book)
-            where = f"「{category.name if category else book}」 책의 글 「{(item.title or summary(item))[:40] if item else item_id}」"
+            shown = (display_title(item.title, item.content, item.fields, (a.name for a in store.list_attachments(user, owner)), 40)
+                     if item else item_id)
+            where = f"「{category.name if category else book}」 책의 글 「{shown}」"
         cut = " · 30만 자가 넘어 앞부분만 뽑았다" if state == "truncated" else ""
         more = f"다음 쪽: category_search(attachment=\"{att.id}\", page={page + 1})" if page < len(all_pages) else "마지막 쪽이다."
         return (f"첨부 「{att.name}」(첨부:{att.id}) · {where} · 쪽 {page}/{len(all_pages)} · 글자 {status['chars']:,}자{cut}\n"
@@ -826,7 +828,9 @@ def build_tools(
                 if not moved:
                     raise ToolError(f"「{category.name}」에 글 {item_id}가 없다. category_search 결과의 id를 준다.")
                 replies = len(moved) - 1
-                return (f"휴지통으로 옮김: 「{category.name}」의 글 {moved[0].id} “{(moved[0].title or summary(moved[0]))[:60]}”"
+                gone_files = store.trashed_item_attachments(user, category.id, moved[0].id)
+                return (f"휴지통으로 옮김: 「{category.name}」의 글 {moved[0].id} "
+                        f"“{display_title(moved[0].title, moved[0].content, moved[0].fields, gone_files, 60)}”"
                         + (f" · 이 글에 응답한 글 {replies}개도 함께" if replies else "") + f". {KEPT}")
             gone = store.trash_category(user, category.id, note.strip())
         except ValueError as e:
