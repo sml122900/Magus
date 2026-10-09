@@ -258,6 +258,13 @@ MCP 도구 23개 그대로(category_search `attachment`·`page`, category_edit `
 **되돌리기**: `docker tag magus:rollback-d692855 magus:latest && docker compose up -d --no-build`(옛 코드가 인덱스 v22를 다시 만든다).
 옛 코드는 첨부 폴더에서 파일만 세므로 `.text/`를 무시한다(시험본에서 첨부 목록·수치 같음 확인). 지울 필요 없다(파생값).
 
+### 2-7. 대화 검색 순위 보정 + 쓸 부분 저장 뒤 원문 확인 묻기(#101) — 2026-10-09 사용자 승인
+
+반영 전 서버는 `p1-attach-text`(`458ffb9`), 반영할 것은 태그 `p1-search-rank`(`rank-1-search`·`rank-2-ask-check` 뒤). **데이터 이전 없음, 인덱스 v23 그대로**(다시 만들지 않는다).
+바뀌는 것은 대화 찾기(category_search)의 결과 순서·책별 제한·개수 줄과 instructions 규칙 2 → **커넥터 재연결**. 도구 설명·웹 그대로.
+절차는 2-6절과 같다(`private/tmp/deploy-rank/` pre.sh → build.sh → up.sh, 첨부 글자 단계는 '이미'만 나와야 한다).
+**되돌리기**: `docker tag magus:rollback-458ffb9 magus:latest && docker compose up -d --no-build`.
+
 ## 3. 알림 확인
 
 ```sh

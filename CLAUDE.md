@@ -68,6 +68,9 @@
   색인 v23(레인 attach_text, chunks.part)으로 찾고, 대화는 `category_search(attachment='첨부:<id>', page=N)`로 3,000자씩, 웹은 '글자 보기'로 읽음.
   쓸 부분 저장은 `category_edit(item_id=문헌 key, parts)`. instructions 규칙 2 끝 문장(2,385토큰), 도구 23개·9,207토큰(커넥터 재연결).
   태그 `att-1-search-scope`·`att-2-reserved`·`att-3-extract`, 결정 문서 `docs/decisions/attachment-text.md`, 배포 `docs/deploy.md` 2-6절, status.md 0-26절·4절 #100 표.
+- **대화 검색 순위 보정 + 쓸 부분 저장 뒤 원문 확인 묻기(2026-10-09, 사용자 요청 #101, 서버 배포 `p1-search-rank`)**: category_search 결과 등급
+  (제목·본문·쓸 부분 > 첨부 글자·원문 > 서지·key·한글 표기·첨부 이름만), 책을 말하지 않은 찾기는 책마다 4개까지(`PER_BOOK`)·남는 칸은 다른 책, 머리에 '책별 개수'.
+  book 지정은 제한 없음, 웹 찾기 그대로. instructions 규칙 2 끝에 원문 확인 묻기(2,437토큰, 커넥터 재연결). 태그 `rank-1-search`·`rank-2-ask-check`, status.md 0-27절, `docs/deploy.md` 2-7절.
 - (고침 2026-10-06 밤) `tests/test_http.py::test_request_size_limit`의 Windows 간헐 실패: 머리만 보내고 응답을 먼저 읽게 고쳤다(status.md 7절).
 - 대기 사항: 계정·키·결정·아버지 docx처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), 저자 보고서 답변. 상세는 status.md에만 적는다.
 
@@ -501,6 +504,7 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
 - 예외: **#98(2026-10-09, 사용자 지시 "규칙 7이 맞는지 확인하고 바꾸면 보고")로 규칙 7의 수정본 문장을 바꿨다**: "'수정본 올렸어'·'수정본 올려 줘'는 저자가 고친 문서(.docx·.pdf)를
   게시판 글에 첨부했거나 올린 파일에 두었다는 뜻이다. files_list에서 book_outline 수정본 줄의 마지막 업로드보다 나중에 올라온 문서를 찾아 이 프로젝트(book_outline 첫 줄의 id)의
   수정본으로 올린다(book_import, path는 files_list에 보이는 이름, new_edition=true)." 웹의 수정본 올리기 폼을 없앴기 때문이다(status.md 0-23절).
+- 예외: **#101(2026-10-09, 사용자 요청)로 규칙 2 끝에 "쓸 부분을 저장한 뒤에는 원문 확인 표시도 할지 한 번 묻고, 저자가 그렇다고 하면 category_edit(checked=true)로 표시한다."를 더했다**(2,385 → 2,437토큰).
 - 예외: **#100(2026-10-09, 사용자 요청 첨부 글자)로 규칙 2 끝에 "첨부에서 뽑은 글자는 찾고 읽는 데 쓰되, 인용은 여전히 원문 확인 글의 쓸 부분만 쓴다. 저자가 첨부의 어느 부분을 쓸 부분으로 저장하라고 하면 그 문헌 글에 넣는다(category_edit)."를 더했다**(2,305 → 2,385토큰).
 - 예외: **#99(2026-10-09, 사용자 요청 스크랩)로 규칙 6 용어에 「스크랩(저자가 별표로 표시해 둔 글. 중요 표시)」, 규칙 7 끝에 "'스크랩 보여 줘'는 category_search(scrap_only=true)다."를 더했다**(2,261 → 2,305토큰).
 - **instructions는 등록된 도구만 언급한다.** `build_instructions(등록된 도구 이름)`은 규칙 문장에 나오는 도구(`book_|ref_|idea_|style_|files_|category_` 이름)가 모두 등록된 규칙만 넣고, 번호는 다시 매긴다. 도구를 부르지 않는 규칙(#96 번호 5·6·10·11)은 언제나 실린다. 도구가 모두 등록되면 SPEC과 똑같아진다(`tests/test_instructions.py`).
