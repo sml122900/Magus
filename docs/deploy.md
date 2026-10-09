@@ -379,6 +379,21 @@ healthy·재시작 0·오류 로그 0, 원본 2,351개 해시 같음(파생 .cac
 
 **되돌리기**: `docker tag magus:rollback-86b6155 magus:latest && docker compose up -d --no-build`(인덱스 v23, 데이터 형식 같음). 되돌리면 커넥터도 다시 연결한다.
 
+### 2-13. '+ 프로젝트' 간소화(제목만으로 만들기) — 2026-10-10 사용자 승인
+
+반영 전 서버는 `p1-followup-c`(`8806621`), 반영할 것은 태그 `p1-plus-project`(`c0e8c55`). **데이터 이전 없음, 인덱스 v23 그대로. 웹만, 커넥터 재연결 필요 없음**
+(도구 설명·스키마·instructions 그대로, book_import의 제목만 만들기 응답 한 문장만). 바뀐 것: '+ 프로젝트' = 제목·'만들기'만, 웹 문서 올리기 주소(`/shelf/manuscript`)·진행 막대 없앰,
+도움말 02~05(status.md 0-33절). 의존성·Dockerfile·deploy 그대로.
+
+절차는 2-11절과 같다(`private/tmp/deploy-pp/pre.sh`·`build.sh`·`up.sh`·`cleanup.sh`, 도구 `/root/pp-tools/`, 되돌리기 이미지 `magus:rollback-8806621`, 백업 태그 p1-plus-project).
+
+반영 기록(2026-10-10 00:36 서버 시각): `8806621` → `c0e8c55`. 백업 `baf921f2`(predeploy·p1-plus-project, 2,367개, 오류 없음).
+healthy·재시작 0·오류 로그 0, 원본 2,353개 해시 같음(파생 .cache 2·.text 10·.thumb 2 그대로), 수치 전후 같음(default 299·297·0·86, father 337·335·5·129·수정본 3(E3)),
+전체 현황 다섯 개 모두 같음. 인용 상태 첫 열기 default 0.14초·father 0.17초. /tmp 점검 7/7('+ 프로젝트' 칸·문서 올리기 주소 없음·올린 파일과 첨부 두 길·제목 그대로·응답 문장).
+메모리 magus 119 → 92MiB. 정리: `rollback-7662192` 지움(남김: latest·rollback-8806621·rollback-86b6155), 72시간 넘은 빌드 캐시 0B, 디스크 51%.
+
+**되돌리기**: `docker tag magus:rollback-8806621 magus:latest && docker compose up -d --no-build`(데이터 형식 같음, 재연결 필요 없음).
+
 ## 3. 알림 확인
 
 ```sh
