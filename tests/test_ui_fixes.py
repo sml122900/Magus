@@ -139,3 +139,15 @@ def test_category_edit_checks_conflict(store: LocalStore, settings):
     assert "그사이 다른 곳(웹 등)에서 저장된 글이라 바꾸지 않았다." in checked and "그사이 다른 곳" in parts
     store.get_ref = real  # type: ignore[method-assign]
     assert store.get_ref("alice", "clack2012").status == "unverified" and len(store.get_passages("alice", "clack2012")) == 1
+
+
+def test_help_texts_and_screen_names():
+    """도움말(10번): 답할 수 없는 요청의 문장, 빈 창 첫 줄, '고치기' 화면 이름, 프로젝트 휴지통 화면, 넓은 화면에서 창을 오른쪽에 붙인다."""
+    from magus.helpbot import HELP_STYLE, PREAMBLE, SCREENS, screen_key, widget  # noqa: PLC0415
+
+    assert '"그건 답할 수 없습니다. Magus 사용법을 물어봐 주세요."' in PREAMBLE and "도움말에 없는 내용입니다." in PREAMBLE
+    assert SCREENS[screen_key("/shelf/notes/20261009000000000-aaaaaa/edit")] == "고치기"
+    assert screen_key("/shelf/trash") == "project_trash" and screen_key("/shelf/trash/notes") == "trash"
+    assert SCREENS["trash"] == "책을 휴지통으로 옮기기"
+    assert '<p class="help-hint">Magus 사용법을 물어보세요. 예: 글은 어떻게 고쳐요?</p>' in widget("c", "u")
+    assert "body.help-open{padding-right:380px}" in HELP_STYLE and ".help-box{right:0;bottom:0" in HELP_STYLE
