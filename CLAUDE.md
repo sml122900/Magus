@@ -34,7 +34,8 @@
   응답 머리에 컨텍스트 전문. 이전은 `magus maps apply`에 합침(`docs/decisions/contexts.md`, 문구 전후 `contexts-texts.md`, status.md 0-19절). 2026-10-08 21:47 묶음 배포(`p1-contexts`).
   **사용자 답(2026-10-08 저녁)**: d·s는 바꿔서, 나머지 승인. d = 노드 → 책 순서로 컨텍스트를 이어 읽는다(합쳐 1,000자). s = 일반 기능의 '원고' → '올린 문서'
   (instructions 머리말·1·4·6·7·8·12, 화면·도구 응답·설명). 도구 목록 8,450토큰, instructions 2,259토큰. #93~#96 묶음은 사용자 확인 뒤 배포했다(status.md 0-20절).
-- **서버(2026-10-09 21:27부터): master `p1-followup-a`(`7662192`, 점검 후속 A: .env 보호 장치(`.claude/`)·대화 찾기 AND·거절 뒤 적은 내용 유지·인용 캐시 뒤에서 데우기(`magus warm-cache`)·배포 전 백업 태그별 보관·바로 할 수 있는 것 22건, 데이터 이전 없음·인덱스 v23, 도구 설명·스키마·instructions 그대로(재연결 없음), status.md 0-30절, `docs/deploy.md` 2-10절). 되돌리기 기준 `deba2af`(이미지 `magus:rollback-deba2af`). 되돌리기 이미지는 `rollback-deba2af`·`rollback-409242d`만.**
+- **서버(2026-10-09 22:23부터): master `p1-followup-b`(`86b6155`, 점검 후속 B: 웹 본문 한도·업로드 디스크로(`magus/bodylimit.py`)·늦은 색인 다시 하기·입력 상한과 장 번호 범위를 스키마에(`magus/limits.py`)·시각 형식 통일·같은 파일 수정본 멈춤·project 범위·category_edit 한 번에 하나·보일 이름 규칙 하나(`store.formats.display_title`)·도구 설명 줄이기(9,218 → 6,359토큰), 데이터 이전 없음·인덱스 v23, **커넥터 재연결 필요**, status.md 0-31절, `docs/deploy.md` 2-11절). 되돌리기 기준 `7662192`(이미지 `magus:rollback-7662192`). 되돌리기 이미지는 `rollback-7662192`·`rollback-deba2af`만.**
+- 그 전 서버(2026-10-09 21:27부터): master `p1-followup-a`(`7662192`, 점검 후속 A: .env 보호 장치(`.claude/`)·대화 찾기 AND·거절 뒤 적은 내용 유지·인용 캐시 뒤에서 데우기(`magus warm-cache`)·배포 전 백업 태그별 보관·바로 할 수 있는 것 22건, 데이터 이전 없음·인덱스 v23, 도구 설명·스키마·instructions 그대로(재연결 없음), status.md 0-30절, `docs/deploy.md` 2-10절). 되돌리기 기준 `deba2af`(이미지 `magus:rollback-deba2af`).
 - 그 전 서버(2026-10-09 19:32부터): master `p1-high-fix`(`deba2af`, 코드 점검 높음 5건: 그림 폭탄·docx 압축 폭탄(`magus/zipguard.py`)·색인 다시 만들기가 깨진 파일에 멈추지 않음·장 번호 0~9,999·대화로 글 고치기 = 웹과 같은 patch, 운영: 로그 회전 10MB × 5·배포 전 백업 태그 `BACKUP_TAG`, 데이터 이전 없음·인덱스 v23, book_write_chapter 입력 스키마만 바뀜(재연결 필수 아님), status.md 0-29절, `docs/deploy.md` 2-9절). 되돌리기 기준 `409242d`(이미지 `magus:rollback-409242d`).
 - 그 전 서버(2026-10-09 18:35부터): master `p1-fix-ui`(`409242d`, 구조·버그 점검 고치기 1~12: 인용 계산 캐시·오류 화면·프로젝트 휴지통·웹 찾기 AND·입력 길이·장 상태·휴지통 목록·폼 상태·스크랩 초점·도움말·휴대폰 폭·작은 것, 데이터 이전 없음·인덱스 v23, 도구 설명·instructions 그대로, status.md 0-28절, `docs/deploy.md` 2-8절). 되돌리기 기준 `58ce884`(이미지 `magus:rollback-58ce884`).
 - 그 전 서버(2026-10-09 오후부터): master `p1-search-rank`(`58ce884`, #101 대화 검색 순위·원문 확인 묻기, 데이터 이전 없음·인덱스 v23, status.md 0-27절, `docs/deploy.md` 2-7절). 되돌리기 기준 `458ffb9`(이미지 `magus:rollback-458ffb9`).**
@@ -439,7 +440,7 @@ data/index.sqlite
 - 지도 일(도구 수를 늘리지 않음): `category_create(template=노드|연결 노드, node)`(연결 노드는 name에 원본 '프로젝트 · 노드'), `category_edit(node, new_name, color, link, unlink)`,
   책 옮기기 `category_edit(book, move_to=노드|'프로젝트 · 노드'|프로젝트)`·`undo_move`, `category_trash(node)`(가운데·책이 꽂힌 노드는 막음). 지도 보기는 `category_list`.
 - book_import에 path 없이 title이면 원고 없는 프로젝트(원고는 나중에 같은 project_id로). book_outline 머리에 지도 두 줄(`지도(노드 N · 선 N): …`, `선: …`).
-- 도구 목록 9,566 → 10,957(#93) → 10,904(#94) → 10,900(#95) → 8,416토큰(#96, 23개). 한도는 10,904.
+- 도구 목록 9,566 → 10,957(#93) → 10,904(#94) → 10,900(#95) → 8,416토큰(#96, 23개) → … 9,218(p1-followup-a) → 6,359(점검 26, 2026-10-09). 한도는 10,904.
 
 ### 책·글 (`magus/category/`, #92 카테고리 → #96 책·글·컨텍스트)
 - **#96부터 기본 카테고리는 없다.** 모든 책이 같다(이름·색·컨텍스트·위치를 바꾸고, 문헌 글이 든 책만 휴지통 막음). 아래 #92 줄의 '기본 셋'·'생각·문체·문헌' 규칙은 #96 전 기록이다.

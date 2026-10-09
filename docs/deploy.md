@@ -344,6 +344,25 @@ SESSION_SECRET 줄 1개, 로그 설정 `max-file:5 max-size:10m`(magus·caddy), 
 **되돌리기**: `docker tag magus:rollback-deba2af magus:latest && docker compose up -d --no-build`(인덱스 v23 그대로, 데이터 형식 같음). 옛 코드는 `.cache/`를 그대로 읽는다(같은 형식).
 backup.sh까지 되돌리려면 `git checkout -B master p1-high-fix` — 그러면 다음 매일 백업의 forget이 배포 전 스냅샷을 다시 일별 규칙으로 다룬다.
 
+### 2-11. 점검 후속 B: 중간 항목 8개 + 도구 설명 줄이기 — 2026-10-09 사용자 승인
+
+반영 전 서버는 `p1-followup-a`(`7662192`), 반영할 것은 태그 `p1-followup-b`(`86b6155`). **데이터 이전 없음, 인덱스 v23 그대로.**
+**도구 설명·입력 스키마가 바뀜 → 커넥터 재연결 필요**(도구 목록 9,218 → 6,359토큰, instructions 2,437 그대로).
+바뀐 것: 5-a 웹 본문 한도·업로드를 디스크로, 12-a 늦은 색인 다시 하기(index-pending.json, 파생), 15-6·15-2 입력 상한·장 번호 범위(스키마),
+16-1 시각 형식(YYYY-MM-DD HH:MM:SS)·같은 파일 수정본 멈춤·'이미 가져옴'·'올린 문서 없음', 16-2 project 범위, 16-3 category_edit 한 번에 하나·쓸 부분 이유,
+22-a 보일 이름 규칙 하나, 26 설명 줄이기·스키마 title·default null 뺌(status.md 0-31절, `docs/decisions/tool-descriptions-diet.md`). 의존성·Dockerfile·deploy 그대로.
+
+절차는 2-10절과 같다(`private/tmp/deploy-fb/pre.sh`·`build.sh`·`up.sh`·`cleanup.sh`, 되돌리기 이미지 `magus:rollback-7662192`, 백업 태그 p1-followup-b).
+
+반영 기록(2026-10-09 22:23 서버 시각): `7662192` → `86b6155`. 백업 `b10f8adf`(predeploy·p1-followup-b, 2,365개, 오류 없음).
+healthy·재시작 0·오류 로그 0, 원본 2,351개 해시 같음(파생 .cache 2·.text 10·.thumb 2 그대로), 수치 전후 같음(default 299·297·0·86, father 337·335·5·129·수정본 3(E3)).
+전체 현황 차이는 의도한 것뿐: 수정본 줄 시각 `10-08 00:16` → `2026-10-08 00:16:37`, 올린 문서 없는 프로젝트 둘은 '수정본 기록 없음(…)' → '올린 문서 없음'.
+인용 상태 첫 열기 default 0.14초·father 0.16초(캐시 그대로 유효). /tmp 점검 10/10. 메모리 magus 121 → 96MiB. 디스크 55%.
+정리: `rollback-409242d` 지움(남김: latest·rollback-7662192·rollback-deba2af), 72시간 넘은 빌드 캐시 0B. 배포 전 스냅샷 68013e32·a231513b·b10f8adf.
+
+**되돌리기**: `docker tag magus:rollback-7662192 magus:latest && docker compose up -d --no-build`(인덱스 v23, 데이터 형식 같음).
+늦은 색인 기록(`index-pending.json`)이 남아 있으면 옛 코드는 읽지 않는다 — 되돌린 뒤 `magus reindex`로 맞춘다. 되돌리면 커넥터도 다시 연결한다(설명이 옛것으로).
+
 ## 3. 알림 확인
 
 ```sh
