@@ -394,6 +394,19 @@ healthy·재시작 0·오류 로그 0, 원본 2,353개 해시 같음(파생 .cac
 
 **되돌리기**: `docker tag magus:rollback-8806621 magus:latest && docker compose up -d --no-build`(데이터 형식 같음, 재연결 필요 없음).
 
+### 2-14. 버튼 높이 맞추기 + '사진 찍기' 삭제 — 2026-10-10 사용자 승인
+
+반영 전 서버는 `p1-plus-project`(`c0e8c55`), 반영할 것은 태그 `p1-btn-photo`(`fb76fb0`). **데이터 이전 없음, 인덱스 v23 그대로. 웹만, 커넥터 재연결 필요 없음.**
+바뀐 것: 전역 버튼 규격(button·a.btn·summary.btn)과 `.acts` 줄, 글 보기·게시판·지도 머리·문서 화면의 짝 맞춤, 글쓰기·고치기의 카메라 단추 없앰(status.md 0-34절).
+
+절차는 2-11절과 같다(`private/tmp/deploy-bp/pre.sh`·`build.sh`·`up.sh`·`cleanup.sh`, 도구 `/root/bp-tools/`, 되돌리기 이미지 `magus:rollback-c0e8c55`, 백업 태그 p1-btn-photo).
+
+반영 기록(2026-10-10 02:14 서버 시각): `c0e8c55` → `fb76fb0`. 백업 `72236369`(predeploy·p1-btn-photo, 2,383개, 오류 없음).
+healthy·재시작 0·오류 로그 0, 원본 2,367개 해시 같음(파생 .cache 3·.text 10·.thumb 3 그대로), 수치 전후 같음(default book 299·297·0·86, default 3b0d82fd 수정본 E2,
+father 337·335·5·129·수정본 3(E3)), 전체 현황 다섯 개 모두 같음. /tmp 점검 4/4. 정리: `rollback-86b6155` 지움(남김: latest·rollback-c0e8c55·rollback-8806621), 디스크 51%.
+
+**되돌리기**: `docker tag magus:rollback-c0e8c55 magus:latest && docker compose up -d --no-build`(데이터 형식 같음, 재연결 필요 없음).
+
 ## 3. 알림 확인
 
 ```sh
