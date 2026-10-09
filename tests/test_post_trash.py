@@ -49,9 +49,11 @@ def test_post_trash_dialog_trash_page_and_restore(server_proc):  # noqa: F811
         assert 'class="del"' not in ref and "/check" not in ref and 'type="checkbox"' not in ref
         # 없앤 주소: 원문 확인 체크, 휴지통은 POST만
         assert c.post(f"/shelf/{refs_book}/clack2012/check", data={"csrf": csrf, "set": "1"}).status_code in (404, 405)
-        assert c.get(f"/shelf/{notes}/{FIRST}/trash").status_code == 405
+        moved = c.get(f"/shelf/{notes}/{FIRST}/trash", follow_redirects=False)  # 주소창에서 열면 그 글로(2026-10-09, 전에는 405)
+        assert moved.status_code == 303 and moved.headers["location"] == f"/shelf/{notes}/{FIRST}"
         assert c.post(f"/shelf/{notes}/{FIRST}/trash", data={"csrf": "틀림"}).status_code == 403
-        assert c.post(f"/shelf/{refs_book}/clack2012/trash", data={"csrf": csrf}).status_code == 404  # 문헌 글은 옮기지 않는다
+        kept = c.post(f"/shelf/{refs_book}/clack2012/trash", data={"csrf": csrf})  # 문헌 글은 옮기지 않는다
+        assert kept.status_code == 400 and "문헌 글은 휴지통으로 옮기지 않습니다." in kept.text
         # 옮기기 → 그 책의 게시판으로, 휴지통 링크
         gone = c.post(f"/shelf/{notes}/{FIRST}/trash", data={"csrf": csrf})
         assert str(gone.url).endswith(f"/shelf/{notes}?done=trashed")

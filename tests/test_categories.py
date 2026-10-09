@@ -284,7 +284,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         # 책 추가 자리는 노드의 책장에 있다(#95). 프로젝트가 없으면 「내 서재」 하나
         assert '<a class="book add" href="/shelf/new?project=common&amp;node=center" aria-label="새 책">' in c.get(
             "/shelf/p/common?node=center").text
-        form = c.get("/shelf/new").text
+        form = c.get("/shelf/new?project=common").text  # 프로젝트 없이 열면 목록으로(2026-10-09)
         assert 'name="template"' not in form and form.count('name="color" value="#') == 18 and 'value="custom"' in form  # 칸 모양은 대화로(#97)
         assert 'name="ctx_pick" value="ctx-style"' in form and 'data-name="문체"' in form and 'name="ctx_new"' in form
         assert c.post("/shelf/new", data={"csrf": "틀림", "name": "사례", "template": "case", "color": "#b3261e"}).status_code == 403

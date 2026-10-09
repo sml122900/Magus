@@ -310,6 +310,8 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
         """화면마다 도움말이 보낼 화면 이름 열쇠를 정해 둔다(#97). 책은 별도 페이지(게시판)라 주소를 바꾸지 않는다(2026-10-09)."""
 
         async def run(request: Request) -> Response:
+            if request.method in ("GET", "HEAD") and self._post_only(request):  # /shelf/projects는 /shelf/{책}보다 먼저 맞는 POST 전용 주소
+                return RedirectResponse(self._screen_of(request), status_code=303)
             screen = SCREEN.set(screen_key(request.url.path, request.url.query))
             try:
                 return await handler(request)
@@ -344,6 +346,74 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
 
     def _csrf_input(self, session: tuple[str, str]) -> str:
         return f'<input type="hidden" name="csrf" value="{self.csrf(session[1])}">'
+
+    # --- 오류 화면(2026-10-09): 404·405·400 공통 — Magus 머리, 문장 하나, '돌아가기'(직전 화면, 없으면 프로젝트 목록) ---
+    def back_link(self, request: Request) -> str:
+        """직전 화면(같은 사이트의 Referer, 지금 주소와 다를 때)의 경로. 없으면 프로젝트 목록."""
+        referer = urllib.parse.urlsplit(request.headers.get("referer") or "")
+        here = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        same = referer.netloc in (request.url.netloc, urllib.parse.urlsplit(self.base_url).netloc)
+        path = referer.path + (f"?{referer.query}" if referer.query else "")
+        if same and path.startswith("/") and not path.startswith("//") and path != here:
+            return path
+        return "/shelf"
+
+    def error_page(self, request: Request, status: int, message: str, session: tuple[str, str] | None = None, *,
+                   extra: str = "") -> Response:
+        """message는 이미 문구 규칙대로 쓴 한 문장(이스케이프 전). extra는 그 아래 덧붙일 HTML(휴지통 링크 등)."""
+        titles = {400: "요청을 처리하지 못했습니다", 403: "열 수 없습니다", 404: "찾을 수 없습니다", 405: "열 수 없는 주소입니다",
+                  410: "링크가 만료됐습니다"}
+        body = (f'<p class="msg err">{html.escape(message)}</p>{extra}'
+                f'<p><a class="back" href="{html.escape(self.back_link(request))}">돌아가기</a></p>')
+        return self._page(titles.get(status, "오류"), body, session, status, current="")
+
+    def not_found(self, request: Request, session: tuple[str, str] | None, what: str, extra: str = "") -> Response:
+        """없는 글·책·노드·첨부·프로젝트·문서 → '없는 {what}입니다.'"""
+        return self.error_page(request, 404, f"없는 {what}입니다.", session, extra=extra)
+
+    @staticmethod
+    def _post_only(request: Request) -> bool:
+        """이 GET이 더 앞에 등록된(더 구체적인) POST 전용 주소에 걸리나. Starlette는 방법이 맞는 첫 경로로 가므로
+        GET /shelf/projects는 405가 아니라 /shelf/{책}(없는 책)으로 간다 — 그런 주소도 그 화면으로 돌려보낸다."""
+        from starlette.routing import Match  # noqa: PLC0415
+
+        for route in request.app.router.routes:
+            match, _ = route.matches(request.scope)
+            if match == Match.FULL:
+                return False
+            if match == Match.PARTIAL:
+                return True
+        return False
+
+    def _screen_of(self, request: Request) -> str:
+        """POST 전용 주소를 GET으로 열었을 때 돌아갈 화면: 주소를 한 칸씩 줄여 GET으로 열리는 첫 화면(…/trash → 글 보기,
+        /shelf/p/<프로젝트>/map → 그 프로젝트, /inbox/upload → 올린 파일). 없으면 프로젝트 목록."""
+        from starlette.routing import Match  # noqa: PLC0415
+
+        path = request.url.path.rstrip("/")
+        while "/" in path:
+            path = path.rsplit("/", 1)[0]
+            target = path or "/"
+            scope = {"type": "http", "path": target, "root_path": "", "method": "GET"}
+            if any(route.matches(scope)[0] == Match.FULL for route in request.app.router.routes):
+                return target
+        return "/shelf"
+
+    async def http_error(self, request: Request, exc: Exception) -> Response:
+        """라우터에서 난 404·405·400(없는 주소, 맞지 않는 방법, 폼을 읽지 못함). MCP·메타데이터·스크립트(JSON) 요청은 그대로 짧게."""
+        status = int(getattr(exc, "status_code", 500))
+        detail = str(getattr(exc, "detail", "") or "")
+        headers = getattr(exc, "headers", None)
+        path = request.url.path
+        if path.startswith(("/mcp", "/.well-known", "/healthz")):
+            return Response(detail or str(status), status_code=status, headers=headers, media_type="text/plain; charset=utf-8")
+        messages = {400: "보낸 내용을 읽지 못했습니다. 화면을 새로 고쳐 다시 해 주세요.", 404: "없는 주소입니다.",
+                    405: "이 주소는 그렇게 열 수 없습니다."}
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"ok": False, "error": messages.get(status, "요청을 처리하지 못했습니다.")}, status_code=status)
+        if status == 405 and request.method in ("GET", "HEAD"):  # POST 전용 주소를 주소창에서 열면 그 화면으로
+            return RedirectResponse(self._screen_of(request), status_code=303)
+        return self.error_page(request, status, messages.get(status, "요청을 처리하지 못했습니다."), self.user_of(request))
 
     async def _form(self, request: Request, session: tuple[str, str]) -> Any:
         form = await request.form(max_files=20, max_fields=200)  # 컨텍스트 칸(#96)은 줄마다 몇 개씩이라 넉넉히
@@ -615,21 +685,21 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
             return self._page("올린 문서", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         project = self.store.get_project(session[0], str(form.get("project_id", "")))
         if project is None or not self.store.list_chapters(session[0], project.id):  # 원고 없는 프로젝트에는 원고 책이 없다
-            return self._page("올린 문서", '<p class="msg err">올린 문서가 없습니다. <a href="/shelf">프로젝트</a>로 돌아가세요.</p>', session, 404)
+            return self.error_page(request, 404, "올린 문서가 없습니다.", session)
         location = await run_in_threadpool(export_docx, self.store, session[0], project)
         return RedirectResponse(self.export_link(session[0], location).removeprefix(self.base_url), status_code=303)
 
     async def download(self, request: Request) -> Response:
         data = unsign(request.path_params["token"], self.secret, "download")
         if not data:
-            return self._page("내려받기", '<p class="msg err">링크가 만료됐거나 잘못됐습니다. 다시 내보내세요.</p>', status=410)
+            return self.error_page(request, 410, "링크가 만료됐거나 잘못됐습니다. 다시 내려받아 주세요.", self.user_of(request))
         session = self.user_of(request)
         if not session:
             return self._need_login(request)
         if session[0] != data.get("u"):
-            return self._page("내려받기", '<p class="msg err">다른 사용자의 파일입니다.</p>', session, 403)
+            return self.error_page(request, 403, "다른 사용자의 파일입니다.", session)
         path = self.store.export_path(session[0], str(data.get("p")), str(data.get("f")))
         if path is None:
-            return self._page("내려받기", '<p class="msg err">파일이 없습니다. 다시 내보내세요.</p>', session, 404)
+            return self.error_page(request, 404, "파일이 없습니다. 다시 내려받아 주세요.", session)
         return FileResponse(path, filename=path.name,
                             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")

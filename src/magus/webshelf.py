@@ -741,9 +741,11 @@ class ShelfPages:
         error = ""
         # 꽂을 곳(#95): 노드의 '책 추가'에서 온 프로젝트와 노드. 없으면 「내 서재」(노드는 이름이 같은 새 노드)
         params = request.query_params
+        if request.method == "GET" and not (params.get("project") or params.get("floor")):  # 프로젝트 없이 열면 프로젝트 목록에서 고르게
+            return RedirectResponse("/shelf?pick=book", status_code=303)
         floor = await run_in_threadpool(self.store.get_floor, uid, params.get("project") or params.get("floor") or COMMON)
         if floor is None and (params.get("project") or params.get("floor")):
-            return self._shelf_page("새 책", '<p class="msg err">없는 프로젝트입니다. <a href="/shelf">프로젝트</a></p>', session, 404)
+            return self.not_found(request, session, "프로젝트")
         floor = floor or await run_in_threadpool(self.store.get_floor, uid, COMMON)
         found_map = await run_in_threadpool(self.store.get_map, uid, floor.id)
         node = found_map.node(params.get("node") or "") if found_map else None
@@ -819,7 +821,7 @@ class ShelfPages:
         uid = session[0]
         kind = await run_in_threadpool(self._kind_any, uid, request.path_params["kind"])
         if kind is None or kind.category is None:
-            return self._shelf_page("책장", '<p class="msg err">없는 책입니다. <a href="/shelf">프로젝트</a></p>', session, 404)
+            return self.not_found(request, session, "책")
         category = kind.category
         settings = await run_in_threadpool(self.store.get_shelf_settings, uid)
         saved = await run_in_threadpool(self.store.list_saved_contexts, uid)
@@ -903,11 +905,10 @@ class ShelfPages:
         uid = session[0]
         kind = await run_in_threadpool(self._kind, uid, request.path_params["kind"])
         if kind is None or kind.category is None:
-            return self._shelf_page("책장", '<p class="msg err">없는 책입니다. <a href="/shelf">프로젝트</a></p>', session, 404)
+            return self.not_found(request, session, "책")
         category = kind.category
         if category.sources:
-            return self._shelf_page("책장", f'<p class="msg err">「{html.escape(category.name)}」에는 문헌 글이 있어 옮기지 않습니다.</p>',
-                                    session, 400)
+            return self.error_page(request, 400, f"「{category.name}」에는 문헌 글이 있어 휴지통으로 옮기지 않습니다.", session)
         if request.method == "POST":
             try:
                 await self._form(request, session)
@@ -954,9 +955,10 @@ class ShelfPages:
         except PermissionError:
             return self._shelf_page("휴지통", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         found = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
-        if found is None or not isinstance(found[1], CategoryItem):
-            return self._shelf_page("책장", '<p class="msg err">옮길 수 있는 글이 아닙니다. <a href="/shelf">프로젝트</a></p>',
-                                    session, 404)
+        if found is None:
+            return await self._missing_post(request, session, request.path_params["kind"], request.path_params["item"])
+        if not isinstance(found[1], CategoryItem):
+            return self.error_page(request, 400, "문헌 글은 휴지통으로 옮기지 않습니다.", session)
         kind, item = found
         assert kind.category is not None
         await run_in_threadpool(self.store.trash_item_with_replies, uid, kind.category.id, item.id, "웹 게시판에서 옮김")
@@ -970,7 +972,7 @@ class ShelfPages:
         uid = session[0]
         found = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
         if found is None:
-            return Response("없는 파일입니다.", status_code=404, media_type="text/plain; charset=utf-8")
+            return self.not_found(request, session, "첨부")
         kind, obj = found
         owner = self._owner(kind, obj)
         try:
@@ -978,7 +980,7 @@ class ShelfPages:
         except ValueError:
             hit = None
         if hit is None:
-            return Response("없는 파일입니다.", status_code=404, media_type="text/plain; charset=utf-8")
+            return self.not_found(request, session, "첨부")
         path, att = hit
         media, inline = media_type(att.name)
         if thumb and (small := await run_in_threadpool(self.store.attachment_thumb, uid, owner, att.id)):

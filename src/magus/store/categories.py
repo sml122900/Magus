@@ -220,6 +220,24 @@ class CategoryMixin:
         return _item(row) if row else None
 
     @locked
+    def trashed_item_project(self, user_id: str, category_id: str, item_id: str) -> str | None:
+        """휴지통에 있는 글이면 그 책의 프로젝트(휴지통 화면 주소에 쓴다). 글만 옮겼든 책·노드째 옮겼든. 휴지통에 없으면 None."""
+        try:
+            safe_id(category_id, "category id")
+            safe_id(item_id, "item id")
+        except ValueError:
+            return None
+        trash = self._user_dir(user_id) / "trash" / "shelf"
+        alone = trash / "category-items" / category_id / f"{item_id}.json"
+        with_book = trash / "categories" / category_id / "items" / f"{item_id}.json"
+        if not alone.exists() and not with_book.exists():
+            return None
+        for meta in (self._category_dir(user_id, category_id) / "category.json", trash / "categories" / category_id / "category.json"):
+            if meta.exists():
+                return str(read_json(meta).get("floor") or COMMON)
+        return COMMON
+
+    @locked
     def trash_category_item(self, user_id: str, category_id: str, item_id: str, note: str) -> CategoryItem | None:
         """글 하나를 휴지통에. 이 글에 응답한 글(같은 책, parent_id)도 함께 옮긴다(옛 생각 휴지통 #88과 같다)."""
         moved = self.trash_item_with_replies(user_id, category_id, item_id, note)

@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None) -> None:
             web.register(server)  # 웹 페이지 4개 + 내려받기(같은 프로세스)
             mode = f"인증: {settings.auth.issuer}, 허용 {len(settings.auth.allowed)}명" if settings.auth else "인증 없음 — 로컬 전용"
             log.info("streamable-http: http://%s:%d%s (stateless, %s)", args.host, args.port, transports.MCP_PATH, mode)
-            transports.run_http(server, args.host, args.port, verifier, settings.max_request_bytes)
+            transports.run_http(server, args.host, args.port, verifier, settings.max_request_bytes, web.http_error)
     elif args.cmd == "import" and args.new_edition:
         from magus.book.reupload import reupload_manuscript
 

@@ -48,7 +48,7 @@ def test_web_new_book_shows_reserved_message_and_picker(server_proc):  # noqa: F
     base, data_dir, _ = server_proc({})
     LocalStore(data_dir).close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
-        page = c.get("/login?next=/shelf/new").text
+        page = c.get("/login?next=/shelf/new%3Fproject%3Dcommon").text
         csrf = _csrf(page)
         assert page.index('type="color" name="picker"') < page.index('<details class="palette">')
         bad = c.post("/shelf/new", data={"csrf": csrf, "name": "수정본", "color": "custom", "hex": "#123456"})

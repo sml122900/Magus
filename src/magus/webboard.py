@@ -457,7 +457,7 @@ class BoardPages:
                 return RedirectResponse(f"/shelf/{target}{query}", status_code=302)
         kind = await run_in_threadpool(self._kind, uid, key)
         if kind is None or kind.category is None:
-            return self._shelf_page("책장", '<p class="msg err">없는 책입니다. <a href="/shelf">프로젝트</a></p>', session, 404)
+            return self.not_found(request, session, "책")
         params = request.query_params
         q = clean_query(params.get("q"))
         filters = {k: params.get(k, "") for k in ("author", "tag", "scrap")}
@@ -536,6 +536,17 @@ class BoardPages:
         return f"{message}{bar}{search}{found}{board}{pager}"
 
     # ---- 글 보기 -------------------------------------------------------------------------------
+    async def _missing_post(self, request: Request, session: tuple[str, str], key: str, item_id: str) -> Response:
+        """없는 글의 주소: 휴지통에 있으면 '이 글은 휴지통에 있습니다.'와 그 프로젝트의 휴지통 링크, 아니면 '없는 글입니다.'"""
+        uid = session[0]
+        kind = await run_in_threadpool(self._kind_any, uid, key, item_id)
+        book = kind.category.id if kind is not None and kind.category is not None else key
+        project = await run_in_threadpool(self.store.trashed_item_project, uid, book, item_id)
+        if project is not None:
+            trash = f'<p><a href="/shelf/p/{urllib.parse.quote(project)}/trash">휴지통 열기</a></p>'
+            return self.error_page(request, 404, "이 글은 휴지통에 있습니다.", session, extra=trash)
+        return self.not_found(request, session, "글")
+
     def _find_post(self, uid: str, kind: Kind, item_id: str) -> Any:
         """글(CategoryItem) 또는 그 책의 문헌 글(Ref). 없으면 None."""
         assert kind.category is not None
@@ -560,11 +571,10 @@ class BoardPages:
                 return RedirectResponse(f"/shelf/{target}/{urllib.parse.quote(item_id)}", status_code=302)
         kind = await run_in_threadpool(self._kind_any, uid, key, item_id)
         if kind is None or kind.category is None:
-            return self._shelf_page("책장", '<p class="msg err">없는 책입니다. <a href="/shelf">프로젝트</a></p>', session, 404)
+            return self.not_found(request, session, "책")
         obj = await run_in_threadpool(self._find_post, uid, kind, item_id)
         if obj is None:
-            return self._shelf_page(kind.name, f'<p class="msg err">없는 글입니다. <a href="/shelf/{kind.key}">{html.escape(kind.name)}</a></p>',
-                                    session, 404, lead=await run_in_threadpool(self.trail, uid, kind.key, "글"))
+            return await self._missing_post(request, session, kind.key, item_id)
         title, body = await run_in_threadpool(self._post_body, uid, session, kind, obj, request.query_params)
         lead = await run_in_threadpool(self.trail, uid, kind.key, title[:40] + ("…" if len(title) > 40 else ""))
         return self._shelf_page(title, body, session, lead=lead)
@@ -619,7 +629,7 @@ class BoardPages:
         uid = session[0]
         kind = await run_in_threadpool(self._kind_any, uid, request.path_params["kind"])
         if kind is None or kind.category is None:
-            return self._shelf_page("책장", '<p class="msg err">없는 책입니다. <a href="/shelf">프로젝트</a></p>', session, 404)
+            return self.not_found(request, session, "책")
         book = kind.category.id
         here = f"/shelf/write/{book}"
         if request.method == "POST":
@@ -691,7 +701,7 @@ class BoardPages:
         uid = session[0]
         found = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
         if found is None:
-            return self._shelf_page("글자 보기", '<p class="msg err">없는 글입니다. <a href="/shelf">프로젝트</a></p>', session, 404)
+            return await self._missing_post(request, session, request.path_params["kind"], request.path_params["item"])
         kind, obj = found
         owner = self._owner(kind, obj)
         try:
@@ -699,8 +709,10 @@ class BoardPages:
         except ValueError:
             hit = None
         status, text = (await run_in_threadpool(self.store.attachment_text, uid, owner, hit[1].id)) if hit else (None, None)
-        if hit is None or status is None:
-            return self._shelf_page("글자 보기", '<p class="msg err">글자를 볼 수 있는 첨부가 아닙니다(docx·pdf·txt·md).</p>', session, 404)
+        if hit is None:
+            return self.not_found(request, session, "첨부")
+        if status is None:
+            return self.error_page(request, 404, "글자를 볼 수 있는 첨부가 아닙니다(docx·pdf·txt·md).", session)
         state = status["status"]
         line = {"ok": f"글자 {status['chars']:,}자",
                 "truncated": f"30만 자가 넘어 앞부분 {status['chars']:,}자만 뽑았어요",
@@ -727,7 +739,9 @@ class BoardPages:
             return self._shelf_page("스크랩", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         found = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
         if found is None:
-            return self._shelf_page("스크랩", '<p class="msg err">없는 글입니다. <a href="/shelf">프로젝트</a></p>', session, 404)
+            if "application/json" in request.headers.get("accept", ""):
+                return JSONResponse({"ok": False, "error": "없는 글입니다."}, status_code=404)
+            return await self._missing_post(request, session, request.path_params["kind"], request.path_params["item"])
         kind, obj = found
         assert kind.category is not None
         on = form.get("on") == "1"
@@ -755,8 +769,7 @@ class BoardPages:
         uid = session[0]
         found = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
         if found is None:
-            return self._shelf_page("고치기", '<p class="msg err">고칠 수 있는 글이 아닙니다. <a href="/shelf">프로젝트</a></p>',
-                                    session, 404)
+            return await self._missing_post(request, session, request.path_params["kind"], request.path_params["item"])
         kind, obj = found
         assert kind.category is not None
         is_item = isinstance(obj, CategoryItem)

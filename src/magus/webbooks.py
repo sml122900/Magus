@@ -236,7 +236,7 @@ class BookPages:
         except ValueError:
             project = None
         if project is None or not await run_in_threadpool(self.store.list_chapters, uid, project.id):
-            return self._book_page("올린 문서", '<p class="msg err">올린 문서가 없습니다. <a href="/shelf">프로젝트</a>로 돌아가세요.</p>', session, 404)
+            return self.error_page(request, 404, "올린 문서가 없습니다.", session)
         tab = request.query_params.get("tab") if request.query_params.get("tab") in dict(TABS) else "chapters"
         body = await run_in_threadpool(self._manuscript_body, uid, session, project, tab, request)
         lead = await run_in_threadpool(self.trail, uid, f"ms.{project.id}")
@@ -404,12 +404,12 @@ class BookPages:
         uid = session[0]
         doc = await run_in_threadpool(self.store.get_document, uid, request.path_params["doc"])
         if doc is None:
-            return self._book_page("문서", '<p class="msg err">없는 문서입니다. <a href="/shelf">프로젝트</a>로 돌아가세요.</p>', session, 404)
+            return self.not_found(request, session, "문서")
         number = request.query_params.get("v")
         number_i = int(number) if number and number.isdigit() else doc.versions[-1].number
         content = await run_in_threadpool(self.store.read_document, uid, doc.id, number_i)
         if content is None:
-            return self._book_page(doc.title, '<p class="msg err">없는 이력입니다.</p>', session, 404)
+            return self.not_found(request, session, "이력")
         body = await run_in_threadpool(self._document_body, uid, session, doc, number_i, content, request)
         return self._book_page(doc.title, body, session, lead=await run_in_threadpool(self.trail, uid, f"doc.{doc.id}"))
 
@@ -461,7 +461,7 @@ class BookPages:
             return self._book_page("문서", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         doc = await run_in_threadpool(self.store.get_document, uid, request.path_params["doc"])
         if doc is None:
-            return self._book_page("문서", '<p class="msg err">없는 문서입니다.</p>', session, 404)
+            return self.not_found(request, session, "문서")
 
         def redo() -> None:
             content, version = build_source_check(self.store, uid, doc.project_id, doc.title, previous=doc.versions[-1])
@@ -479,7 +479,7 @@ class BookPages:
         number = request.query_params.get("v")
         content = await run_in_threadpool(self.store.read_document, uid, doc.id, int(number) if number and number.isdigit() else None) if doc else None
         if doc is None or content is None:
-            return self._book_page("문서", '<p class="msg err">없는 문서입니다.</p>', session, 404)
+            return self.not_found(request, session, "문서")
 
         def build() -> bytes:
             with tempfile.TemporaryDirectory() as tmp:
@@ -501,13 +501,13 @@ class BookPages:
         if kind == "ms":
             project = await run_in_threadpool(self.store.get_project, uid, ident)
             if project is None:
-                return self._book_page("책 설정", '<p class="msg err">없는 책입니다.</p>', session, 404)
+                return self.not_found(request, session, "책")
             name, color, floor_id, back = project.title, project.color or MANUSCRIPT_COLOR, project.id, f"/shelf/book/{ident}"
             attached = project.contexts
         else:
             doc = await run_in_threadpool(self.store.get_document, uid, ident)
             if doc is None:
-                return self._book_page("책 설정", '<p class="msg err">없는 책입니다.</p>', session, 404)
+                return self.not_found(request, session, "책")
             name, color, floor_id, back = doc.title, doc.color, doc.floor, f"/shelf/doc/{ident}"
             attached = doc.contexts
         error = ""
@@ -580,7 +580,7 @@ class BookPages:
         if kind == "ms":
             project = await run_in_threadpool(self.store.get_project, uid, ident)
             if project is None:
-                return self._book_page("휴지통으로", '<p class="msg err">없는 책입니다.</p>', session, 404)
+                return self.not_found(request, session, "책")
             name, floor_id, back = project.title, project.id, f"/shelf/book/{ident}"
             chapters = await run_in_threadpool(self.store.list_chapters, uid, ident)
             issues = await run_in_threadpool(self.store.list_issues, uid, ident, None)
@@ -589,7 +589,7 @@ class BookPages:
         else:
             doc = await run_in_threadpool(self.store.get_document, uid, ident)
             if doc is None:
-                return self._book_page("휴지통으로", '<p class="msg err">없는 책입니다.</p>', session, 404)
+                return self.not_found(request, session, "책")
             name, floor_id, back = doc.title, doc.floor, f"/shelf/doc/{ident}"
             what = f" · 만든 이력 {len(doc.versions)}"
         if request.method == "POST":

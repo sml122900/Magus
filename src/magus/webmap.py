@@ -251,6 +251,8 @@ class MapPages:
         if err := {"empty": "제목을 적어 주세요.", "full": f"프로젝트는 {MAX_FLOORS}개까지입니다."}.get(
                 params.get("projecterr") or ""):
             out += f'<p class="msg err">{err}</p>'
+        if params.get("pick") == "book":  # /shelf/new를 프로젝트 없이 열었을 때
+            out += '<p class="msg">새 책은 프로젝트 안에서 만듭니다. 프로젝트를 골라 노드를 열면 「새 책」이 있습니다.</p>'
         if code := params.get("maperr"):
             named = params.get("name") or ""
             out += f'<p class="msg err">{html.escape(error_message(MapError(code, code, name=named, projects=named), polite=True))}</p>'
@@ -283,7 +285,8 @@ class MapPages:
             node = found.node_of(book_key)
         return node
 
-    async def project_page(self, request: Request) -> Response:
+    async def project_page(self, request: Request, error: str = "", status: int = 200, node_id: str | None = None) -> Response:
+        """error: 지도 위에 보일 오류 한 줄(이미 HTML, 예: 노드 컨텍스트가 너무 길 때 400). 없는 노드 주소는 지도에 '없는 노드입니다.'(404)."""
         session = self.user_of(request)
         if not session:
             return self._need_login(request)
@@ -292,14 +295,15 @@ class MapPages:
         found = await run_in_threadpool(self.store.get_map, uid, floor_id)
         floor = await run_in_threadpool(self.store.get_floor, uid, floor_id)
         if found is None or floor is None:
-            return self._map_page("프로젝트", '<p class="msg err">없는 프로젝트입니다. <a href="/shelf">프로젝트 목록</a>으로 돌아가세요.</p>',
-                                  session, 404)
+            return self.not_found(request, session, "프로젝트")
         params = request.query_params
         if at := safe_at(params.get("at")):  # 예전 주소(옆 패널의 게시판 자리) → 그 화면을 별도 페이지로(2026-10-09)
             return RedirectResponse(at, status_code=303)
-        node = await run_in_threadpool(self._view, uid, found, params)
+        node = found.node(node_id) if node_id else await run_in_threadpool(self._view, uid, found, params)
+        if params.get("node") and node is None and not error:
+            error, status = '<p class="msg err">없는 노드입니다.</p>', 404
         here = state_url(floor_id, node=node.id if node else None)
-        notices = await run_in_threadpool(self._notices, uid, request, session, here, found)
+        notices = error + await run_in_threadpool(self._notices, uid, request, session, here, found)
         q = clean_query(params.get("q"))
         view = params.get("view") if params.get("view") in ("map", "list") else "auto"
         search = ""
@@ -324,7 +328,7 @@ class MapPages:
                 f'<aside class="pm-panel" id="panel" aria-label="노드의 책장">{panel}</aside></div></div>'
                 f'<script type="application/json" id="map-data">{json_script(data)}</script>'
                 + self._move_form(session, here) + MAP_SCRIPT)
-        return self._map_page(project_name(floor), body, session, css=MAP_STYLE)
+        return self._map_page(project_name(floor), body, session, status, css=MAP_STYLE)
 
     def _toolbar(self, floor: Floor, found: ProjectMap, q: str, view: str) -> str:
         base = state_url(floor.id)
@@ -636,8 +640,10 @@ class MapPages:
         except ValueError as e:  # 색 이름·컨텍스트 길이 등
             if wants_json:
                 return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-            return RedirectResponse(with_query(back, maperr="bad_context" if action in ("add_node", "contexts") else "bad_color"),
-                                    status_code=303)
+            if action in ("add_node", "contexts"):  # 책 설정과 같이 400으로 그 자리에서(2026-10-09, 전에는 303 → 200)
+                said = f"컨텍스트를 저장하지 못했습니다. {e}" if action == "contexts" else f"노드를 만들지 못했습니다. {e}"
+                return await self.project_page(request, f'<p class="msg err">{html.escape(said)}</p>', 400, node or None)
+            return RedirectResponse(with_query(back, maperr="bad_color"), status_code=303)
         if wants_json:
             return JSONResponse(result)
         target = result.get("node") or node
@@ -653,7 +659,7 @@ class MapPages:
         uid = session[0]
         floor = await run_in_threadpool(self.store.get_floor, uid, request.path_params["project"])
         if floor is None:
-            return self._map_page("휴지통", '<p class="msg err">없는 프로젝트입니다. <a href="/shelf">프로젝트</a></p>', session, 404)
+            return self.not_found(request, session, "프로젝트")
         here = f"/shelf/p/{urllib.parse.quote(floor.id)}/trash"
         if request.method == "POST":
             try:
@@ -915,7 +921,7 @@ class MapPages:
         uid = session[0]
         floor = await run_in_threadpool(self.store.get_floor, uid, request.path_params["project"])
         if floor is None:
-            return self._map_page("프로젝트", '<p class="msg err">없는 프로젝트입니다.</p>', session, 404)
+            return self.not_found(request, session, "프로젝트")
         from magus.export_zip import build_zip, zip_name  # noqa: PLC0415
 
         data = await run_in_threadpool(build_zip, self.store, uid, [floor.id])
