@@ -12,6 +12,7 @@ import secrets
 import shutil
 import sqlite3
 import threading
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
@@ -33,13 +34,13 @@ from magus.store.fileio import write_text as _write_text
 from magus.floors import COMMON, MAX_FLOORS
 from magus.category.rules import HEX
 from magus.contexts import from_record, to_record
-from magus.store.categories import CategoryMixin
+from magus.store.categories import CategoryMixin, _item_from_record
 from magus.store.contexts import ContextMixin
 from magus.store.documents import DocumentMixin
 from magus.store.floors import FloorMixin
 from magus.store.maps import MapMixin
 from magus.store.project_trash import ProjectTrashMixin
-from magus.store.shelf import ShelfMixin
+from magus.store.shelf import ShelfMixin, safe_ref_key
 from magus.store.base import (
     ANCHOR_MAX,
     BookTitles,
@@ -68,6 +69,9 @@ from magus.store.base import (
 from magus.store.schema import SCHEMA, SCHEMA_VERSION, TABLES
 
 log = logging.getLogger("magus.store")
+INDEX_PENDING = "index-pending.json"  # 파일은 저장됐는데 색인이 늦은 글(파생, 다 하면 지운다, 점검 12-a)
+RETRY_WAITS = (0.0, 0.5, 1.0)  # 색인이 실패하면 기다렸다 다시(초). sqlite 자체도 잠김을 5초까지 기다린다
+REPAIR_EVERY, REPAIR_TRIES = 2.0, 90  # 그래도 안 되면 뒤에서 2초마다, 3분까지
 
 NON_CITATION_TERMS = "non_citation_terms.txt"
 AI_AUTHORS = "ai_authors.txt"  # 이 프로젝트에서 AI로 볼 코멘트 작성자 이름(기본 목록에 더한다, #71)
@@ -90,9 +94,102 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
         if self._db.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
             log.info("인덱스 스키마 v%s 생성 → 파일에서 재생성", SCHEMA_VERSION)
             self.reindex()
+        self._repairer: threading.Thread | None = None
+        if self._pending_path().exists() and self._repair_pending():  # 지난번에 늦은 색인(점검 12-a)
+            self._start_repair()  # 남은 것은 뒤에서 계속
 
     def close(self) -> None:
         self._db.close()
+
+    # ---- 파일을 쓴 뒤의 색인(2026-10-09 점검 12-a) -----------------------------------------------
+    # 쓰기 순서는 파일 → 색인이다. 색인이 실패하면(다른 프로세스가 DB를 잠금 등) 전에는 도구 오류가 나 같은 글을 다시 넣어 둘이 됐고,
+    # 휴지통은 색인에 유령 글이 남았다. 이제 파일은 저장된 것이므로 오류를 올리지 않는다: 두 번 더 해 보고, 그래도 안 되면
+    # 그 글 하나를 기록해 두고(index-pending.json, 파생) 뒤에서 파일 기준으로 다시 색인한다. 서버를 다시 띄우면 남은 것을 먼저 한다.
+
+    def _sync_index(self, user_id: str, owner: str) -> None:
+        """owner: 'item:<책 id>/<글 id>' 또는 'ref:<key>'. 파일 그대로 그 하나를 색인한다(파일이 없으면 색인에서 뺀다)."""
+        last: Exception | None = None
+        for wait in RETRY_WAITS:
+            if wait:
+                time.sleep(wait)
+            try:
+                with self._db:
+                    self._index_one(user_id, owner)
+                return
+            except sqlite3.OperationalError as e:
+                last = e
+        log.warning("색인 늦음(파일은 저장됨, 그 글만 뒤에서 다시): %s", type(last).__name__)
+        self._pending_add(user_id, owner)
+
+    def _index_one(self, user_id: str, owner: str) -> None:
+        kind, _, rest = owner.partition(":")
+        if kind == "item":
+            book, _, item_id = rest.partition("/")
+            path = self._category_dir(user_id, book) / "items" / f"{safe_id(item_id, 'item id')}.json"
+            if path.exists():
+                self._index_item(user_id, _item_from_record(book, _read_json(path)))
+            else:
+                self._db.execute("DELETE FROM category_items WHERE user_id = ? AND category_id = ? AND id = ?", (user_id, book, item_id))
+                self._drop_chunks(user_id, "category", f"{book}/{item_id}")
+        elif kind == "ref":
+            rdir = self._melchior_dir(user_id) / safe_ref_key(rest)
+            if (rdir / "bib.json").exists():
+                self._index_ref(user_id, rdir)
+
+    def _pending_path(self) -> Path:
+        return self.root / INDEX_PENDING
+
+    def _pending_read(self) -> dict[str, list[str]]:
+        try:
+            data = json.loads(self._pending_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return {u: [o for o in owners if isinstance(o, str)] for u, owners in data.items() if isinstance(owners, list)} if isinstance(data, dict) else {}
+
+    def _pending_write(self, pending: dict[str, list[str]]) -> None:
+        pending = {u: owners for u, owners in pending.items() if owners}
+        if pending:
+            _write_text(self._pending_path(), json.dumps(pending, ensure_ascii=False, indent=1) + "\n")
+        else:
+            self._pending_path().unlink(missing_ok=True)
+
+    def _pending_add(self, user_id: str, owner: str) -> None:
+        pending = self._pending_read()
+        pending[user_id] = list(dict.fromkeys([*pending.get(user_id, []), owner]))
+        self._pending_write(pending)
+        self._start_repair()
+
+    def _start_repair(self) -> None:
+        if self._repairer is None or not self._repairer.is_alive():
+            self._repairer = threading.Thread(target=self._repair_loop, name="magus-index-repair", daemon=True)
+            self._repairer.start()
+
+    def _repair_pending(self) -> int:
+        """기록된 늦은 색인을 지금 한 번 해 본다. 남은 수를 돌려준다."""
+        with self._lock:
+            pending = self._pending_read()
+            for user_id, owners in pending.items():
+                left = []
+                for owner in owners:
+                    try:
+                        with self._db:
+                            self._index_one(user_id, owner)
+                    except sqlite3.OperationalError:
+                        left.append(owner)
+                pending[user_id] = left
+            self._pending_write(pending)
+            return sum(len(o) for o in pending.values())
+
+    def _repair_loop(self) -> None:
+        for _ in range(REPAIR_TRIES):
+            time.sleep(REPAIR_EVERY)
+            try:
+                if self._repair_pending() == 0:
+                    log.info("늦은 색인을 다시 했다")
+                    return
+            except sqlite3.ProgrammingError:  # 저장소가 닫혔다(서버 종료). 다음 시작 때 한다
+                return
+        log.error("늦은 색인을 다시 하지 못했다(파일은 그대로) — 서버를 다시 시작하면 다시 한다")
 
     # ---- 경로 ------------------------------------------------------------------------
 
@@ -700,6 +797,7 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
             new.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             new.commit()
             new.backup(old)  # 지금 색인 자리로 통째로(다 만든 뒤에만 바뀐다)
+            (self.root / INDEX_PENDING).unlink(missing_ok=True)  # 다 다시 만들었으니 늦은 색인 기록은 끝(점검 12-a)
         except Exception as e:  # noqa: BLE001 — 색인은 파생값이다. 무엇이 실패해도 서버는 떠야 한다
             log.error("색인 다시 만들기 실패, 지금 색인을 그대로 둔다(%s)", type(e).__name__)
             self._db = old

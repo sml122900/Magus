@@ -50,6 +50,7 @@ class CategoryMixin:
     _known: Callable[[str, Any], set[str]]
     _check_floor: Callable[[str, Any, str], str]
     _move_item_files: Callable[..., None]  # AttachmentMixin(#97: 글의 첨부도 함께 휴지통으로)
+    _sync_index: Callable[..., None]  # LocalStore: 파일을 쓴 뒤 그 글 하나의 색인(늦으면 뒤에서 다시, 점검 12-a)
 
     def _categories_dir(self, user_id: str) -> Path:
         return self._user_dir(user_id) / "shelf" / "categories"
@@ -180,8 +181,7 @@ class CategoryMixin:
         # 이 코드가 모르는 칸(앞으로 더할 표시 등)은 그대로 둔다. 고쳐 저장해도 파일에 있던 것이 사라지지 않게(2026-10-09 글 고치기)
         keep = {k: v for k, v in old.items() if k not in _ITEM_KEYS}
         write_json(path, {**_item_record(item), **keep})
-        with self._db:
-            self._index_item(user_id, item)
+        self._sync_index(user_id, f"item:{item.category_id}/{item.id}")
         return item
 
     @locked
@@ -206,8 +206,7 @@ class CategoryMixin:
             data["updated_at"] = utcnow()
         write_json(path, data)
         item = _item_from_record(category_id, data)
-        with self._db:
-            self._index_item(user_id, item)
+        self._sync_index(user_id, f"item:{item.category_id}/{item.id}")
         return item
 
     @locked
@@ -262,10 +261,7 @@ class CategoryMixin:
             write_json(target, {**data, "_trash": mark})  # 먼저 쓰고 지운다
             path.unlink()
             self._move_item_files(user_id, category_id, one, to_trash=True)
-            with self._db:
-                self._db.execute("DELETE FROM category_items WHERE user_id = ? AND category_id = ? AND id = ?",
-                                 (user_id, category_id, one))
-                self._drop_chunks(user_id, "category", f"{category_id}/{one}")
+            self._sync_index(user_id, f"item:{category_id}/{one}")  # 파일이 없으면 색인에서 뺀다
             out.append(_item_from_record(category_id, data))
         return out
 
@@ -287,8 +283,7 @@ class CategoryMixin:
             write_json(self._category_dir(user_id, category_id) / "items" / f"{name}.json", data)
             src.unlink()
             self._move_item_files(user_id, category_id, name, to_trash=False)
-            with self._db:
-                self._index_item(user_id, _item_from_record(category_id, data))
+            self._sync_index(user_id, f"item:{category_id}/{name}")
         return [f"{category_id}/{n}" for n in names]
 
     def _trashed_categories(self, user_id: str) -> list[tuple[str, str, dict[str, Any], str]]:
@@ -361,14 +356,11 @@ class CategoryMixin:
         if owner.startswith("ref:"):
             rdir = self._melchior_dir(user_id) / owner[4:]  # type: ignore[attr-defined]
             if (rdir / "bib.json").exists():
-                with self._db:
-                    self._index_ref(user_id, rdir)  # type: ignore[attr-defined]
+                self._sync_index(user_id, f"ref:{rdir.name}")
             return
         book, _, item = owner.partition("/")
-        path = self._category_dir(user_id, book) / "items" / f"{item}.json"
-        if path.exists():
-            with self._db:
-                self._index_item(user_id, _item_from_record(book, read_json(path)))
+        if (self._category_dir(user_id, book) / "items" / f"{item}.json").exists():
+            self._sync_index(user_id, f"item:{book}/{item}")
 
     def _reindex_category(self, user_id: str, cdir: Path, known: set[str]) -> None:
         record = read_json(cdir / "category.json")

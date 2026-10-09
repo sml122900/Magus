@@ -64,6 +64,7 @@ class ShelfMixin:
     _layout: Callable[[str], Layout]
     _known: Callable[[str, Layout], set[str]]
     _guard: Callable[..., object]  # LocalStore: 파일 하나 색인, 실패하면 그것만 건너뜀(2026-10-09)
+    _sync_index: Callable[..., None]  # LocalStore: 파일을 쓴 뒤 그 글 하나의 색인(늦으면 뒤에서 다시, 점검 12-a)
     # CategoryMixin이 구현한다(메서드 껍데기를 두면 MRO에서 진짜를 가리므로 주석만 둔다)
     _trashed_categories: Callable[[str], list[tuple[str, str, dict[str, Any], str]]]
     _restore_category: Callable[[str, str, str | None], list[str]]
@@ -152,8 +153,7 @@ class ShelfMixin:
                 **{k: v for k, v in old.items() if k not in REF_FILE_KEYS},
             },
         )
-        with self._db:
-            self._index_ref(user_id, rdir)
+        self._sync_index(user_id, f"ref:{rdir.name}")
         stored = self.get_ref(user_id, key)
         assert stored is not None
         return stored
@@ -202,8 +202,7 @@ class ShelfMixin:
         if reason:  # 저자가 알 수 있게 옮긴 시각·원래 프로젝트·이유를 남긴다(#93-a 더함)
             data["moved"] = {"at": utcnow(), "from": str(before or ""), "to": floor, "reason": reason}
         write_json(path, data)
-        with self._db:
-            self._index_ref(user_id, path.parent)
+        self._sync_index(user_id, f"ref:{path.parent.name}")
         found = self.get_ref(user_id, key)
         assert found is not None
         return found
@@ -223,8 +222,7 @@ class ShelfMixin:
         if data.get("status") != status:
             data.update({"status": status, "updated_at": utcnow(), "status_by": {"by": "author", "at": utcnow(), "via": via}})
             write_json(path, data)
-            with self._db:
-                self._index_ref(user_id, path.parent)
+            self._sync_index(user_id, f"ref:{path.parent.name}")
         found = self.get_ref(user_id, key)
         assert found is not None
         return found
@@ -246,8 +244,7 @@ class ShelfMixin:
                 new.append(p)
         if new:
             write_json(rdir / "passages.json", [asdict(p) for p in [*old, *new]])
-            with self._db:
-                self._index_ref(user_id, rdir)
+            self._sync_index(user_id, f"ref:{rdir.name}")
         return len(new), len(old) + len(new)
 
     @locked
@@ -266,8 +263,7 @@ class ShelfMixin:
             else:
                 data.pop("scrap", None)
             write_json(path, data)
-            with self._db:
-                self._index_ref(user_id, path.parent)
+            self._sync_index(user_id, f"ref:{path.parent.name}")
         return on
 
     @locked
@@ -285,8 +281,7 @@ class ShelfMixin:
             bib.pop("memo", None)
             data.update({"bib": {**bib, **({"memo": memo} if memo else {})}, "updated_at": utcnow()})
             write_json(path, data)
-            with self._db:
-                self._index_ref(user_id, path.parent)
+            self._sync_index(user_id, f"ref:{path.parent.name}")
         found = self.get_ref(user_id, key)
         assert found is not None
         return found

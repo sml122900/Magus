@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx2
 import pytest
+from mcp import Client
 from test_web import _csrf, server_proc  # noqa: F401 - 픽스처
 
+from magus.config import Settings
+from magus.server import build_server
 from magus.store import CategoryItem, LocalStore
 
 pytestmark = pytest.mark.anyio
@@ -77,3 +82,50 @@ async def test_put_attachment_and_inbox_take_files(store: LocalStore, tmp_path):
     assert path.read_bytes() == b"0123456789" * 1000 and att.size == 10_000
     entry = store.put_inbox("alice", "b.txt", io.BytesIO("안녕".encode()))
     assert entry.size == len("안녕".encode())
+
+
+# ---- 12-a 파일은 썼는데 색인이 실패하면 그 글만 다시 색인 ----
+
+async def test_index_lag_is_repaired_in_background(data_dir, settings: Settings, monkeypatch: pytest.MonkeyPatch):
+    import sqlite3
+    import time
+
+    import magus.store.local as local
+
+    monkeypatch.setattr(local, "RETRY_WAITS", (0.0, 0.05))
+    monkeypatch.setattr(local, "REPAIR_EVERY", 0.1)
+    store = LocalStore(data_dir)
+    store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="notes")
+    store.put_category_item("alice", CategoryItem("20261009000000001-aaaaaa", "notes", "버릴 글", "me", "버릴 글", "author"))
+    store._db.execute("PRAGMA busy_timeout = 50")
+    lock = sqlite3.connect(data_dir / "index.sqlite")
+    lock.execute("BEGIN IMMEDIATE")  # 다른 프로세스가 쓰는 중
+    async with Client(build_server(settings, store)) as c:
+        r = await c.call_tool("category_put", {"book": "메모", "author": "me", "content": "새 글", "untitled": True})
+    assert not r.is_error, r.content[0].text  # 파일은 저장됐다: 오류를 내지 않는다(전에는 오류 → 다시 넣어 둘이 됐다)
+    store.trash_item_with_replies("alice", "notes", "20261009000000001-aaaaaa", "웹")  # 전에는 OperationalError, 색인에 유령 글
+    pending = json.loads((data_dir / "index-pending.json").read_text(encoding="utf-8"))
+    assert len(pending["alice"]) == 2
+    lock.rollback()
+    lock.close()
+    for _ in range(50):
+        if not (data_dir / "index-pending.json").exists():
+            break
+        time.sleep(0.1)
+    rows = [(i.content, i.id) for i in store.list_category_items("alice", "notes")]
+    assert [c for c, _ in rows] == ["새 글"] and not (data_dir / "index-pending.json").exists()
+    store.close()
+
+
+def test_pending_index_is_repaired_at_start(data_dir):
+    store = LocalStore(data_dir)
+    store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="notes")
+    store.put_category_item("alice", CategoryItem("20261009000000001-aaaaaa", "notes", "글", "me", "글", "author"))
+    store._db.execute("DELETE FROM category_items")  # 지난번에 색인이 늦은 채 서버가 꺼졌다
+    store._db.commit()
+    store.close()
+    (data_dir / "index-pending.json").write_text(json.dumps({"alice": ["item:notes/20261009000000001-aaaaaa"]}), encoding="utf-8")
+    again = LocalStore(data_dir)
+    assert [i.content for i in again.list_category_items("alice", "notes")] == ["글"]
+    assert not (data_dir / "index-pending.json").exists()
+    again.close()
