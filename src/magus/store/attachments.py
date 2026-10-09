@@ -30,6 +30,23 @@ from magus.store.fileio import locked, read_json, write_json
 PART = ".part"  # 받는 도중의 임시 파일(목록에 보이지 않는다)
 
 
+_extracting: set[str] = set()  # 지금 첨부 글자를 뽑고 있는 사용자(프로세스 안)
+_extracting_lock = threading.Lock()
+
+
+def _claim(user_id: str) -> bool:
+    with _extracting_lock:
+        if user_id in _extracting:
+            return False
+        _extracting.add(user_id)
+        return True
+
+
+def _release(user_id: str) -> None:
+    with _extracting_lock:
+        _extracting.discard(user_id)
+
+
 class AttachmentMixin:
     root: Path
     _db: sqlite3.Connection
@@ -186,9 +203,12 @@ class AttachmentMixin:
             return None, None
         att_dir = hit[0].parent
         status = ex.read_status(att_dir)
-        if make and (status is None or status["status"] == "later"):
-            result = ex.extract(hit[0], ex.DEADLINE if deadline is None else deadline)
-            status = ex.save(att_dir, hit[1].name, result)
+        if make and (status is None or (status["status"] == "later" and ex.retry_due(status))) and _claim(user_id):
+            try:  # 사용자마다 한 번에 하나만 뽑는다(점검 7-e: 새로 고침·동시 요청이 20초씩 겹쳤다)
+                result = ex.extract(hit[0], ex.DEADLINE if deadline is None else deadline)
+                status = ex.save(att_dir, hit[1].name, result)
+            finally:
+                _release(user_id)
             ex.log.info("extract status=%s chars=%d ms=%d", status["status"], status["chars"], status["ms"])
             with self._lock:
                 self._attachments_changed(user_id, owner)

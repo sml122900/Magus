@@ -18,6 +18,7 @@ import logging
 import time
 import zipfile
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from magus import zipguard
@@ -175,23 +176,50 @@ def _docx(path: Path, check) -> tuple[str, bool]:
     return "".join(parts), cut
 
 
+BAD_SHARE = 0.01  # 대체 문자(�)·제어 문자가 이 비율을 넘으면 그 인코딩이 아니다(점검 7-f)
+LATER_RETRY = 60.0  # 초. '나중에'(시간 넘음)인 첨부를 다시 뽑기까지 기다림(점검 7-e)
+
+
+def retry_due(status: dict) -> bool:
+    """'나중에' 상태를 다시 뽑아도 되는가: 마지막 시도에서 LATER_RETRY초가 지났으면(시각을 못 읽으면 True)."""
+    try:
+        at = datetime.fromisoformat(str(status.get("at")).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    return (datetime.now(UTC) - at).total_seconds() >= LATER_RETRY
+
+
+def _bad_share(text: str) -> float:
+    if not text:
+        return 0.0
+    bad = sum(1 for ch in text if ch == "�" or (ord(ch) < 32 and ch not in "\t\n\r\f"))
+    return bad / len(text)
+
+
+def _decode(path: Path, encoding: str, check) -> tuple[str, bool]:
+    decoder = codecs.getincrementaldecoder(encoding)("replace")
+    parts: list[str] = []
+    total = 0
+    with path.open("rb") as f:
+        while block := f.read(1_000_000):
+            check()
+            total, cut = _limit(parts, total, decoder.decode(block))
+            if cut:
+                return "".join(parts), True
+        total, cut = _limit(parts, total, decoder.decode(b"", final=True))
+    return "".join(parts), cut
+
+
 def _plain(path: Path, check) -> tuple[str, bool]:
-    """txt·md: 1MB씩 읽어 30만 자에서 멈춘다. UTF-8(BOM 포함)이 아니면 cp949로 읽는다."""
-    for encoding, errors in (("utf-8-sig", "strict"), ("cp949", "replace")):
-        decoder = codecs.getincrementaldecoder(encoding)(errors)
-        parts: list[str] = []
-        total = 0
-        try:
-            with path.open("rb") as f:
-                while block := f.read(1_000_000):
-                    check()
-                    total, cut = _limit(parts, total, decoder.decode(block))
-                    if cut:
-                        return "".join(parts), True
-                total, cut = _limit(parts, total, decoder.decode(b"", final=True))
-            return "".join(parts), cut
-        except UnicodeDecodeError:
-            continue
+    """txt·md: 1MB씩 읽어 30만 자에서 멈춘다. UTF-8(BOM 포함)로 읽되, 깨진 글자(�)·제어 문자가 1%를 넘을 때만 cp949로 읽는다.
+    둘 다 넘으면 글자가 아닌 파일로 보고 비운다(empty). 전에는 UTF-8 바이트가 하나만 틀려도 파일 전체를 cp949로 읽어 통째로 깨졌고,
+    무작위 바이너리도 'ok'로 색인됐다(점검 7-f)."""
+    text, cut = _decode(path, "utf-8-sig", check)
+    if _bad_share(text) <= BAD_SHARE:
+        return text, cut
+    other, other_cut = _decode(path, "cp949", check)
+    if _bad_share(other) <= BAD_SHARE:
+        return other, other_cut
     return "", False
 
 

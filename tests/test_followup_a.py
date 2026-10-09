@@ -390,3 +390,46 @@ def test_format_chars_in_names_and_download_quote():
             safe_filename(bad.replace(".png", ".txt"))
     assert clean_name("현장 사진.png") == "현장 사진.png" and safe_filename("원고 E2.docx") == "원고 E2.docx"
     assert urllib.parse.quote("a/b<c>.docx", safe="") == "a%2Fb%3Cc%3E.docx"
+
+
+# ---- 7-e·7-f '나중에' 다시 뽑기 간격·사용자마다 하나, txt 인코딩 판정 ----
+
+def test_plain_text_encoding(tmp_path):
+    import random
+
+    from magus.extract import extract
+
+    mostly = tmp_path / "mostly.txt"
+    mostly.write_bytes(("도시의 성장은 느리다. " * 500).encode("utf-8") + b"\xff" + "끝".encode("utf-8"))
+    got = extract(mostly)
+    assert got.status == "ok" and got.text.startswith("도시의 성장은") and got.text.count("�") == 1  # 전에는 통째로 cp949로 깨졌다
+    korean = tmp_path / "옛글.txt"
+    korean.write_bytes(("옛 한글 문서 " * 200).encode("cp949"))
+    assert extract(korean).text.startswith("옛 한글 문서")
+    noise = tmp_path / "noise.txt"
+    noise.write_bytes(random.Random(1).randbytes(50_000))
+    assert extract(noise).status == "empty"  # 무작위 바이너리를 글자로 색인하지 않는다
+    assert extract(tmp_path / "없음.md").status == "failed"
+
+
+def test_later_retry_waits_and_one_per_user(store: LocalStore, monkeypatch: pytest.MonkeyPatch):
+    from magus import extract as ex
+    from magus.store import CategoryItem
+    from magus.store import attachments as store_attachments
+
+    store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="notes")
+    store.put_category_item("alice", CategoryItem("20261009000000000-aaaaaa", "notes", "글", "me"))
+    owner = "notes/20261009000000000-aaaaaa"
+    att = store.put_attachment("alice", owner, "긴 글.txt", "글자 ".encode("utf-8") * 100)
+    calls: list[str] = []
+    monkeypatch.setattr(ex, "extract", lambda path, deadline=20.0: calls.append(path.name) or ex.Extracted("later", "", 20_000))
+    store.attachment_text("alice", owner, att.id)
+    store.attachment_text("alice", owner, att.id)  # 방금 '나중에'였다: 60초 안에는 다시 뽑지 않는다
+    assert calls == ["긴 글.txt"]
+    monkeypatch.setattr(ex, "LATER_RETRY", 0.0)
+    store_attachments._extracting.add("alice")  # 같은 사용자의 다른 뽑기가 도는 중
+    store.attachment_text("alice", owner, att.id)
+    assert calls == ["긴 글.txt"]
+    store_attachments._extracting.discard("alice")
+    store.attachment_text("alice", owner, att.id)
+    assert calls == ["긴 글.txt", "긴 글.txt"]
