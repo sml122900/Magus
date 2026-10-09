@@ -33,4 +33,4 @@ def test_star_focus_counts_leave_guard_and_back(server_proc, tmp_path):  # noqa:
                            f"/shelf/{book}", f"/shelf/write/{book}", f"/shelf/{book}/{POST}/edit"],
                           capture_output=True, text=True, encoding="utf-8", timeout=180)
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "FAIL" not in done.stdout and done.stdout.count("ok  ") == 12, done.stdout
+    assert "FAIL" not in done.stdout and done.stdout.count("ok  ") == 13, done.stdout

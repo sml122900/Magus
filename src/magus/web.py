@@ -115,7 +115,7 @@ details{margin:12px 0}summary{cursor:pointer;color:var(--ink2);padding:4px 0}
 ul.links{list-style:none;padding:0;margin:16px 0;display:grid;gap:8px}ul.links a{font-size:17px}
 .empty{font-size:17px;margin:16px 0 8px}
 .count{display:inline-block;margin-left:8px;color:var(--ink2);font-size:14px;font-variant-numeric:tabular-nums}
-.count.over{color:#a31d1d;font-weight:600}
+.count.over{color:#a31d1d;font-weight:600}.count[hidden]{display:none}
 form.inline{display:inline}
 form.busy{pointer-events:none}
 form.busy button::after{content:"";display:inline-block;width:14px;height:14px;margin-left:8px;vertical-align:-2px;

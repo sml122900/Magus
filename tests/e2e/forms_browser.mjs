@@ -56,6 +56,7 @@ check("Enter 뒤 초점이 그 단추에", await js("document.activeElement === 
 // 5번: 글자 수 표시와 넘치면 막기
 await go(writePath);
 check("제목 옆 0/80", (await js("document.querySelector('input[name=title] + .count').textContent")) === "0/80");
+check("본문처럼 큰 칸은 한도에 가까울 때만 보인다", await js("getComputedStyle(document.querySelector('textarea[name=content] + .count')).display === 'none'"));
 await js("var t=document.querySelector('input[name=title]'); t.focus(); t.value='가'.repeat(81); t.dispatchEvent(new Event('input', {bubbles: true}))");
 check("넘치면 '81/80 · 1자 넘음'", (await js("document.querySelector('input[name=title] + .count').textContent")) === "81/80 · 1자 넘음");
 await js("document.querySelector('textarea[name=content]').focus()");
