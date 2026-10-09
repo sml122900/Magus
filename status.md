@@ -1,7 +1,8 @@
 # Magus status
 
 > 세션을 시작하면 이 파일부터 읽는다. 단계를 완료했을 때, 사용자 확인을 기다리며 멈출 때, 세션을 끝낼 때 반드시 갱신한다.
-> 마지막 갱신: 2026-10-09 (밤) KST — 코드 점검 높음 5건 + 운영(로그 회전·배포 전 백업 태그·이미지 정리)(0-29절) → 서버 배포 `p1-high-fix`.
+> 마지막 갱신: 2026-10-09 (밤) KST — 점검 후속 A: .env 보호 장치·결정 b·d·e·f·h·i·바로 할 수 있는 것 22건(0-30절) → 서버 배포 `p1-followup-a`.
+> 그 전: 2026-10-09 (밤) KST — 코드 점검 높음 5건 + 운영(로그 회전·배포 전 백업 태그·이미지 정리)(0-29절) → 서버 배포 `p1-high-fix`.
 > 그 전: 2026-10-09 (저녁) KST — 구조·버그 점검 결과 고치기 1~13(0-28절) → 서버 배포 `p1-fix-ui`.
 > 그 전: 2026-10-09 (오후) KST — 대화 검색 순위 보정·쓸 부분 저장 뒤 원문 확인 묻기(#101, 0-27절) → 서버 배포 `p1-search-rank`.
 > 그 전: 2026-10-09 (오후) KST — 대화 검색 범위·예약어 '스크랩'·첨부 글자 뽑기(#100, 0-26절) → 서버 배포 `p1-attach-text`.
@@ -26,6 +27,27 @@
 > 그 전: 2026-10-06 아침 KST — 야간 자율 작업(책장·카테고리·제목·책 색 #92, 저자 확인 질문지 #84) 끝, 서버 배포 없음(0-9절, 보고 docs/daily/2026-10-06.md).
 > 그 전: 2026-10-06 KST — 비밀 대화 시험 결과 기록(되묻기 성공, 선택지에 원고가 섞임 → #90 수정, 커밋만), 사용자 서랍 설계안 #91(검토 대기, `docs/decisions/user-drawers.md`).
 > 2026-10-06 01시 KST — 토큰 aud 검사 강화(결정 #79)를 `p1-auth-audience`로 서버에 반영하고, 서버의 옛 git 이력을 새 이력으로 바꿨다(0-3절).
+
+## 0-30. 점검 후속 A(2026-10-09, 사용자 요청): .env 보호 장치 + 결정 반영 + 바로 할 수 있는 것 + 서버 배포 `p1-followup-a`
+
+- **지금 바로 할 일**: 대기(사용자): 4절 0-30 표(j~m) 확인, 다음 묶음(B: 스키마·도구 문구, 중간 24건 나머지) 고르기. 커넥터 재연결은 필요 없다.
+- 0 .env 보호 장치(`fa-0-env-guard`): `.claude/settings.json`(Read 금지 3개 + PreToolUse 훅 Bash·PowerShell·Monitor), `.claude/hooks/env_guard.py`, CLAUDE.md 절대 원칙 한 줄.
+  이 PC 시험: `cat deploy/.env` → 훅이 막음 · `grep -c '^ANTHROPIC_API_KEY=' deploy/.env` → 훅은 통과시켰지만 **Read 금지 규칙이 Bash의 파일 인자에도 걸려 거부**(가짜 파일도 같음) ·
+  하위 에이전트 `cat` → 막음(가짜·진짜 둘 다). `git check-ignore -v deploy/.env`는 통과. 시험 `tests/test_env_guard.py` 44개.
+  더함: 대소문자 무시(.ENV), .env가 든 폴더의 재귀 grep·rg(-u)도 막음, python이 없거나 입력을 못 읽으면 막음(`|| exit 2`). 오탐: 명령에 `os.environ`이 있으면 막힘(그때는 스크립트 파일로).
+  지난 배포 때 만든 비밀 해시 파일(로컬 `private/tmp/deploy-high/local-secret.sha`, 서버 `/root/high-tools/local-secret.sha`)은 지웠다.
+- 1 결정: 장 번호 0~9,999 그대로, a·c 그대로. d·e(`fa-1-de-keep-typed`): 노드 컨텍스트·'+ 노드'·프로젝트 제목 거절(400) 뒤 적은 내용이 폼에 그대로.
+  f(`fa-1-f-warm-cache`): `magus/melchior/warmer.py` — after_refs_changed(문헌 변경·가져오기·수정본) 뒤 뒤에서 데움(같은 프로젝트 한 번, serve에서만 켬), CLI `magus warm-cache`.
+  b(`fa-1-b-chat-search`): category_search도 find_all_words(AND·기호 글자 그대로). 대가: 활용형이 다른 낱말이 섞이면 못 찾는다(예: '짧은 반복 리듬' → 글에 '짧아'·'짧고'만 있어 결과 없음; 시험 둘을 고침).
+  h(`fa-1-h-predeploy-keep`): forget을 태그별로(daily 30일·12달, predeploy 30일). i: 배포 정리 단계에서.
+- 2 바로 할 수 있는 것(태그 `fa-2-*`): 15-2·13-b·15-3·7-b·7-d·1-8·1-10·3-4·4-4·3-5·15-4·15-5·13-c·10-a·5-d·6-c·7-e·7-f·22-b·25-b·20-3·24-a·24-b·24-d·21-a~d.
+  21-a~d는 정리 전후 화면 29개 HTML(지운 CSS만 다름)·캡처 58장 픽셀 같음. 전·후 표는 보고(채팅).
+- 시험: 453 → **519 통과**(env_guard 44·후속 A 17·cite_warm 5·export_zip 1 등, 21-b로 지운 함수 시험 2개 뺌), ruff 통과. 시험본 수치·도구 출력이 p1-high-fix와 같음(default 299·297·86, father-trial 337·335·129·E1),
+  인용 상태 화면은 지운 CSS 말고 같음. 도구 설명·스키마·instructions 글자까지 같음(9,218토큰) → **커넥터 재연결 필요 없음**.
+- **서버 배포 `p1-followup-a`**(2026-10-09 21:27, `deba2af` → `7662192`, 데이터 이전 없음·인덱스 v23, `docs/deploy.md` 2-10절). 되돌리기 이미지 `magus:rollback-deba2af`.
+  백업 `a231513b`, healthy·오류 0, 원본 2,351개 해시 같음, 수치 전후 같음(father 수정본 3(E3)), SESSION_SECRET 줄 1개, 로그 회전 적용 그대로, /tmp 점검 10/10.
+  인용 캐시 미리 만듦(default 8.4초·father 12.1초) → 첫 열기 0.15초·0.17초. 빌드 캐시 4.70GB 회수, restic:latest·rollback-58ce884 지움, 디스크 75% → 55%.
+  배포 전 스냅샷: `68013e32`(p1-high-fix)·`a231513b`(p1-followup-a).
 
 ## 0-29. 코드 점검 높음 5건 + 운영 승인 3건(2026-10-09, 사용자 요청) + 서버 배포 `p1-high-fix`
 
@@ -812,6 +834,7 @@ print('정리한 생각 파일', n)"
 
 ## 1. 지금 바로 할 일
 
+- **대기(사용자, 배포 뒤 p1-followup-a, 0-30절)**: 1. 4절 0-30 표(j~m) 확인. 2. 다음 묶음(B: 15-2 스키마·도구 문구 등, 중간 24건 나머지) 고르기. 커넥터 재연결은 필요 없다.
 - **대기(사용자, 배포 뒤 p1-high-fix, 0-29절)**: 1. 3번 목록(바로 할 수 있는 것·중간 24건)에서 다음에 할 것 고르기. 2. SESSION_SECRET 교체 여부(감사 때 찍힌 값과 아직 같음).
   3. 4절 0-29 표(g~i) 확인. 커넥터 재연결은 필수 아님.
 - **대기(사용자, 배포 뒤 p1-search-rank)**: 1. 커넥터 연결 해제 → 다시 연결(instructions 규칙 2가 바뀜, 도구 설명은 그대로). 2. 비밀 대화에서 책을 말하지 않고
@@ -1015,6 +1038,15 @@ print('정리한 생각 파일', n)"
   - 파일: `src/magus/book/{reupload,importer,docx_reader,comments,outline,tools,export}.py`, `src/magus/store/*`, `src/magus/melchior/{bibliography,author_report}.py`, `src/magus/{web,cli,instructions}.py`, `tests/test_docx_features.py`, `tests/test_reupload.py`
 
 ## 4. 검토 대기 결정
+
+**점검 후속 A(2026-10-09, 0-30절) — 질문 없이 진행, 내가 정한 것. 확인 필요.** (0-29 g~i는 사용자 답으로 닫음: g 0~9,999 유지, h·i 반영)
+
+| 무엇을 | 고른 것 | 대안 | 이유 | 바꾸는 비용 |
+|---|---|---|---|---|
+| j. 배포 전 백업 보관 방식 | forget을 태그별로(daily: 일별 30·월별 12, predeploy: 30일) | 지시대로 한 forget에 `--keep-tag predeploy` + predeploy 30일 정리 | 한 forget에 넣으면 그달 마지막 스냅샷이 predeploy일 때 그것이 월별 보관을 차지했다가 30일 뒤 지워져 그달 월별 백업이 사라진다 | 낮음(backup.sh 두 줄) |
+| k. .env 훅의 범위 | 지시한 두 예외 꼴 + 대소문자 무시·재귀 grep/rg 막기·PowerShell·Monitor에도 | 지시 그대로(Bash, 글자 그대로) | 감사 때 값이 찍힌 길이 재귀 grep이었다. Windows는 .ENV도 같은 파일 | 낮음 |
+| l. grep -c 예외 | 훅은 통과시키지만 Read 금지 규칙(지시대로 둠)이 Bash 파일 인자에도 걸려 이 PC에서는 거부된다 | Read 금지 규칙을 훅으로 옮기고 settings의 deny를 뺌 | 지시한 금지 규칙을 그대로 두는 쪽이 더 안전. 서버 쪽 개수 확인은 서버 스크립트 안에서 한다 | 낮음(설정만) |
+| m. 뒤에서 데우기의 범위 | 문헌이 바뀌면 그 사용자의 올린 문서가 있는 모든 프로젝트를 데움(일꾼 하나, 같은 것은 한 번) | 바뀐 프로젝트만 | 연결 노드로 문헌을 나눠 쓰는 프로젝트도 범위가 바뀐다. 사용자 둘·원고 하나씩이라 비용이 작다 | 낮음 |
 
 **코드 점검 높음 5건·운영(2026-10-09, 0-29절) — 질문 없이 진행, 내가 정한 것. 확인 필요.**
 

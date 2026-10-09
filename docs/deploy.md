@@ -112,6 +112,9 @@ curl -s https://<도메인>/.well-known/oauth-protected-resource/mcp   # resourc
 - 반영 전에: 백업을 손으로 한 번 돌려 스냅샷을 확인하고(`docker compose --profile backup run --rm -e BACKUP_TAG=<배포 태그> backup </dev/null`, 2026-10-09부터 스냅샷에 `predeploy`·배포 태그),
   실행 중 이미지를 `magus:rollback-<커밋>`으로 태그해 둔다. 되돌리기 이미지는 지금 것 + 최근 2개만 남긴다(그보다 옛 판은 태그에서 다시 빌드, 2-9절).
 - 반영 전에 되돌릴 커밋(`git rev-parse HEAD`)과 data 해시 목록을 적어 둔다. 되돌릴 때는 그 커밋으로 `reset --hard` 후 다시 빌드한다(`HEAD~1`을 쓰지 않는다).
+  - data 해시는 `index.sqlite*`와 파생 폴더(`.cache`·`.text`·`.thumb`)를 빼고 비교한다(2026-10-09 결정 f). 원본 파일은 전후가 같아야 하고, 파생 파일은 개수만 따로 적는다.
+  - `.env`는 변수 이름 개수만 본다(`grep -c '^이름=' …/.env`). 값·길이·해시는 보지 않는다(2026-10-09 사용자 지시, CLAUDE.md).
+- 올린 뒤에: 인용 계산 캐시를 미리 만든다(`docker compose exec -T magus /app/.venv/bin/magus warm-cache --all-users`). 올리고 healthy면 `docker builder prune -f --filter until=72h`(72시간 넘은 빌드 캐시)와 되돌리기 이미지 정리(지금 것 + 최근 2개).
 
 ### 2-2. 층(#93) + 책 종류(#94) + 프로젝트·지도(#95) + 컨텍스트(#96) 묶음 배포 — 사용자 승인 뒤 한 번에
 
@@ -318,6 +321,29 @@ SESSION_SECRET: 줄 1개·32자 이상·새 컨테이너에 있고 `.env`와 같
 썸네일 실패 표시(`.thumb/failed`)는 옛 코드가 읽지 않는다(그 그림은 다시 만들려 한다). compose·backup.sh까지 되돌리려면 `git checkout -B master p1-fix-ui` 뒤 `up -d`.
 `p1-contexts` 이전(`ec6c40b`)으로 가는 이미지는 지웠다 — 그때는 태그에서 다시 빌드하고 먼저 새 코드로 `magus maps revert --all-users`(2-2절).
 
+### 2-10. 점검 후속 A: .env 보호 장치·결정 반영(b·d·e·f·h·i)·바로 할 수 있는 것 — 2026-10-09 사용자 승인
+
+반영 전 서버는 `p1-high-fix`(`deba2af`), 반영할 것은 태그 `p1-followup-a`(`7662192`). **데이터 이전 없음, 인덱스 v23 그대로, 도구 설명·스키마·instructions 글자까지 그대로 → 커넥터 재연결 필요 없음**(도구 목록 9,218토큰).
+바뀐 것(동작·응답 문장): 대화 찾기 AND(결정 b), 거절 뒤 적은 내용 유지(d·e), 인용 캐시 뒤에서 데우기·`magus warm-cache`(f), backup.sh 태그별 보관(h),
+15-2·13-b·15-3·7-b·7-d·1-8·1-10·3-4·4-4·3-5·15-4·15-5·13-c·10-a·5-d·6-c·7-e·7-f·22-b·25-b·20-3·21-a~d(status.md 0-30절). 의존성: lxml 직접 선언(판 그대로), ruff는 개발만.
+
+1. **기록**(`private/tmp/deploy-fa/pre.sh`, 읽기만): head, SESSION_SECRET 줄 개수만, data 해시(index·파생 제외), 옛 코드 수치·전체 현황, 로그 설정,
+   `restic/restic:latest`를 쓰는 곳(compose·스크립트·cron·컨테이너), 이미지·빌드 캐시.
+2. **되돌리기 이미지·코드·백업·빌드**(`build.sh`): `magus:rollback-deba2af` → `git checkout -B master p1-followup-a` → 손 백업(새 backup.sh, `BACKUP_TAG=p1-followup-a`) → build.
+3. **올리기·확인**(`up.sh`): healthy·`/healthz`·`/mcp` 401·`/login` 303 → 인덱스 v23 → 수치·전체 현황 전후 → `magus warm-cache --all-users` → 첫 열기 시간 →
+   data 해시(파생 제외) → SESSION_SECRET 줄 개수 → 로그 설정 → /tmp 점검(`smoke.py`) → 메모리·디스크.
+4. **정리**(`cleanup.sh`, healthy일 때만): `docker builder prune -f --filter until=72h`, 쓰는 곳이 없으면 `restic/restic:latest` 지움, 되돌리기 이미지는 지금 것 + 최근 2개.
+
+반영 기록(2026-10-09 21:27 서버 시각): `deba2af` → `7662192`. 백업 `a231513b`(predeploy·p1-followup-a, 2,363개, 오류 없음) — 새 보관 규칙으로 앞 배포 전 스냅샷 `68013e32`도 남음.
+healthy·재시작 0·오류 로그 0, 원본 2,351개 해시 같음(파생 .cache 0 → 2, .text 10, .thumb 2), 수치·전체 현황 전후 같음(default 299·297·0·86 3개 프로젝트, father 337·335·5·129·수정본 3(E3)),
+SESSION_SECRET 줄 1개, 로그 설정 `max-file:5 max-size:10m`(magus·caddy), /tmp 점검 10/10.
+인용 캐시 미리 만들기: default 8.4초·father 12.1초 → 그 뒤 인용 상태 첫 열기 default 0.15초·father 0.17초(새로 계산한 장 0; 전에는 첫 열기 7.9초·11.8초).
+정리: 빌드 캐시 8.77GB → 4.07GB(4.70GB 회수), `restic/restic:latest`·`magus:rollback-58ce884` 지움, 이미지 9.11GB → 5.44GB, 디스크 75% → 55%(여유 11G).
+메모리 magus 105 → 133MiB(캐시를 데운 직후). 기록 `/root/deploy-20261009-fa/`.
+
+**되돌리기**: `docker tag magus:rollback-deba2af magus:latest && docker compose up -d --no-build`(인덱스 v23 그대로, 데이터 형식 같음). 옛 코드는 `.cache/`를 그대로 읽는다(같은 형식).
+backup.sh까지 되돌리려면 `git checkout -B master p1-high-fix` — 그러면 다음 매일 백업의 forget이 배포 전 스냅샷을 다시 일별 규칙으로 다룬다.
+
 ## 3. 알림 확인
 
 ```sh
@@ -391,5 +417,5 @@ cd /opt/magus/deploy && sudo ./restore-test.sh default father
 - [ ] `restore-test.sh`가 "같음"인가(위 기록에 적는다)
 - [ ] `sudo apt list --upgradable`, Docker 이미지 갱신(`docker compose pull && up -d --build`)
 - [ ] 디스크(`df -h`)와 사용자별 용량(웹 받은함 페이지의 "사용")
-- [ ] 되돌리기 이미지(`docker images magus`): 지금 것 + 최근 rollback 2개만. 빌드 캐시(`docker system df`)가 크면 정리를 정한다(2026-10-09: 7.8GB, 정리는 승인 대기)
+- [ ] 되돌리기 이미지(`docker images magus`): 지금 것 + 최근 rollback 2개만. 빌드 캐시는 배포마다 72시간 넘은 것을 정리한다(2026-10-09 결정 i, 8.8GB → 4.1GB)
 - [ ] 컨테이너 로그는 compose의 `logging`(json-file 10MB × 5)으로 회전한다(2026-10-09부터). `docker inspect -f '{{.HostConfig.LogConfig.Config}}' magus-magus-1`
