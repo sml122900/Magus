@@ -216,6 +216,26 @@ instructions 규칙 12(커넥터 재연결), 의존성 `anthropic`(이미지 다
 **되돌리기**: 데이터 이전이 없으므로 이미지만 되돌린다. `docker tag magus:rollback-ed15ffb magus:latest && docker compose up -d --no-build`.
 옛 코드는 첨부 폴더에서 파일만 세므로 `.thumb/` 하위 폴더를 무시한다(첨부 목록 그대로). 배포 뒤 대화로 뗀 원문 확인 표시는 파일(bib.json status)에 그대로 남는다.
 
+### 2-5. 웹 수정 묶음(#99: 고치기·제목 자동 채움·스크랩·찾기·첨부 고르기·책 색·책등·정해진 이름) — 2026-10-09 사용자 승인
+
+반영 전 서버는 `p1-board`(`0e0c89e`), 반영할 것은 태그 `p1-edit-scrap`(`webfix-1-edit`~`webfix-9-help`·`webfix-4b-rank` 뒤). **데이터 이전 없음**:
+저장 형식은 표시 하나만 늘어난다 — 글 파일·bib.json의 선택 키 `"scrap": true`(스크랩했을 때만), 뺀 첨부의 휴지통 기록
+`trash/shelf/attachments/…/<첨부 id>.trash.json`(#97부터 있던 형식). **인덱스 v20 → v22**(스크랩 칸, 첨부 이름 색인):
+새 서버가 처음 뜰 때 모든 사용자 색인을 파일에서 다시 만든다(내용 파일은 그대로, index.sqlite만 바뀜). 의존성 그대로.
+바뀌는 것: 웹 글 고치기(되돌림)·뺀 첨부 되살리기, 제목 자동 채움, 스크랩(☆·'★ 스크랩만'), 찾기(앞부분 일치·글자 포함·첨부 이름),
+첨부 고르기 목록, 책 색 화면, 책등 글자, 정해진 이름 안내, 도움말 문서. MCP 도구 23개 그대로(category_search `scrap_only`·category_edit `scrap`,
+설명 바뀜), instructions 규칙 6·7 → **커넥터 재연결**. **실제 사용자 공간에는 시험 글을 쓰지 않는다**(점검은 컨테이너 안 /tmp, 찾기는 읽기만).
+
+1. **기록·백업**(`private/tmp/deploy-webfix/pre.sh`): head, `.env` 해시·키 줄 개수, data 해시(index 제외), 옛 코드 수치·전체 현황·찾기(읽기만), 손 백업.
+2. **되돌리기 이미지·빌드**(`build.sh`): `magus:rollback-0e0c89e` 태그 → 번들 fetch → `git checkout -B master p1-edit-scrap`(`p1-board` 포함 확인) → build.
+3. **올리기·확인**(`up.sh`): `up -d` → healthy(색인을 다시 만드느라 조금 늦을 수 있다)·허용 2명·`/healthz`·`/mcp` 401 → 인덱스 v22 →
+   수치·전체 현황 전후 → 찾기(raw·ra, 읽기만) → data 해시(index 제외, 아직 아무도 쓰지 않았으므로 같아야 한다) → 컨테이너 안 /tmp 점검(`smoke.py`).
+4. **커넥터 재연결 한 번**(도구 설명·instructions 규칙 6·7이 바뀜).
+
+**되돌리기**: 데이터 이전이 없으므로 이미지만 되돌린다. `docker tag magus:rollback-0e0c89e magus:latest && docker compose up -d --no-build`
+(옛 코드가 인덱스 v20을 다시 만든다). 옛 코드는 `"scrap"` 키와 첨부 휴지통 기록을 읽지 않고 무시한다. 다만 옛 코드로 대화에서 그 글을 고치면
+(category_put item_id) 옛 put_category_item이 모르는 칸을 쓰지 않아 그 글의 스크랩 표시가 빠진다(글 내용은 그대로).
+
 ## 3. 알림 확인
 
 ```sh

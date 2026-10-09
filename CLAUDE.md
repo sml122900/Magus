@@ -54,6 +54,13 @@
   `/shelf/<책>/<글>/thumbs/<첨부>` 못 만들면 원본, `magus thumbs [--all-users]`)과 글 보기 사진 격자·크게 보기, 원문 확인 표시 떼기·붙이기 `category_edit(item_id, checked)`
   (새 도구 없음, 붙일 때 쓸 부분 하나 이상, status_by.via=chat), 규칙 7 끝 "어느 파일인지 분명하지 않으면(후보가 여럿이거나 없으면) 파일 이름을 보여 주고 묻는다.",
   휴대폰 화면(지도 맞춤·목록에서 노드 아래 책장·'?' 여백), '🗑 휴지통으로'·'⚙ 책 설정'·'📎 N', 컨텍스트 줄은 책 설정 안에만. 도구 23개·8,639토큰.
+- **웹 수정 묶음(2026-10-09, 사용자 요청 #99, 서버 배포 `p1-edit-scrap`)**: 글 고치기 되돌림(바꾼 칸만 파일에서 고침 `Store.patch_category_item`·문헌 글은 `set_ref_memo`,
+  기존 첨부 ✕ → 휴지통 종류 `attachment`, 프로젝트 휴지통에서 그 글로 되살림. 원칙: 웹에서 없애는 것은 모두 휴지통), 제목 자동 채움(웹 쓰기·고치기에서 제목이 비고 첨부가 있으면
+  첫 첨부 이름, 저장된 글은 보일 때만 `attachments.shown_title`), 스크랩(글 파일·bib.json `"scrap": true`, 웹 ☆·'★ 스크랩만' `?scrap=1`,
+  `category_search(scrap_only)`·`category_edit(scrap, item_id)`), 찾기 보강(`search.find_chunks` 웹·대화 공통: 앞부분 일치·따옴표 구절·낱말 하나면 가까운 낱말부터 →
+  글자 포함(최근 것부터), 첨부 이름 색인), 첨부 고르기(스크립트가 담은 목록·✕·담는 순간 거절), 책 색(색 선택기 먼저·'기본 색 ▾'), 책등(upright·2~4자 tcy·5자 이상 눕힘),
+  정해진 이름 안내(`RESERVED_SHOWN` 목록), 도움말. 인덱스 v22. 도구 23개·8,787토큰, instructions 규칙 6·7(2,305토큰, 커넥터 재연결).
+  태그 `webfix-1-edit`~`webfix-9-help`·`webfix-4b-rank`, 결정 문서 `docs/decisions/web-edit-scrap.md`, 배포 `docs/deploy.md` 2-5절, status.md 0-25절·4절 #99 표.
 - (고침 2026-10-06 밤) `tests/test_http.py::test_request_size_limit`의 Windows 간헐 실패: 머리만 보내고 응답을 먼저 읽게 고쳤다(status.md 7절).
 - 대기 사항: 계정·키·결정·아버지 docx처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), 저자 보고서 답변. 상세는 status.md에만 적는다.
 
@@ -228,7 +235,9 @@
 - categories(id, user_id, name, name_key, template, color, fields json, schema_version, created_at, updated_at, contexts json) — 글이 쌓이는 책(#92 카테고리 → #96 책). (user_id, floor, name_key) 유일, 60권까지.
   이전으로 생긴 책은 id `ideas-<프로젝트>`·`styles-<프로젝트>`·`refs-<프로젝트>`와 `"legacy": 옛 종류`(revert용).
 - category_items(id, user_id, category_id, title?, title_by?, content, fields json, author: me|ai, tags json, chapters json, schema_version, created_at, updated_at, edited_at?, edited_by?,
-  reason?, location?(파일 "where"), passages json(쓸 부분), parent_id?, origin?, kind?, tags_by?) — 글(#96). 덧붙은 칸이 있으면 schema_version 2
+  reason?, location?(파일 "where"), passages json(쓸 부분), parent_id?, origin?, kind?, tags_by?, scrap) — 글(#96). 덧붙은 칸이 있으면 schema_version 2
+  - **scrap(#99)**: 스크랩(별표). 파일에는 켰을 때만 `"scrap": true`(형식 버전 그대로, 끄면 키를 뺀다, updated_at 그대로). 문헌 글은 bib.json의 같은 키(refs.scrap).
+    put_category_item은 이 코드가 모르는 칸을 파일에서 지우지 않고, 웹 고치기·스크랩은 `patch_category_item`으로 바꾼 칸만 쓴다. SCHEMA_VERSION 22(첨부 이름 색인)
 - **컨텍스트(#96)**: 붙인 곳의 파일에 사본 `"contexts": [{name, text}]`(category.json·project.json·document.json·지도 노드). 자주 쓰는 컨텍스트 `shelf/contexts.json`
   = {schema_version 1, contexts: [{id, name, text, created_at, updated_at}]}. 파일이 없으면 처음 제공하는 넷(`contexts.DEFAULTS`, 읽기만으로는 쓰지 않음). 색인 v20.
 - 책장 설정(shelf/settings.json, 인덱스 없음): 기본 카테고리 책 색, 내 색(12개까지), 제목 기본값 ask|ai|none
@@ -424,7 +433,9 @@ data/index.sqlite
   - `category_edit(book?|node?, new_name?, color?, context?([]이면 뗌), project?, move_to?, undo_move?, link?, unlink?)`.
   - `category_put(book, author, content?, title?, title_by?, untitled?, reason?, where?, parts?: [{text, reason, where}], source?(서지), checked?, file?, aliases?, fields?, tags?, chapters?, item_id?, project?)`
     = 글 넣기. source가 있으면 문헌 글(`melchior/refs.py: add_ref`, checked면 원문 확인 + 쓸 부분 하나 이상), 없으면 책의 글. 올린 문서가 든 책에는 넣지 않는다.
-  - `category_search(query, book?, project?, author=all|me|ai, full?, k=8)` → 책으로 묶고 책마다 컨텍스트 머리. 글에 첨부가 있으면 `첨부 N개: 이름(종류, 크기)`만(#97, 내용은 읽지 않음). `category_trash(note, book?, item_id?, project?, node?)`(AI 답 글도 함께).
+  - `category_search(query?, book?, project?, author=all|me|ai, full?, k=8, scrap_only?)` → 책으로 묶고 책마다 컨텍스트 머리. 글에 첨부가 있으면 `첨부 N개: 이름(종류, 크기)`만(#97, 내용은 읽지 않음).
+    #99: 웹 찾기와 같은 `search.find_chunks`(앞부분 일치·구절 → 글자 포함), 첨부 파일 이름도 찾음(문헌 글은 여전히 쓸 부분·원문만), 결과에 ★스크랩,
+    제목 없는 글은 `제목 「첫 첨부 이름」(첫 첨부의 파일 이름)`. scrap_only=true에 query가 없으면 스크랩 전체(최근 것부터). `category_edit(scrap, item_id)`로 스크랩 켜고 끄기. `category_trash(note, book?, item_id?, project?, node?)`(AI 답 글도 함께).
   - 응답 첫 줄은 그 책의 컨텍스트(`contexts.View.header`). 자주 쓰는 컨텍스트를 만들고 고치는 것은 웹(`/me/contexts`)만.
 - (#92 기록) 기본 카테고리는 생각·문체·문헌이다(이름·삭제 불가, 책 색만 바꿈, 넣는 것은 각자의 도구). 그 옆에 저자가 만든 카테고리가 책장에 꽂힌다. 설계·고른 것: `docs/decisions/user-drawers.md`.
 - `category_list()` → 기본 셋과 저자의 카테고리(이름·템플릿·칸·항목 수·책 색), 제목 기본값.
@@ -483,6 +494,7 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
 - 예외: **#98(2026-10-09, 사용자 지시 "규칙 7이 맞는지 확인하고 바꾸면 보고")로 규칙 7의 수정본 문장을 바꿨다**: "'수정본 올렸어'·'수정본 올려 줘'는 저자가 고친 문서(.docx·.pdf)를
   게시판 글에 첨부했거나 올린 파일에 두었다는 뜻이다. files_list에서 book_outline 수정본 줄의 마지막 업로드보다 나중에 올라온 문서를 찾아 이 프로젝트(book_outline 첫 줄의 id)의
   수정본으로 올린다(book_import, path는 files_list에 보이는 이름, new_edition=true)." 웹의 수정본 올리기 폼을 없앴기 때문이다(status.md 0-23절).
+- 예외: **#99(2026-10-09, 사용자 요청 스크랩)로 규칙 6 용어에 「스크랩(저자가 별표로 표시해 둔 글. 중요 표시)」, 규칙 7 끝에 "'스크랩 보여 줘'는 category_search(scrap_only=true)다."를 더했다**(2,261 → 2,305토큰).
 - **instructions는 등록된 도구만 언급한다.** `build_instructions(등록된 도구 이름)`은 규칙 문장에 나오는 도구(`book_|ref_|idea_|style_|files_|category_` 이름)가 모두 등록된 규칙만 넣고, 번호는 다시 매긴다. 도구를 부르지 않는 규칙(#96 번호 5·6·10·11)은 언제나 실린다. 도구가 모두 등록되면 SPEC과 똑같아진다(`tests/test_instructions.py`).
 - 새 도구를 추가하면 그 도구가 필요한 규칙이 자동으로 instructions에 들어간다. 따로 손댈 것은 없다.
 
