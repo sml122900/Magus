@@ -217,3 +217,24 @@ async def test_project_scopes_book(store: LocalStore, settings: Settings):
         via = await c.call_tool("category_put", {"book": "책B", "project": "둘째", "author": "me", "content": "연결로", "untitled": True})
         assert not via.is_error, via.content[0].text
     assert len(store.list_category_items("alice", book)) == 3
+
+
+# ---- 16-3 category_edit: 한 번에 하나, 쓸 부분에도 이유 ----
+
+async def test_category_edit_one_job_and_reason(store: LocalStore, settings: Settings):
+    from magus.melchior.bibliography import import_bibliography
+
+    store.create_project("alice", "책", project_id="b")
+    import_bibliography(store, "alice", "Ahlberg, P. (2019). Follow the footprints. Nature.\n", floor="b")
+    async with Client(build_server(settings, store)) as c:
+        both = await c.call_tool("category_edit", {"item_id": "ahlberg2019", "parts": [{"text": "대목", "reason": "근거"}], "checked": True})
+        assert both.is_error and "한 번에 하나만 한다" in both.content[0].text and "parts · checked" in both.content[0].text
+        colors = await c.call_tool("category_edit", {"book": "참고문헌", "item_id": "ahlberg2019", "scrap": True, "color": "빨강"})
+        assert colors.is_error and "scrap · 책·노드 고치기" in colors.content[0].text
+        bare = await c.call_tool("category_edit", {"item_id": "ahlberg2019", "parts": [{"text": "이유 없는 대목"}]})
+        assert bare.is_error and "쓸 부분마다 이유" in bare.content[0].text  # 전에는 이유 없이 더한 뒤 checked=true로 원문 확인이 됐다
+        assert store.get_passages("alice", "ahlberg2019") == [] and store.get_ref("alice", "ahlberg2019").status == "unverified"
+        ok = await c.call_tool("category_edit", {"item_id": "ahlberg2019", "parts": [{"text": "발자국 대목", "reason": "근거"}]})
+        assert not ok.is_error
+        checked = await c.call_tool("category_edit", {"item_id": "ahlberg2019", "checked": True})
+        assert not checked.is_error and store.get_ref("alice", "ahlberg2019").status == "verified"

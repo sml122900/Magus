@@ -246,6 +246,13 @@ def build_tools(
                       unlink: str | None = None, item_id: str | None = None, checked: bool | None = None,
                       scrap: bool | None = None, parts: list[PartIn] | None = None) -> str:
         user = current_user()
+        # 한 번에 하나(2026-10-09 점검 16-3): 전에는 parts > scrap > checked > node > book 순서로 앞의 것만 하고 뒤의 것은 조용히 버렸다
+        jobs = [name for name, given in (("parts", bool(parts)), ("checked", checked is not None), ("scrap", scrap is not None),
+                                         ("책·노드 고치기", bool(new_name or color or context is not None or move_to or undo_move
+                                                               or link or unlink))) if given]
+        if len(jobs) > 1:
+            raise ToolError(f"category_edit는 한 번에 하나만 한다: parts · checked · scrap · 책·노드 고치기(이번에 준 것: {' · '.join(jobs)}). "
+                            "나눠서 차례로 부른다(쓸 부분을 더한 뒤 원문 확인 표시는 저자에게 묻고 따로).")
         if parts:  # 문헌 글에 쓸 부분 더하기(#100: 저자가 첨부의 어느 부분을 쓸 부분으로 저장하라고 했을 때)
             return add_parts(user, book, project, item_id, parts)
         if scrap is not None:  # 글의 스크랩(★) 켜고 끄기(2026-10-09). 파일의 표시 하나만
@@ -309,6 +316,8 @@ def build_tools(
             raise ToolError(f"문헌 글 {key!r}이 없다. category_search로 key를 확인한다. 문헌 글이 아니면 category_put으로 넣는다.")
         if book and ref.book and find_book(user, book, project).key != ref.book:
             raise ToolError(f"그 문헌 글은 「{book}」 책에 있지 않다.")
+        if any(not (p.reason or "").strip() for p in parts):  # category_put(source, checked)와 같은 규칙(점검 16-3)
+            raise ToolError("쓸 부분마다 이유(reason: 저자가 왜 골랐는지)가 필요하다. 저자가 말하지 않았으면 묻는다(지어내지 않는다).")
         try:
             added, total = store.add_passages(user, ref.key, [Passage(p.text, p.reason or "", p.where) for p in parts],
                                               if_updated_at=ref.updated_at or ref.created_at)
