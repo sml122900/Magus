@@ -334,7 +334,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         # 고치기: 이름·색·컨텍스트. 붙인 컨텍스트는 그 자리에서 고친다(원본은 그대로)
         edit = c.get(f"/shelf/edit/{cid}").text
         assert 'name="name" value="사례"' in edit and '<button aria-label="내 색 #4a6741 빼기">빼기</button>' in edit
-        assert f'<a href="/shelf/trash/{cid}">휴지통</a>' in edit and 'value="ctx-paper" data-name="논문"' in edit
+        assert f'<a class="trash-link" href="/shelf/trash/{cid}"><span aria-hidden="true">🗑</span> 휴지통으로</a>' in edit and 'value="ctx-paper" data-name="논문"' in edit
         assert re.search(r'name="ctx_pick" value="ctx-paper"[^>]*checked', edit) and 'name="ctx_from" value="ctx-paper"' in edit
         bad = c.post(f"/shelf/edit/{cid}", data={"csrf": csrf, "name": "사례", "color": "#b3261e;}</style>"})
         assert bad.status_code == 400 and "책 색을 골라 주세요" in bad.text
@@ -367,7 +367,8 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         store.close()
         # 휴지통: 확인 화면 → 옮김
         confirm = c.get(f"/shelf/trash/{cid}").text
-        assert "「옛 사례」 · 글 1" in confirm and "휴지통으로 옮기기</button>" in confirm
+        assert "「옛 사례」 책을 휴지통으로 옮길까요? 글 1개도 함께 옮겨집니다." in confirm and '<button class="primary">옮기기</button>' in confirm
+        assert "<h1>책을 휴지통으로 옮기기</h1>" in confirm
         assert c.get("/shelf/trash/ideas").status_code == 404
         trashed = c.post(f"/shelf/trash/{cid}", data={"csrf": csrf}).text
         assert "휴지통으로 옮겼습니다." in trashed and "옛 사례" not in trashed

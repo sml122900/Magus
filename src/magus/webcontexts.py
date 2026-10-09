@@ -38,6 +38,7 @@ ol.ctx-rows .drop{margin-left:auto}
 .ctxs .ctx-label{color:var(--ink2);font-size:15px}
 .ctxs .ctx-sep{color:var(--ink2);font-weight:600}
 .ctxs details.ctx{display:inline-block}
+.ctxs .ctx-chip{display:inline-block;padding:2px 12px;border-radius:999px;background:#eef0fb;border:1px solid #b9b9f9}
 .ctxs details.ctx>summary{display:inline-block;padding:2px 12px;border-radius:999px;background:#eef0fb;border:1px solid #b9b9f9;
 cursor:pointer;font-weight:600;list-style:none}
 .ctxs details.ctx>summary::-webkit-details-marker{display:none}
@@ -162,11 +163,16 @@ def register_row(store: Store, uid: str, form: Any) -> str:
 
 
 def _chips(contexts: tuple[Context, ...]) -> str:
-    return "".join(
-        f'<details class="ctx"><summary>{html.escape(c.name or c.text.splitlines()[0][:16] + ("…" if len(c.text) > 16 else ""))}</summary>'
-        f"<p>{html.escape(c.text)}</p></details>"
-        for c in contexts
-    )
+    """이름(없으면 내용 앞부분)을 누르면 전문. 이름 없는 짧은 컨텍스트는 칩에 다 보이므로 펼치지 않는다(같은 글이 두 번 보이지 않게, 2026-10-09)."""
+    out = []
+    for c in contexts:
+        first = c.text.splitlines()[0]
+        if not c.name and first == c.text and len(first) <= 16:
+            out.append(f'<span class="ctx ctx-chip">{html.escape(c.text)}</span>')
+        else:
+            label = c.name or first[:16] + ("…" if len(c.text) > 16 or first != c.text else "")
+            out.append(f'<details class="ctx"><summary>{html.escape(label)}</summary><p>{html.escape(c.text)}</p></details>')
+    return "".join(out)
 
 
 def contexts_view_html(view: View, edit_href: str | None = None) -> str:

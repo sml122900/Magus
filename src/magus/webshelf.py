@@ -65,6 +65,7 @@ LIGHT_TEXT, DARK_TEXT = "#ffffff", "#1a1a1a"
 AI_MARK = '<span class="tag" title="AI가 쓴 글">AI</span>'
 AI_TITLE = '<span class="tag" title="AI가 지은 제목">AI 제목</span>'
 EMPTY_ITEM = "제목이나 본문을 적어 주세요."
+TRASH_BOOK_TITLE = "책을 휴지통으로 옮기기"  # 책 설정의 '🗑 휴지통으로' 다음 확인 화면(2026-10-09)
 GEAR = '<a class="gear" href="{href}" aria-label="{label}" title="{label}">⚙</a>'
 
 
@@ -877,7 +878,8 @@ class ShelfPages:
             for c in settings.my_colors
         )
         # 문헌 글이 든 책은 휴지통으로 옮기지 않는다(인용 점검이 보는 기록). 그때는 휴지통 줄을 보이지 않는다
-        trash = "" if category.sources else f'<p><a href="/shelf/trash/{kind.key}">휴지통</a></p>'
+        trash = "" if category.sources else (f'<p><a class="trash-link" href="/shelf/trash/{kind.key}">'
+                                             '<span aria-hidden="true">🗑</span> 휴지통으로</a></p>')
         place = await run_in_threadpool(self.location_form, uid, session, kind)  # 위치(#95: 프로젝트 · 노드, webmap)
         reading = await run_in_threadpool(lambda: contexts_view_html(view_for_book(self.store, uid, kind.key)))  # 노드 → 이 책 읽는 순서
         body = (
@@ -930,12 +932,14 @@ class ShelfPages:
                 return self._shelf_page("휴지통", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
             await run_in_threadpool(self.store.trash_category, uid, category.id, "웹 책장에서 옮김")
             return RedirectResponse(state_url(category.floor, done="trash"), status_code=303)
+        ask = f"「{category.name}」 책을 휴지통으로 옮길까요?" + (f" 글 {category.items}개도 함께 옮겨집니다." if category.items else "")
         body = (
-            f'<div class="card"><p>「{html.escape(category.name)}」 · 글 {category.items}</p>'
+            f'<div class="card"><p>{html.escape(ask)}</p>'
             f'<form method="post" action="/shelf/trash/{category.id}">{self._csrf_input(session)}'
-            f'<p><button>휴지통으로 옮기기</button> <a href="/shelf/{category.id}">취소</a></p></form></div>'
+            f'<p><button class="primary">옮기기</button> <a href="/shelf/{category.id}">취소</a></p></form></div>'
         )
-        return self._shelf_page("휴지통", body, session, lead=await run_in_threadpool(self.trail, uid, category.id, "휴지통"))
+        return self._shelf_page(TRASH_BOOK_TITLE, body, session,
+                                lead=await run_in_threadpool(self.trail, uid, category.id, TRASH_BOOK_TITLE))
 
     # --- 글 휴지통·첨부(모든 책의 글. 자기 책장 안에서만, CSRF). 웹의 원문 확인 체크는 없앴다(2026-10-09). 고치기는 webboard ---
     def _editable(self, uid: str, kind_key: str, item_id: str) -> tuple[Kind, Any] | None:

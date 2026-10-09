@@ -151,3 +151,26 @@ def test_help_texts_and_screen_names():
     assert SCREENS["trash"] == "책을 휴지통으로 옮기기"
     assert '<p class="help-hint">Magus 사용법을 물어보세요. 예: 글은 어떻게 고쳐요?</p>' in widget("c", "u")
     assert "body.help-open{padding-right:380px}" in HELP_STYLE and ".help-box{right:0;bottom:0" in HELP_STYLE
+
+
+def test_small_things(server_proc):  # noqa: F811
+    """작은 것(12번): 이름 없는 짧은 컨텍스트는 한 번만, 노드 설정의 '컨텍스트' 제목은 하나, 올린 파일 사용량의 뜻 한 줄,
+    책 설정의 '🗑 휴지통으로'와 확인 화면 제목 '책을 휴지통으로 옮기기'. 주소는 그대로."""
+    from magus.contexts import Context  # noqa: PLC0415
+
+    base, data_dir, _ = server_proc({})
+    store = LocalStore(data_dir)
+    node = store.add_node("alice", "common", "현장")
+    store.set_node_contexts("alice", "common", node.id, (Context("", "현장 메모다."),))
+    store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", node.id, category_id="notes")
+    store.close()
+    with httpx2.Client(base_url=base, follow_redirects=True, timeout=60) as c:
+        panel = c.get(f"/login?next=/shelf/p/common?node={node.id}").text.split('id="pp-node"')[1]
+        assert panel.count("현장 메모다.") == 2  # 머리의 칩 하나 + 노드 설정 폼의 칸 하나(펼치는 칸에 또 나오지 않는다)
+        assert '<span class="ctx ctx-chip">현장 메모다.</span>' in panel and "<h3>컨텍스트</h3>" not in panel
+        files = c.get("/me/files").text
+        assert "사용량에는 올린 파일, 글의 첨부, 올린 문서와 수정본, 휴지통에 있는 것이 모두 들어갑니다." in files
+        settings = c.get("/shelf/edit/notes").text
+        assert '<a class="trash-link" href="/shelf/trash/notes"><span aria-hidden="true">🗑</span> 휴지통으로</a>' in settings
+        confirm = c.get("/shelf/trash/notes").text
+        assert "<h1>책을 휴지통으로 옮기기</h1>" in confirm and "「메모」 책을 휴지통으로 옮길까요?" in confirm

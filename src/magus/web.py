@@ -663,6 +663,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
                  if rows else '<p class="empty">파일이 없습니다.</p>')
         body = f"""<p class="crumb"><a href="/me">← 내 정보</a></p>{message}
 <p>{mb(self.store.usage_bytes(uid))} / {mb(self.settings.max_user_bytes)}</p>
+<p class="muted usage-note">사용량에는 올린 파일, 글의 첨부, 올린 문서와 수정본, 휴지통에 있는 것이 모두 들어갑니다.</p>
 <form method="post" action="/inbox/upload" enctype="multipart/form-data" class="card upload">{self._csrf_input(session)}
 <input type="file" name="files" multiple accept=".docx,.pdf,.md,.txt" aria-label="올릴 파일"> <button class="primary">올리기</button></form>
 {table}

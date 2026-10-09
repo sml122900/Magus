@@ -85,7 +85,7 @@ def test_project_page_map_panel_and_board(server_proc):  # noqa: F811
         assert 'aria-current="true"' in node and 'aria-label="인물, 글 1개"' in node
         assert re.search(rf'<a class="book[^"]*" href="/shelf/{ids["person"]}"[^>]*data-key="{ids["person"]}"', node)
         assert f'href="/shelf/new?project=city&amp;node={ids["person_node"]}" aria-label="새 책"' in node and "/shelf/add" not in node
-        assert "<summary>⚙ 설정</summary>" in node and "<h3>선</h3>" in node and "<h3>컨텍스트</h3>" in node
+        assert "<summary>⚙ 설정</summary>" in node and "<h3>선</h3>" in node and "<legend>컨텍스트</legend>" in node and "<h3>컨텍스트</h3>" not in node
         assert "없음 — " not in node  # 노드에 컨텍스트가 없으면 머리에 아무것도 보이지 않는다(#97)
         thoughts = c.get("/shelf/p/city", params={"node": ids["ideas_node"]}).text
         assert 'aria-label="생각, 컨텍스트 생각 메모, 글 1개"' in thoughts
@@ -162,7 +162,7 @@ def test_map_edits_with_forms_and_script(server_proc):  # noqa: F811
         field = _query(with_ctx)["node"]
         changed = c.post(post, data={"csrf": csrf, "action": "contexts", "node": field, "ctx_name": "", "ctx_text": "고친 현장 메모",
                                      "ctx_from": ""})
-        assert "컨텍스트를 저장했습니다." in changed.text and "<p>고친 현장 메모</p>" in changed.text
+        assert "컨텍스트를 저장했습니다." in changed.text and '<span class="ctx ctx-chip">고친 현장 메모</span>' in changed.text
         too_long = c.post(post, data={"csrf": csrf, "action": "contexts", "node": field, "ctx_new": "가" * 501})
         assert "컨텍스트를 저장하지 못했습니다." in too_long.text
         c.post(post, data={"csrf": csrf, "action": "trash", "node": field})

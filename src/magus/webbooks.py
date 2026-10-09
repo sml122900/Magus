@@ -45,6 +45,7 @@ from magus.melchior.questions import build_questions
 from magus.melchior.report import build_cite_report
 from magus.store import BookTitles, Store
 from magus.store.base import CHAPTER_STATUS_NAMES, STALE_REASONS
+from magus.webshelf import TRASH_BOOK_TITLE
 from magus.webshelf import color_fieldset, chosen_color, safe_color, state_url
 
 LIGHTS = {"verified": ("🟢", "확인"), "unverified": ("🟡", "미확인"), "unknown": ("🔴", "참고문헌에 없음"),
@@ -568,7 +569,7 @@ class BookPages:
             + context_fieldset(saved, attached)
             + color_fieldset(color, settings.my_colors)
             + f'<p><button class="primary">저장</button> <a href="{html.escape(back)}">취소</a></p></form>'
-            + place + f'<p><a href="/shelf/trash/{html.escape(key)}">휴지통</a></p>'
+            + place + f'<p><a class="trash-link" href="/shelf/trash/{html.escape(key)}"><span aria-hidden="true">🗑</span> 휴지통으로</a></p>'
         )
         from magus.webshelf import COLOR_SCRIPT  # noqa: PLC0415
 
@@ -607,7 +608,7 @@ class BookPages:
             else:
                 await run_in_threadpool(self.store.trash_document, uid, ident, "웹 책장에서 옮김")
             return RedirectResponse(state_url(floor_id, done="trash"), status_code=303)
-        body = (f'<div class="card"><p>「{html.escape(name)}」{what}</p>'
+        body = (f'<div class="card"><p>「{html.escape(name)}」{what}</p><p>{"이 올린 문서를" if kind == "ms" else "이 문서를"} 휴지통으로 옮길까요?</p>'
                 f'<form method="post" action="/shelf/trash/{html.escape(key)}">{self._csrf_input(session)}'
-                f'<p><button>휴지통으로 옮기기</button> <a href="{html.escape(back)}">취소</a></p></form></div>')
-        return self._book_page("휴지통", body, session, lead=await run_in_threadpool(self.trail, uid, key, "휴지통"))
+                f'<p><button class="primary">옮기기</button> <a href="{html.escape(back)}">취소</a></p></form></div>')
+        return self._book_page(TRASH_BOOK_TITLE, body, session, lead=await run_in_threadpool(self.trail, uid, key, TRASH_BOOK_TITLE))
