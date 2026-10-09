@@ -1,5 +1,5 @@
 """책 = 게시판 페이지(2026-10-09 사용자 요청; 첨부는 #97). 게시판 목록(제목·📎·미리보기·날짜, 최신 글 위, 20개씩, 글쓰기 하나),
-글쓰기(제목·본문·첨부, 끌어다 놓기·고르기·사진 찍기), 글 보기(본문·그림·파일 목록), 위치 표시(프로젝트 › 노드 › 책),
+글쓰기(제목·본문·첨부, 끌어다 놓기·고르기), 글 보기(본문·그림·파일 목록), 위치 표시(프로젝트 › 노드 › 책),
 게시판 첨부 문서가 files_list·book_import에 보이고 읽힌다, 다른 사용자의 책·글·첨부에는 닿지 못한다."""
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ def test_board_write_view_and_attachments(server_proc):  # noqa: F811
         assert "<iframe" not in board and 'enctype="multipart/form-data"' not in board
         write = c.get(f"/shelf/write/{NOTES}").text
         assert 'enctype="multipart/form-data"' in write and 'name="files" multiple accept=".pdf,' in write
-        assert 'accept="image/*" capture="environment"' in write and "끌어다 놓기" in write and "data-dropzone" in write
+        assert "끌어다 놓기" in write and "data-dropzone" in write and "pick camera" not in write and "image/*" not in write  # 카메라 단추 뺌(2026-10-10)
         assert re.search(r'<a href="/shelf/notes-common">메모</a>.*?<span aria-current="page">글쓰기</span>', write)
         # 새 글: 제목·본문·첨부 둘 → 글 보기 페이지(그림은 글 안에, 다른 파일은 이름을 누르면 내려받기)
         made = c.post(f"/shelf/write/{NOTES}", data={"csrf": csrf, "title": "답사", "content": "시장 사진"},

@@ -4,7 +4,7 @@
 - 위치 표시(제목 위): 프로젝트 › 「프로젝트」 › 노드 › 책. 누르면 그 단계로 돌아간다.
 - 게시판(/shelf/<책>): 한 줄 = 제목 · 첨부 표시(📎, 그림이면 작은 미리보기) · 날짜. 최신 글이 위, 20개씩, 오른쪽 위 '글쓰기' 하나.
   문헌 글(서지가 있는 글)도 같은 목록에 섞인다(제목은 서지). 거르기(전체·나·AI)·찾기·책 설정(⚙)은 그대로.
-- 글쓰기(/shelf/write/<책>): 제목·본문·첨부. 파일을 끌어다 놓거나 '파일 고르기', 휴대폰은 '사진 찍기'(capture). 누가 = 저자.
+- 글쓰기(/shelf/write/<책>): 제목·본문·첨부. 파일을 끌어다 놓거나 '파일 고르기'(휴대폰은 거기서 카메라·앨범을 고른다). 누가 = 저자.
 - 글 보기(/shelf/<책>/<글>): 제목·본문·그림(글 안에 바로)·파일 목록(이름을 누르면 내려받기)·고치기·🗑(화면 안 확인 창 → 휴지통.
   응답한 글·첨부도 함께, 되살리기는 프로젝트의 휴지통 화면). 웹에서 원문 확인 체크는 없다(MCP 도구는 그대로).
 - 글 고치기(/shelf/<책>/<글>/edit, 2026-10-09 되돌림: 고칠 길이 없으면 불편): 글쓰기와 같은 화면에 제목·본문·첨부가 채워져 열린다.
@@ -65,8 +65,7 @@ form.star button{min-width:44px;min-height:44px;border:0;border-radius:9999px;ba
 cursor:pointer;padding:0}form.star button:hover{background:var(--soft)}
 form.star button[aria-pressed=true]{color:#b8860b}form.star button:focus-visible{outline:3px solid var(--primary);outline-offset:1px}
 .post-head{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}.post-head .post-meta{margin:0}
-a.scrap-only{display:inline-flex;align-items:center;gap:4px;min-height:44px;padding:0 14px;border-radius:9999px;border:1px solid var(--mute);
-text-decoration:none;color:var(--ink);background:var(--canvas);font-weight:600}a.scrap-only:hover{background:var(--soft)}
+a.scrap-only{gap:4px}
 a.scrap-only[aria-current=true]{background:#fff3c4;border-color:#b8860b}a.scrap-only .n{font-weight:400;color:var(--ink2)}
 .search-row{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}.search-row form.search{margin:0}
 a.post{display:grid;grid-template-columns:minmax(0,1fr) auto 10.5em;gap:4px 16px;align-items:center;padding:10px 16px;min-height:52px;
@@ -98,19 +97,12 @@ font-weight:600;padding:0 16px;cursor:pointer}.lightbox button:focus-visible{out
 .lightbox .lb-next{right:8px;top:50%;transform:translateY(-50%)}
 .lightbox .lb-count{position:absolute;bottom:16px;left:0;right:0;text-align:center;color:#fff;font-variant-numeric:tabular-nums}
 .board-bar a.gear.labeled{font-size:16px;padding:0 12px;min-height:44px;gap:4px;color:var(--ink)}
-.post-acts{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-start;margin:12px 0}
+.post-acts{position:relative}
 ul.files a.as-text{display:inline-flex;align-items:center;min-height:44px;padding:0 10px;margin-left:4px}
 pre.att-text{white-space:pre-wrap;word-break:break-word;background:var(--canvas);border:1px solid var(--line);border-radius:12px;padding:16px 20px;
 font:inherit;font-size:16px;line-height:1.7;max-width:100%;overflow-x:auto}
 .att-head{color:var(--ink2);margin:8px 0}
-.post-acts a.act{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:44px;min-height:44px;padding:0 18px;
-border-radius:9999px;font-size:16px;font-weight:600;color:var(--ink);border:1px solid var(--mute);background:var(--canvas);text-decoration:none}
-.post-acts a.act:hover{background:var(--soft)}
-.post-acts details.del{position:relative}
-.post-acts details.del>summary{list-style:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:44px;min-height:44px;
-padding:0 18px;border-radius:9999px;cursor:pointer;font-size:16px;font-weight:600;color:var(--ink);border:1px solid var(--mute);background:var(--canvas)}
-.post-acts details.del>summary::-webkit-details-marker{display:none}.post-acts details.del>summary:hover{background:var(--soft)}
-.post-acts .del-box{margin-top:8px;width:min(380px,100%);background:var(--canvas);border:1px solid var(--line);border-left:4px solid var(--ruby);
+.post-acts .del-box{position:absolute;left:0;top:calc(100% + 8px);z-index:20;width:min(380px,100%);background:var(--canvas);border:1px solid var(--line);border-left:4px solid var(--ruby);
 border-radius:10px;padding:4px 16px;box-shadow:0 8px 24px rgb(0 0 0/.18)}.post-acts .del-box p{margin:10px 0}
 .write-form textarea{min-height:220px}
 ul.current{list-style:none;padding:0;margin:4px 0 12px;display:flex;flex-direction:column;gap:6px}
@@ -130,7 +122,7 @@ color:var(--primary);background:var(--canvas);cursor:pointer;margin:0;position:r
 .dropzone label.pick:focus-within{outline:3px solid var(--primary);outline-offset:2px}
 .dropzone input[type=file]{position:absolute;inset:0;opacity:0;width:1px;height:1px}
 .dropzone .drop-word{color:var(--ink2)}
-@media (pointer:fine){.dropzone label.camera{display:none}}
+
 ul.chosen{list-style:none;padding:0;margin:8px 0;display:flex;flex-direction:column;gap:6px}
 ul.chosen li{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;background:var(--canvas);border:1px solid var(--line);border-radius:8px;
 padding:4px 6px 4px 8px}
@@ -232,11 +224,11 @@ document.addEventListener("keydown", function (e) {
 
 # 글쓰기·고치기의 첨부: 담은 파일 목록을 스크립트가 들고 있다(2026-10-09). 고르기·끌어다 놓기는 목록에 더하고, 파일마다 ✕로 빼고,
 # 10개 초과·한 개 한도 초과·받지 않는 형식은 담는 순간 그 파일만 빼고 알린다. 보낼 때 목록으로 FormData를 만든다.
-# 스크립트가 꺼져 있으면 고르기·사진 찍기는 브라우저 기본대로 된다(다시 고르면 앞의 것이 바뀐다)
+# 스크립트가 꺼져 있으면 고르기는 브라우저 기본대로 된다(다시 고르면 앞의 것이 바뀐다)
 WRITE_SCRIPT = """<script>
 (function () {
   var zone = document.querySelector("[data-dropzone]"), form = zone && zone.closest("form");
-  if (!form || !window.FormData || !window.fetch) return;  // 스크립트가 없으면 고르기·사진 찍기는 브라우저 기본대로 된다
+  if (!form || !window.FormData || !window.fetch) return;  // 스크립트가 없으면 고르기는 브라우저 기본대로 된다
   var inputs = zone.querySelectorAll("input[type=file]"), list = form.querySelector("ul.chosen"), note = form.querySelector(".pick-note");
   var MAX = +zone.getAttribute("data-max"), LIMIT = +zone.getAttribute("data-limit");
   var LIMIT_TEXT = zone.getAttribute("data-limit-text"), TYPES = zone.getAttribute("data-types").split(",");
@@ -546,7 +538,7 @@ class BoardPages:
         starred = sum(1 for i in items if i.scrap) + sum(1 for r in self.store.list_refs(uid, book=c.id) if r.scrap)
         toggle = [(k, v) for k, v in [("q", q), *((k, v) for k, v in filters.items() if k != "scrap")] if v]
         toggle += [] if scrap_on else [("scrap", "1")]
-        scrap_link = (f'<a class="scrap-only" href="{base}{"?" + html.escape(urllib.parse.urlencode(toggle)) if toggle else ""}" '
+        scrap_link = (f'<a class="btn quiet scrap-only" href="{base}{"?" + html.escape(urllib.parse.urlencode(toggle)) if toggle else ""}" '
                       f'aria-current="{"true" if scrap_on else "false"}"><span aria-hidden="true">★</span> 스크랩만 '
                       f'<span class="n" data-scrap-count>{starred}</span></a>')
         search = f'<div class="search-row">{search}{scrap_link}</div>'
@@ -737,7 +729,6 @@ class BoardPages:
             + f'<div class="dropzone" data-dropzone data-max="{MAX_FILES}" data-limit="{attach_limit}" data-limit-text="{mb(attach_limit)}" '
             f'data-types="{ACCEPT}">'
             f'<label class="pick">파일 고르기<input type="file" name="files" multiple accept="{ACCEPT}"></label>'
-            '<label class="pick camera">사진 찍기<input type="file" name="files" accept="image/*" capture="environment"></label>'
             f'<span class="drop-word">끌어다 놓기 · {MAX_FILES}개까지</span></div>'
             '<ul class="chosen" aria-label="담은 파일"></ul><p class="pick-note" role="status" aria-live="polite"></p></fieldset>'
             f'<p><button class="primary">저장</button> <a href="{html.escape(cancel)}">취소</a></p></form>{WRITE_SCRIPT}'
