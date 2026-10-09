@@ -39,7 +39,7 @@ from magus.config import Settings
 from magus.helpbot import CLEAR_SCRIPT, HELP_STYLE, UNAVAILABLE, HelpBot, screen_key, screen_label, user_key, widget
 from magus.ids import local_time, utcnow
 from magus.inbox import LimitError, mb, save_upload, size_text
-from magus.signing import sign, unsign
+from magus.signing import CsrfError, sign, unsign
 from magus.store import Profile, Store
 from magus.webboard import BoardPages
 from magus.webbooks import BookPages
@@ -478,7 +478,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
     async def _form(self, request: Request, session: tuple[str, str]) -> Any:
         form = await request.form(max_files=20, max_fields=200)  # 컨텍스트 칸(#96)은 줄마다 몇 개씩이라 넉넉히
         if not hmac.compare_digest(str(form.get("csrf", "")).encode(), self.csrf(session[1]).encode()):
-            raise PermissionError("CSRF")
+            raise CsrfError("CSRF")
         return form
 
     def _need_login(self, request: Request) -> Response:

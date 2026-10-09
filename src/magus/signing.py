@@ -41,3 +41,8 @@ def unsign(token: str, secret: bytes, purpose: str) -> dict[str, Any] | None:
     if payload.get("pur") != purpose or int(payload.get("exp", 0)) < time.time():
         return None
     return payload
+
+
+class CsrfError(PermissionError):
+    """폼의 CSRF 토큰이 맞지 않음(2026-10-09 점검 7-d). PermissionError를 잇되(기존 except PermissionError는 그대로)
+    다른 PermissionError(Windows 임시 폴더 정리 등)와 나눈다."""

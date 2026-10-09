@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from mcp import Client
+from test_web import server_proc  # noqa: F401 - 픽스처
 
 from magus.config import Settings
 from magus.server import build_server
@@ -112,3 +113,49 @@ def test_docx_text_streams_by_run(tmp_path):
     started = time.monotonic()
     got = extract(one)
     assert got.status == "truncated" and len(got.text) == TEXT_MAX and time.monotonic() - started < 2
+
+
+# ---- 7-d 깨진 원고 올리기 → 500 대신 안내, CSRF만 403 ----
+
+def _broken_files(tmp_path):
+    import zipfile
+
+    no_body = tmp_path / "본문없음.docx"
+    with zipfile.ZipFile(no_body, "w") as z:
+        z.writestr("[Content_Types].xml", "<Types/>")
+    bad_xml = tmp_path / "깨진XML.docx"
+    with zipfile.ZipFile(bad_xml, "w") as z:
+        z.writestr("word/document.xml", "<w:document><w:body><w:p>")
+    return {"zip아님.docx": b"this is not a zip", no_body.name: no_body.read_bytes(), bad_xml.name: bad_xml.read_bytes(),
+            "깨진.pdf": b"%PDF-1.7\n%broken\n"}
+
+
+def test_broken_manuscript_upload_is_400(server_proc, tmp_path):  # noqa: F811
+    import httpx2
+    from test_web import _csrf
+
+    from magus.book.importer import UNREADABLE
+
+    base, _, log = server_proc({})
+    with httpx2.Client(base_url=base, follow_redirects=True, timeout=60) as c:
+        csrf = _csrf(c.get("/login?next=/shelf").text)
+        for name, data in _broken_files(tmp_path).items():
+            r = c.post("/shelf/manuscript", data={"csrf": csrf, "project": "new"}, files={"file": (name, data, "application/octet-stream")})
+            assert r.status_code == 400 and UNREADABLE in r.text, (name, r.status_code)
+        wrong = c.post("/shelf/manuscript", data={"csrf": "틀림", "project": "new"},
+                       files={"file": ("a.docx", b"x", "application/octet-stream")})
+        assert wrong.status_code == 403 and "잘못된 요청입니다." in wrong.text
+    assert "Traceback" not in log.read_text(encoding="utf-8") and " ERROR " not in log.read_text(encoding="utf-8")
+
+
+async def test_broken_manuscript_book_import(store: LocalStore, settings: Settings, tmp_path):
+    from magus.book.importer import UNREADABLE
+
+    inbox = store.root / "users" / "alice" / "inbox"
+    inbox.mkdir(parents=True)
+    for name, data in _broken_files(tmp_path).items():
+        (inbox / name).write_bytes(data)
+    async with Client(build_server(settings, store)) as c:
+        for name in _broken_files(tmp_path):
+            r = await c.call_tool("book_import", {"path": name, "project_id": "x"})
+            assert r.is_error and UNREADABLE in r.content[0].text, (name, r.content[0].text)

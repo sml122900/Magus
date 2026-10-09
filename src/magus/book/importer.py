@@ -11,7 +11,10 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
+import zipfile
+import zlib
 from collections import Counter
 from dataclasses import dataclass, field
 from dataclasses import replace as replace_titles
@@ -27,6 +30,7 @@ from magus.ids import utcnow
 from magus.store import BookTitles, Edition, Part, Store
 from magus.store.base import PART_INTRO_BASE, AuthorKind, IssueKind, reading_order
 from magus.store.formats import one_line
+from lxml import etree
 
 _SEP = r"[\s:：.\-–—·]"
 _PART = re.compile(rf"^\s*제\s*(\d+)\s*부(?:{_SEP}+(.*?))?\s*$")
@@ -336,12 +340,22 @@ def book_titles(manuscript: Manuscript, split: Split, title: str | None, subtitl
     )
 
 
+UNREADABLE = "문서를 읽지 못했습니다. 파일이 깨졌거나 Word(.docx)·PDF가 아닌 형식입니다. 원본 파일에서 다시 저장해 올려 주세요."
+# 깨진 문서가 내는 예외(zip이 아님·word/document.xml 없음·XML 오류·압축 손상·깨진 PDF). 저자에게 보일 문장(ValueError)으로 바꾼다(점검 7-d)
+_BROKEN = (zipfile.BadZipFile, KeyError, etree.LxmlError, zlib.error, EOFError, RuntimeError)
+log = logging.getLogger("magus.import")
+
+
 def read_manuscript(path: Path) -> Manuscript:
     suffix = path.suffix.lower()
-    if suffix == ".docx":
-        return read_docx(path)
-    if suffix == ".pdf":
-        return read_pdf(path)
+    try:
+        if suffix == ".docx":
+            return read_docx(path)
+        if suffix == ".pdf":
+            return read_pdf(path)
+    except _BROKEN as e:  # 전에는 500(운영자 알림)이었다. 압축 폭탄(UnsafeDocument)은 ValueError라 그대로 간다
+        log.info("원고 읽기 실패 kind=%s error=%s", suffix, type(e).__name__)
+        raise ValueError(UNREADABLE) from e
     raise ValueError(f"지원하지 않는 형식: {path.name} (docx 또는 pdf)")
 
 

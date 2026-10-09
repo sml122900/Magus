@@ -34,6 +34,7 @@ from magus.contexts import attach_manuscript_context, view_for_book
 from magus.webcontexts import CONTEXT_SCRIPT, context_fieldset, contexts_from_form, contexts_view_html, register_row
 from magus.ids import local_time
 from magus.inbox import LimitError, mb, safe_filename
+from magus.signing import CsrfError
 from magus.mdlite import to_html
 from magus.melchior.author_report import cite_label, write_docx
 from magus.melchior.check import cite_floors
@@ -185,12 +186,13 @@ class BookPages:
         uid = session[0]
         try:
             _, data, name = await self._uploaded(request, session)
-            with tempfile.TemporaryDirectory() as tmp:  # 프로젝트 목록의 '+ 프로젝트': 올린 문서로 새 프로젝트를 만든다
+            # 프로젝트 목록의 '+ 프로젝트': 올린 문서로 새 프로젝트를 만든다. 임시 폴더를 지우지 못해도(Windows에서 깨진 PDF가 파일을 잡고 있을 때) 실패로 보지 않는다
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
                 path = Path(tmp) / name
                 path.write_bytes(data)
                 report = await run_in_threadpool(import_manuscript, self.store, uid, path)
                 await run_in_threadpool(attach_manuscript_context, self.store, uid, report.project_id)  # 「원고」 컨텍스트(#96)
-        except PermissionError:
+        except CsrfError:  # CSRF만 403(전에는 모든 PermissionError가 '잘못된 요청입니다'였다, 점검 7-d)
             return self._book_page("문서 올리기", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         except (ValueError, FileNotFoundError, LimitError) as e:
             return self._book_page("문서 올리기", f'<p class="msg err">{html.escape(str(e))}</p><p><a href="/shelf">프로젝트</a></p>',
@@ -483,7 +485,7 @@ class BookPages:
             return self.not_found(request, session, "문서")
 
         def build() -> bytes:
-            with tempfile.TemporaryDirectory() as tmp:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
                 out = write_docx(content, Path(tmp) / "doc.docx")
                 return out.read_bytes()
 
