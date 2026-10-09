@@ -68,7 +68,7 @@ async def test_completion_criterion_and_search(settings: Settings, store: LocalS
         assert "넣음: 「생각」" in put
         mine = _text(await client.call_tool("category_search", {"query": "고래", "author": "me"}))
         assert "[ai]" not in mine and "[me]" in mine and "## 「생각」 — 컨텍스트(책 「생각」)" in mine
-        both = _text(await client.call_tool("category_search", {"query": "고래 관점", "k": 20}))
+        both = _text(await client.call_tool("category_search", {"query": "고래", "k": 20}))  # 낱말 여럿은 AND(결정 b)라 하나로
         authors = [line.split("]")[0].split("[")[1] for line in both.splitlines() if line[:1].isdigit() and "[" in line]
         assert "me" in authors and "ai" in authors and authors == sorted(authors, key=lambda a: a != "me")  # 저자의 말 먼저
         ai_only = _text(await client.call_tool("category_search", {"query": "고래", "author": "ai"}))
