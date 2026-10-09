@@ -39,7 +39,8 @@ def test_delete_dialog_trash_page_and_restore(server_proc):  # noqa: F811
         assert "「장날」 맞는 글이 없습니다." in c.get("/shelf", params={"q": "장날"}).text  # 검색에서 빠진다
         assert c.get(f"/shelf/{ids['notes']}").status_code == 404
         trash = c.get("/shelf/p/book/trash").text
-        assert "노드 「답사」 · 책 3권" in trash and re.search(r'<time datetime="[^"]+">\d{4}-\d\d-\d\d \d\d:\d\d</time>', trash)
+        assert "<b>노드 「답사」</b>" in trash and re.search(r'<small class="trash-sub">책 3권·글 \d+개', trash)  # 안에 있던 것 한 줄
+        assert re.search(r'<time datetime="[^"]+">\d{4}-\d\d-\d\d \d\d:\d\d</time>', trash)
         assert c.post("/shelf/p/book/trash", data={"csrf": "틀림", "node": f"book/{ids['walk']}"}).status_code == 403
         back = c.post("/shelf/p/book/trash", data={"csrf": csrf, "node": f"book/{ids['walk']}"})
         assert "되살렸습니다." in back.text and f"node={ids['walk']}" in str(back.url) and "노드 「답사」와 책 3권" in back.text

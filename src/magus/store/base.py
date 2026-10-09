@@ -502,6 +502,7 @@ class TrashItem:
     with_id: str | None = None  # 함께 옮겨진 AI 발화면 그 발화가 응답한 생각의 id
     owner: str | None = None  # 첨부(attachment)면 그 글("<책 id>/<글 id>" 또는 "ref:<key>"). id는 "<owner>/<첨부 id>"
     title: bool = False  # 글이면 제목이 있었나(preview가 제목인지 본문 앞부분인지)
+    detail: str = ""  # 노드면 그 안에 있던 것 한 줄(책 N권·글 N개·먼저 버린 글 N개, 2026-10-09)
 
 
 @dataclass(frozen=True)
@@ -824,6 +825,9 @@ class Store(Protocol):
     def list_trashed_projects(self, user_id: str) -> list[TrashedProject]: ...
     def restore_project(self, user_id: str, trash_id: str) -> str:
         """되살린 프로젝트 id. 막히면 아무것도 옮기지 않고 ValueError(code: missing·taken·full·clash, 보일 이름)."""
+        ...
+    def trashed_node_books(self, user_id: str, floor: str) -> dict[str, tuple[str, str]]:
+        """이 프로젝트에서 책째 휴지통으로 옮긴 노드의 책: 책 id → (책 이름, 노드 이름)."""
         ...
     def trashed_item_project(self, user_id: str, category_id: str, item_id: str) -> str | None:
         """휴지통에 있는 글이면 그 책의 프로젝트(웹의 '이 글은 휴지통에 있습니다.'). 없으면 None."""

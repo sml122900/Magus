@@ -820,15 +820,17 @@ class MapPages:
         rows = "".join(
             f'<li><time datetime="{html.escape(t.trashed_at)}">{local_time(t.trashed_at, "%Y-%m-%d %H:%M")}</time> '
             f"<b>{html.escape(label)}</b>"
-            f'<form method="post" action="{here}" class="inline">{csrf}'
-            f'<input type="hidden" name="{TRASH_FIELD.get(t.kind, "item")}" value="{html.escape(t.id)}">'
-            "<button>되살리기</button></form></li>" for t, label in items)
+            + (f'<form method="post" action="{here}" class="inline">{csrf}'
+               f'<input type="hidden" name="{TRASH_FIELD.get(t.kind, "item")}" value="{html.escape(t.id)}">'
+               "<button>되살리기</button></form>" if ok else "")
+            + (f'<small class="trash-sub">{html.escape(sub)}</small>' if sub else "") + "</li>" for t, label, sub, ok in items)
         from magus.webboard import SEP  # noqa: PLC0415
 
         lead = (f'<nav class="trail" aria-label="위치"><a href="/shelf">프로젝트</a>{SEP}'
                 f'<a href="{html.escape(state_url(floor.id))}">{html.escape(project_name(floor))}</a>{SEP}'
                 '<span aria-current="page">휴지통</span></nav>')
-        body = message + (f'<ol class="trash-list">{rows}</ol>' if rows else '<p class="empty">휴지통이 비었습니다.</p>')
+        body = message + (f'<p class="trash-count">{len(items)}개</p><ol class="trash-list">{rows}</ol>' if rows
+                          else '<p class="empty">휴지통이 비었습니다.</p>')
         return self._map_page("휴지통", body, session, css=TRASH_STYLE, lead=lead)
 
     def _owner_floor(self, uid: str, owner: str) -> str | None:
@@ -844,18 +846,24 @@ class MapPages:
             found = None
         return found.floor if found else None
 
-    def _trash_rows(self, uid: str, floor: Floor) -> list[tuple[Any, str]]:
-        """(휴지통 항목, 보일 이름). 이 프로젝트의 노드와, 이 프로젝트의 책에 든 글(함께 옮긴 응답 글은 빼고),
-        그 글에서 뺀 첨부(2026-10-09). 최근 것부터."""
+    def _trash_rows(self, uid: str, floor: Floor) -> list[tuple[Any, str, str, bool]]:
+        """(휴지통 항목, 보일 이름, 그 아래 한 줄, 되살릴 수 있나). 이 프로젝트의 노드(안에 있던 것 한 줄)와, 이 프로젝트의 책에 든 글
+        (함께 옮긴 응답 글은 빼고), 그 글에서 뺀 첨부. 노드째 옮기기 전에 먼저 버린 글도 따로 남긴다(노드를 되살린 뒤 되살린다). 최근 것부터."""
         books = {c.id: c for c in self.store.list_categories(uid, floors=[floor.id])}
+        in_nodes = self.store.trashed_node_books(uid, floor.id)
         out = []
         trash = self.store.list_trash(uid)
         for t in trash:
             if t.kind == "attachment" and t.owner and self._owner_floor(uid, t.owner) == floor.id:
-                out.append((t, f"첨부 「{t.preview}」 · 글 「{self._post_name(uid, t.owner, trash)}」"))
+                out.append((t, f"첨부 「{t.preview}」 · 글 「{self._post_name(uid, t.owner, trash)}」", "", True))
                 continue
             if t.kind == "node" and t.id.startswith(f"{floor.id}/"):
-                out.append((t, t.preview))
+                out.append((t, t.preview, t.detail, True))
+            elif t.kind == "category_item" and not t.with_id and (held := in_nodes.get(t.id.partition("/")[0])) is not None:
+                title = one_line(t.preview) or "제목 없는 글"
+                out.append((t, f"글 「{title[:60]}{'…' if len(title) > 60 else ''}」 · 책 「{held[0]}」",
+                            f"노드 {josa(f'「{held[1]}」', '과/와')} 함께 휴지통에 있는 책의 글입니다. 노드를 먼저 되살리면 따로 되살릴 수 있습니다.",
+                            False))
             elif t.kind == "category_item" and not t.with_id and (book := books.get(t.id.partition("/")[0])) is not None:
                 replies = sum(1 for x in self.store.list_trash(uid) if x.kind == "category_item" and x.with_id
                               and x.id.partition("/")[0] == book.id and x.with_id == t.id.partition("/")[2])
@@ -864,7 +872,7 @@ class MapPages:
                 files = len(names)
                 along = [f"응답한 글 {replies}개" if replies else "", f"첨부 {files}개" if files else ""]  # 확인 창 문구와 같게
                 out.append((t, f"글 「{title[:60]}{'…' if len(title) > 60 else ''}」 · 책 「{book.name}」"
-                            + (f" · {'·'.join(a for a in along if a)} 함께" if any(along) else "")))
+                            + (f" · {'·'.join(a for a in along if a)} 함께" if any(along) else ""), "", True))
         return out
 
     def _post_name(self, uid: str, owner: str, trash: list[Any]) -> str:

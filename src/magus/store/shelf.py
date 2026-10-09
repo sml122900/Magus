@@ -330,9 +330,16 @@ class ShelfMixin:
                                    title=bool(data.get("title"))))
         for ref, data in self._trashed_nodes(user_id):  # type: ignore[attr-defined]  # 지도의 노드(#95)
             mark = data.get("_trash") or {}
-            books = len(data.get("books") or [])  # 책째 옮긴 노드(#97)면 책 수
-            preview = "연결 노드" if data.get("link") else f"노드 「{data.get('name', '')}」" + (f" · 책 {books}권" if books else "")
-            items.append(TrashItem("node", ref, mark.get("at", ""), mark.get("note", ""), preview))
+            if data.get("link"):  # 연결 노드: 원본 노드 이름(2026-10-09)
+                preview = f"연결 노드 「{self._link_name(user_id, data)}」"  # type: ignore[attr-defined]
+                detail = "원본 노드와 그 책·글은 그대로"
+            else:
+                preview = f"노드 「{data.get('name', '')}」"
+                cats = [c for c in mark.get("categories") or [] if isinstance(c, str)]
+                earlier = sum(self._trashed_posts(user_id, c) for c in cats)  # type: ignore[attr-defined]
+                detail = (f"책 {len(cats) + len(mark.get('documents') or [])}권·글 {int(mark.get('items') or 0)}개"
+                          + (f"·먼저 버린 글 {earlier}개" if earlier else ""))
+            items.append(TrashItem("node", ref, mark.get("at", ""), mark.get("note", ""), preview, detail=detail))
         for owner, att, mark in self._trashed_attachments(user_id):  # type: ignore[attr-defined]  # 글에서 뺀 첨부(2026-10-09)
             items.append(TrashItem("attachment", f"{owner}/{att.id}", str(mark.get("at", "")), str(mark.get("note", "")), att.name,
                                    owner=owner))

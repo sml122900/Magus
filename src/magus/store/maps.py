@@ -682,6 +682,31 @@ class MapMixin:
         data["edges"] = [e for e in data["edges"] if node_id not in e]
         self._write_map(user_id, floor, data)
 
+    def _link_name(self, user_id: str, record: dict[str, Any]) -> str:
+        """휴지통의 연결 노드가 가리키던 원본 노드 이름(원본이 없어졌으면 적혀 있던 이름, 그것도 없으면 '원본 없음')."""
+        link = record.get("link") or {}
+        target = self.get_map(user_id, str(link.get("project") or "")) if link.get("project") else None
+        node = target.node(str(link.get("node") or "")) if target else None
+        return (node.name if node else str(record.get("name") or "")) or "원본 없음"
+
+    def _trashed_posts(self, user_id: str, category_id: str) -> int:
+        """그 책에서 먼저 휴지통으로 옮긴 글 수(응답 글은 빼고)."""
+        folder = self._user_dir(user_id) / "trash" / "shelf" / "category-items" / category_id
+        return sum(1 for p in folder.glob("*.json") if not (read_json(p).get("_trash") or {}).get("with"))
+
+    @locked
+    def trashed_node_books(self, user_id: str, floor: str) -> dict[str, tuple[str, str]]:
+        """이 프로젝트에서 책째 휴지통으로 옮긴 노드의 책: 책 id → (책 이름, 노드 이름). 먼저 버린 글을 따로 보일 때 쓴다."""
+        out: dict[str, tuple[str, str]] = {}
+        base = self._user_dir(user_id) / "trash" / "shelf" / "nodes" / floor
+        for path in sorted(base.glob("*.json")):
+            record = read_json(path)
+            for cid in (record.get("_trash") or {}).get("categories") or []:
+                meta = base / path.stem / "categories" / str(cid) / "category.json"
+                name = str(read_json(meta).get("name") or cid) if meta.exists() else str(cid)
+                out[str(cid)] = (name, str(record.get("name") or ""))
+        return out
+
     def _trashed_nodes(self, user_id: str) -> list[tuple[str, dict[str, Any]]]:
         base = self._user_dir(user_id) / "trash" / "shelf" / "nodes"
         return [(f"{p.parent.name}/{p.stem}", read_json(p)) for p in sorted(base.glob("*/*.json"))]
