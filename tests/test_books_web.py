@@ -122,7 +122,8 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
         assert c.post(f"/shelf/book/{floor_id}/edition", data={"csrf": csrf},
                       files={"file": (manuscript.name, manuscript.read_bytes(), DOCX)}).status_code in (404, 405)
         second = _attach(c, csrf, book, manuscript, "수정본")
-        await _call(data_dir, "alice", "book_import", path=f"첨부:{second}", project_id=floor_id, new_edition=True)
+        # 같은 파일이라 그냥은 "이미 올린 파일입니다."로 멈춘다(점검 16-1). 흐름을 보려고 force로 올린다
+        await _call(data_dir, "alice", "book_import", path=f"첨부:{second}", project_id=floor_id, new_edition=True, force=True)
         edition = c.get(f"/shelf/book/{floor_id}?tab=editions&report=2").text
         assert "<td>수정본 E2</td>" in edition and "리포트 — 수정본 E2" in edition
         floor = c.get(f"/shelf/p/{floor_id}?node=center").text
