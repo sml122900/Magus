@@ -43,6 +43,7 @@ from magus.store.base import (
     BookTitles,
     Edition,
     CHAPTER_NUMBER_MAX,
+    CHAPTER_RANGE,
     CHAPTER_STATUSES,
     AuthorKind,
     Change,
@@ -59,6 +60,7 @@ from magus.store.base import (
     Part,
     Profile,
     Project,
+    chapter_number_ok,
     reading_order,
 )
 from magus.store.schema import SCHEMA, SCHEMA_VERSION, TABLES
@@ -327,6 +329,8 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
 
     @_locked
     def read_chapter(self, user_id: str, project_id: str, number: int) -> Chapter | None:
+        if not chapter_number_ok(number):  # 범위 밖(2^63 등)은 없는 장. SQLite 정수 범위를 넘으면 OverflowError였다(2026-10-09 점검 15-2)
+            return None
         row = self._db.execute(
             "SELECT * FROM chapters WHERE user_id = ? AND project_id = ? AND number = ?",
             (user_id, project_id, number),
@@ -351,8 +355,8 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
         label: str | None = None,
         edition: int | None = None,
     ) -> ChapterMeta:
-        if not 0 <= number <= CHAPTER_NUMBER_MAX:  # 쓰기 전에(2026-10-09 점검 15-1)
-            raise ValueError(f"장 번호는 0~{CHAPTER_NUMBER_MAX:,}입니다(0은 서장).")
+        if not chapter_number_ok(number):  # 쓰기 전에(2026-10-09 점검 15-1)
+            raise ValueError(CHAPTER_RANGE)
         if status is not None and status not in CHAPTER_STATUSES:
             raise ValueError(f"status={status!r}: {'|'.join(CHAPTER_STATUSES)} 중 하나")
         # 메타는 서버가 관리한다. 호출자가 front matter를 붙여 보내도 버리고 본문만 쓴다.
@@ -646,6 +650,8 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
         origin: IssueOrigin | None = None,
         kind: IssueKind | None = None,
     ) -> list[Issue]:
+        if chapter_number is not None and not chapter_number_ok(chapter_number):  # 범위 밖 장(2026-10-09 점검 15-2)
+            return []
         sql, args = "SELECT * FROM issues WHERE user_id = ? AND project_id = ?", [user_id, project_id]
         for column, value in (("status", status), ("chapter_number", chapter_number), ("origin", origin), ("kind", kind)):
             if value is not None:

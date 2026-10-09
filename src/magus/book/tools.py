@@ -23,7 +23,7 @@ from magus.contexts import attach_manuscript_context, view_for_book
 from magus.melchior.check import CheckResult, Resolver, check_chapter, check_text, terms_of
 from magus.inbox import FileResolver, ResolveFile
 from magus.store import BookTitles, Issue, Project, Store
-from magus.store.base import CHAPTER_NUMBER_MAX, STALE_REASONS, ChapterStatus
+from magus.store.base import CHAPTER_NUMBER_MAX, CHAPTER_RANGE, STALE_REASONS, ChapterStatus, chapter_number_ok
 from magus.store.formats import one_line, strip_front_matter
 
 FRONT_MATTER_WARNING = (
@@ -37,6 +37,12 @@ UNVERIFIED_CITES_MEANING = (
 )
 ISSUE_LIST_MAX = 200
 ChapterNumber = Annotated[int, Field(ge=0, le=CHAPTER_NUMBER_MAX)]  # 장 번호 0(서장)~9,999(2026-10-09 점검 15-1)
+
+
+def check_number(number: int | None) -> None:
+    """읽기 도구의 장 번호 범위(2026-10-09 점검 15-2). 스키마는 그대로 두고(커넥터 재연결 없이) 서버에서 안내한다."""
+    if number is not None and not chapter_number_ok(number):
+        raise ToolError(CHAPTER_RANGE)
 
 
 def _json(data: dict[str, Any]) -> str:
@@ -83,6 +89,7 @@ def build_tools(
 
     def book_read_chapter(number: int, project_id: str | None = None) -> str:
         user, project = current_user(), resolve_project(project_id)
+        check_number(number)
         chapter = store.read_chapter(user, project.id, number)
         if chapter is None:
             have = ", ".join(str(c.number) for c in store.list_chapters(user, project.id)) or "없음"
@@ -156,6 +163,7 @@ def build_tools(
         possibly_resolved: bool = False,
     ) -> str:
         project = resolve_project(project_id)
+        check_number(chapter_number)
         issues = store.list_issues(
             current_user(),
             project.id,
@@ -195,6 +203,7 @@ def build_tools(
     ) -> str:
         project = resolve_project(project_id)
         where = ""
+        check_number(chapter_number)
         if chapter_number is not None:
             if (chapter := store.read_chapter(current_user(), project.id, chapter_number)) is None:
                 raise ToolError(f"{chapter_number}장이 없습니다.")

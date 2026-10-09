@@ -44,6 +44,9 @@ def build_tools(
         project = store.get_project(user, project_id)
         if project is None:
             raise ToolError("프로젝트가 없습니다.")
+        from magus.book.tools import check_number  # noqa: PLC0415
+
+        check_number(chapter_number)  # 범위 밖 장 번호(2026-10-09 점검 15-2)
         result = check_chapter(store, user, project.id, chapter_number)
         if result is None:
             raise ToolError(f"{chapter_number}장이 없습니다.")
