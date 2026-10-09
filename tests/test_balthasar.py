@@ -1,5 +1,4 @@
-"""6단계 → #96: 문체도 여느 책의 글이다(컨텍스트 「문체」). 이유·위치·태그 칸, 찾기는 category_search.
-옛 문체 표본의 태그 스키마(validate_tags)는 이전(옛 파일 읽기)에만 쓰인다."""
+"""6단계 → #96: 문체도 여느 책의 글이다(컨텍스트 「문체」). 이유·위치·태그 칸, 찾기는 category_search."""
 
 from __future__ import annotations
 
@@ -9,7 +8,6 @@ from pathlib import Path
 import pytest
 from mcp import Client
 
-from magus.balthasar.style import search_text, validate_tags
 from magus.config import Settings
 from magus.server import build_server
 from magus.store import LocalStore
@@ -24,21 +22,6 @@ STYLE = "문학적 부분이 마음에 드는 구절을 모아놓은것. 내 문
 def _text(result) -> str:
     assert not result.is_error, result.content[0].text
     return "".join(block.text for block in result.content)
-
-
-def test_validate_tags():
-    assert validate_tags({**TAGS, "호흡": "  짧고   끊김 "})["호흡"] == "짧고 끊김"
-    assert validate_tags({**TAGS, "장치": []})["장치"] == []
-    with pytest.raises(ValueError, match="없는 키: \\['톤'\\]"):
-        validate_tags({k: v for k, v in TAGS.items() if k != "톤"})
-    with pytest.raises(ValueError, match="모르는 키: \\['리듬'\\]"):
-        validate_tags({**TAGS, "리듬": "빠름"})
-
-
-def test_search_text_excludes_passage():
-    assert search_text("장면으로 바로 들어가서 좋다", TAGS) == (
-        "장면으로 바로 들어가서 좋다\n호흡: 짧고 끊김 / 시점: 1인칭 / 열기: 장면 / 장치: 반복, 대구 / 어미: -다 체 / 톤: 건조함"
-    )
 
 
 async def test_style_book_put_and_search(settings: Settings, store: LocalStore, data_dir: Path):

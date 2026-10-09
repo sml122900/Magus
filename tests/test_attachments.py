@@ -64,7 +64,7 @@ def test_item_trash_and_restore_carry_attachments(store: LocalStore, data_dir: P
     item = _item(store, "alice", book)
     owner = f"{book}/{item}"
     a = store.put_attachment("alice", owner, "사진.png", b"png")
-    store.trash_category_item("alice", book, item, "시험")
+    store.trash_item_with_replies("alice", book, item, "시험")
     assert store.list_attachments("alice", owner) == []
     kept = data_dir / "users" / "alice" / "trash" / "shelf" / "category-items" / book / "files" / item / a.id / "사진.png"
     assert kept.read_bytes() == b"png"

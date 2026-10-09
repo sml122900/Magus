@@ -31,7 +31,7 @@ def _seed(store: LocalStore, user: str = "alice") -> None:
     store.put_category_item(user, CategoryItem("20261009000000000-aaaaaa", "walk", "골목 답사 메모", "me"))
     store.put_attachment(user, "walk/20261009000000000-aaaaaa", "사진.txt", "골목".encode())
     store.put_category_item(user, CategoryItem("20261009000000001-bbbbbb", "walk", "버린 글", "me"))
-    store.trash_category_item(user, "walk", "20261009000000001-bbbbbb", "먼저 버림")
+    store.trash_item_with_replies(user, "walk", "20261009000000001-bbbbbb", "먼저 버림")
     store.create_category(user, "물길", "blank", "#1f2f5c", (), "river", category_id="water")
     store.put_category_item(user, CategoryItem("20261009000000002-cccccc", "water", "물길 메모", "me"))
     store.put_ref(user, Ref(key="daeschler2006", status="verified", bib={"title": "A Devonian fish", "authors": "Daeschler, E."},

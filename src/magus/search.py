@@ -13,7 +13,7 @@ from typing import Protocol
 
 from magus.store import Chunk, Store
 from magus.store.base import Lane
-from magus.textindex import match_query, needle_of, query_parts, search_match, tokens
+from magus.textindex import needle_of, query_parts, search_match, tokens
 
 RRF_K = 60
 log = logging.getLogger("magus.search")
@@ -32,22 +32,6 @@ def rrf(rankings: list[list[Chunk]], k: int = RRF_K) -> list[Chunk]:
             chunks.setdefault(chunk.id, chunk)
     order = sorted(scores, key=lambda cid: -scores[cid])
     return [Chunk(c.id, c.owner_type, c.owner_id, c.lane, c.text, scores[c.id], c.part) for c in (chunks[cid] for cid in order)]
-
-
-def hybrid_search(
-    store: Store, user_id: str, query: str, lanes: list[Lane], k: int, embedder: Embedder | None = None
-) -> list[Chunk]:
-    pool = max(k * 4, 20)
-    rankings: list[list[Chunk]] = []
-    if match := match_query(query):
-        rankings.append(store.search_fts(user_id, lanes, match, pool))
-    if embedder is not None and query.strip():
-        try:
-            embed_missing(store, user_id, embedder)
-            rankings.append(store.search_vector(user_id, lanes, embedder.embed([query])[0], pool))
-        except Exception as e:  # 임베딩 API가 실패해도 검색은 FTS 결과로 계속한다
-            log.warning("벡터 검색 실패, FTS만 사용: %s", e)
-    return rrf(rankings)[:k]
 
 
 def find_chunks(store: Store, user_id: str, lanes: list[Lane], query: str, limit: int, embedder: Embedder | None = None) -> list[Chunk]:

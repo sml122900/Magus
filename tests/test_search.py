@@ -12,10 +12,10 @@ from magus.book.demo import seed_demo
 from magus.config import Settings
 from magus.embeddings import OpenAIEmbedder, VoyageEmbedder, get_embedder
 from magus.ids import new_id
-from magus.search import embed_missing, hybrid_search, rrf
+from magus.search import embed_missing, find_chunks, rrf
 from magus.server import build_server
 from magus.store import CategoryItem, Chunk, LocalStore
-from magus.textindex import chunk_text, match_query, tokens
+from magus.textindex import chunk_text, search_match, tokens
 
 pytestmark = pytest.mark.anyio
 
@@ -52,8 +52,8 @@ def _idea(store: LocalStore, text: str, author: str = "me") -> str:
 
 def test_tokens_bigram_and_latin():
     assert tokens("갤러는 Clack의 2012") == ["갤러", "러는", "clack", "의", "2012"]
-    assert match_query("갤러") == '"갤러"'
-    assert match_query("!!") is None
+    assert search_match("갤러") == '"갤러"'
+    assert search_match("!!") is None
 
 
 def test_chunk_text_respects_size():
@@ -70,12 +70,12 @@ def test_rrf_merges_rankings():
 def test_fts_only_vs_hybrid(store: LocalStore):
     sea = _idea(store, "바다는 모든 생명이 돌아가는 곳이다")
     _idea(store, "숲은 천천히 자란다")
-    assert hybrid_search(store, "alice", "해양", ["category"], 5) == []  # 키워드 불일치: FTS만으로는 못 찾는다
+    assert find_chunks(store, "alice", ["category"], "해양", 5) == []  # 키워드 불일치: FTS만으로는 못 찾는다
     fake = FakeEmbedder()
-    hits = hybrid_search(store, "alice", "해양", ["category"], 5, fake)
+    hits = find_chunks(store, "alice", ["category"], "해양", 5, fake)
     assert hits[0].owner_id == sea  # 벡터가 잡는다
     # 키워드 일치(FTS) + 벡터 일치가 겹치면 위로 온다
-    both = hybrid_search(store, "alice", "바다 생명", ["category"], 5, fake)
+    both = find_chunks(store, "alice", ["category"], "바다 생명", 5, fake)
     assert both[0].owner_id == sea
 
 
@@ -86,15 +86,15 @@ def test_embeddings_are_derived_and_refilled(store: LocalStore):
     assert store.chunks_missing_embedding("alice") == []
     store.reindex()  # 임베딩은 파생값: 재생성하면 비고, 다음 검색 때 다시 채운다
     assert len(store.chunks_missing_embedding("alice")) == 1
-    hybrid_search(store, "alice", "거리", ["category"], 5, fake)
+    find_chunks(store, "alice", ["category"], "거리", 5, fake)
     assert store.chunks_missing_embedding("alice") == []
 
 
 def test_embedder_failure_falls_back_to_fts(store: LocalStore, caplog):
     sea = _idea(store, "바다는 넓다")
     with caplog.at_level(logging.WARNING, logger="magus.search"):
-        hits = hybrid_search(store, "alice", "바다", ["category"], 5, BrokenEmbedder())
-    assert [h.owner_id for h in hits] == [sea] and "FTS만 사용" in caplog.text
+        hits = find_chunks(store, "alice", ["category"], "바다", 5, BrokenEmbedder())
+    assert [h.owner_id for h in hits] == [sea] and "키워드만 사용" in caplog.text
 
 
 def test_provider_selection_and_request_shape(caplog):

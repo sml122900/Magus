@@ -17,7 +17,6 @@ IssueStatus = Literal["open", "closed"]
 IssueOrigin = Literal["import_comment", "user", "agent"]
 # citation: 출처 확인 코멘트 + 문헌이 지목됨 / fact: 출처 확인 코멘트지만 문헌 없음(사실·수치 확인) / general: 그 외
 IssueKind = Literal["citation", "fact", "general"]
-ISSUE_KINDS: tuple[str, ...] = ("citation", "fact", "general")
 AuthorKind = Literal["ai", "person"]  # 원고 코멘트 작성자: AI인가 사람인가(#71)
 ANCHOR_MAX = 1000  # 미해결에 남기는 걸린 문장의 최대 길이(#73)
 IssueStale = Literal["comment_removed", "anchor_missing"]  # 다시 올린 뒤 "해결됐을 수 있음"(#76)
@@ -245,42 +244,7 @@ class Ref:
     scrap: bool = False  # 스크랩(별표, 2026-10-09). bib.json에 켰을 때만 "scrap": true. put_ref는 바꾸지 않는다(set_scrap만)
 
 
-IdeaKind = Literal["thought", "ai", "article", "conversation", "tv", "other"]
 Author = Literal["me", "ai"]
-
-
-@dataclass(frozen=True)
-class Idea:
-    """옛 형식(#96 전)의 생각 한 조각(shelf/casper/<id>.json). 이전(magus maps apply)과 되돌리기만 읽고 쓴다.
-    #96부터 생각은 책의 글(CategoryItem)이다."""
-
-    id: str
-    text: str
-    kind: IdeaKind
-    author: Author
-    origin: str | None = None
-    parent_id: str | None = None
-    created_at: str = ""
-    title: str | None = None  # 선택 제목(#92). 없으면 목록에 내용 앞부분이 흐리게 보인다
-    title_by: TitleBy | None = None
-    edited_at: str | None = None  # 처음 쓴 뒤 고친 시각과 고친 사람(웹에서 저자가 고침). 고친 적이 없으면 None
-    edited_by: EditedBy | None = None
-    floor: str | None = None  # 꽂힌 층(#93). None이면 저장소가 정한다
-
-
-@dataclass(frozen=True)
-class StyleEntry:
-    """옛 형식(#96 전)의 문체 표본(shelf/balthasar/<id>.json). 이전과 되돌리기만 읽고 쓴다. #96부터 책의 글(CategoryItem)이다.
-    passage는 원문 구절, reason은 왜 좋은지, tags는 {호흡, 시점, 열기, 장치, 어미, 톤}."""
-
-    id: str
-    passage: str
-    reason: str
-    tags: dict[str, Any] = field(default_factory=dict)
-    work: str | None = None
-    created_at: str = ""
-    tags_by: TagsBy | None = None  # 태그를 누가 정했나(#89). 웹 /styles에 보인다
-    floor: str | None = None  # 꽂힌 층(#93). None이면 저장소가 정한다
 
 
 @dataclass(frozen=True)
@@ -830,7 +794,6 @@ class Store(Protocol):
     def patch_category_item(self, user_id: str, category_id: str, item_id: str, changes: dict[str, Any]) -> CategoryItem:
         """글 파일에서 준 칸만 바꾼다(웹의 글 고치기·스크랩). 나머지 칸은 파일에서 그대로. 값이 None이면 그 칸을 뺀다. 없으면 ValueError."""
         ...
-    def trash_category_item(self, user_id: str, category_id: str, item_id: str, note: str) -> CategoryItem | None: ...
     # 프로젝트 휴지통(2026-10-09) — trash/projects/<프로젝트>-<시각>/(manifest.json + files/). 지우지 않는다
     def project_trash_info(self, user_id: str, project_id: str) -> ProjectTrashInfo | None:
         """웹 확인 창: 노드·책·글·문헌·장·수정본 수와 막는 까닭(「내 서재」, 다른 프로젝트가 연결 중). 없는 프로젝트면 None."""
@@ -911,10 +874,6 @@ class Store(Protocol):
     def update_document(self, user_id: str, doc_id: str, *, title: str | None = None, color: str | None = None,
                         title_by: str | None = None) -> Document: ...
     def trash_document(self, user_id: str, doc_id: str, note: str) -> Document | None: ...
-
-    def category_updated(self, user_id: str, category_id: str) -> str:
-        """책의 최근 수정(책·글·문헌 중 가장 최근)."""
-        ...
 
     # 검색 청크 (모든 책장 공용)
     def search_fts(self, user_id: str, lanes: list[Lane], match: str, limit: int) -> list[Chunk]: ...

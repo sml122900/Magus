@@ -112,7 +112,7 @@ def test_trash_and_restore_with_cli(store: LocalStore, data_dir: Path, monkeypat
     c = store.create_category("default", "사례", "case", "#b3261e", ())
     store.put_category_item("default", CategoryItem("20261006000000000-aaaaaa", c.id, "하나", "me"))
     store.put_category_item("default", CategoryItem("20261006000000001-aaaaab", c.id, "둘", "ai"))
-    assert store.trash_category_item("default", c.id, "20261006000000001-aaaaab", "시험").content == "둘"
+    assert store.trash_item_with_replies("default", c.id, "20261006000000001-aaaaab", "시험")[0].content == "둘"
     assert store.trash_category("default", c.id, "통째").items == 1
     assert store.list_categories("default") == [] and not store.search_substring("default", ["category"], "하나", 5)
     store.create_category("default", "사례", "blank", "#000000", ())  # 같은 이름을 새로 만들 수 있다

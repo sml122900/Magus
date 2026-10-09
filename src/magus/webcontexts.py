@@ -89,7 +89,7 @@ CONTEXT_SCRIPT = """<script>
 </script>"""
 
 
-def _row(index: int, ctx: Context, from_id: str, csrf_ok: bool = True) -> str:
+def _row(index: int, ctx: Context, from_id: str) -> str:
     return (
         f'<li data-from="{html.escape(from_id)}"><div class="row-head">'
         f'<label>이름 <input name="ctx_name" value="{html.escape(ctx.name)}" data-count-max="{CONTEXT_NAME_MAX}"></label>'

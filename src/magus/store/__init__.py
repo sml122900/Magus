@@ -14,7 +14,6 @@ from magus.store.base import (
     Edition,
     Floor,
     FloorMove,
-    Idea,
     Issue,
     MapNode,
     NodeTrashInfo,
@@ -28,7 +27,6 @@ from magus.store.base import (
     SavedContext,
     ShelfSettings,
     Store,
-    StyleEntry,
     TrashItem,
     TrashedProject,
 )
@@ -50,7 +48,6 @@ __all__ = [
     "Edition",
     "Floor",
     "FloorMove",
-    "Idea",
     "Issue",
     "MapNode",
     "NodeTrashInfo",
@@ -65,7 +62,6 @@ __all__ = [
     "SavedContext",
     "ShelfSettings",
     "Store",
-    "StyleEntry",
     "TrashItem",
     "TrashedProject",
 ]

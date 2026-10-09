@@ -35,7 +35,7 @@ from test_web import _csrf, _login, fake_issuer, server_proc  # noqa: F401 - 픽
 from magus.auth import USER_ID_CLAIM, AuthConfig, ForbiddenGate, JwtVerifier
 from magus.book.demo import seed_demo
 from magus.config import Settings
-from magus.search import hybrid_search
+from magus.search import find_chunks
 from magus.server import build_server
 from magus.signing import sign
 from magus.store import CategoryItem, LocalStore, Passage, Ref
@@ -89,8 +89,8 @@ def test_same_ids_in_two_users_never_mix(store: LocalStore, data_dir: Path):
                 store.inbox_path(user, "원고.docx").read_bytes().decode(),
             ]
             for query, lanes in (("네발동물", ["ref_picked"]), ("바다", ["category"]), ("호흡", ["category"])):
-                seen += [c.text for c in hybrid_search(store, user, query, lanes, 10, None)]  # FTS
-                seen += [c.text for c in hybrid_search(store, user, query, lanes, 10, _SameVector())]  # FTS + 벡터
+                seen += [c.text for c in find_chunks(store, user, lanes, query, 10, None)]  # FTS
+                seen += [c.text for c in find_chunks(store, user, lanes, query, 10, _SameVector())]  # FTS + 벡터
             assert all(word in text for text in seen), (user, seen)
             assert not any(other in text for text in seen), (user, seen)
         store.reindex()

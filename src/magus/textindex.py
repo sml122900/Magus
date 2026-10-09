@@ -57,12 +57,6 @@ def needle_of(q: str) -> str:
     return " ".join(q.replace('"', " ").split())
 
 
-def match_query(text: str) -> str | None:
-    """FTS5 MATCH 식. 토큰이 없으면 None."""
-    unique = list(dict.fromkeys(tokens(text)))
-    return " OR ".join(f'"{t}"' for t in unique) if unique else None
-
-
 def chunk_text(text: str, size: int = 800, overlap: int = 100) -> list[str]:
     """전문(full text)을 문단 경계 위주로 size 안팎의 조각으로 자른다. 긴 문단은 글자 수로 자른다."""
     pieces: list[str] = []

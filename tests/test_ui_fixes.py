@@ -45,7 +45,7 @@ def test_trash_list_counts_links_and_earlier_posts(server_proc):  # noqa: F811
     store.create_category("alice", "답사", "blank", "#1f2f5c", (), "city", node.id, category_id="walk")
     store.put_category_item("alice", CategoryItem("20261009000000001-aaaaaa", "walk", "먼저 버린 글", "me"))
     store.put_category_item("alice", CategoryItem("20261009000000002-aaaaaa", "walk", "남은 글", "me"))
-    store.trash_category_item("alice", "walk", "20261009000000001-aaaaaa", "먼저")
+    store.trash_item_with_replies("alice", "walk", "20261009000000001-aaaaaa", "먼저")
     trash_node_with_books(store, "alice", "city", node.id, "노드째")
     link = add_link(store, "alice", "city", "river", "center")
     trash_node_with_books(store, "alice", "city", link.id, "연결 노드")

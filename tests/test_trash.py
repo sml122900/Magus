@@ -15,7 +15,7 @@ from test_web import server_proc  # noqa: F401 - 픽스처
 
 from magus import cli
 from magus.config import Settings
-from magus.search import hybrid_search
+from magus.search import find_chunks
 from magus.server import build_server
 from magus.store import CategoryItem, LocalStore
 
@@ -38,7 +38,7 @@ def _seed(store: LocalStore, user: str = "alice") -> None:
 
 
 def _found(store: LocalStore, user: str, query: str) -> set[str]:
-    return {c.owner_id.split("/")[-1] for c in hybrid_search(store, user, query, ["category"], 10)}
+    return {c.owner_id.split("/")[-1] for c in find_chunks(store, user, ["category"], query, 10)}
 
 
 def test_trash_moves_files_and_restore_brings_them_back(store: LocalStore, data_dir: Path):
@@ -61,23 +61,23 @@ def test_trash_moves_files_and_restore_brings_them_back(store: LocalStore, data_
     with pytest.raises(ValueError):
         store.restore_trash("alice", "category_item", f"{IDEAS}/{ME}")
 
-    entry = store.trash_category_item("alice", STYLES, STYLE, "")
+    [entry] = store.trash_item_with_replies("alice", STYLES, STYLE, "")
     assert entry is not None and entry.tags_by == "ai" and store.list_category_items("alice", STYLES) == []
     assert _found(store, "alice", "짧은 호흡") == set()
     store.restore_trash("alice", "category_item", f"{STYLES}/{STYLE}")
     store.reindex()
     assert [s.tags_by for s in store.list_category_items("alice", STYLES)] == ["ai"]  # 누가 태그를 정했는지는 파일에 남는다
     assert store.trash_item_with_replies("alice", IDEAS, "20260101000000000-ffffff", "") == []
-    assert store.trash_category_item("alice", STYLES, OTHER, "") is None
+    assert store.trash_item_with_replies("alice", STYLES, OTHER, "") == []
     for bad in ("../alice", "a/b"):
         with pytest.raises(ValueError):
-            store.trash_category_item("alice", IDEAS, bad, "")
+            store.trash_item_with_replies("alice", IDEAS, bad, "")
 
 
 def test_trash_is_per_user(store: LocalStore, data_dir: Path):
     _seed(store, "alice")
     _seed(store, "bob")  # 같은 id
-    assert store.trash_item_with_replies("bob", IDEAS, ME, "") and store.trash_category_item("bob", STYLES, STYLE, "")
+    assert store.trash_item_with_replies("bob", IDEAS, ME, "") and store.trash_item_with_replies("bob", STYLES, STYLE, "")
     assert {i.id for i in store.list_category_items("alice", IDEAS)} == {ME, AI, OTHER}
     assert len(store.list_category_items("alice", STYLES)) == 1
     assert store.list_trash("alice") == [] and len(store.list_trash("bob")) == 3

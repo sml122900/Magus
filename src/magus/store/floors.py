@@ -87,31 +87,6 @@ def legacy_layout(project_ids: list[str]) -> Layout:
     return Layout(list(project_ids), {COMMON: ["styles", "refs"], **{p: list(NEW_FLOOR_BUILTINS) for p in project_ids}})
 
 
-@dataclass
-class FloorPlan:
-    """층 이전 미리보기(magus floors plan). 아무것도 쓰지 않는다."""
-
-    user_id: str
-    stored: bool  # 이미 이전했나
-    floors: list[tuple[str, str, list[str]]]  # (층 이름, 작업물 제목, 꽂힐 기본 카테고리)
-    moves: dict[str, Counter]  # 종류(생각·문체·문헌·카테고리) → {층 이름: 항목 수} ("floor"를 새로 적을 것)
-    already: Counter  # 이미 "floor"가 있는 항목 수(종류별)
-    categories: list[tuple[str, str]]  # (카테고리 이름, 층 이름)
-
-    def lines(self) -> list[str]:
-        out = [f"사용자 {self.user_id}: " + ("이미 이전함(floors.json 있음)" if self.stored else "이전 전")]
-        for label, title, kinds in self.floors:
-            names = "·".join({"ideas": "생각", "styles": "문체", "refs": "문헌"}[k] for k in kinds) or "(기본 카테고리 없음)"
-            out.append(f"- {label}{f' 「{title}」' if title else ''}: {names}")
-        for kind, counts in self.moves.items():
-            if counts:
-                out.append(f"- {kind}: " + " · ".join(f"{floor} {n}개" for floor, n in counts.items()) + " (새로 적음)")
-        if self.already:
-            out.append("- 이미 층이 적힌 항목: " + " · ".join(f"{k} {n}" for k, n in self.already.items()))
-        out += [f"- 카테고리 「{name}」 → {floor}" for name, floor in self.categories]
-        return out
-
-
 class FloorMixin:
     root: Path
     _db: sqlite3.Connection
@@ -172,9 +147,6 @@ class FloorMixin:
     def _known(self, user_id: str, layout: Layout) -> set[str]:
         return {COMMON, *self._existing(user_id, layout)}
 
-    def _floor_or_fallback(self, raw: Any, kind: str, layout: Layout, known: set[str]) -> str:
-        return raw if isinstance(raw, str) and raw in known else layout.fallback(kind)
-
     # ---- 이전(= 배치를 파일로 적기) -------------------------------------------------------------
 
     def _shelf_files(self, user_id: str) -> dict[str, list[Path]]:
@@ -185,30 +157,6 @@ class FloorMixin:
             "refs": sorted((shelf / "melchior").glob("*/bib.json")),
             "category": sorted((shelf / "categories").glob("*/category.json")),
         }
-
-    @locked
-    def floor_plan(self, user_id: str) -> FloorPlan:
-        layout = self._layout(user_id)
-        known = self._known(user_id, layout)
-        titles = {r[0]: r[1] for r in self._db.execute("SELECT id, title FROM projects WHERE user_id = ?", (user_id,))}
-        labels = {COMMON: COMMON_NAME, **{p: f"{n}층" for n, p in enumerate(self._existing(user_id, layout), 1)}}
-        names = {"ideas": "생각", "styles": "문체", "refs": "문헌", "category": "카테고리"}
-        moves: dict[str, Counter] = {names[k]: Counter() for k in names}
-        already: Counter = Counter()
-        cats = []
-        for kind, paths in self._shelf_files(user_id).items():
-            for path in paths:
-                data = read_json(path)
-                if isinstance(data.get("floor"), str) and data["floor"] in known:
-                    already[names[kind]] += 1
-                    floor = data["floor"]
-                else:
-                    floor = layout.fallback(kind)
-                    moves[names[kind]][labels.get(floor, floor)] += 1
-                if kind == "category":
-                    cats.append((str(data.get("name") or path.parent.name), labels.get(floor, floor)))
-        floors = [(labels[f], titles.get(f, ""), layout.kinds(f)) for f in (COMMON, *self._existing(user_id, layout))]
-        return FloorPlan(user_id, layout.stored, floors, moves, already, cats)
 
     @locked
     def ensure_layout(self, user_id: str) -> Layout:
@@ -433,14 +381,3 @@ class FloorMixin:
     def last_undone(self, user_id: str) -> FloorMove | None:
         last = self._layout(user_id).last_undone
         return FloorMove(**{**last, "items": tuple(last.get("items") or ())}) if last else None
-
-    # ---- 최근 수정 -----------------------------------------------------------------------------
-
-    @locked
-    def category_updated(self, user_id: str, category_id: str) -> str:
-        row = self._db.execute(
-            "SELECT MAX(t) FROM (SELECT updated_at AS t FROM categories WHERE user_id = ?1 AND id = ?2 "
-            "UNION ALL SELECT updated_at FROM category_items WHERE user_id = ?1 AND category_id = ?2 "
-            "UNION ALL SELECT COALESCE(updated_at, created_at) FROM refs WHERE user_id = ?1 AND book = ?2)", (user_id, category_id),
-        ).fetchone()
-        return str(row[0] or "")

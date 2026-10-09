@@ -66,7 +66,6 @@ AI_MARK = '<span class="tag" title="AI가 쓴 글">AI</span>'
 AI_TITLE = '<span class="tag" title="AI가 지은 제목">AI 제목</span>'
 EMPTY_ITEM = "제목이나 본문을 적어 주세요."
 TRASH_BOOK_TITLE = "책을 휴지통으로 옮기기"  # 책 설정의 '🗑 휴지통으로' 다음 확인 화면(2026-10-09)
-GEAR = '<a class="gear" href="{href}" aria-label="{label}" title="{label}">⚙</a>'
 
 
 def luminance(color: str) -> float:
@@ -277,8 +276,6 @@ padding:12px 16px 12px 44px;min-height:48px;cursor:pointer;list-style:none;posit
 .board .t.none{font-weight:400;color:var(--mute)}
 .board .t .tag{font-size:14px;font-weight:400;margin-left:8px;vertical-align:1px}
 .board .hit{grid-column:1/-1;color:var(--ink2);font-size:15px}
-.board .when{color:var(--ink2);font-variant-numeric:tabular-nums;white-space:nowrap}
-.board .aux{color:var(--ink2);font-size:15px}
 .muted{color:var(--ink2)}
 .board .body{padding:0 16px 16px 44px}
 .board .body p{margin:8px 0}.board .body .muted{color:var(--ink2);font-size:15px}
@@ -294,7 +291,6 @@ background:var(--primary);color:#fff;list-style:none;cursor:pointer}.write>summa
 a.gear{display:inline-flex;align-items:center;justify-content:center;min-width:40px;min-height:40px;border-radius:9999px;
 text-decoration:none;font-size:20px;color:var(--ink2);margin-left:auto}a.gear:hover{background:var(--soft);color:var(--primary)}
 .empty{font-size:17px;margin:16px 0 8px}
-.row-acts{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center;margin:8px 0 0}.row-acts a{text-decoration:none}
 ul.files{list-style:none;padding:0;margin:8px 0;display:grid;gap:4px}ul.files li::before{content:"📎 ";}
 ul.files small{color:var(--ink2)}
 .board blockquote{margin:8px 0;padding:4px 12px;border-left:3px solid var(--line);color:var(--ink2)}
@@ -306,7 +302,6 @@ width:100%;min-height:150px;max-width:100%}
 textarea:focus{border-color:var(--primary)}
 fieldset{border:1px solid var(--line);border-radius:12px;padding:12px 16px 16px;margin:16px 0;background:var(--canvas);min-width:0}
 legend{font-weight:600;padding:0 4px}
-.tpl{display:flex;gap:8px;align-items:baseline;margin:8px 0}.tpl .muted{color:var(--ink2);font-size:15px}
 .sw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin:8px 0 12px}
 .sw{display:flex;align-items:center;gap:8px;margin:0;padding:6px 8px;min-height:44px;border:1px solid var(--line);border-radius:8px;
 background:var(--canvas);cursor:pointer}
@@ -401,10 +396,6 @@ def find_hits(store: Store, user_id: str, lanes: list[Lane], q: str) -> list[tup
     return list(out.items())
 
 
-def one_char(q: str) -> bool:
-    return bool(q) and not any(len(t) >= 2 for t in tokens(q))
-
-
 def _pattern(q: str, text: str, exact: bool = False) -> re.Pattern[str] | None:
     """맞은 부분 표시: 따옴표 구절·검색어 낱말이 그대로(대소문자 무시) 있으면 그것을, 없으면 색인 조각(2글자·영단어)을 표시한다.
     앞부분 일치("ra" → raw)는 맞은 앞부분만 표시된다."""
@@ -457,14 +448,13 @@ class Kind:
     key: str  # 주소 이름: 카테고리 id(ms.<프로젝트>·doc.<id>는 설정 화면에서만)
     name: str
     lanes: list[Lane]
-    empty: str  # 빈 목록 안내
     category: Category | None = None
     floor: str = COMMON  # 그 책이 있는 프로젝트(#93 층 → #95)
     base: str = ""  # 올린 문서(ms)·문서(doc) 설정 화면에서만
 
 
 def category_kind(c: Category) -> Kind:
-    return Kind(c.id, c.name, ["category", "ref_bib", "ref_picked", "attach_text"], "글이 없습니다.", c, c.floor)
+    return Kind(c.id, c.name, ["category", "ref_bib", "ref_picked", "attach_text"], c, c.floor)
 
 
 def kept_color(form: Any, fallback: str) -> str:
@@ -538,7 +528,6 @@ class ShelfPages:
     map_routes: Callable[[], list[tuple[str, list[str], Callable[..., Any]]]]
     location_form: Callable[[str, tuple[str, str], Kind], str]
     # BoardPages(webboard)가 구현한다
-    board_routes: Callable[[], list[tuple[str, list[str], Callable[..., Any]]]]
     board_list: Callable[[Request], Awaitable[Response]]
     post_view: Callable[[Request], Awaitable[Response]]
     board_write: Callable[[Request], Awaitable[Response]]
@@ -747,7 +736,7 @@ class ShelfPages:
         settings = await run_in_threadpool(self.store.get_shelf_settings, uid)
         saved = await run_in_threadpool(self.store.list_saved_contexts, uid)
         default_color = PALETTE_BY_NAME[NEW_COLOR_ORDER[len(mine) % len(NEW_COLOR_ORDER)]]
-        values = {"name": "", "template": "blank", "color": default_color}
+        values = {"name": "", "color": default_color}
         choice: str | None = None
         attached: tuple = ()
         error = ""
@@ -767,9 +756,8 @@ class ShelfPages:
                 form = await self._form(request, session)
             except PermissionError:
                 return self._shelf_page("새 책", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-            # 칸 모양(템플릿)은 웹에서 고르지 않는다(#97: 글은 제목·본문·첨부). 대화(category_create)로는 그대로 된다
-            values = {"name": str(form.get("name") or ""), "template": str(form.get("template") or "blank"),
-                      "color": kept_color(form, default_color)}
+            # 칸 모양(템플릿)은 웹에서 고르지 않는다(#97: 글은 제목·본문·첨부, 늘 빈 책). 대화(category_create)로는 그대로 된다
+            values = {"name": str(form.get("name") or ""), "color": kept_color(form, default_color)}
             choice = "custom" if form.get("color") == "custom" else None  # 거절 뒤에도 '직접 고르기'를 그대로(2026-10-09)
             try:
                 attached = contexts_from_form(form, saved)
@@ -783,7 +771,7 @@ class ShelfPages:
                     if len(mine) >= MAX_CATEGORIES:
                         raise ValueError(f"책은 {MAX_CATEGORIES}권까지입니다.")
                     name = check_name(values["name"], {name_key(c.name): c.name for c in mine if c.floor == floor.id})
-                    template = TEMPLATE_BY_KEY.get(values["template"]) or TEMPLATE_BY_KEY["blank"]
+                    template = TEMPLATE_BY_KEY["blank"]
                     color = chosen_color(form)
                     values["color"] = color
                     made = await run_in_threadpool(lambda: self.store.create_category(

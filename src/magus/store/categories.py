@@ -242,12 +242,6 @@ class CategoryMixin:
         return COMMON
 
     @locked
-    def trash_category_item(self, user_id: str, category_id: str, item_id: str, note: str) -> CategoryItem | None:
-        """글 하나를 휴지통에. 이 글에 응답한 글(같은 책, parent_id)도 함께 옮긴다(옛 생각 휴지통 #88과 같다)."""
-        moved = self.trash_item_with_replies(user_id, category_id, item_id, note)
-        return moved[0] if moved else None
-
-    @locked
     def trash_item_with_replies(self, user_id: str, category_id: str, item_id: str, note: str) -> list[CategoryItem]:
         """[그 글, 함께 옮긴 응답 글…]. 없으면 []."""
         safe_id(item_id, "item id")

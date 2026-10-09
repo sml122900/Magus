@@ -2,7 +2,7 @@
 
 EMBEDDINGS=none(기본)이면 제공자가 없고 모든 검색이 FTS만으로 동작한다.
 voyage / openai는 표준 라이브러리 HTTP로 부른다(SDK 의존성 없음). 모델은 EMBEDDINGS_MODEL로 바꾼다.
-키가 없으면 경고를 남기고 FTS로 동작한다. 호출이 실패해도 검색은 FTS 결과로 계속된다(hybrid_search가 처리).
+키가 없으면 경고를 남기고 FTS로 동작한다. 호출이 실패해도 검색은 키워드 결과로 계속된다(search.find_chunks가 처리).
 """
 
 from __future__ import annotations

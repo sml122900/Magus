@@ -402,7 +402,7 @@ def test_shelf_books_and_board_lists(server_proc):
 def test_shelf_search_marks_hits(server_proc):
     """검색(GET ?q=): 두 글자 이상은 FTS(많이 맞은 것부터), 한 글자는 글자 그대로 포함(최근 것부터). 맞은 부분은 <mark>.
     글은 본문·이유·위치로, 문헌 글은 서지·쓸 부분으로도 찾는다. 전체 검색은 프로젝트 → 노드 · 책으로 묶는다."""
-    from magus.search import hybrid_search
+    from magus.search import find_chunks
     from magus.store import CategoryItem, LocalStore
 
     base, data_dir, _ = server_proc({})
@@ -432,7 +432,7 @@ def test_shelf_search_marks_hits(server_proc):
         assert "<script>alert" not in evil and "&lt;script&gt;alert(1)&lt;/script&gt;" in c.get("/shelf/ideas-common").text
         assert 'value="&lt;script&gt;"' in evil
     store = LocalStore(data_dir)
-    assert hybrid_search(store, "alice", "물결", ["category"], 5)  # #96: 도구 찾기(category_search)도 글의 본문을 본다
+    assert find_chunks(store, "alice", ["category"], "물결", 5)  # #96: 도구 찾기(category_search)도 글의 본문을 본다
 
 
 def test_display_name_from_email_and_editable(server_proc, fake_issuer):

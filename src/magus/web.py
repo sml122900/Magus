@@ -89,7 +89,7 @@ th,td{padding:8px 12px;text-align:left;vertical-align:top;border-bottom:1px soli
 tr:last-child td{border-bottom:0}
 th{color:var(--mute);font-size:13px;font-weight:600;white-space:nowrap}
 td small{color:var(--mute)}
-.pager{color:var(--ink2)}a.tag{text-decoration:none;margin:2px 0}a.tag:hover{color:var(--press)}
+a.tag{text-decoration:none;margin:2px 0}a.tag:hover{color:var(--press)}
 .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .msg{padding:12px 16px;margin:16px 0;white-space:pre-wrap}
 .err{border-left:4px solid var(--ruby)}

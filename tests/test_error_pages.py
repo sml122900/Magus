@@ -20,7 +20,7 @@ def _seed(data_dir) -> None:
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id=BOOK)
     store.put_category_item("alice", CategoryItem(ITEM, BOOK, "남은 글", "me"))
     store.put_category_item("alice", CategoryItem(GONE, BOOK, "버린 글", "me"))
-    store.trash_category_item("alice", BOOK, GONE, "시험")
+    store.trash_item_with_replies("alice", BOOK, GONE, "시험")
     store.close()
 
 

@@ -19,7 +19,6 @@ import re
 from magus.melchior.citations import Citation, find_citations
 from magus.store.base import AuthorKind, Issue, IssueKind
 
-CITATION_MARKERS = ("확인 필요", "인용 확인 필요", "서지", "원문 대조")
 _MARKER = re.compile(
     r"확인\s*(?:할|이)?\s*필요"  # 확인 필요 · 확인필요 · 확인할 필요 · 인용 확인 필요
     r"|원문\s*(?:과|으로|을|의\s*표현을)?\s*대조"  # 원문 대조 · 원문과 대조해 · 원문으로 대조해

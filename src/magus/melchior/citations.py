@@ -25,7 +25,6 @@ _LATIN_WORD = rf"[{_UPPER}]{_WORD}+"
 _LATIN = rf"(?:{_PARTICLE}\s+){{0,2}}{_LATIN_WORD}(?:\s+{_LATIN_WORD}){{0,2}}"
 _HAN = r"[一-鿿㐀-䶿]{2,8}"
 _HANGUL = r"[가-힣]{2,8}|[가-힣](?=\s*(?:[·・]|등|외))"
-_NAME = rf"(?:{_LATIN}|{_HAN}|{_HANGUL})"
 _YEAR = r"(?:1[5-9]|20)\d{2}[a-z]?"
 _ETAL = r"\s*(?:et\s+al\.?|외|등)"
 # 공저자 꼬리는 첫 저자의 문자 체계를 따른다. 한글 낱말 뒤에 라틴 공저자가 붙는 것을 허용하면

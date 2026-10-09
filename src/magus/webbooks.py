@@ -560,7 +560,7 @@ class BookPages:
         else:
             from magus.webshelf import Kind  # noqa: PLC0415
 
-            place = await run_in_threadpool(self.location_form, uid, session, Kind(key, name, [], "", None, floor_id, "doc"))
+            place = await run_in_threadpool(self.location_form, uid, session, Kind(key, name, [], None, floor_id, "doc"))
         body = (
             f'{error}'
             f'<form method="post" action="/shelf/edit/{html.escape(key)}" class="colors" data-guard>{self._csrf_input(session)}'

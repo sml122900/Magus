@@ -52,7 +52,6 @@ from magus.store.formats import one_line
 from magus.store.maps import MapError
 
 WHO = {"me": "저자의 말", "ai": "Claude가 쓴 글"}
-NODE_TEMPLATES = ("노드", "연결 노드")
 KEPT = "지운 것이 아니라 옮긴 것이라 운영자가 되살릴 수 있다."
 SOURCE_LIGHT = {"verified": "원문 확인", "unverified": "원문 확인 전"}
 SEARCH_POOL = 300  # 대화 찾기에서 살펴보는 조각 수(책별 개수를 세는 범위, #101)

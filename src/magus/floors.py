@@ -26,11 +26,6 @@ COMMON_BUILTINS = ("styles",)  # 공용 층에 처음부터 있는 기본 카테
 BUILTIN_ORDER = ("ideas", "styles", "refs")
 
 
-def floor_label(number: int) -> str:
-    """0 → 공용, n → n층."""
-    return COMMON_NAME if number == 0 else f"{number}층"
-
-
 def has_batchim(word: str) -> bool | None:
     """마지막 글자에 받침이 있나. 한글이 아니면 None(숫자는 읽는 소리로)."""
     if not word:
