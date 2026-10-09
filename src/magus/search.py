@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+from collections.abc import Callable
+from dataclasses import replace
 from typing import Protocol
 
 from magus.store import Chunk, Store
@@ -106,30 +108,97 @@ def _term_owners(store: Store, user_id: str, lanes: list[Lane], term: str, liter
     return found
 
 
-def find_all_words(store: Store, user_id: str, lanes: list[Lane], query: str, limit: int, embedder: Embedder | None = None) -> list[Chunk]:
+_HANGUL = re.compile(r"[가-힣]+")
+STEM_TAILS = "은는"  # 두 글자 낱말은 끝이 이 글자일 때만 뗀다(짧은 → 짧). 리듬·도시는 그대로
+
+
+def stem_of(word: str) -> str | None:
+    """대체 단계(일부 낱말만 맞음)에서만 더 찾는 앞부분(후속 C, 2026-10-09): 세 글자 이상 한글 낱말은 끝 한 글자를 뗀 것
+    (도시는 → 도시, 선택한 → 선택), 두 글자는 끝이 은·는일 때만(짧은 → 짧). 한글만인 낱말이 아니면 None."""
+    if not _HANGUL.fullmatch(word):
+        return None
+    if len(word) >= 3 or (len(word) == 2 and word[-1] in STEM_TAILS):
+        return word[:-1]
+    return None
+
+
+def relaxed_words(query: str) -> list[str]:
+    """검색어 낱말(따옴표 구절 밖)의 앞부분들(stem_of). 일부 낱말만 맞은 결과에서 맞은 곳을 표시할 때 쓴다."""
+    return [s for w in query_parts(" ".join((query or "").split()))[1] if (s := stem_of(w))]
+
+
+Keep = Callable[[str, str], bool]  # (owner_type, owner_id) → 보이는 범위(책·프로젝트·거르기) 안인가
+
+
+def find_all_words(store: Store, user_id: str, lanes: list[Lane], query: str, limit: int, embedder: Embedder | None = None,
+                   keep: Keep | None = None) -> list[Chunk]:
     """웹 찾기(2026-10-09 점검): 낱말이 여럿이면 모두 맞는 글만(AND, 글 단위 — 낱말이 다른 조각·첨부 글자에 있어도 된다).
     기호가 든 낱말(<b>, doc_1009)은 글자 그대로 포함만 본다(기호를 뗀 b·1009로 넓히지 않는다). 따옴표 구절은 구절 그대로.
     한글 세 글자 이상 낱말(없는낱말)도 2글자 조각 중 하나만 맞는 글로 넓히지 않는다(조각이 이어진 구절 또는 글자 그대로).
-    순서는 find_chunks 그대로(그 밖에 맞은 글은 뒤에). 대화(category_search)도 이것을 쓴다(2026-10-09 결정 b, 전에는 웹만)."""
+    순서는 find_chunks 그대로(그 밖에 맞은 글은 뒤에). 대화(category_search)도 이것을 쓴다(2026-10-09 결정 b, 전에는 웹만).
+    keep: 보이는 범위. 주면 그 안의 글만 보고, 모두 맞는 글이 없는지도 그 안에서 가린다.
+    모두 맞는 글이 범위 안에 하나도 없으면 일부 낱말만 맞는 글(후속 C): _partial, 조각의 partial = 맞은 낱말 수."""
     query = " ".join((query or "").split())
     phrases, words = query_parts(query)
-    terms = [(p, False) for p in phrases] + [(w, _PLAIN.fullmatch(w) is None) for w in words]
+    terms = [(p, False, None) for p in phrases] + [(w, _PLAIN.fullmatch(w) is None, stem_of(w)) for w in words]
+
+    def inside(key: tuple[str, str]) -> bool:
+        return keep is None or keep(*key)
+
     if len(terms) == 1 and not terms[0][1] and not phrases and len(tokens(query)) <= 1:
-        return find_chunks(store, user_id, lanes, query, limit, embedder)  # 조각 하나인 낱말(도시·ra·economic): 지금까지와 같다
+        # 조각 하나인 낱말(도시·ra·economic): 지금까지와 같다. 하나도 없을 때만 앞부분(짧은 → 짧)으로
+        found = [c for c in find_chunks(store, user_id, lanes, query, limit, embedder) if inside((c.owner_type, c.owner_id))]
+        if found or terms[0][2] is None:
+            return found
+        own = {k: v for k, v in _term_owners(store, user_id, lanes, query, False).items() if inside(k)}
+        if own:  # 범위 안에 맞는 글이 순위 밖에만 있었다
+            return list(own.values())[:limit] if limit else list(own.values())
+        return _partial(store, user_id, lanes, query, terms, [own], limit, embedder, inside)
     if not terms:
         return []
+    per_term: list[dict[tuple[str, str], Chunk]] = []
     allowed: dict[tuple[str, str], Chunk] | None = None
-    for term, literal in terms:
-        hits = _term_owners(store, user_id, lanes, term, literal)
+    for term, literal, _ in terms:
+        hits = {k: v for k, v in _term_owners(store, user_id, lanes, term, literal).items() if inside(k)}
+        per_term.append(hits)
         allowed = hits if allowed is None else {k: v for k, v in allowed.items() if k in hits}
-        if not allowed:
-            return []
-    assert allowed is not None
+    if not allowed:
+        if len(terms) == 1 and terms[0][2] is None:
+            return []  # 낱말 하나에 뗄 끝도 없으면 더 찾을 것이 없다
+        return _partial(store, user_id, lanes, query, terms, per_term, limit, embedder, inside)
     ranked = [c for c in find_chunks(store, user_id, lanes, query, max(limit, len(allowed)), embedder)
               if (c.owner_type, c.owner_id) in allowed]
     seen = {(c.owner_type, c.owner_id) for c in ranked}
     rest = [c for key, c in allowed.items() if key not in seen]
     return [*ranked, *rest][:limit] if limit else [*ranked, *rest]
+
+
+def _partial(store: Store, user_id: str, lanes: list[Lane], query: str, terms: list[tuple[str, bool, str | None]],
+             per_term: list[dict[tuple[str, str], Chunk]], limit: int, embedder: Embedder | None,
+             inside: Callable[[tuple[str, str]], bool]) -> list[Chunk]:
+    """모두 맞는 글이 없을 때(후속 C): 낱말 하나라도 맞는 글을 맞은 낱말 수가 많은 순, 같으면 find_chunks 순위(지금 규칙)로.
+    이 단계에서만 한글 낱말은 앞부분(stem_of)으로도 맞는다(짧은 반복 리듬 → '짧아… 반복… 리듬'). 기호가 든 낱말·따옴표 구절은 그대로."""
+    counts: dict[tuple[str, str], int] = {}
+    first: dict[tuple[str, str], Chunk] = {}
+    stems = []
+    for (_, _, stem), hits in zip(terms, per_term, strict=True):
+        got = dict(hits)
+        if stem:
+            stems.append(stem)
+            for k, c in _term_owners(store, user_id, lanes, stem, False).items():
+                if inside(k):
+                    got.setdefault(k, c)
+        for k, c in got.items():
+            counts[k] = counts.get(k, 0) + 1
+            first.setdefault(k, c)
+    if not counts:
+        return []
+    ranked = [c for c in find_chunks(store, user_id, lanes, " ".join([query, *stems]), max(limit, len(counts)), embedder)
+              if (c.owner_type, c.owner_id) in counts]
+    seen = {(c.owner_type, c.owner_id) for c in ranked}
+    found = sorted([*ranked, *(c for k, c in first.items() if k not in seen)], key=lambda c: -counts[(c.owner_type, c.owner_id)])
+    out = [replace(c, partial=counts[(c.owner_type, c.owner_id)]) for c in found]
+    return out[:limit] if limit else out
 
 
 def _single_word(query: str) -> str | None:

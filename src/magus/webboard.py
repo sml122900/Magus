@@ -21,7 +21,7 @@ from __future__ import annotations
 import html
 import time
 import urllib.parse
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,6 +35,7 @@ from magus.book_migrate import legacy_book_id
 from magus.category.rules import BUILTINS, CONTENT_MAX, TITLE_MAX
 from magus.ids import local_time, new_id, utcnow
 from magus.melchior.author_report import cite_label
+from magus.search import relaxed_words
 from magus.store.base import EditConflict
 from magus.store import Attachment, CategoryItem, Chunk, Store
 from magus.store.formats import display_title, one_line
@@ -317,6 +318,7 @@ class Post:
     text: str = ""  # 찾기의 맞은 곳 한 줄(제목 밖에서 맞았을 때)
     scrap: bool = False  # 스크랩(별표, 2026-10-09)
     attach: str | None = None  # 첨부 글자에서 맞았으면 그 첨부 이름(#100). text는 맞은 조각
+    partial: bool = False  # 찾기에서 일부 낱말만 맞음(모두 맞는 글이 없을 때, 후속 C)
 
 
 def item_preview(item: CategoryItem, files: list[Attachment] | tuple[Attachment, ...]) -> str:
@@ -342,10 +344,17 @@ def too_long(what: str, text: str, limit: int) -> str:
     return f"{what}은 {limit:,}자까지입니다. 지금 {len(text):,}자입니다." if len(text) > limit else ""
 
 
-def search_line(q: str, count: int, clear: str) -> str:
-    """찾기 결과 한 줄(게시판·지도·전체가 같은 문구, 2026-10-09): 「검색어」 N건 · 지우기 / 「검색어」 맞는 글이 없습니다. · 지우기."""
-    said = f"{count}건" if count else "맞는 글이 없습니다."
+def search_line(q: str, count: int, clear: str, partial: bool = False) -> str:
+    """찾기 결과 한 줄(게시판·지도·전체가 같은 문구, 2026-10-09): 「검색어」 N건 · 지우기 / 「검색어」 맞는 글이 없습니다. · 지우기.
+    partial: 모두 맞는 글이 없어 일부 낱말만 맞는 글(후속 C) → 「검색어」 일부 낱말만 맞음 N건."""
+    said = (f"일부 낱말만 맞음 {count}건" if partial else f"{count}건") if count else "맞는 글이 없습니다."
     return f'<p class="found">「{html.escape(q)}」 {said} · <a href="{html.escape(clear)}">지우기</a></p>'
+
+
+def marked_query(q: str, posts: Iterable[Post]) -> str:
+    """맞은 곳 표시에 쓸 검색어. 일부 낱말만 맞은 결과(후속 C)면 낱말의 앞부분(짧은 → 짧)도 표시한다."""
+    stems = relaxed_words(q) if any(p.partial for p in posts) else []
+    return " ".join([q, *stems]) if stems else q
 
 
 def post_row_html(post: Post, q: str = "", star: str = "") -> str:
@@ -429,9 +438,12 @@ class BoardPages:
         tag = (filters.get("tag") or "").strip()
         scrap = filters.get("scrap") == "1"
         pairs: list[tuple[str, Post]] = []
+        items: set[str] = set()  # 찾기 범위(후속 C): 보이는 글 "<책 id>/<글 id>"와 문헌 글 key
+        refs: set[str] = set()
         for i in self.store.list_category_items(uid, c.id):
             if (author and i.author != author) or (tag and tag not in i.tags) or (scrap and not i.scrap):
                 continue
+            items.add(f"{c.id}/{i.id}")
             link = f"/shelf/{c.id}/{i.id}"
             files = tuple(self.store.list_attachments(uid, f"{c.id}/{i.id}"))
             preview = item_preview(i, files)
@@ -444,6 +456,7 @@ class BoardPages:
             for r in self.store.list_refs(uid, book=c.id):
                 if scrap and not r.scrap:
                     continue
+                refs.add(r.key)
                 link = f"/shelf/{c.id}/{urllib.parse.quote(r.key)}"
                 files = tuple(self.store.list_attachments(uid, f"ref:{r.key}"))
                 text = ("\n".join([str(r.bib.get("authors") or r.bib.get("raw") or ""), str(r.bib.get("container") or ""),
@@ -453,14 +466,22 @@ class BoardPages:
             return [p for _, p in sorted(pairs, key=lambda kv: (kv[1].at, kv[0]), reverse=True)]
         order: dict[str, int] = {}
         attached: dict[str, Chunk] = {}
-        for owner, chunk in find_hits(self.store, uid, kind.lanes, q):  # 글은 "<책 id>/<글 id>", 문헌 글은 key
+        partial: set[str] = set()
+
+        def keep(owner_type: str, owner: str) -> bool:  # 이 책에 보이는 글만(거르기 포함). 모두 맞는 글이 없는지도 이 안에서 가린다
+            return owner in (items if owner_type == "category" else refs)
+
+        for owner, chunk in find_hits(self.store, uid, kind.lanes, q, keep):  # 글은 "<책 id>/<글 id>", 문헌 글은 key
             local = owner.split("/", 1)[1] if owner.startswith(f"{c.id}/") else owner if "/" not in owner else None
             if local is not None and local not in order:
                 order[local] = len(order)
                 if chunk.lane == "attach_text" and chunk.part:
                     attached[local] = chunk
+                if chunk.partial:
+                    partial.add(local)
         found = [p for k, p in sorted((kv for kv in pairs if kv[0] in order), key=lambda kv: order[kv[0]])]
         for post in found:
+            post.partial = post.id in partial
             if (chunk := attached.get(post.id)) is not None:
                 post.attach = next((a.name for a in post.files if a.id == chunk.part), "첨부")
                 post.text = chunk.text
@@ -529,12 +550,13 @@ class BoardPages:
                       f'aria-current="{"true" if scrap_on else "false"}"><span aria-hidden="true">★</span> 스크랩만 '
                       f'<span class="n" data-scrap-count>{starred}</span></a>')
         search = f'<div class="search-row">{search}{scrap_link}</div>'
-        found = search_line(q, len(posts), base) if q else ""
+        found = search_line(q, len(posts), base, partial=any(p.partial for p in posts)) if q else ""
         back = base + ("?" + urllib.parse.urlencode([(k, v) for k, v in params.multi_items() if k != "done"])
                        if any(k != "done" for k in params.keys()) else "")
         csrf = self._csrf_input(session)
         if shown:
-            board = (f'<ol class="posts">{"".join(post_row_html(p, q, star_html(p.link, p.scrap, csrf, back)) for p in shown)}</ol>'
+            lit = marked_query(q, shown)
+            board = (f'<ol class="posts">{"".join(post_row_html(p, lit, star_html(p.link, p.scrap, csrf, back)) for p in shown)}</ol>'
                      + STAR_SCRIPT)
         elif q:
             board = ""  # 결과 줄이 '맞는 글이 없습니다.'라고 말한다

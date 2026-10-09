@@ -54,7 +54,7 @@ from magus.store import Category, CategoryItem, Chunk, ShelfSettings, Store
 from magus.webcontexts import CONTEXT_SCRIPT, CONTEXT_STYLE, context_fieldset, contexts_from_form, contexts_view_html, register_row
 from magus.store.base import Lane
 from magus.store.formats import one_line
-from magus.search import find_all_words
+from magus.search import Keep, find_all_words
 from magus.textindex import query_parts, tokens
 
 GROUP_SIZE = 5  # 책장 전체 검색에서 카테고리마다 먼저 보이는 수
@@ -382,17 +382,19 @@ def clean_query(q: str | None) -> str:
 
 
 def find(store: Store, user_id: str, lanes: list[Lane], q: str) -> list[str]:
-    """검색어에 맞는 항목 id(owner_id)를 차례대로. category_search와 같은 찾기(magus.search.find_chunks, 2026-10-09):
-    색인(앞부분 일치·구절, 많이 맞은 것부터) 뒤에 글자 그대로 포함(최근 것부터), 첨부 글자(#100)는 그 뒤."""
-    return [owner for owner, _ in find_hits(store, user_id, lanes, q)]
+    """검색어에 모두 맞는 항목 id(owner_id)를 차례대로. category_search와 같은 찾기(magus.search.find_chunks, 2026-10-09):
+    색인(앞부분 일치·구절, 많이 맞은 것부터) 뒤에 글자 그대로 포함(최근 것부터), 첨부 글자(#100)는 그 뒤.
+    일부 낱말만 맞은 것(후속 C)은 넣지 않는다(문서 책 이름 맞추기에 쓴다)."""
+    return [owner for owner, c in find_hits(store, user_id, lanes, q) if not c.partial]
 
 
-def find_hits(store: Store, user_id: str, lanes: list[Lane], q: str) -> list[tuple[str, Chunk]]:
-    """(항목 id, 처음 맞은 조각) 차례대로. 조각이 첨부 글자(attach_text)면 어느 첨부(part)의 어느 부분이 맞았는지 보일 수 있다."""
+def find_hits(store: Store, user_id: str, lanes: list[Lane], q: str, keep: Keep | None = None) -> list[tuple[str, Chunk]]:
+    """(항목 id, 처음 맞은 조각) 차례대로. 조각이 첨부 글자(attach_text)면 어느 첨부(part)의 어느 부분이 맞았는지 보일 수 있다.
+    keep: 보이는 범위(그 책의 글). 그 안에 모두 맞는 글이 없으면 일부 낱말만 맞는 글(조각의 partial > 0, 후속 C)."""
     if not q.strip():
         return []
     out: dict[str, Chunk] = {}
-    for c in find_all_words(store, user_id, lanes, q, SEARCH_LIMIT):  # 웹: 낱말 모두(AND), 기호 든 낱말은 글자 그대로(2026-10-09)
+    for c in find_all_words(store, user_id, lanes, q, SEARCH_LIMIT, keep=keep):  # 웹: 낱말 모두(AND), 기호 든 낱말은 글자 그대로(2026-10-09)
         out.setdefault(c.owner_id, c)
     return list(out.items())
 

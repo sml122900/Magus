@@ -573,8 +573,9 @@ def build_tools(
         lanes: list[Any] = ["category", "ref_bib", "ref_picked", *(["ref_full"] if full else []), "attach_text"]  # 첨부 글자는 맨 뒤(#100)
         hits: list[tuple[str, Any, Any]] = []  # (책 id, 글 또는 문헌, 맞은 청크)
         best: dict[str, tuple[int, int, tuple[str, Any, Any]]] = {}  # 글·문헌 하나에 가장 좋은 맞음 하나: (등급, 차례, hit)
-        # 웹 찾기와 같은 규칙(2026-10-09 결정 b): 낱말이 여럿이면 모두 맞는 글만(AND), 기호가 든 낱말은 글자 그대로
-        chunks = find_all_words(store, user, lanes, query, SEARCH_POOL, embedder) if query else []
+        # 웹 찾기와 같은 규칙(2026-10-09 결정 b): 낱말이 여럿이면 모두 맞는 글만(AND), 기호가 든 낱말은 글자 그대로.
+        # 보이는 범위(책·프로젝트·누가·스크랩)에 모두 맞는 글이 없으면 일부 낱말만 맞는 글(후속 C)
+        chunks = find_all_words(store, user, lanes, query, SEARCH_POOL, embedder, keep=visible_to(user, books, only, author, scrap_only)) if query else []
         if not query:  # 스크랩한 글 전체(최근 것부터)
             starred: list[tuple[str, Any, Any]] = [
                 *((i.category_id, i, None) for i in store.list_category_items(user)
@@ -604,7 +605,8 @@ def build_tools(
         shown_refs = {k.split("/", 1)[0] for k in best if k.startswith("ref:") and "/" in k}
         best = {k: v for k, v in best.items() if not (k.startswith("ref:") and "/" not in k and k in shown_refs)}
         # 순위(#101): 제목·본문·쓸 부분 > 첨부 글자·원문 > 서지·key·한글 표기·첨부 이름만. 같은 등급 안에서는 저자의 말 먼저, 그다음 찾기 순위
-        ranked = [h for _, _, h in sorted(best.values(), key=lambda v: (v[0], author == "all" and isinstance(v[2][1], CategoryItem)
+        # 일부 낱말만 맞은 결과(후속 C)는 맞은 낱말이 많은 것 먼저, 그다음 위 규칙
+        ranked = [h for _, _, h in sorted(best.values(), key=lambda v: (-v[2][2].partial, v[0], author == "all" and isinstance(v[2][1], CategoryItem)
                                                                         and v[2][1].author == "ai", v[1]))]
         owners: dict[str, set[str]] = {}  # 책별 개수는 글·문헌 수(한 문헌의 여러 조각은 하나로)
         for cid, obj, _ in ranked:
@@ -615,7 +617,11 @@ def build_tools(
         asked = f"category_search {query!r}" if query else "category_search"
         if not hits:
             return f"{asked} ({where}): 결과 없음." + (" 스크랩(★)한 글이 없다." if scrap_only and not query else "")
-        lines = [f"{asked} ({where}) — {len(hits)}건. author=me 글이 저자의 말이다. 인용은 '원문 확인' 문헌 글의 쓸 부분만 쓴다."
+        partial = bool(query) and all(h[2] is not None and h[2].partial for h in hits)
+        lines = [f"{asked} ({where}) — {len(hits)}건"
+                 + (" · 일부 낱말만 맞음(모든 낱말이 맞는 글이 없어 맞은 낱말이 많은 글부터. 한글 낱말은 끝 글자를 뗀 꼴로도 찾았다: 도시는 → 도시)"
+                    if partial else "")
+                 + ". author=me 글이 저자의 말이다. 인용은 '원문 확인' 문헌 글의 쓸 부분만 쓴다."
                  + (" ★는 저자가 스크랩(중요 표시)한 글이다." if any(h[1].scrap for h in hits) else "")]
         if query and not only:  # 책마다 몇 개 맞았는지(#101): 한 책이 결과를 차지하지 않게 책마다 PER_BOOK개까지 보인다
             more = " 이상" if len(chunks) >= SEARCH_POOL else ""
@@ -640,6 +646,15 @@ def build_tools(
                     lines += source_lines(user, n, obj, chunk)
                     lines += attach_hit(user, f"ref:{obj.key}", chunk, query)
         return "\n".join(lines)
+
+    def visible_to(user: str, books: dict[str, Any], only: Any, author: str, scrap_only: bool) -> Any:
+        """category_search가 보일 수 있는 글(책·프로젝트·누가·스크랩)만 True. 모두 맞는 글이 없는지를 이 안에서 가린다(후속 C)."""
+        items = {f"{i.category_id}/{i.id}" for i in store.list_category_items(user)
+                 if i.category_id in books and (not only or i.category_id == only.key) and author in ("all", i.author)
+                 and (not scrap_only or i.scrap)}
+        refs = {r.key for r in store.list_refs(user)
+                if r.book in books and (not only or r.book == only.key) and author != "ai" and (not scrap_only or r.scrap)}
+        return lambda owner_type, owner: owner in (items if owner_type == "category" else refs)
 
     def match_grade(chunk: Any, query: str) -> int:
         """맞은 곳의 등급(#101): 0 제목·본문·쓸 부분(칸·이유·태그 포함) · 1 첨부 글자·원문 · 2 서지·key·한글 표기·첨부 이름만."""
@@ -893,7 +908,8 @@ def build_tools(
             category_search, name="category_search",
             description=(
                 (
-                "책의 글에서 찾는다(문헌 글은 서지·key·첨부 이름·쓸 부분, full=true면 원문까지. 원문 확인 전 문헌은 '미확인'이고 인용하지 않는다). 낱말 여럿은 모두 맞는 글만. book: 그 책만, "
+                "책의 글에서 찾는다(문헌 글은 서지·key·첨부 이름·쓸 부분, full=true면 원문까지. 원문 확인 전 문헌은 '미확인'이고 인용하지 않는다). 낱말 여럿은 모두 맞는 글을 먼저, 없으면 일부만 맞는 글(표시됨). "
+                "book: 그 책만, "
                 "project: 그 프로젝트와 연결 노드. author 기본 all(저자의 말 먼저). scrap_only=true: 스크랩(★)만(query 없으면 전체, 최근순). 첨부(docx·pdf·txt·md) 글자도 "
                 "찾는다. attachment='첨부:<id>'와 page=N: 그 첨부를 3,000자씩 한 쪽 읽는다."
             )

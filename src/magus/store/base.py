@@ -496,6 +496,7 @@ class Chunk:
     text: str
     score: float = 0.0
     part: str | None = None  # attach_text 레인이면 그 첨부 id(어느 첨부의 글자인지)
+    partial: int = 0  # 찾기에서 모두 맞는 글이 없어 일부 낱말만 맞은 조각이면 맞은 낱말 수(후속 C). 0이면 보통 결과
 
 
 @dataclass(frozen=True)

@@ -35,8 +35,10 @@ async def test_style_book_put_and_search(settings: Settings, store: LocalStore, 
             "book": "문체", "author": "me", "untitled": True,
             "content": "그 여름의 물가에는 아무도 없었고, 나는 오래도록 바람이 지나간 자리를 바라보았다.",
             "reason": "길게 이어지는 회상의 문장이 느린 호흡을 만든다"})
-        # 낱말 여럿은 모두 맞는 글만(결정 b): '짧은'은 글에 없어('짧아'·'짧고') 빼고 찾는다
-        assert "결과 없음" in _text(await client.call_tool("category_search", {"query": "짧은 반복 리듬"}))
+        # 낱말 여럿은 모두 맞는 글 먼저(결정 b). '짧은'은 글에 없어('짧아'·'짧고') 모두 맞는 글이 없으면
+        # 일부 낱말만 맞는 글을 표시와 함께(후속 C): 짧은 → 짧(앞부분)으로 '짧아'도 맞는다
+        partial = _text(await client.call_tool("category_search", {"query": "짧은 반복 리듬"}))
+        assert "일부 낱말만 맞음" in partial.splitlines()[0] and "“고래는 돌아갔다." in partial and "길게 이어지는" not in partial
         hit = _text(await client.call_tool("category_search", {"query": "반복 리듬"}))
         assert "## 「문체」 — 컨텍스트(책 「문체」)" in hit and "“고래는 돌아갔다." in hit and "이유: 문장이 짧아" in hit
         assert "위치: 합성 산문" in hit and "태그: 호흡: 짧고 끊김, 장치: 반복" in hit

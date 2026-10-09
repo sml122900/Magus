@@ -52,7 +52,9 @@ def test_find_all_words(store: LocalStore, data_dir):
     assert _owners(find_all_words(store, "alice", lanes, "doc_1009", 50)) == {"20261009000000003"}  # doc·1009 따로인 글은 아니다
     assert _owners(find_all_words(store, "alice", lanes, "도시 성장", 50)) == {"20261009000000005", "20261009000000006"}  # AND
     assert _owners(find_all_words(store, "alice", lanes, '"도시 성장"', 50)) == {"20261009000000005", "20261009000000006"}
-    assert _owners(find_all_words(store, "alice", lanes, "도시 없는낱말", 50)) == set()
+    # 모든 낱말이 맞는 글이 없으면 일부 낱말만 맞는 글(후속 C, 전에는 빈 결과)
+    some = find_all_words(store, "alice", lanes, "도시 없는낱말", 50)
+    assert _owners(some) == {"20261009000000005", "20261009000000006", "20261009000000007"} and all(c.partial == 1 for c in some)
     assert len(_owners(find_all_words(store, "alice", lanes, "도시", 50))) == 3  # 낱말 하나는 지금까지와 같다
     # find_chunks(순위·1단계 찾기)는 그대로: 낱말 중 하나만 맞아도
     assert "20261009000000007" in _owners(find_chunks(store, "alice", lanes, "도시 성장", 50))
@@ -71,7 +73,7 @@ async def test_chat_search_same_rules(data_dir, settings):
         assert await found("doc_1009") == {"20261009000000003"}
         assert await found("도시 성장") == {"20261009000000005", "20261009000000006"}
         assert await found('"도시 성장"') == {"20261009000000005", "20261009000000006"}
-        assert await found("도시 없는낱말") == set()
+        assert await found("도시 없는낱말") == {"20261009000000005", "20261009000000006", "20261009000000007"}  # 일부만 맞음(후속 C)
         assert len(await found("도시")) == 3
         assert await found("현장사진") == {"20261009000000009"}
     store.close()
