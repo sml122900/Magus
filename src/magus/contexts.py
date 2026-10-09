@@ -78,11 +78,11 @@ def clean_context(name: str | None, text: str | None) -> Context:
     clean_name = " ".join(str(name or "").split())
     body = "\n".join(line.rstrip() for line in str(text or "").strip().splitlines()).strip()
     if not body:
-        raise ValueError("컨텍스트 내용이 비어 있다.")
+        raise ValueError("컨텍스트 내용이 비어 있습니다.")
     if len(clean_name) > CONTEXT_NAME_MAX:
-        raise ValueError(f"컨텍스트 이름은 {CONTEXT_NAME_MAX}자까지다.")
+        raise ValueError(f"컨텍스트 이름은 {CONTEXT_NAME_MAX}자까지입니다. 지금 {len(clean_name)}자입니다.")
     if len(body) > CONTEXT_MAX:
-        raise ValueError(f"컨텍스트는 하나에 {CONTEXT_MAX}자까지다(지금 {len(body)}자).")
+        raise ValueError(f"컨텍스트 내용은 하나에 {CONTEXT_MAX}자까지입니다. 지금 {len(body)}자입니다.")
     return Context(clean_name, body)
 
 
@@ -94,7 +94,7 @@ def clean_contexts(items: Iterable[Context]) -> tuple[Context, ...]:
         if all(o.text != clean.text for o in out):
             out.append(clean)
     if len(out) > MAX_ATTACHED:
-        raise ValueError(f"컨텍스트는 노드·책마다 {MAX_ATTACHED}개까지 붙인다.")
+        raise ValueError(f"컨텍스트는 노드·책마다 {MAX_ATTACHED}개까지 붙일 수 있습니다.")
     return tuple(out)
 
 

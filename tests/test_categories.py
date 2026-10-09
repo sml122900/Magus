@@ -260,7 +260,7 @@ async def test_saved_contexts_defaults_and_editing(store: LocalStore, data_dir: 
     book = make_book(store, "alice", "문체", "문체")
     added = store.save_saved_context("alice", SavedContext("", "신문", "신문 기사를 모은 것이다."))
     assert [c.name for c in store.list_saved_contexts("alice")] == ["문체", "원고", "논문", "생각 메모", "신문"]
-    with pytest.raises(ValueError, match="이미 있다"):
+    with pytest.raises(ValueError, match="이미 있습니다"):
         store.save_saved_context("alice", SavedContext("", "신문", "x"))
     store.save_saved_context("alice", SavedContext("ctx-style", "문체", "바꾼 원본"))
     assert store.delete_saved_context("alice", added.id) and not store.delete_saved_context("alice", added.id)
@@ -324,7 +324,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
         assert '<span class="ctx-label">노드 「사례」</span>' in both and '<span class="ctx-label">이 책</span>' in both
         # 바로 적기(누가 = 저자, CSRF)
         assert c.post(f"/shelf/write/{cid}", data={"csrf": "틀림", "content": "x"}).status_code == 403
-        assert "error=empty" in str(c.post(f"/shelf/write/{cid}", data={"csrf": csrf, "content": "  "}).url)
+        assert c.post(f"/shelf/write/{cid}", data={"csrf": csrf, "content": "  "}).status_code == 400
         written = c.post(f"/shelf/write/{cid}", data={"csrf": csrf, "title": "", "content": "<script>alert(1)</script> 강가 장날",
                                                        "f:시기": "1850년대", "f:없는칸": "무시", "reason": "도입부", "where": "향토지 12쪽"})
         assert re.search(rf"/shelf/{cid}/\d{{17}}-[0-9a-f]{{6}}$", str(written.url)) and '<p class="post-meta">' in written.text
@@ -388,7 +388,7 @@ def test_web_saved_contexts_page(server_proc):  # noqa: F811
         added = c.post("/me/contexts", data={"csrf": csrf, "action": "add", "name": "<b>신문</b>", "text": "신문 기사 <script>"}).text
         assert "더했습니다." in added and "&lt;b&gt;신문&lt;/b&gt;" in added and "<script>" not in added.split("<main>")[1].split("</main>")[0]
         dup = c.post("/me/contexts", data={"csrf": csrf, "action": "add", "name": "문체", "text": "x"})
-        assert dup.status_code == 400 and "이미 있다" in dup.text
+        assert dup.status_code == 400 and "이미 있습니다" in dup.text
         saved = c.post("/me/contexts", data={"csrf": csrf, "action": "save", "id": "ctx-note", "name": "생각 메모", "text": "고친 생각 메모"}).text
         assert "저장했습니다." in saved and ">고친 생각 메모</textarea>" in saved
         c.post("/me/contexts", data={"csrf": csrf, "action": "delete", "id": "ctx-manuscript"})
@@ -521,9 +521,9 @@ def test_web_list_shows_fields_when_no_title_or_content(server_proc):  # noqa: F
         page = w.get(f"/login?next=/shelf/{c.id}").text
         assert '<span class="pt none">장소: 엘알토, 볼리비아</span>' in page
         csrf = _csrf(page)
-        assert 'name="content" rows="10" maxlength="20000"></textarea>' in w.get(f"/shelf/write/{c.id}").text  # 내용이 꼭 필요하지 않다
+        assert 'name="content" rows="10" data-count-max="20000" data-count-quiet></textarea>' in w.get(f"/shelf/write/{c.id}").text  # 내용이 꼭 필요하지 않다
         assert "<p>장소: 엘알토, 볼리비아</p>" in w.get(f"/shelf/{c.id}/20261006000000000-aaaaaa").text  # 칸은 본문의 일부로 보인다(#97)
         only_field = w.post(f"/shelf/write/{c.id}", data={"csrf": csrf, "title": "", "content": "", "f:시기": "1950년대"})
-        assert "error=empty" in str(only_field.url)  # 웹의 새 글은 제목·본문·첨부만(칸은 대화로, #97)
+        assert only_field.status_code == 400  # 웹의 새 글은 제목·본문·첨부만(칸은 대화로, #97)
         nothing = w.post(f"/shelf/write/{c.id}", data={"csrf": csrf, "title": "", "content": ""})
-        assert "error=empty" in str(nothing.url) and "제목이나 본문을 적어 주세요." in nothing.text
+        assert nothing.status_code == 400 and "제목이나 본문을 적어 주세요." in nothing.text

@@ -210,7 +210,7 @@ class MapPages:
             '<input type="file" name="file" accept=".docx,.pdf" required aria-label="문서 파일(docx·pdf)">'
             f'<p><button class="primary">올리기</button></p>{progress_box()}</form>'
             f'<form method="post" action="/shelf/projects">{csrf}'
-            f'<label class="block">제목 <input name="title" maxlength="{PROJECT_TITLE_MAX}" required></label>'
+            f'<label class="block">제목 <input name="title" data-count-max="{PROJECT_TITLE_MAX}" required></label>'
             '<p><button>만들기</button></p></form></li>'
             if room else f'<li class="pcard new"><p class="muted">{MAX_FLOORS}개 가득</p></li>'
         )
@@ -225,9 +225,11 @@ class MapPages:
             form = await self._form(request, session)
         except PermissionError:
             return self._map_page("프로젝트", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-        title = one_line(str(form.get("title") or ""))[:PROJECT_TITLE_MAX]
+        title = one_line(str(form.get("title") or ""))
         if not title:
             return RedirectResponse("/shelf?projecterr=empty", status_code=303)
+        if len(title) > PROJECT_TITLE_MAX:  # 자르지 않고 거절(2026-10-09)
+            return RedirectResponse(f"/shelf?projecterr=long&n={len(title)}", status_code=303)
         try:
             project = await run_in_threadpool(self.store.create_project, uid, title)
         except ValueError:
@@ -253,7 +255,8 @@ class MapPages:
             trash = (f' <a href="/shelf/p/{urllib.parse.quote(found.floor)}/trash">휴지통</a>'
                      if done == "node_trash" and found else "")
             out += f'<p class="msg">{html.escape(text, quote=False)}{trash}</p>'
-        if err := {"empty": "제목을 적어 주세요.", "full": f"프로젝트는 {MAX_FLOORS}개까지입니다."}.get(
+        long = f"제목은 {PROJECT_TITLE_MAX}자까지입니다." + (f" 지금 {params.get('n')}자입니다." if (params.get("n") or "").isdigit() else "")
+        if err := {"empty": "제목을 적어 주세요.", "full": f"프로젝트는 {MAX_FLOORS}개까지입니다.", "long": long}.get(
                 params.get("projecterr") or ""):
             out += f'<p class="msg err">{err}</p>'
         if done == "project_trashed":  # 프로젝트째 휴지통으로(2026-10-09)
@@ -385,14 +388,14 @@ class MapPages:
         contexts = (
             '<fieldset class="ctx ctx-mini"><legend>컨텍스트</legend>'
             + (f'<div class="chips" role="group" aria-label="자주 쓰는 컨텍스트">{chips}</div>' if chips else "")
-            + '<details><summary>직접 적기</summary><label class="block">내용 <textarea name="ctx_new" maxlength="500" rows="2">'
+            + '<details><summary>직접 적기</summary><label class="block">내용 <textarea name="ctx_new" data-count-max="500" rows="2">'
             "</textarea></label></details></fieldset>"
         )
         return (
             '<details class="pm-new" id="new-node"><summary class="btn primary-ish">+ 노드</summary><div class="pm-new-in">'
             f'<form method="post" action="{post}" class="pm-form">{csrf}<input type="hidden" name="action" value="add_node">'
             '<input type="hidden" name="x"><input type="hidden" name="y">'
-            f'<label class="block">이름 <input name="name" maxlength="{NODE_NAME_MAX}" required></label>'
+            f'<label class="block">이름 <input name="name" data-count-max="{NODE_NAME_MAX}" required></label>'
             f'{contexts}'
             f'<p><button class="primary">만들기</button></p></form>{link}</div></details>'
         )
@@ -629,7 +632,7 @@ class MapPages:
                    f'<label>이을 노드 <select name="other">{choices}</select></label> <button>선 잇기</button></form>' if free else "")
         rename = ("" if node.center or node.link else
                   f'<form method="post" action="{post}" class="pm-form">{hidden}<input type="hidden" name="action" value="rename">'
-                  f'<label>이름 <input name="name" value="{html.escape(node.name)}" maxlength="{NODE_NAME_MAX}" required></label> '
+                  f'<label>이름 <input name="name" value="{html.escape(node.name)}" data-count-max="{NODE_NAME_MAX}" required></label> '
                   '<button>바꾸기</button></form>')
         swatches = "".join(f'<option value="{value}"{" selected" if node.color == value else ""}>{html.escape(name)}</option>'
                            for name, value in PALETTE)

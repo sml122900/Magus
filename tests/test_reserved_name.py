@@ -18,11 +18,11 @@ def test_reserved_name_message_says_why_and_what_next():
     with pytest.raises(ValueError) as e:
         check_name("수정본", {})
     msg = str(e.value)
-    assert msg.startswith("'수정본'은 Magus가 쓰는 말이라 책 이름으로는 쓸 수 없어요. 다른 이름을 붙여 주세요. (쓸 수 없는 이름: 전체, ")
+    assert msg.startswith("「수정본」은 Magus가 쓰는 말이라 책 이름으로 쓸 수 없습니다. 다른 이름을 붙여 주세요. (쓸 수 없는 이름: 전체, ")
     assert msg.endswith("게시판, 스크랩 등)") and all(n in msg for n in RESERVED_SHOWN)
     with pytest.raises(ValueError) as e:
         check_name("전체", {})
-    assert str(e.value).startswith("'전체'는 Magus가 쓰는 말이라")
+    assert str(e.value).startswith("「전체」는 Magus가 쓰는 말이라")
     # 옛 이름·코어 이름도 그대로 막지만 목록에는 보이지 않는다(용어집 규칙)
     with pytest.raises(ValueError) as e:
         check_name("Casper", {})
@@ -34,7 +34,7 @@ def test_reserved_name_message_says_why_and_what_next():
 def test_scrap_is_reserved_but_existing_books_stay():
     with pytest.raises(ValueError) as e:
         check_name("스크랩", {})
-    assert str(e.value).startswith("'스크랩'은 Magus가 쓰는 말이라") and "스크랩 등)" in str(e.value)
+    assert str(e.value).startswith("「스크랩」은 Magus가 쓰는 말이라") and "스크랩 등)" in str(e.value)
     assert check_name("스크랩 모음", {}) == "스크랩 모음"  # 정해진 이름 그대로일 때만 막는다
 
 
@@ -52,7 +52,7 @@ def test_web_new_book_shows_reserved_message_and_picker(server_proc):  # noqa: F
         csrf = _csrf(page)
         assert page.index('type="color" name="picker"') < page.index('<details class="palette">')
         bad = c.post("/shelf/new", data={"csrf": csrf, "name": "수정본", "color": "custom", "hex": "#123456"})
-        assert bad.status_code == 400 and "Magus가 쓰는 말이라 책 이름으로는 쓸 수 없어요. 다른 이름을 붙여 주세요." in bad.text
+        assert bad.status_code == 400 and "Magus가 쓰는 말이라 책 이름으로 쓸 수 없습니다. 다른 이름을 붙여 주세요." in bad.text
         made = c.post("/shelf/new", data={"csrf": csrf, "name": "2026 답사", "color": "#b3261e", "was": "#b3261e", "picker": "#00ff88"})
         assert made.status_code == 200 and re.search(r"/shelf/[^/?]+\?done=made$", str(made.url))
     store = LocalStore(data_dir)

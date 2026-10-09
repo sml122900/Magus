@@ -76,8 +76,10 @@ def test_board_write_view_and_attachments(server_proc):  # noqa: F811
                             ([("files", ("큰.pdf", b"0" * 20_000, "application/pdf"))], "big"),
                             ([("files", (f"{n}.txt", b"x", "text/plain")) for n in range(11)], "many")):
             bad = c.post(f"/shelf/write/{NOTES}", data={"csrf": csrf, "title": "막혀야 함", "content": "x"}, files=files)
-            assert f"error={code}" in str(bad.url) and '<p class="msg err">' in bad.text and "막혀야 함" not in bad.text, code
-        assert "error=empty" in str(c.post(f"/shelf/write/{NOTES}", data={"csrf": csrf, "title": " ", "content": ""}).url)
+            # 저장하지 않고 그 자리에서 다시(적은 제목·본문은 그대로, 2026-10-09 — 전에는 ?error=로 넘기며 비웠다)
+            assert bad.status_code == 400 and '<p class="msg err">' in bad.text and 'value="막혀야 함"' in bad.text, code
+        empty = c.post(f"/shelf/write/{NOTES}", data={"csrf": csrf, "title": " ", "content": ""})
+        assert empty.status_code == 400 and "제목이나 본문을 적어 주세요." in empty.text
         assert c.post(f"/shelf/write/{NOTES}", data={"csrf": "틀림", "content": "x"}).status_code == 403
         # 게시판 목록: 최신 글이 위, 첨부 표시(그림이면 작은 미리보기 + 📎2), 제목이 없으면 앞부분을 흐리게
         board = c.get(f"/shelf/{NOTES}").text

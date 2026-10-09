@@ -46,7 +46,7 @@ from magus.contexts import band as context_band
 from magus.contexts import view_for_book
 from magus.floors import COMMON
 from magus.category.rules import (
-    BUILTINS, COLOR_NAMES, HEX, MAX_CATEGORIES, MAX_MY_COLORS, NEW_COLOR_ORDER,
+    BUILTINS, COLOR_NAMES, HEX, MAX_CATEGORIES, MAX_MY_COLORS, NAME_MAX, NEW_COLOR_ORDER,
     PALETTE, PALETTE_BY_NAME, TEMPLATE_BY_KEY, check_name, name_key,
 )
 from magus.store import Category, CategoryItem, Chunk, ShelfSettings, Store
@@ -466,11 +466,19 @@ def category_kind(c: Category) -> Kind:
     return Kind(c.id, c.name, ["category", "ref_bib", "ref_picked", "attach_text"], "글이 없습니다.", c, c.floor)
 
 
-def color_fieldset(current: str, my_colors: tuple[str, ...]) -> str:
+def kept_color(form: Any, fallback: str) -> str:
+    """거절된 폼을 다시 보일 때의 색: 고른 색(직접 고르기·내 색·기본 색·스크립트 없이 바꾼 색 선택기), 읽지 못하면 #RRGGBB 칸, 그것도 아니면 fallback."""
+    try:
+        return chosen_color(form)
+    except ValueError:
+        return safe_color(str(form.get("hex") or ""), fallback)
+
+
+def color_fieldset(current: str, my_colors: tuple[str, ...], choice: str | None = None) -> str:
     """책 색 고르기(2026-10-09): 색 선택기가 먼저 보이고(직접 고르기·#RRGGBB·R·G·B), 내 색, 기본 제공 색은 '기본 색 ▾'를 누르면
     펼쳐진다(기본은 접힘). 저장하는 값·방식은 그대로(color 라디오 + hex·R·G·B). was는 처음 색(스크립트 없이 색 선택기만 바꿨을 때)."""
     current = safe_color(current, PALETTE[0][1])
-    chosen = current if current in COLOR_NAMES or current in my_colors else "custom"
+    chosen = "custom" if choice == "custom" else current if current in COLOR_NAMES or current in my_colors else "custom"
 
     def swatch(value: str, label: str) -> str:
         return (f'<label class="sw"><input type="radio" name="color" value="{value}"{" checked" if chosen == value else ""}>'
@@ -739,6 +747,7 @@ class ShelfPages:
         saved = await run_in_threadpool(self.store.list_saved_contexts, uid)
         default_color = PALETTE_BY_NAME[NEW_COLOR_ORDER[len(mine) % len(NEW_COLOR_ORDER)]]
         values = {"name": "", "template": "blank", "color": default_color}
+        choice: str | None = None
         attached: tuple = ()
         error = ""
         # 꽂을 곳(#95): 노드의 '책 추가'에서 온 프로젝트와 노드. 없으면 「내 서재」(노드는 이름이 같은 새 노드)
@@ -759,7 +768,8 @@ class ShelfPages:
                 return self._shelf_page("새 책", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
             # 칸 모양(템플릿)은 웹에서 고르지 않는다(#97: 글은 제목·본문·첨부). 대화(category_create)로는 그대로 된다
             values = {"name": str(form.get("name") or ""), "template": str(form.get("template") or "blank"),
-                      "color": safe_color(str(form.get("hex") or ""), default_color)}
+                      "color": kept_color(form, default_color)}
+            choice = "custom" if form.get("color") == "custom" else None  # 거절 뒤에도 '직접 고르기'를 그대로(2026-10-09)
             try:
                 attached = contexts_from_form(form, saved)
             except ValueError as e:
@@ -793,9 +803,9 @@ class ShelfPages:
         body = (
             f'{error}'
             f'<form method="post" action="/shelf/new?{html.escape(query)}" class="colors">{self._csrf_input(session)}'
-            f'<label class="block">이름 <input name="name" value="{html.escape(values["name"])}" maxlength="12" required></label>'
+            f'<label class="block">이름 <input name="name" value="{html.escape(values["name"])}" data-count-max="{NAME_MAX}" required></label>'
             + context_fieldset(saved, attached)
-            + color_fieldset(values["color"], settings.my_colors)
+            + color_fieldset(values["color"], settings.my_colors, choice)
             + f'<div class="preview">{preview}</div>'
             f'<p><button class="primary">만들기</button> <a href="{html.escape(state_url(floor.id))}">취소</a></p></form>'
             + COLOR_SCRIPT + CONTEXT_SCRIPT
@@ -828,13 +838,15 @@ class ShelfPages:
         settings = await run_in_threadpool(self.store.get_shelf_settings, uid)
         saved = await run_in_threadpool(self.store.list_saved_contexts, uid)
         current, name, attached, error = category.color, kind.name, category.contexts, ""
+        choice: str | None = None
         if request.method == "POST":
             try:
                 form = await self._form(request, session)
             except PermissionError:
                 return self._shelf_page("책 설정", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
             name = str(form.get("name") or kind.name)
-            current = safe_color(str(form.get("hex") or ""), current)
+            current = kept_color(form, current)
+            choice = "custom" if form.get("color") == "custom" else None
             try:
                 attached = contexts_from_form(form, saved)
             except ValueError as e:
@@ -871,9 +883,9 @@ class ShelfPages:
         body = (
             f'{error}{reading}'
             f'<form method="post" action="/shelf/edit/{kind.key}" class="colors">{self._csrf_input(session)}'
-            f'<label class="block">이름 <input name="name" value="{html.escape(name)}" maxlength="12" required></label>'
+            f'<label class="block">이름 <input name="name" value="{html.escape(name)}" data-count-max="{NAME_MAX}" required></label>'
             + context_fieldset(saved, attached)
-            + color_fieldset(current, settings.my_colors)
+            + color_fieldset(current, settings.my_colors, choice)
             + f'<div class="preview">{preview}</div>'
             f'<p><button class="primary">저장</button> <a href="/shelf/{kind.key}">취소</a></p></form>'
             + (f'<h2>내 색</h2><ul class="mycolors">{mine}</ul>' if mine else "") + place + trash + COLOR_SCRIPT + CONTEXT_SCRIPT

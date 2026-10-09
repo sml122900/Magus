@@ -62,7 +62,7 @@ def parse_color(value: str) -> str:
         name = candidate if candidate in PALETTE_BY_NAME else _COLOR_ALIASES.get(candidate)
         if name:
             return PALETTE_BY_NAME[name]
-    raise ValueError(f"색 {value!r}을 알 수 없다. 기본 색 이름({'·'.join(n for n, _ in PALETTE)}) 또는 #RRGGBB(예: #b22222)로 준다")
+    raise ValueError(f"색 「{value}」을 알 수 없습니다. 기본 색 이름({'·'.join(n for n, _ in PALETTE)}) 또는 #RRGGBB(예: #b22222)로 적어 주세요.")
 
 
 def color_label(hex_: str) -> str:
@@ -100,7 +100,7 @@ def template_of(value: str) -> Template:
     raw = "빈 책" if raw in ("빈 카테고리", "") else raw
     t = TEMPLATE_BY_NAME.get(raw) or TEMPLATE_BY_KEY.get(raw)
     if t is None:
-        raise ValueError(f"템플릿 {value!r}이 없다. {'·'.join(TEMPLATE_NAMES)} 중 하나")
+        raise ValueError(f"템플릿 「{value}」이 없습니다. {'·'.join(TEMPLATE_NAMES)} 중 하나를 골라 주세요.")
     return t
 
 
@@ -141,20 +141,20 @@ def check_name(name: str, taken: dict[str, str]) -> str:
     """새 이름 검사. taken: 이미 쓰는 이름의 열쇠 → 이름. 통과하면 정리한 이름, 아니면 ValueError(이유를 한국어로)."""
     clean = clean_name(name)
     if not clean:
-        raise ValueError("책 이름이 비어 있습니다")
+        raise ValueError("책 이름이 비어 있습니다.")
     if len(clean) > NAME_MAX:
-        raise ValueError(f"책 이름은 {NAME_MAX}자까지입니다(책등에 들어가는 길이). 지금 {len(clean)}자")
+        raise ValueError(f"책 이름은 {NAME_MAX}자까지입니다(책등에 들어가는 길이). 지금 {len(clean)}자입니다.")
     if bad := sorted({c for c in clean if not (c.isalnum() or c in _NAME_CHARS)}):
-        raise ValueError(f"책 이름에 쓸 수 없는 글자가 있습니다: {' '.join(bad)} (글자·숫자·띄어쓰기·가운뎃점·하이픈·괄호만)")
+        raise ValueError(f"책 이름에 쓸 수 없는 글자가 있습니다: 「{' '.join(bad)}」. 글자·숫자·띄어쓰기·가운뎃점·하이픈·괄호만 쓸 수 있습니다.")
     if clean.replace(" ", "").isdigit():
-        raise ValueError("숫자만으로는 책 이름을 지을 수 없습니다")
+        raise ValueError("숫자만으로는 책 이름을 지을 수 없습니다.")
     key = name_key(clean)
     if key in RESERVED_KEYS:  # 이유와 다음 행동, 쓸 수 없는 이름(2026-10-09)
-        said = josa(f"'{clean}'", "은/는")
-        raise ValueError(f"{said} Magus가 쓰는 말이라 책 이름으로는 쓸 수 없어요. 다른 이름을 붙여 주세요. "
+        said = josa(f"「{clean}」", "은/는")
+        raise ValueError(f"{said} Magus가 쓰는 말이라 책 이름으로 쓸 수 없습니다. 다른 이름을 붙여 주세요. "
                          f"(쓸 수 없는 이름: {', '.join(RESERVED_SHOWN)} 등)")
     if key in taken:
-        raise ValueError(f"'{taken[key]}' 책이 이미 있습니다. 다른 이름을 지어 주세요")
+        raise ValueError(f"「{taken[key]}」 책이 이미 있습니다. 다른 이름을 지어 주세요.")
     return clean
 
 
@@ -165,5 +165,5 @@ TITLE_MODES = {"ask": "매번 묻기", "ai": "AI가 짓기", "none": "비워 두
 def clean_tags(tags: list[str] | None) -> list[str]:
     out = list(dict.fromkeys(" ".join(str(t).split())[:TAG_MAX] for t in (tags or []) if str(t).strip()))
     if len(out) > TAGS_MAX:
-        raise ValueError(f"태그는 {TAGS_MAX}개까지")
+        raise ValueError(f"태그는 {TAGS_MAX}개까지입니다.")
     return out

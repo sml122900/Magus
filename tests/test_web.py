@@ -452,7 +452,7 @@ def test_display_name_from_email_and_editable(server_proc, fake_issuer):
         csrf = _csrf(me)
         assert alice.post("/me", data={"csrf": "틀림", "display_name": "x"}).status_code == 403
         too_long = alice.post("/me", data={"csrf": csrf, "display_name": "가" * 41})
-        assert too_long.status_code == 400 and "표시 이름은 40자까지입니다. 지금 41자" in too_long.text
+        assert too_long.status_code == 400 and "표시 이름은 40자까지입니다. 지금 41자입니다." in too_long.text
         saved = alice.post("/me", data={"csrf": csrf, "display_name": "  <b>표시명시험</b>  교수 "}, follow_redirects=True).text
         assert "저장했습니다." in saved and ">&lt;b&gt;표시명시험&lt;/b&gt; 교수</a>" in saved and "<b>표시명시험" not in saved
         assert ">sub-bob@example.com</a>" in bob.get("/shelf").text  # 밥의 상단 바는 밥의 것

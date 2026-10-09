@@ -109,7 +109,7 @@ def test_long_post_from_chat_is_not_cut_when_edited(server_proc):  # noqa: F811
     store.close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         form = c.get(f"/login?next=/shelf/{ids['notes']}/20261009000000008-eeeeee/edit").text
-        assert 'maxlength="25000"' in form
+        assert 'data-count-max="25000"' in form
         c.post(f"/shelf/{ids['notes']}/20261009000000008-eeeeee/edit", data={"csrf": _csrf(form), "title": "긴 글 고침", "content": long})
     store = LocalStore(data_dir)
     item = store.get_category_item("alice", ids["notes"], "20261009000000008-eeeeee")

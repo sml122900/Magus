@@ -91,11 +91,11 @@ CONTEXT_SCRIPT = """<script>
 def _row(index: int, ctx: Context, from_id: str, csrf_ok: bool = True) -> str:
     return (
         f'<li data-from="{html.escape(from_id)}"><div class="row-head">'
-        f'<label>이름 <input name="ctx_name" value="{html.escape(ctx.name)}" maxlength="{CONTEXT_NAME_MAX}"></label>'
+        f'<label>이름 <input name="ctx_name" value="{html.escape(ctx.name)}" data-count-max="{CONTEXT_NAME_MAX}"></label>'
         f'<input type="hidden" name="ctx_from" value="{html.escape(from_id)}">'
         f'<button name="register" value="{index}" aria-label="자주 쓰는 컨텍스트로 등록" title="자주 쓰는 컨텍스트로 등록">등록</button>'
         f'<label class="drop"><input type="checkbox" name="ctx_drop" value="{index}"> 떼기</label></div>'
-        f'<label class="block">내용 <textarea name="ctx_text" maxlength="{CONTEXT_MAX}" rows="3">{html.escape(ctx.text)}</textarea></label></li>'
+        f'<label class="block">내용 <textarea name="ctx_text" data-count-max="{CONTEXT_MAX}" rows="3">{html.escape(ctx.text)}</textarea></label></li>'
     )
 
 
@@ -116,7 +116,7 @@ def context_fieldset(saved: list[SavedContext], attached: tuple[Context, ...]) -
         + (f'<div class="chips" role="group" aria-label="자주 쓰는 컨텍스트">{chips}</div>' if chips else "")
         + f'<ol class="ctx-rows">{rows}</ol>'
         f'<template class="ctx-row">{template}</template>'
-        f'<details><summary>직접 적기</summary><label class="block">내용 <textarea name="ctx_new" maxlength="{CONTEXT_MAX}" rows="3">'
+        f'<details><summary>직접 적기</summary><label class="block">내용 <textarea name="ctx_new" data-count-max="{CONTEXT_MAX}" rows="3">'
         "</textarea></label></details></fieldset>"
     )
 
@@ -233,8 +233,8 @@ class ContextPages:
         cards = "".join(
             f'<section class="saved-ctx" aria-label="{html.escape(c.name)}"><form method="post" action="/me/contexts">{csrf}'
             f'<input type="hidden" name="id" value="{html.escape(c.id)}">'
-            f'<label class="block">이름 <input name="name" value="{html.escape(c.name)}" maxlength="{CONTEXT_NAME_MAX}" required></label>'
-            f'<label class="block">내용 <textarea name="text" maxlength="{CONTEXT_MAX}" rows="3" required>{html.escape(c.text)}</textarea></label>'
+            f'<label class="block">이름 <input name="name" value="{html.escape(c.name)}" data-count-max="{CONTEXT_NAME_MAX}" required></label>'
+            f'<label class="block">내용 <textarea name="text" data-count-max="{CONTEXT_MAX}" rows="3" required>{html.escape(c.text)}</textarea></label>'
             '<p><button name="action" value="save">저장</button> '
             '<button name="action" value="delete">지우기</button></p></form></section>'
             for c in items
@@ -242,8 +242,8 @@ class ContextPages:
         room = len(items) < MAX_SAVED
         add = (
             f'<h2>새로 더하기</h2><form method="post" action="/me/contexts" class="card">{csrf}'
-            f'<label class="block">이름 <input name="name" maxlength="{CONTEXT_NAME_MAX}" required></label>'
-            f'<label class="block">내용 <textarea name="text" maxlength="{CONTEXT_MAX}" rows="3" required></textarea></label>'
+            f'<label class="block">이름 <input name="name" data-count-max="{CONTEXT_NAME_MAX}" required></label>'
+            f'<label class="block">내용 <textarea name="text" data-count-max="{CONTEXT_MAX}" rows="3" required></textarea></label>'
             '<p><button name="action" value="add" class="primary">더하기</button></p></form>'
             if room else f'<p class="muted">{MAX_SAVED}개 가득</p>'
         )

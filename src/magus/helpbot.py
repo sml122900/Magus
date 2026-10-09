@@ -28,8 +28,8 @@ from typing import Any
 
 log = logging.getLogger("magus.help")
 
-UNAVAILABLE = "지금은 도움말을 쓸 수 없어요."
-QUOTA = "오늘 도움말 질문을 다 썼어요. 내일 다시 물어 주세요."
+UNAVAILABLE = "지금은 도움말을 쓸 수 없습니다."
+QUOTA = "오늘 도움말 질문을 다 썼습니다. 내일 다시 물어 주세요."
 EMPTY = "질문을 적어 주세요."
 QUESTION_MAX = 300
 BAD_REQUEST = "잘못된 요청입니다. 화면을 새로 고쳐 주세요."
@@ -173,9 +173,11 @@ class HelpBot:
 
     def ask(self, uid: str, question: str, screen: str, history: Any = None) -> tuple[int, dict[str, Any]]:
         """(HTTP 상태, JSON). history: 브라우저가 보낸 이전 주고받기 [{"q", "a"}](없으면 None). 질문·답은 로그에 남기지 않는다."""
-        text = _one_line(question)[:QUESTION_MAX]
+        text = _one_line(question)
         if not text:
             return 400, {"ok": False, "error": EMPTY}
+        if len(text) > QUESTION_MAX:  # 자르지 않고 알린다(2026-10-09)
+            return 400, {"ok": False, "error": f"질문은 {QUESTION_MAX}자까지입니다. 지금 {len(text)}자입니다."}
         try:
             pairs = clean_history(history)
         except ValueError:
@@ -353,11 +355,11 @@ HELP_SCRIPT = """<script>
       body: JSON.stringify({csrf: root.getAttribute("data-csrf"), q: text, screen: document.body.getAttribute("data-screen") || "", history: history})})
       .then(function (r) { return r.json().catch(function () { return {ok: false}; }); })
       .then(function (res) {
-        wait.className = "bot"; wait.textContent = res.ok ? res.answer : (res.error || "지금은 도움말을 쓸 수 없어요.");
+        wait.className = "bot"; wait.textContent = res.ok ? res.answer : (res.error || "지금은 도움말을 쓸 수 없습니다.");
         if (res.ok) data = S.add(store, key, data, text, res.answer, Date.now());
         bottom();
       })
-      .catch(function () { wait.className = "bot"; wait.textContent = "지금은 도움말을 쓸 수 없어요."; bottom(); })
+      .catch(function () { wait.className = "bot"; wait.textContent = "지금은 도움말을 쓸 수 없습니다."; bottom(); })
       .then(function () { send.disabled = false; q.focus(); });
   });
   q.addEventListener("keydown", function (e) {
@@ -389,6 +391,6 @@ def widget(csrf: str, user: str) -> str:
         '<button type="button" class="help-new">새 대화</button>'
         '<button type="button" class="help-close" aria-label="접기" title="접기">✕</button></span></div>'
         '<ol class="help-log" aria-live="polite"></ol>'
-        f'<form class="help-form"><textarea name="q" rows="2" maxlength="{QUESTION_MAX}" aria-label="질문" placeholder="질문"></textarea>'
+        f'<form class="help-form"><textarea name="q" rows="2" data-count-max="{QUESTION_MAX}" data-count-quiet aria-label="질문" placeholder="질문"></textarea>'
         '<button class="primary">묻기</button></form></section></div>' + HELP_SCRIPT
     )

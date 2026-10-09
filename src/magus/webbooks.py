@@ -517,7 +517,7 @@ class BookPages:
                 form = await self._form(request, session)
             except PermissionError:
                 return self._book_page("책 설정", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-            new_name = " ".join(str(form.get("name") or "").split())[:120]
+            new_name = " ".join(str(form.get("name") or "").split())
             if form.get("register") is not None:  # 자주 쓰는 컨텍스트로 등록만 하고 이 화면을 다시 보인다
                 error = await run_in_threadpool(register_row, self.store, uid, form)
                 saved = await run_in_threadpool(self.store.list_saved_contexts, uid)
@@ -533,6 +533,8 @@ class BookPages:
                 new_color = chosen_color(form)
                 if not new_name:
                     raise ValueError("이름을 적어 주세요.")
+                if len(new_name) > 120:  # 자르지 않고 거절(2026-10-09)
+                    raise ValueError(f"이름은 120자까지입니다. 지금 {len(new_name)}자입니다.")
                 if kind == "ms":
                     if new_name != name:
                         await run_in_threadpool(self.store.set_titles, uid, ident, BookTitles(title=new_name, subtitle=project.subtitle,
@@ -559,7 +561,7 @@ class BookPages:
         body = (
             f'{error}'
             f'<form method="post" action="/shelf/edit/{html.escape(key)}" class="colors">{self._csrf_input(session)}'
-            f'<label class="block">이름 <input name="name" value="{html.escape(name)}" maxlength="120" required></label>'
+            f'<label class="block">이름 <input name="name" value="{html.escape(name)}" data-count-max="120" required></label>'
             + context_fieldset(saved, attached)
             + color_fieldset(color, settings.my_colors)
             + f'<p><button class="primary">저장</button> <a href="{html.escape(back)}">취소</a></p></form>'

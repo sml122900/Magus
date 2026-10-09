@@ -36,7 +36,7 @@ from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Redire
 from magus.auth import JwtVerifier
 from magus.book.export import export_docx
 from magus.config import Settings
-from magus.helpbot import CLEAR_SCRIPT, HELP_STYLE, HelpBot, screen_key, screen_label, user_key, widget
+from magus.helpbot import CLEAR_SCRIPT, HELP_STYLE, UNAVAILABLE, HelpBot, screen_key, screen_label, user_key, widget
 from magus.ids import local_time, utcnow
 from magus.inbox import LimitError, mb, save_upload, size_text
 from magus.signing import sign, unsign
@@ -114,6 +114,8 @@ label.off{color:var(--mute)}
 details{margin:12px 0}summary{cursor:pointer;color:var(--ink2);padding:4px 0}
 ul.links{list-style:none;padding:0;margin:16px 0;display:grid;gap:8px}ul.links a{font-size:17px}
 .empty{font-size:17px;margin:16px 0 8px}
+.count{display:inline-block;margin-left:8px;color:var(--ink2);font-size:14px;font-variant-numeric:tabular-nums}
+.count.over{color:#a31d1d;font-weight:600}
 form.inline{display:inline}
 form.busy{pointer-events:none}
 form.busy button::after{content:"";display:inline-block;width:14px;height:14px;margin-left:8px;vertical-align:-2px;
@@ -122,6 +124,31 @@ border:2px solid currentColor;border-right-color:transparent;border-radius:50%;a
 @media (max-width:767px){main{padding:16px 12px 24px}h1{font-size:22px}table{min-width:640px}
 button,input[type=file]::file-selector-button,input:not([type=radio]):not([type=checkbox]):not([type=hidden]),select{min-height:44px}}
 """
+# 글자 수(2026-10-09): data-count-max가 있는 칸 옆에 "n/한도"를 보이고, 넘치면 그 칸에 머문 채 저장을 막는다(서버도 같은 한도로 거절).
+# data-count-quiet가 있으면 한도의 9할을 넘을 때만 보인다(본문처럼 큰 칸). 글자는 서버와 같이 코드 포인트로 센다.
+COUNT_SCRIPT = """<script>
+(function () {
+  function n(el) { return Array.from(el.value).length; }
+  function over(el) { return n(el) > +el.getAttribute("data-count-max"); }
+  document.querySelectorAll("[data-count-max]").forEach(function (el) {
+    var max = +el.getAttribute("data-count-max"), quiet = el.hasAttribute("data-count-quiet"), out = document.createElement("small");
+    out.className = "count"; out.setAttribute("aria-live", "polite");
+    el.insertAdjacentElement("afterend", out);
+    function show() {
+      var k = n(el), big = k > max;
+      out.hidden = quiet && k <= max * 0.9;
+      out.textContent = k.toLocaleString() + "/" + max.toLocaleString() + (big ? " · " + (k - max).toLocaleString() + "자 넘음" : "");
+      out.classList.toggle("over", big);
+      el.setAttribute("aria-invalid", big ? "true" : "false");
+    }
+    el.addEventListener("input", show); show();
+  });
+  document.addEventListener("submit", function (e) {  // 잡는 단계: 다른 저장 스크립트보다 먼저
+    var bad = Array.prototype.find.call(e.target.querySelectorAll("[data-count-max]"), over);
+    if (bad) { e.preventDefault(); e.stopPropagation(); bad.focus(); }
+  }, true);
+})();
+</script>"""
 # 받은함: 파일을 고르면 바로 올린다(자바스크립트가 꺼져 있으면 '올리기' 버튼으로). 올리는 동안 버튼 옆에 도는 표시가 보인다.
 UPLOAD_SCRIPT = """<script>
 document.querySelectorAll("form.upload input[type=file]").forEach(function (input) {
@@ -340,7 +367,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
             f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)} · Magus</title><style>{STYLE}{css}{HELP_STYLE if helper else ""}</style></head><body data-screen="{screen}">
 <header class="site"><div class="site-in"><span class="brand">Magus</span>{nav}</div></header>
-<main>{lead}<h1>{html.escape(title)}</h1>{body}</main>{helper}</body></html>""",
+<main>{lead}<h1>{html.escape(title)}</h1>{body}</main>{helper}{COUNT_SCRIPT if 'data-count-max="' in body + helper else ""}</body></html>""",
             status_code=status,
         )
 
@@ -441,7 +468,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
         if not isinstance(data, dict) or not hmac.compare_digest(str(data.get("csrf", "")).encode(), self.csrf(session[1]).encode()):
             return JSONResponse({"ok": False, "error": "잘못된 요청입니다. 화면을 새로 고쳐 주세요."}, status_code=403)
         if self.helpbot is None:
-            return JSONResponse({"ok": False, "error": "지금은 도움말을 쓸 수 없어요."}, status_code=503)
+            return JSONResponse({"ok": False, "error": UNAVAILABLE}, status_code=503)
         screen = screen_label(str(data.get("screen") or ""))
         status, body = await run_in_threadpool(self.helpbot.ask, session[0], str(data.get("q") or ""), screen, data.get("history"))
         return JSONResponse(body, status_code=status)
@@ -556,7 +583,8 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
                 return self._page("내 정보", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
             name = " ".join("".join(ch for ch in str(form.get("display_name") or "") if ch.isprintable()).split())
             if len(name) > DISPLAY_NAME_MAX:
-                message = f'<p class="msg err">표시 이름은 {DISPLAY_NAME_MAX}자까지입니다. 지금 {len(name)}자</p>'
+                message = f'<p class="msg err">표시 이름은 {DISPLAY_NAME_MAX}자까지입니다. 지금 {len(name)}자입니다.</p>'
+                profile = Profile(profile.email, name, profile.email_at, profile.name_at)  # 다시 보일 때 적은 이름 그대로
             else:
                 profile = Profile(profile.email, name or None, profile.email_at, utcnow())
                 await run_in_threadpool(self.store.save_profile, uid, profile)
@@ -566,7 +594,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
         body = (
             f'{message}<form method="post" action="/me" class="card">{self._csrf_input(session)}'
             f'<p><label>표시 이름 <input name="display_name" value="{html.escape(profile.display_name or "")}" '
-            f'maxlength="{DISPLAY_NAME_MAX}"></label></p>'
+            f'data-count-max="{DISPLAY_NAME_MAX}"></label></p>'
             f"<p>메일 {html.escape(profile.email or '—')}</p>"
             '<p><button class="primary">저장</button></p></form>'
             '<ul class="links"><li><a href="/me/contexts">자주 쓰는 컨텍스트</a></li><li><a href="/me/files">올린 파일</a></li></ul>'
@@ -629,7 +657,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages):
                                          self.settings.max_upload_bytes, self.settings.max_user_bytes).name)
             except (LimitError, ValueError) as e:
                 errors.append(f"{item.filename}: {e}")
-        flash = "\n".join([*(f"올림: {n}" for n in saved), *errors]) or "올릴 파일을 고르세요."
+        flash = "\n".join([*(f"올림: {n}" for n in saved), *errors]) or "올릴 파일을 골라 주세요."
         return await self.inbox(request, flash, bool(errors))
 
     async def delete(self, request: Request) -> Response:

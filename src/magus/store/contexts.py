@@ -55,15 +55,15 @@ class ContextMixin:
     def save_saved_context(self, user_id: str, context: SavedContext) -> SavedContext:
         clean = clean_context(context.name, context.text)
         if not clean.name:
-            raise ValueError("자주 쓰는 컨텍스트에는 이름이 있어야 한다.")
+            raise ValueError("자주 쓰는 컨텍스트에는 이름이 있어야 합니다.")
         items = self.list_saved_contexts(user_id)
         if any(name_key(c.name) == name_key(clean.name) and c.id != context.id for c in items):
-            raise ValueError(f"「{clean.name}」 컨텍스트가 이미 있다. 다른 이름을 짓는다.")
+            raise ValueError(f"「{clean.name}」 컨텍스트가 이미 있습니다. 다른 이름을 지어 주세요.")
         now = utcnow()
         index = next((n for n, c in enumerate(items) if c.id == context.id), None) if context.id else None
         if index is None:
             if len(items) >= MAX_SAVED:
-                raise ValueError(f"자주 쓰는 컨텍스트는 {MAX_SAVED}개까지다. 쓰지 않는 것을 지운 뒤 더한다.")
+                raise ValueError(f"자주 쓰는 컨텍스트는 {MAX_SAVED}개까지입니다. 쓰지 않는 것을 지운 뒤 더해 주세요.")
             saved = SavedContext("ctx-" + new_id(), clean.name, clean.text, now, now)
             items.append(saved)
         else:

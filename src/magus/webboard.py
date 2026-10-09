@@ -247,9 +247,9 @@ WRITE_SCRIPT = """<script>
     Array.prototype.forEach.call(files || [], function (f) {
       var same = chosen.some(function (c) { return c.name === f.name && c.size === f.size; });
       if (same || attached(f)) return;  // 같은 파일(이름·크기)은 한 번만
-      if (TYPES.indexOf(ext(f.name)) < 0) said.push("「" + f.name + "」 파일은 받지 않는 형식이라 뺐어요.");
-      else if (f.size > LIMIT) said.push("「" + f.name + "」 파일은 " + LIMIT_TEXT + " 한도를 넘어 뺐어요.");
-      else if (chosen.length >= MAX) said.push("첨부는 한 번에 " + MAX + "개까지라 「" + f.name + "」 파일은 뺐어요.");
+      if (TYPES.indexOf(ext(f.name)) < 0) said.push("「" + f.name + "」 파일은 받지 않는 형식이라 뺐습니다.");
+      else if (f.size > LIMIT) said.push("「" + f.name + "」 파일은 " + LIMIT_TEXT + " 한도를 넘어 뺐습니다.");
+      else if (chosen.length >= MAX) said.push("첨부는 한 번에 " + MAX + "개까지라 「" + f.name + "」 파일은 뺐습니다.");
       else chosen.push(f);
     });
     note.textContent = said.join(" ");
@@ -265,7 +265,7 @@ WRITE_SCRIPT = """<script>
       var x = document.createElement("button"); x.type = "button"; x.className = "unpick"; x.textContent = "✕";
       x.setAttribute("aria-label", f.name + " 빼기"); x.title = "빼기";
       x.addEventListener("click", function () {
-        chosen.splice(i, 1); note.textContent = "「" + f.name + "」 파일을 뺐어요."; show();
+        chosen.splice(i, 1); note.textContent = "「" + f.name + "」 파일을 뺐습니다."; show();
         var next = list.querySelectorAll("button.unpick")[Math.min(i, chosen.length - 1)];
         (next || zone.querySelector("input[type=file]")).focus();
       });
@@ -286,7 +286,7 @@ WRITE_SCRIPT = """<script>
     fetch(form.action, { method: "POST", body: data, credentials: "same-origin" }).then(function (r) {
       if (r.redirected) { location.href = r.url; return; }
       return r.text().then(function (page) { document.open(); document.write(page); document.close(); });
-    }).catch(function () { button.disabled = false; note.textContent = "저장하지 못했어요. 다시 눌러 주세요."; });
+    }).catch(function () { button.disabled = false; note.textContent = "저장하지 못했습니다. 다시 눌러 주세요."; });
   });
 })();
 </script>"""
@@ -324,6 +324,11 @@ def star_html(link: str, on: bool, csrf: str, back: str, head: bool = False) -> 
     return (f'<form class="star{" head" if head else ""}" method="post" action="{html.escape(link)}/scrap">{csrf}'
             f'<input type="hidden" name="on" value="{"0" if on else "1"}"><input type="hidden" name="next" value="{html.escape(back)}">'
             f'<button aria-pressed="{"true" if on else "false"}" aria-label="스크랩" title="스크랩">{"★" if on else "☆"}</button></form>')
+
+
+def too_long(what: str, text: str, limit: int) -> str:
+    """넘치면 안내 한 문장(자르지 않는다, 2026-10-09). 맞으면 빈 문자열."""
+    return f"{what}은 {limit:,}자까지입니다. 지금 {len(text):,}자입니다." if len(text) > limit else ""
 
 
 def search_line(q: str, count: int, clear: str) -> str:
@@ -650,13 +655,16 @@ class BoardPages:
                 form = await self._form(request, session)
             except PermissionError:
                 return self._shelf_page("글쓰기", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-            content = str(form.get("content") or "").strip()[:CONTENT_MAX]
-            title = one_line(str(form.get("title") or ""))[:TITLE_MAX] or None
+            content = str(form.get("content") or "").strip()
+            title = one_line(str(form.get("title") or "")) or None
             files, code = await self._read_files(uid, form)
-            if code:
-                return RedirectResponse(f"{here}?error={code}", status_code=303)
-            if not content and not title and not files:
-                return RedirectResponse(f"{here}?error=empty", status_code=303)
+            error = (too_long("제목", title or "", TITLE_MAX) or too_long("본문", content, CONTENT_MAX)  # 자르지 않는다(2026-10-09)
+                     or self._write_error(code) or ("" if content or title or files else self._write_error("empty")))
+            if error:  # 적은 제목·본문은 그대로 다시(첨부는 브라우저가 다시 고르게 한다)
+                body = (f'<p class="msg err">{html.escape(error)}</p>'
+                        + self._write_form(session, here, f"/shelf/{book}", title=title or "", content=content))
+                lead = await run_in_threadpool(self.trail, uid, kind.key, "글쓰기")
+                return self._shelf_page("글쓰기", body, session, 400, lead=lead)
             title = title or title_from_files(name for name, _ in files)  # 제목이 비고 첨부가 있으면 첫 첨부의 파일 이름(2026-10-09)
 
             def save() -> CategoryItem:
@@ -672,7 +680,7 @@ class BoardPages:
             item = await run_in_threadpool(save)
             return RedirectResponse(f"/shelf/{book}/{item.id}", status_code=303)
         error = self._write_error(request.query_params.get("error") or "")
-        body = (f'<p class="msg err">{error}</p>' if error else "") + self._write_form(session, here, f"/shelf/{book}")
+        body = (f'<p class="msg err">{html.escape(error)}</p>' if error else "") + self._write_form(session, here, f"/shelf/{book}")
         lead = await run_in_threadpool(self.trail, uid, kind.key, "글쓰기")
         return self._shelf_page("글쓰기", body, session, 400 if error else 200, lead=lead)
 
@@ -686,11 +694,11 @@ class BoardPages:
             f'aria-label="{html.escape(a.name)} 빼기"><span class="x" aria-hidden="true">✕ 빼기</span>'
             '<span class="undo" aria-hidden="true">빼지 않기</span></label></li>' for a in current)
         head = (f'<h2 class="ref-title">{html.escape(heading)}</h2>' if heading else
-                f'<label class="block">제목 <input name="title" value="{html.escape(title)}" maxlength="{TITLE_MAX}"></label>')
+                f'<label class="block">제목 <input name="title" value="{html.escape(title)}" data-count-max="{TITLE_MAX}"></label>')
         return (
             f'<form method="post" action="{html.escape(action)}" enctype="multipart/form-data" class="card write-form">'
             f'{self._csrf_input(session)}{head}'
-            f'<label class="block">본문 <textarea name="content" rows="10" maxlength="{limit}">{html.escape(content)}</textarea></label>'
+            f'<label class="block">본문 <textarea name="content" rows="10" data-count-max="{limit}" data-count-quiet>{html.escape(content)}</textarea></label>'
             '<fieldset><legend>첨부</legend>'
             + (f'<ul class="current" aria-label="지금 첨부">{rows}</ul>' if rows else "")
             + f'<div class="dropzone" data-dropzone data-max="{MAX_FILES}" data-limit="{attach_limit}" data-limit-text="{mb(attach_limit)}" '
@@ -726,10 +734,10 @@ class BoardPages:
             return self.error_page(request, 404, "글자를 볼 수 있는 첨부가 아닙니다(docx·pdf·txt·md).", session)
         state = status["status"]
         line = {"ok": f"글자 {status['chars']:,}자",
-                "truncated": f"30만 자가 넘어 앞부분 {status['chars']:,}자만 뽑았어요",
-                "empty": "글자 없음(그림이나 스캔한 PDF일 수 있어요)",
-                "failed": "글자를 뽑지 못했어요(깨진 파일이거나 암호가 걸린 파일)",
-                "later": "아직 뽑는 중이에요. 잠시 뒤 다시 열어 주세요."}.get(state, "")
+                "truncated": f"30만 자가 넘어 앞부분 {status['chars']:,}자만 뽑았습니다.",
+                "empty": "글자가 없습니다(그림이나 스캔한 PDF일 수 있습니다).",
+                "failed": "글자를 뽑지 못했습니다(깨진 파일이거나 암호가 걸린 파일).",
+                "later": "아직 뽑는 중입니다. 잠시 뒤 다시 열어 주세요."}.get(state, "")
         link = f"/shelf/{kind.key}/{urllib.parse.quote(obj.id if isinstance(obj, CategoryItem) else obj.key)}"
         body = (f'<p class="att-head"><b>{html.escape(hit[1].name)}</b> · {html.escape(line)}</p>'
                 + (f'<pre class="att-text">{html.escape(text)}</pre>' if text else "")
@@ -798,16 +806,17 @@ class BoardPages:
                 form = await self._form(request, session)
             except PermissionError:
                 return self._shelf_page("고치기", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-            content = str(form.get("content") or "").strip()[:limit]
-            title = one_line(str(form.get("title") or ""))[:TITLE_MAX] or None
+            content = str(form.get("content") or "").strip()
+            title = one_line(str(form.get("title") or "")) or None
             files, code = await self._read_files(uid, form)
             current = await run_in_threadpool(self.store.list_attachments, uid, owner)
             asked = {str(v) for v in form.getlist("drop")}
             drops = [a.id for a in current if a.id in asked]
             left = len(current) - len(drops) + len(files)
-            if code:
-                return RedirectResponse(f"{here}?error={code}", status_code=303)
-            if is_item and not (content or title or any(obj.fields.values()) or obj.passages or left > 0):
+            error = too_long("제목", title or "", TITLE_MAX) or too_long("본문", content, limit) or self._write_error(code)
+            if error:  # 자르지 않고 거절, 적은 것은 그대로 다시(2026-10-09)
+                title_text, text = title or "", content
+            elif is_item and not (content or title or any(obj.fields.values()) or obj.passages or left > 0):
                 error, title_text, text = self._write_error("empty"), title or "", content
             else:
                 if is_item and not title:  # 제목이 비고 첨부가 남으면 첫 첨부의 파일 이름(2026-10-09)
@@ -818,7 +827,7 @@ class BoardPages:
             error = self._write_error(request.query_params.get("error") or "")
         current = await run_in_threadpool(self.store.list_attachments, uid, owner)
         heading = "" if is_item else cite_label(obj, obj.key)
-        body = ((f'<p class="msg err">{error}</p>' if error else "")
+        body = ((f'<p class="msg err">{html.escape(error)}</p>' if error else "")
                 + self._write_form(session, here, link, title=title_text, content=text, heading=heading, current=current, limit=limit))
         lead = await run_in_threadpool(self.trail, uid, kind.key, "고치기")
         return self._shelf_page("고치기", body, session, 400 if error else 200, lead=lead)
