@@ -267,6 +267,27 @@ MCP 도구 23개 그대로(category_search `attachment`·`page`, category_edit `
 
 **되돌리기**: `docker tag magus:rollback-458ffb9 magus:latest && docker compose up -d --no-build`.
 
+### 2-8. 구조·버그 점검 결과 고치기(웹만) — 2026-10-09 사용자 승인
+
+반영 전 서버는 `p1-search-rank`(`58ce884`), 반영할 것은 태그 `p1-fix-ui`(`fix-1-cite-cache`~`fix-12-small` 뒤). **데이터 이전 없음, 인덱스 v23 그대로.**
+새로 생길 수 있는 것은 파생값·옮긴 것뿐이다: 프로젝트 폴더의 `.cache/cites.json`(인용 계산 캐시, 화면을 열 때 생긴다)과 `trash/projects/`(프로젝트 휴지통).
+도구 설명·instructions는 그대로 → **커넥터 재연결 필요 없음**. 의존성·Dockerfile·deploy 그대로.
+
+1. **기록·백업**(`private/tmp/deploy-fixui/pre.sh`): head, `.env` 해시, data 해시(index 제외), 옛 코드 수치·전체 현황, 옛 코드 인용 상태 계산 시간(읽기만), 손 백업.
+2. **되돌리기 이미지·빌드**(`build.sh`): `magus:rollback-58ce884` → 번들 fetch → `git checkout -B master p1-fix-ui` → build.
+3. **올리기·확인**(`up.sh`): healthy → `/healthz`·`/mcp` 401·없는 주소 404 오류 화면·POST 전용 주소 GET 303 → 인덱스 v23 → 수치·전체 현황 전후 →
+   인용 상태 계산 시간(새 코드, 캐시는 메모리에만 두어 사용자 공간에 쓰지 않는다) → data 해시(`.cache`·`trash/projects` 빼고 같아야) → 컨테이너 안 /tmp 점검.
+   - 컨테이너 안 /tmp에 넣은 파일은 root 것이라 `docker exec -u 0 … rm`으로 지운다(앱 사용자 10001은 지우지 못한다 — 지난 배포들의 마지막 rm도 실패했었다).
+
+반영 기록(2026-10-09 18:35 서버 시각): `58ce884` → `409242d`. 백업 `8eb92b70`(2,363개, 오류 없음), healthy·재시작 0, 오류 로그 0, `.env` 같음,
+data 2,363개 해시 같음(.cache·trash/projects 0개), 수치·전체 현황 전후 같음(default 299·297·0·86 3개 프로젝트, father 337·335·5·129·E3),
+없는 주소 404(찾을 수 없습니다·돌아가기), `/shelf/projects` GET → 303 /shelf, /tmp 점검 9/9, 메모리 111MiB, 디스크 76%. 기록 `/root/deploy-20261009-fixui/`.
+인용 상태 계산(인용 집계 + 답해 주실 질문): default 8.0~8.7초 → 처음 7.9초·다음 0.12초, father 12.8~13.4초 → 처음 11.8초·다음 0.15초.
+
+**되돌리기**: `docker tag magus:rollback-58ce884 magus:latest && docker compose up -d --no-build`(인덱스 v23 그대로). 옛 코드는 `.cache/`와 `trash/projects/`를 읽지 않는다
+(시험본에서 확인). 되돌린 동안 휴지통에 있는 프로젝트는 옛 코드에서 그냥 없는 프로젝트로 보이고 되살릴 수 없다 — 새 코드로 다시 올리거나 manifest.json의
+paths를 `files/`에서 사용자 폴더로 옮긴 뒤 `magus reindex`.
+
 ## 3. 알림 확인
 
 ```sh
