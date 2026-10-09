@@ -53,6 +53,8 @@ WHO = {"me": "저자의 말", "ai": "Claude가 쓴 글"}
 NODE_TEMPLATES = ("노드", "연결 노드")
 KEPT = "지운 것이 아니라 옮긴 것이라 운영자가 되살릴 수 있다."
 SOURCE_LIGHT = {"verified": "원문 확인", "unverified": "원문 확인 전"}
+SEARCH_POOL = 300  # 대화 찾기에서 살펴보는 조각 수(책별 개수를 세는 범위, #101)
+PER_BOOK = 4  # 책을 말하지 않은 찾기에서 한 책이 먼저 차지하는 칸(#101)
 
 
 class PartIn(BaseModel):
@@ -520,7 +522,8 @@ def build_tools(
         # 문헌 글은 서지·key·한글 표기·첨부 이름(ref_bib)으로도 찾는다(2026-10-09 #100: 웹 찾기와 같게). 찾기는 넓게, 인용은 원문 확인 글의 쓸 부분만
         lanes: list[Any] = ["category", "ref_bib", "ref_picked", *(["ref_full"] if full else []), "attach_text"]  # 첨부 글자는 맨 뒤(#100)
         hits: list[tuple[str, Any, Any]] = []  # (책 id, 글 또는 문헌, 맞은 청크)
-        seen: set[str] = set()
+        best: dict[str, tuple[int, int, tuple[str, Any, Any]]] = {}  # 글·문헌 하나에 가장 좋은 맞음 하나: (등급, 차례, hit)
+        chunks = find_chunks(store, user, lanes, query, SEARCH_POOL, embedder) if query else []
         if not query:  # 스크랩한 글 전체(최근 것부터)
             starred: list[tuple[str, Any, Any]] = [
                 *((i.category_id, i, None) for i in store.list_category_items(user)
@@ -528,36 +531,45 @@ def build_tools(
                 *((r.book, r, None) for r in store.list_refs(user)
                   if r.scrap and r.book in books and (not only or r.book == only.key) and author != "ai")]
             hits = sorted(starred, key=lambda h: h[1].created_at, reverse=True)
-        for chunk in (find_chunks(store, user, lanes, query, k * 6, embedder) if query else []):
+        for order, chunk in enumerate(chunks):
             if chunk.owner_type == "category":  # 글(본문·칸·첨부 이름, 첨부 글자 #100)
                 cid, _, iid = chunk.owner_id.partition("/")
-                if cid not in books or (only and cid != only.key) or chunk.owner_id in seen:
+                if cid not in books or (only and cid != only.key):
                     continue
                 item = store.get_category_item(user, cid, iid)
                 if item is None or (author != "all" and item.author != author) or (scrap_only and not item.scrap):
                     continue
-                seen.add(chunk.owner_id)
-                hits.append((cid, item, chunk))
+                key, hit = f"item:{chunk.owner_id}", (cid, item, chunk)
             else:
                 ref = store.get_ref(user, chunk.owner_id)
                 if ref is None or ref.book not in books or (only and ref.book != only.key) or author == "ai" or (scrap_only and not ref.scrap):
                     continue
-                mark = f"{ref.key}/{chunk.lane}/{chunk.text[:40]}"
-                if mark in seen or (chunk.lane == "ref_bib" and any(isinstance(h[1], Ref) and h[1].key == ref.key for h in hits)):
-                    continue  # 서지로 맞은 문헌은 한 번(쓸 부분으로 이미 보였으면 다시 보이지 않는다)
-                seen.add(mark)
-                hits.append((ref.book, ref, chunk))
-            if len(hits) >= k * 2:
-                break
-        if author == "all":  # 저자의 말을 먼저(같은 쪽 안에서는 검색 순위 그대로)
-            hits.sort(key=lambda h: isinstance(h[1], CategoryItem) and h[1].author == "ai")
-        hits = hits[:k]
+                # 문헌은 전처럼 쓸 부분·원문 조각마다 한 줄(서지로만 맞은 줄은 다른 줄이 있으면 뺀다), 첨부 글자는 한 줄
+                part = "" if chunk.lane == "ref_bib" else "/attach" if chunk.lane == "attach_text" else f"/{chunk.lane}/{chunk.text[:40]}"
+                key, hit = f"ref:{ref.key}{part}", (ref.book, ref, chunk)
+            grade = match_grade(chunk, query)
+            if key not in best or grade < best[key][0]:  # 글·문헌 하나는 한 번, 가장 좋은 맞음으로
+                best[key] = (grade, order, hit)
+        shown_refs = {k.split("/", 1)[0] for k in best if k.startswith("ref:") and "/" in k}
+        best = {k: v for k, v in best.items() if not (k.startswith("ref:") and "/" not in k and k in shown_refs)}
+        # 순위(#101): 제목·본문·쓸 부분 > 첨부 글자·원문 > 서지·key·한글 표기·첨부 이름만. 같은 등급 안에서는 저자의 말 먼저, 그다음 찾기 순위
+        ranked = [h for _, _, h in sorted(best.values(), key=lambda v: (v[0], author == "all" and isinstance(v[2][1], CategoryItem)
+                                                                        and v[2][1].author == "ai", v[1]))]
+        owners: dict[str, set[str]] = {}  # 책별 개수는 글·문헌 수(한 문헌의 여러 조각은 하나로)
+        for cid, obj, _ in ranked:
+            owners.setdefault(cid, set()).add(obj.id if isinstance(obj, CategoryItem) else f"ref:{obj.key}")
+        counts = {cid: len(found) for cid, found in owners.items()}
+        hits = (ranked[:k] if only else spread(ranked, k)) if query else hits[:k]  # 스크랩 목록은 최근 것부터 k개
         where = (f"「{only.name}」" if only else "모든 책") + (" · 스크랩만" if scrap_only else "")
         asked = f"category_search {query!r}" if query else "category_search"
         if not hits:
             return f"{asked} ({where}): 결과 없음." + (" 스크랩(★)한 글이 없다." if scrap_only and not query else "")
         lines = [f"{asked} ({where}) — {len(hits)}건. author=me 글이 저자의 말이다. 인용은 '원문 확인' 문헌 글의 쓸 부분만 쓴다."
                  + (" ★는 저자가 스크랩(중요 표시)한 글이다." if any(h[1].scrap for h in hits) else "")]
+        if query and not only:  # 책마다 몇 개 맞았는지(#101): 한 책이 결과를 차지하지 않게 책마다 PER_BOOK개까지 보인다
+            more = " 이상" if len(chunks) >= SEARCH_POOL else ""
+            lines.append("책별 개수: " + " · ".join(f"{books[cid].name} {n}" for cid, n in counts.items())
+                         + f"{more} — 한 책만 보려면 book=책 이름(책마다 {PER_BOOK}개까지 보였다)")
         multi = len({books[h[0]].floor for h in hits}) > 1
         names: dict[str, dict[int, str]] = {}
         groups: dict[str, list[tuple[Any, Any]]] = {}
@@ -577,6 +589,42 @@ def build_tools(
                     lines += source_lines(user, n, obj, chunk)
                     lines += attach_hit(user, f"ref:{obj.key}", chunk, query)
         return "\n".join(lines)
+
+    def match_grade(chunk: Any, query: str) -> int:
+        """맞은 곳의 등급(#101): 0 제목·본문·쓸 부분(칸·이유·태그 포함) · 1 첨부 글자·원문 · 2 서지·key·한글 표기·첨부 이름만."""
+        if chunk.lane in ("attach_text", "ref_full"):
+            return 1
+        if chunk.lane == "ref_bib":
+            return 2
+        if chunk.lane == "category":  # 글의 색인 조각 끝에 '첨부: 이름…' 줄이 있다. 거기서만 맞았으면 이름만 맞은 것
+            lines = chunk.text.split("\n")
+            names = "\n".join(x for x in lines if x.startswith("첨부: "))
+            body = "\n".join(x for x in lines if not x.startswith("첨부: "))
+            if names and not contains(body, query) and contains(names, query):
+                return 2
+        return 0
+
+    def contains(text: str, query: str) -> bool:
+        low = text.lower()
+        phrases, words = query_parts(query)
+        return any(t and t.lower() in low for t in [*phrases, *words, *tokens(query)])
+
+    def spread(ranked: list[tuple[str, Any, Any]], k: int) -> list[tuple[str, Any, Any]]:
+        """책을 말하지 않은 찾기(#101): 책마다 PER_BOOK개까지 먼저 고르고, 남는 칸은 순위대로 채운다(다른 책에 결과가 없을 때).
+        고른 것은 순위 차례 그대로."""
+        chosen: set[int] = set()
+        per: dict[str, int] = {}
+        for n, (cid, _, _) in enumerate(ranked):
+            if len(chosen) >= k:
+                break
+            if per.get(cid, 0) < PER_BOOK:
+                chosen.add(n)
+                per[cid] = per.get(cid, 0) + 1
+        for n in range(len(ranked)):
+            if len(chosen) >= k:
+                break
+            chosen.add(n)
+        return [h for n, h in enumerate(ranked) if n in chosen]
 
     def attach_hit(user: str, owner: str, chunk: Any, query: str) -> list[str]:
         """첨부 글자에서 맞았으면(#100) 어느 첨부의 어느 부분인지: 앞뒤 100자와 쪽 번호, 읽는 법."""
