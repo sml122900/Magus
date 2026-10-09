@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -50,15 +51,18 @@ def test_refs_changed_warms_in_background(store: LocalStore, warming: None):
 def test_same_project_is_queued_once(store: LocalStore, warming: None, monkeypatch: pytest.MonkeyPatch):
     _book(store)
     calls: list[str] = []
-    gate = __import__("threading").Event()
+    started, gate = threading.Event(), threading.Event()
 
     def slow(_store, _user, project_id):
+        started.set()
         gate.wait(10)
         calls.append(project_id)
 
     monkeypatch.setattr("magus.melchior.cache.warm", slow)
-    for _ in range(5):
-        warmer.schedule(store, "alice", ["book"])  # 첫 것은 일꾼이 들고, 나머지 넷은 줄에 한 번
+    warmer.schedule(store, "alice", ["book"])
+    assert started.wait(10)  # 일꾼이 첫 것을 들고 계산 중
+    for _ in range(4):
+        warmer.schedule(store, "alice", ["book"])  # 그동안 넷 → 줄에는 한 번
     gate.set()
     assert warmer.wait_idle(30)
     assert calls == ["book", "book"]
