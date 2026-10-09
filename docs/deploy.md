@@ -263,6 +263,8 @@ MCP 도구 23개 그대로(category_search `attachment`·`page`, category_edit `
 반영 전 서버는 `p1-attach-text`(`458ffb9`), 반영할 것은 태그 `p1-search-rank`(`rank-1-search`·`rank-2-ask-check` 뒤). **데이터 이전 없음, 인덱스 v23 그대로**(다시 만들지 않는다).
 바뀌는 것은 대화 찾기(category_search)의 결과 순서·책별 제한·개수 줄과 instructions 규칙 2 → **커넥터 재연결**. 도구 설명·웹 그대로.
 절차는 2-6절과 같다(`private/tmp/deploy-rank/` pre.sh → build.sh → up.sh, 첨부 글자 단계는 '이미'만 나와야 한다).
+반영 기록: `458ffb9` → `58ce884`. 백업 `c8a063b8`, healthy, data 2,332개 해시(.text 포함) 같음, 수치 전후 같음(father 337·335·5·129·E3), /tmp 점검 6/6.
+
 **되돌리기**: `docker tag magus:rollback-458ffb9 magus:latest && docker compose up -d --no-build`.
 
 ## 3. 알림 확인

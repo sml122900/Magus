@@ -34,7 +34,8 @@
   응답 머리에 컨텍스트 전문. 이전은 `magus maps apply`에 합침(`docs/decisions/contexts.md`, 문구 전후 `contexts-texts.md`, status.md 0-19절). 2026-10-08 21:47 묶음 배포(`p1-contexts`).
   **사용자 답(2026-10-08 저녁)**: d·s는 바꿔서, 나머지 승인. d = 노드 → 책 순서로 컨텍스트를 이어 읽는다(합쳐 1,000자). s = 일반 기능의 '원고' → '올린 문서'
   (instructions 머리말·1·4·6·7·8·12, 화면·도구 응답·설명). 도구 목록 8,450토큰, instructions 2,259토큰. #93~#96 묶음은 사용자 확인 뒤 배포했다(status.md 0-20절).
-- **서버(2026-10-09 14:57부터): master `p1-attach-text`(`458ffb9`, #100 첨부 글자·대화 검색 범위·예약어, 데이터 이전 없음·인덱스 v23, 기존 첨부 글자 2개 뽑음, status.md 0-26절, `docs/deploy.md` 2-6절). 되돌리기 기준 `d692855`(이미지 `magus:rollback-d692855`, 이미지만 되돌리면 된다).**
+- **서버(2026-10-09 오후부터): master `p1-search-rank`(`58ce884`, #101 대화 검색 순위·원문 확인 묻기, 데이터 이전 없음·인덱스 v23, status.md 0-27절, `docs/deploy.md` 2-7절). 되돌리기 기준 `458ffb9`(이미지 `magus:rollback-458ffb9`).**
+- 그 전 서버(2026-10-09 14:57부터): master `p1-attach-text`(`458ffb9`, #100 첨부 글자·대화 검색 범위·예약어, 데이터 이전 없음·인덱스 v23, 기존 첨부 글자 2개 뽑음, status.md 0-26절, `docs/deploy.md` 2-6절). 되돌리기 기준 `d692855`(이미지 `magus:rollback-d692855`, 이미지만 되돌리면 된다).**
 - 그 전 서버(2026-10-09 13:50부터): master `p1-edit-scrap`(`d692855`, #99 웹 수정 묶음, 인덱스 v22, status.md 0-25절, `docs/deploy.md` 2-5절). 되돌리기 기준 `0e0c89e`(이미지 `magus:rollback-0e0c89e`).
 - 그 전 서버(2026-10-09 03:13부터): master `p1-board`(`0e0c89e`, #98 + 배포 전 수정, 데이터 이전 없음, status.md 0-24절, `docs/deploy.md` 2-4절). 되돌리기 기준 `ed15ffb`(이미지 `magus:rollback-ed15ffb`).
 - 그 전 서버(2026-10-09 00:33부터): master `p1-razor`(`ed15ffb`, #97, 데이터 이전 없음, status.md 0-22절). 되돌리기 기준 `efc19ac`(이미지 `magus:rollback-efc19ac`).
