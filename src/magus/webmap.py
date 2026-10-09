@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import html
 import json
+from dataclasses import dataclass
 import re
 import urllib.parse
 from collections.abc import Awaitable, Callable
@@ -39,14 +40,28 @@ from magus.store.formats import one_line
 from magus.store.maps import MapError
 from magus.webboard import post_row_html, search_line
 from magus.webmap_assets import MAP_SCRIPT, MAP_STYLE, PROJECTS_STYLE, TRASH_STYLE
-from magus.contexts import View
-from magus.webcontexts import CONTEXT_SCRIPT, CONTEXT_STYLE, context_fieldset, contexts_from_form, contexts_view_html, register_row
+from magus.contexts import Context, View
+from magus.webcontexts import (CONTEXT_SCRIPT, CONTEXT_STYLE, context_fieldset, contexts_as_typed, contexts_from_form, contexts_view_html,
+                               register_row)
 from magus.webshelf import (
     GROUP_SIZE, Book, Kind, add_book, book_html, category_kind, clean_query, find,
     safe_at, shelf_html, state_url, text_color,
 )
 
 PROJECT_TITLE_MAX = 120
+
+
+@dataclass(frozen=True)
+class NodeDraft:
+    """거절(400)한 노드 폼에 적었던 것(2026-10-09 결정 d). action: add_node(이름·고른 단추·직접 적은 글) | contexts(줄 그대로)."""
+
+    action: str
+    name: str = ""
+    contexts: tuple[Context, ...] = ()
+    picks: frozenset[str] = frozenset()
+    new_text: str = ""
+
+
 WHEN = "%m-%d %H:%M"
 _NEXT = re.compile(r"/shelf(/[A-Za-z0-9_.\-/%]*)?")
 _ID = re.compile(r"[A-Za-z0-9_.\-]{1,80}")
@@ -177,17 +192,26 @@ class MapPages:
             hits = [g for g in groups if g]
             head = f'<p class="crumb"><a href="/shelf">← 프로젝트</a></p>{form}{search_line(q, count, "/shelf")}'
             return self._map_page("프로젝트", head + "".join(hits), session, css=PROJECTS_STYLE)
-        notices = await run_in_threadpool(self._notices, uid, request, session, "/shelf")
-        cards = await run_in_threadpool(self._project_cards, uid, floors, session)
+        return await self._project_list_page(request, session)
+
+    async def _project_list_page(self, request: Request, session: tuple[str, str], error: str = "", status: int = 200,
+                                 draft_title: str = "") -> Response:
+        """프로젝트 목록. error·draft_title: 새 프로젝트 제목을 거절한 뒤(400) 오류 한 줄과 적었던 제목."""
+        uid = session[0]
+        floors = await run_in_threadpool(self.store.list_floors, uid)
+        form = ('<form method="get" action="/shelf" class="search" role="search">'
+                '<input type="search" name="q" value="" aria-label="모든 프로젝트에서 찾기"><button>찾기</button></form>')
+        notices = error + await run_in_threadpool(self._notices, uid, request, session, "/shelf")
+        cards = await run_in_threadpool(self._project_cards, uid, floors, session, draft_title)
         from magus.webbooks import UPLOAD_PROGRESS  # noqa: PLC0415
 
         trashed = len(await run_in_threadpool(self.store.list_trashed_projects, uid))
         body = (f"{notices}{form}<ul class=\"projects\">{cards}</ul>{UPLOAD_PROGRESS}"
                 '<p class="muted"><a href="/shelf/export.zip">전체 내려받기(zip)</a> · '
                 f'<a href="/shelf/trash">휴지통{f" {trashed}" if trashed else ""}</a></p>')
-        return self._map_page("프로젝트", body, session, css=PROJECTS_STYLE)
+        return self._map_page("프로젝트", body, session, status, css=PROJECTS_STYLE)
 
-    def _project_cards(self, uid: str, floors: list[Floor], session: tuple[str, str]) -> str:
+    def _project_cards(self, uid: str, floors: list[Floor], session: tuple[str, str], draft_title: str = "") -> str:
         from magus.webbooks import IMPORTING, progress_box  # noqa: PLC0415
 
         library = [f for f in floors if f.common]
@@ -210,7 +234,8 @@ class MapPages:
             '<input type="file" name="file" accept=".docx,.pdf" required aria-label="문서 파일(docx·pdf)">'
             f'<p><button class="primary">올리기</button></p>{progress_box()}</form>'
             f'<form method="post" action="/shelf/projects">{csrf}'
-            f'<label class="block">제목 <input name="title" data-count-max="{PROJECT_TITLE_MAX}" required></label>'
+            f'<label class="block">제목 <input name="title" value="{html.escape(draft_title)}" data-count-max="{PROJECT_TITLE_MAX}" required>'
+            '</label>'
             '<p><button>만들기</button></p></form></li>'
             if room else f'<li class="pcard new"><p class="muted">{MAX_FLOORS}개 가득</p></li>'
         )
@@ -228,8 +253,9 @@ class MapPages:
         title = one_line(str(form.get("title") or ""))
         if not title:
             return RedirectResponse("/shelf?projecterr=empty", status_code=303)
-        if len(title) > PROJECT_TITLE_MAX:  # 자르지 않고 거절(2026-10-09)
-            return RedirectResponse(f"/shelf?projecterr=long&n={len(title)}", status_code=303)
+        if len(title) > PROJECT_TITLE_MAX:  # 자르지 않고 거절, 적은 제목은 칸에 그대로(2026-10-09 결정 e)
+            said = f"제목은 {PROJECT_TITLE_MAX}자까지입니다. 지금 {len(title)}자입니다."
+            return await self._project_list_page(request, session, f'<p class="msg err">{html.escape(said)}</p>', 400, title)
         try:
             project = await run_in_threadpool(self.store.create_project, uid, title)
         except ValueError:
@@ -297,8 +323,10 @@ class MapPages:
             node = found.node_of(book_key)
         return node
 
-    async def project_page(self, request: Request, error: str = "", status: int = 200, node_id: str | None = None) -> Response:
-        """error: 지도 위에 보일 오류 한 줄(이미 HTML, 예: 노드 컨텍스트가 너무 길 때 400). 없는 노드 주소는 지도에 '없는 노드입니다.'(404)."""
+    async def project_page(self, request: Request, error: str = "", status: int = 200, node_id: str | None = None,
+                           draft: NodeDraft | None = None) -> Response:
+        """error: 지도 위에 보일 오류 한 줄(이미 HTML, 예: 노드 컨텍스트가 너무 길 때 400). 없는 노드 주소는 지도에 '없는 노드입니다.'(404).
+        draft: 거절한 폼에 적었던 것. 그 폼을 펼쳐 다시 채운다(2026-10-09 결정 d)."""
         session = self.user_of(request)
         if not session:
             return self._need_login(request)
@@ -324,10 +352,12 @@ class MapPages:
             search = (f'<section class="pm-results" aria-label="찾은 것">{search_line(q, count, state_url(floor_id))}'
                       f"{result}</section>")
         bar = self._toolbar(floor, found, q, view)
-        new_node = await run_in_threadpool(self._new_node_form, uid, session, floor, found)
+        new_node = await run_in_threadpool(self._new_node_form, uid, session, floor, found,
+                                           draft if draft and draft.action == "add_node" else None)
         map_html = await run_in_threadpool(self._map_html, uid, found, node)
         list_html = await run_in_threadpool(self._list_html, uid, floor, found, node)
-        panel = await run_in_threadpool(self._panel_html, uid, session, floor, found, node)
+        panel = await run_in_threadpool(self._panel_html, uid, session, floor, found, node,
+                                        draft if draft and draft.action == "contexts" else None)
         data = {"project": floor_id, "csrf": self.csrf(session[1]), "post": f"/shelf/p/{urllib.parse.quote(floor_id)}/map",
                 "panel": f"/shelf/p/{urllib.parse.quote(floor_id)}/panel", "page": f"/shelf/p/{urllib.parse.quote(floor_id)}",
                 "nodes": [{"id": n.id, "x": n.x, "y": n.y} for n in found.nodes], "edges": [list(e) for e in found.edges]}
@@ -357,8 +387,9 @@ class MapPages:
             f'<a class="btn" href="/shelf/p/{urllib.parse.quote(floor.id)}/trash">휴지통</a></div></div>'
         )
 
-    def _new_node_form(self, uid: str, session: tuple[str, str], floor: Floor, found: ProjectMap) -> str:
-        """'+ 노드': 새 노드(이름) 또는 다른 프로젝트의 노드를 연결. 지도의 빈 곳을 두 번 누르면 그 자리로 열린다."""
+    def _new_node_form(self, uid: str, session: tuple[str, str], floor: Floor, found: ProjectMap, draft: NodeDraft | None = None) -> str:
+        """'+ 노드': 새 노드(이름) 또는 다른 프로젝트의 노드를 연결. 지도의 빈 곳을 두 번 누르면 그 자리로 열린다.
+        draft가 있으면(거절한 뒤) 펼친 채 적었던 이름·고른 단추·직접 적은 글을 다시 채운다."""
         csrf = self._csrf_input(session)
         post = f"/shelf/p/{urllib.parse.quote(floor.id)}/map"
         groups = []
@@ -382,20 +413,26 @@ class MapPages:
                 f'<label class="block">연결 노드 <select name="target" required>{"".join(groups)}</select></label>'
                 '<p><button>연결</button></p></form>' if groups else "")
         saved = self.store.list_saved_contexts(uid)
+        picks = draft.picks if draft else frozenset()
         chips = "".join(
-            f'<label class="chip-toggle"><input type="checkbox" name="ctx_pick" value="{html.escape(c.id)}">{html.escape(c.name)}</label>'
+            f'<label class="chip-toggle"><input type="checkbox" name="ctx_pick" value="{html.escape(c.id)}"'
+            f'{" checked" if c.id in picks else ""}>{html.escape(c.name)}</label>'
             for c in saved)
+        typed = draft.new_text if draft else ""
         contexts = (
             '<fieldset class="ctx ctx-mini"><legend>컨텍스트</legend>'
             + (f'<div class="chips" role="group" aria-label="자주 쓰는 컨텍스트">{chips}</div>' if chips else "")
-            + '<details><summary>직접 적기</summary><label class="block">내용 <textarea name="ctx_new" data-count-max="500" rows="2">'
+            + f'<details{" open" if typed else ""}><summary>직접 적기</summary>'
+            f'<label class="block">내용 <textarea name="ctx_new" data-count-max="500" rows="2">{html.escape(typed)}'
             "</textarea></label></details></fieldset>"
         )
         return (
-            '<details class="pm-new" id="new-node"><summary class="btn primary-ish">+ 노드</summary><div class="pm-new-in">'
+            f'<details class="pm-new" id="new-node"{" open" if draft else ""}><summary class="btn primary-ish">+ 노드</summary>'
+            '<div class="pm-new-in">'
             f'<form method="post" action="{post}" class="pm-form">{csrf}<input type="hidden" name="action" value="add_node">'
             '<input type="hidden" name="x"><input type="hidden" name="y">'
-            f'<label class="block">이름 <input name="name" data-count-max="{NODE_NAME_MAX}" required></label>'
+            f'<label class="block">이름 <input name="name" value="{html.escape(draft.name if draft else "")}"'
+            f' data-count-max="{NODE_NAME_MAX}" required></label>'
             f'{contexts}'
             f'<p><button class="primary">만들기</button></p></form>{link}</div></details>'
         )
@@ -463,7 +500,8 @@ class MapPages:
                 f'<p class="muted">선: {lines or "없음"}</p></section>')
 
     # ---- 패널(노드의 책장) ----------------------------------------------------------------------
-    def _panel_html(self, uid: str, session: tuple[str, str], floor: Floor, found: ProjectMap, node: MapNode | None) -> str:
+    def _panel_html(self, uid: str, session: tuple[str, str], floor: Floor, found: ProjectMap, node: MapNode | None,
+                    draft: NodeDraft | None = None) -> str:
         if node is None:
             return ('<div class="pp-node" id="pp-node"><h2 class="pp-title" id="pp-title" tabindex="-1">노드를 고르세요</h2></div>')
         books = self.book_objects(uid, node.books)
@@ -484,7 +522,7 @@ class MapPages:
             kind = "가운데 노드" if node.center else "노드"
         title = found.title if node.center else node.name
         hint = ""  # 책 열기·끌어 옮기기 설명은 도움말(docs/help)
-        settings = self._node_settings(uid, session, floor, found, node)
+        settings = self._node_settings(uid, session, floor, found, node, draft)
         context = "" if node.missing else contexts_view_html(View(node.contexts, node=node.name))  # 노드의 컨텍스트(#96)
         delete = self._node_delete(uid, session, floor, node)
         return (f'<div class="pp-node" id="pp-node" data-node="{html.escape(node.id)}">'
@@ -612,8 +650,9 @@ class MapPages:
         return ('<details class="node-del"><summary aria-label="노드 휴지통으로" title="노드 휴지통으로">🗑</summary>'
                 f'<div class="del-box" role="dialog" aria-label="노드 휴지통으로">{inner}</div></details>')
 
-    def _node_settings(self, uid: str, session: tuple[str, str], floor: Floor, found: ProjectMap, node: MapNode) -> str:
-        """노드 설정(스크립트 없이도): 이름·색·선 잇기·끊기·휴지통."""
+    def _node_settings(self, uid: str, session: tuple[str, str], floor: Floor, found: ProjectMap, node: MapNode,
+                       draft: NodeDraft | None = None) -> str:
+        """노드 설정(스크립트 없이도): 이름·색·선 잇기·끊기·휴지통. draft(컨텍스트를 거절한 뒤)면 펼친 채 적었던 줄을 다시 채운다."""
         csrf = self._csrf_input(session)
         post = f"/shelf/p/{urllib.parse.quote(floor.id)}/map"
         here = state_url(floor.id, node=node.id)
@@ -644,8 +683,8 @@ class MapPages:
             saved = self.store.list_saved_contexts(uid)
             contexts = (f'<form method="post" action="{post}" class="pm-form" data-guard>{hidden}'
                         '<input type="hidden" name="action" value="contexts">'
-                        + context_fieldset(saved, node.contexts) + '<p><button>저장</button></p></form>')
-        return (f'<details class="pp-set"><summary>⚙ 설정</summary>{rename}{color}{contexts}'
+                        + context_fieldset(saved, draft.contexts if draft else node.contexts) + '<p><button>저장</button></p></form>')
+        return (f'<details class="pp-set"{" open" if draft else ""}><summary>⚙ 설정</summary>{rename}{color}{contexts}'
                 f'<h3>선</h3><ul class="pp-lines">{lines or "<li>없음</li>"}</ul>{connect}'
                 f"</details>{CONTEXT_SCRIPT}")
 
@@ -742,9 +781,12 @@ class MapPages:
         except ValueError as e:  # 색 이름·컨텍스트 길이 등
             if wants_json:
                 return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-            if action in ("add_node", "contexts"):  # 책 설정과 같이 400으로 그 자리에서(2026-10-09, 전에는 303 → 200)
+            if action in ("add_node", "contexts"):  # 책 설정과 같이 400으로 그 자리에서, 적은 내용은 폼에 그대로(2026-10-09 결정 d)
                 said = f"컨텍스트를 저장하지 못했습니다. {e}" if action == "contexts" else f"노드를 만들지 못했습니다. {e}"
-                return await self.project_page(request, f'<p class="msg err">{html.escape(said)}</p>', 400, node or None)
+                saved = await run_in_threadpool(self.store.list_saved_contexts, uid)
+                draft = NodeDraft(action, name=str(form.get("name") or ""), contexts=contexts_as_typed(form, saved),
+                                  picks=frozenset(str(v) for v in form.getlist("ctx_pick")), new_text=str(form.get("ctx_new") or ""))
+                return await self.project_page(request, f'<p class="msg err">{html.escape(said)}</p>', 400, node or None, draft)
             return RedirectResponse(with_query(back, maperr="bad_color"), status_code=303)
         if wants_json:
             return JSONResponse(result)

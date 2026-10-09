@@ -125,6 +125,11 @@ def context_fieldset(saved: list[SavedContext], attached: tuple[Context, ...]) -
 def contexts_from_form(form: Any, saved: list[SavedContext]) -> tuple[Context, ...]:
     """폼 → 붙일 컨텍스트(붙인 순서). 줄(ctx_name·ctx_text·ctx_from) 중 떼기를 고른 것과, 단추를 끈 자주 쓰는 컨텍스트의 줄은 뺀다.
     고른 단추 중 아직 줄이 없는 것은 그 사본을 끝에 더한다(스크립트 없이 고른 경우). 직접 적은 글(ctx_new)도 끝에. ValueError 가능."""
+    return clean_contexts(contexts_as_typed(form, saved))
+
+
+def contexts_as_typed(form: Any, saved: list[SavedContext]) -> tuple[Context, ...]:
+    """contexts_from_form과 같은 줄을 검사 없이(길이·개수를 넘어도) 적은 그대로. 거절(400) 화면에 다시 채운다(2026-10-09 결정 d)."""
     names, texts, froms = form.getlist("ctx_name"), form.getlist("ctx_text"), form.getlist("ctx_from")
     drops = {str(v) for v in form.getlist("ctx_drop")}
     picks = [str(v) for v in form.getlist("ctx_pick")]
@@ -142,7 +147,7 @@ def contexts_from_form(form: Any, saved: list[SavedContext]) -> tuple[Context, .
             rows.append(Context(by_id[sid].name, by_id[sid].text))
     if new := str(form.get("ctx_new") or "").strip():
         rows.append(Context("", new))
-    return clean_contexts(rows)
+    return tuple(rows)
 
 
 def register_row(store: Store, uid: str, form: Any) -> str:

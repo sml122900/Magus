@@ -71,6 +71,11 @@ def test_error_pages(server_proc):  # noqa: F811
         long = c.post("/shelf/p/common/map", data={"csrf": csrf, "action": "contexts", "node": node_id, "ctx_new": "가" * 501})
         assert long.status_code == 400 and "컨텍스트를 저장하지 못했습니다." in long.text
         assert f'class="pp-node" id="pp-node" data-node="{node_id}"' in long.text
+        assert '<details class="pp-set" open>' in long.text and ">" + "가" * 501 + "</textarea>" in long.text  # 적은 내용 그대로(결정 d)
+        bad_node = c.post("/shelf/p/common/map", data={"csrf": csrf, "action": "add_node", "name": "새 현장", "ctx_new": "나" * 501})
+        assert bad_node.status_code == 400 and "노드를 만들지 못했습니다." in bad_node.text
+        assert '<details class="pm-new" id="new-node" open>' in bad_node.text and 'name="name" value="새 현장"' in bad_node.text
+        assert ">" + "나" * 501 + "</textarea>" in bad_node.text
         assert c.post(f"/shelf/edit/{BOOK}", data={"csrf": csrf, "name": "메모", "ctx_new": "가" * 501}).status_code == 400
         # 폼을 읽지 못함(첨부 21개 > 폼 한도 20) → 400 공통 화면
         files = [("files", (f"{n}.txt", b"x", "text/plain")) for n in range(21)]

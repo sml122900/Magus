@@ -47,7 +47,8 @@ def test_lengths_are_shown_and_not_cut(server_proc):  # noqa: F811
         assert '<input type="radio" name="color" value="custom" checked>' in reserved.text and 'name="hex" value="#654321"' in reserved.text
         # 프로젝트 제목·컨텍스트
         long_project = c.post("/shelf/projects", data={"csrf": csrf, "title": "가" * 121})
-        assert "제목은 120자까지입니다. 지금 121자입니다." in long_project.text
+        assert long_project.status_code == 400 and "제목은 120자까지입니다. 지금 121자입니다." in long_project.text
+        assert 'name="title" value="' + "가" * 121 + '"' in long_project.text  # 적은 제목 그대로(결정 e)
         ctx = c.post(f"/shelf/edit/{BOOK}", data={"csrf": csrf, "name": "메모", "ctx_new": "가" * 501})
         assert ctx.status_code == 400 and "컨텍스트 내용은 하나에 500자까지입니다. 지금 501자입니다." in ctx.text
         me = c.post("/me", data={"csrf": csrf, "display_name": "나" * 41})
