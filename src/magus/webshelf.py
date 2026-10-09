@@ -49,7 +49,7 @@ from magus.category.rules import (
     BUILTINS, COLOR_NAMES, HEX, MAX_CATEGORIES, MAX_MY_COLORS, NEW_COLOR_ORDER,
     PALETTE, PALETTE_BY_NAME, TEMPLATE_BY_KEY, check_name, name_key,
 )
-from magus.store import Category, CategoryItem, ShelfSettings, Store
+from magus.store import Category, CategoryItem, Chunk, ShelfSettings, Store
 from magus.webcontexts import CONTEXT_SCRIPT, CONTEXT_STYLE, context_fieldset, contexts_from_form, contexts_view_html, register_row
 from magus.store.base import Lane
 from magus.store.formats import one_line
@@ -386,10 +386,18 @@ def clean_query(q: str | None) -> str:
 
 def find(store: Store, user_id: str, lanes: list[Lane], q: str) -> list[str]:
     """검색어에 맞는 항목 id(owner_id)를 차례대로. category_search와 같은 찾기(magus.search.find_chunks, 2026-10-09):
-    색인(앞부분 일치·구절, 많이 맞은 것부터) 뒤에 글자 그대로 포함(최근 것부터)."""
+    색인(앞부분 일치·구절, 많이 맞은 것부터) 뒤에 글자 그대로 포함(최근 것부터), 첨부 글자(#100)는 그 뒤."""
+    return [owner for owner, _ in find_hits(store, user_id, lanes, q)]
+
+
+def find_hits(store: Store, user_id: str, lanes: list[Lane], q: str) -> list[tuple[str, Chunk]]:
+    """(항목 id, 처음 맞은 조각) 차례대로. 조각이 첨부 글자(attach_text)면 어느 첨부(part)의 어느 부분이 맞았는지 보일 수 있다."""
     if not q.strip():
         return []
-    return list(dict.fromkeys(c.owner_id for c in find_chunks(store, user_id, lanes, q, SEARCH_LIMIT)))
+    out: dict[str, Chunk] = {}
+    for c in find_chunks(store, user_id, lanes, q, SEARCH_LIMIT):
+        out.setdefault(c.owner_id, c)
+    return list(out.items())
 
 
 def one_char(q: str) -> bool:
@@ -453,7 +461,7 @@ class Kind:
 
 
 def category_kind(c: Category) -> Kind:
-    return Kind(c.id, c.name, ["category", "ref_bib", "ref_picked"], "글이 없습니다.", c, c.floor)
+    return Kind(c.id, c.name, ["category", "ref_bib", "ref_picked", "attach_text"], "글이 없습니다.", c, c.floor)
 
 
 def color_fieldset(current: str, my_colors: tuple[str, ...]) -> str:
@@ -525,6 +533,7 @@ class ShelfPages:
     board_write: Callable[[Request], Awaitable[Response]]
     board_edit: Callable[[Request], Awaitable[Response]]
     board_scrap: Callable[[Request], Awaitable[Response]]
+    board_text: Callable[[Request], Awaitable[Response]]
     trail: Callable[..., str]
     # BookPages(webbooks)가 구현한다
     book_routes: Callable[[], list[tuple[str, list[str], Callable[..., Any]]]]
@@ -546,6 +555,7 @@ class ShelfPages:
             ("/shelf/{kind}/{item}", ["GET"], self.post_view),  # 글 보기 페이지(webboard)
             ("/shelf/{kind}/{item}/edit", ["GET", "POST"], self.board_edit),  # 글 고치기(webboard, 2026-10-09 되돌림)
             ("/shelf/{kind}/{item}/scrap", ["POST"], self.board_scrap),  # 스크랩(별표, webboard, 2026-10-09)
+            ("/shelf/{kind}/{item}/text/{att}", ["GET"], self.board_text),  # 첨부 글자 보기(webboard, #100)
             ("/shelf/{kind}/{item}/trash", ["POST"], self.shelf_item_trash),  # 글 보기의 🗑(화면 안 확인 창, 2026-10-09)
             ("/shelf/{kind}/{item}/files/{att}", ["GET"], self.shelf_file),  # 첨부 보기·내려받기(#97)
             ("/shelf/{kind}/{item}/thumbs/{att}", ["GET"], self.shelf_thumb),  # 사진 썸네일(없으면 만들고, 못 만들면 원본)

@@ -336,6 +336,9 @@ class CategoryMixin:
                           *(p.text for p in item.passages), *(f"{k}: {v}" for k, v in item.fields.items() if v), " ".join(item.tags),
                           *(["첨부: " + ", ".join(names)] if names else [])])
         self._replace_chunks(user_id, "category", f"{item.category_id}/{item.id}", "category", chunk_text(text.strip()))
+        found = self._attachment_texts(user_id, f"{item.category_id}/{item.id}")  # type: ignore[attr-defined]  # 첨부 글자(#100)
+        self._replace_chunks(user_id, "category", f"{item.category_id}/{item.id}", "attach_text", [c for _, c in found],
+                             parts=[a for a, _ in found])
 
     def _attachments_changed(self, user_id: str, owner: str) -> None:
         """첨부가 늘거나 줄면 그 글(또는 문헌 글)의 색인을 파일에서 다시 만든다(첨부 이름을 찾게, 2026-10-09)."""

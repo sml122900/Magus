@@ -161,6 +161,84 @@ class AttachmentMixin:
         self._attachments_changed(user_id, owner)
         return [ref]
 
+    def _attachment_texts(self, user_id: str, owner: str) -> list[tuple[str, str]]:
+        """그 글의 첨부에서 뽑아 둔 글자를 색인할 조각으로 [(첨부 id, 조각)]. 아직 뽑지 않았거나 글자 없음은 뺀다(#100)."""
+        from magus.extract import read_text  # noqa: PLC0415
+        from magus.textindex import chunk_text  # noqa: PLC0415
+
+        folder = self._owner_dir(user_id, owner, must_exist=False)
+        out: list[tuple[str, str]] = []
+        for att in self.list_attachments(user_id, owner) if folder is not None else []:  # type: ignore[attr-defined]
+            text = read_text(folder / att.id, att.name)
+            if text:
+                out += [(att.id, piece) for piece in chunk_text(text)]
+        return out
+
+    def attachment_text(self, user_id: str, owner: str, attachment_id: str, *, make: bool = True,
+                        deadline: float | None = None) -> tuple[dict | None, str | None]:
+        """(상태, 글자). 뽑는 동안 저장소 잠금을 잡지 않는다(파일 하나를 읽고 .text/에 쓸 뿐이다). 뽑은 뒤 색인만 잠금 안에서."""
+        from magus import extract as ex  # noqa: PLC0415
+
+        hit = self.attachment_path(user_id, owner, attachment_id)  # type: ignore[attr-defined]
+        if hit is None or not ex.extractable(hit[1].name):
+            return None, None
+        att_dir = hit[0].parent
+        status = ex.read_status(att_dir)
+        if make and (status is None or status["status"] == "later"):
+            result = ex.extract(hit[0], ex.DEADLINE if deadline is None else deadline)
+            status = ex.save(att_dir, hit[1].name, result)
+            ex.log.info("extract status=%s chars=%d ms=%d", status["status"], status["chars"], status["ms"])
+            with self._lock:
+                self._attachments_changed(user_id, owner)
+        return status, ex.read_text(att_dir, hit[1].name) if status else None
+
+    @locked
+    def find_attachment(self, user_id: str, attachment_id: str) -> tuple[str, Attachment] | None:
+        att = safe_id(attachment_id, "attachment id")
+        shelf = self._user_dir(user_id) / "shelf"
+        for folder in (shelf / "categories").glob(f"*/files/*/{att}"):  # <책>/files/<글>/<첨부 id>
+            book, item = folder.parents[2].name, folder.parent.name
+            if (shelf / "categories" / book / "items" / f"{item}.json").is_file() and (a := self._one(folder)):
+                return f"{book}/{item}", a
+        for folder in (shelf / "melchior").glob(f"*/files/{att}"):
+            if (folder.parents[1] / "bib.json").is_file() and (a := self._one(folder)):
+                return f"ref:{folder.parents[1].name}", a
+        return None
+
+    def extract_all(self, user_id: str, *, force: bool = False) -> dict[str, int]:
+        """그 사용자의 모든 첨부(휴지통 빼고) 글자 뽑기(배포 때 한 번에, `magus extract`). 이미 뽑은 것은 force가 아니면 건너뛴다.
+        돌려주는 것은 개수뿐(이름·내용 없음)."""
+        from magus import extract as ex  # noqa: PLC0415
+
+        counts = {"대상": 0, "뽑음": 0, "앞부분만": 0, "글자 없음": 0, "실패": 0, "나중에": 0, "이미": 0, "형식 아님": 0}
+        names = {"ok": "뽑음", "truncated": "앞부분만", "empty": "글자 없음", "failed": "실패", "later": "나중에"}
+        shelf = self._user_dir(user_id) / "shelf"
+        owners: list[tuple[str, Path]] = []
+        for folder in sorted((shelf / "categories").glob("*/files/*/*")):
+            book, item = folder.parents[2].name, folder.parent.name
+            if (shelf / "categories" / book / "items" / f"{item}.json").is_file():
+                owners.append((f"{book}/{item}", folder))
+        for folder in sorted((shelf / "melchior").glob("*/files/*")):
+            if (folder.parents[1] / "bib.json").is_file():
+                owners.append((f"ref:{folder.parents[1].name}", folder))
+        for owner, folder in owners:
+            att = self._one(folder)
+            if att is None:
+                continue
+            if not ex.extractable(att.name):
+                counts["형식 아님"] += 1
+                continue
+            counts["대상"] += 1
+            old = ex.read_status(folder)
+            if old is not None and old["status"] != "later" and not force:
+                counts["이미"] += 1
+                continue
+            if force and old is not None:
+                (folder / ex.TEXT_DIR / ex.STATUS_FILE).unlink()
+            status, _ = self.attachment_text(user_id, owner, att.id)
+            counts[names.get((status or {}).get("status", "failed"), "실패")] += 1
+        return counts
+
     def _attachments_changed(self, user_id: str, owner: str) -> None:
         """첨부가 늘거나 줄면 그 글의 색인을 다시 만든다(첨부 이름도 찾는다). CategoryMixin·ShelfMixin이 채운다."""
 

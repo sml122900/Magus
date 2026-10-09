@@ -1,10 +1,11 @@
 """SQLite 인덱스 스키마. 인덱스는 언제든 원본 파일에서 다시 만들 수 있으므로,
 스키마가 바뀌면 SCHEMA_VERSION을 올린다. 그러면 LocalStore가 인덱스를 지우고 다시 만든다."""
 
-SCHEMA_VERSION = 22  # 17: 층(#93). 18: refs.moved(공용으로 옮긴 기록). 19: 문서 책(documents, 레인 document)·원고 책 색(#94)
+SCHEMA_VERSION = 23  # 17: 층(#93). 18: refs.moved(공용으로 옮긴 기록). 19: 문서 책(documents, 레인 document)·원고 책 색(#94)
 # 20: 컨텍스트(#96). 생각·문체 표(ideas·style_entries)를 빼고 글(category_items)에 칸을 더함, refs.book, contexts 열
 # 21: 스크랩(별표, 2026-10-09). category_items.scrap·refs.scrap
 # 22: 찾기 보강(2026-10-09). 글·문헌 글의 색인에 첨부 파일 이름(파일은 그대로, 배포 뒤 첫 시작 때 모든 사용자 색인을 다시 만든다)
+# 23: 첨부 글자(2026-10-09 #100). 레인 attach_text, chunks.part(첨부 id). 글자는 첨부 폴더 안 .text/에서 읽는다
 
 # 지울 때는 역순으로 지운다. chunks_fts는 가상 테이블이다(그림자 테이블도 함께 지워진다).
 TABLES = (
@@ -213,9 +214,10 @@ CREATE TABLE chunks (
     owner_type  TEXT NOT NULL,
     owner_id    TEXT NOT NULL,
     lane        TEXT NOT NULL CHECK (lane IN ('ref_picked', 'ref_full', 'idea_me', 'idea_ai', 'style', 'style_passage', 'ref_bib',
-                                              'category', 'document')),
+                                              'category', 'document', 'attach_text')),
     text        TEXT NOT NULL,
-    embedding   BLOB
+    embedding   BLOB,
+    part        TEXT  -- attach_text면 그 첨부 id(#100)
 );
 CREATE INDEX chunks_owner ON chunks (user_id, owner_type, owner_id);
 

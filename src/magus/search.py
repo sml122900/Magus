@@ -30,7 +30,7 @@ def rrf(rankings: list[list[Chunk]], k: int = RRF_K) -> list[Chunk]:
             scores[chunk.id] = scores.get(chunk.id, 0.0) + 1.0 / (k + rank + 1)
             chunks.setdefault(chunk.id, chunk)
     order = sorted(scores, key=lambda cid: -scores[cid])
-    return [Chunk(c.id, c.owner_type, c.owner_id, c.lane, c.text, scores[c.id]) for c in (chunks[cid] for cid in order)]
+    return [Chunk(c.id, c.owner_type, c.owner_id, c.lane, c.text, scores[c.id], c.part) for c in (chunks[cid] for cid in order)]
 
 
 def hybrid_search(
@@ -73,13 +73,15 @@ def find_chunks(store: Store, user_id: str, lanes: list[Lane], query: str, limit
     first = rrf(rankings) if rankings else []
     if (word := _single_word(query)) is not None:  # 'ra' → raw를 rate·ravallion보다 먼저(가까운 낱말부터, 같으면 원래 순위)
         first.sort(key=lambda c: _closeness(word, c.text))
-    owners = {(c.owner_type, c.owner_id) for c in first}
+    owners = {(c.owner_type, c.owner_id, c.part) for c in first}
     second = []
     for c in store.search_substring(user_id, lanes, needle_of(query), pool) if needle_of(query) else []:
-        if (c.owner_type, c.owner_id) not in owners:
-            owners.add((c.owner_type, c.owner_id))
+        if (c.owner_type, c.owner_id, c.part) not in owners:
+            owners.add((c.owner_type, c.owner_id, c.part))
             second.append(c)
-    return [*first, *second]
+    # 첨부 글자(#100)는 제목·본문·파일 이름으로 맞은 것 다음에(각각 1단계 → 2단계 순서 그대로)
+    found = [*first, *second]
+    return [c for c in found if c.lane != "attach_text"] + [c for c in found if c.lane == "attach_text"]
 
 
 def _single_word(query: str) -> str | None:

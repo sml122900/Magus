@@ -127,6 +127,6 @@ async def test_search_shows_attachment_name_kind_size_only(settings, store: Loca
     async with Client(build_server(settings, store)) as c:
         result = await c.call_tool("category_search", {"query": "장날", "book": "사례"})
     text = result.content[0].text
-    assert "첨부 1개: 장날.pdf(PDF, 1.2 MB)" in text
-    assert "첨부 1개: clack.png(그림, 1 KB)" in text
+    assert "첨부 1개: 장날.pdf(PDF, 1.2 MB, 첨부:" in text  # #100: 읽을 때 쓰는 첨부 id
+    assert "첨부 1개: clack.png(그림, 1 KB, 첨부:" in text
     assert "secret-body" not in text

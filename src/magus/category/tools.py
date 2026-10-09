@@ -42,6 +42,8 @@ from magus.project_args import (
 )
 from magus.search import Embedder, find_chunks
 from magus.attachments import describe, title_from_files
+from magus.extract import page_of, pages
+from magus.textindex import query_parts, tokens
 from magus.store import Category, CategoryItem, MapNode, Passage, Ref, ShelfSettings, Store
 from magus.store.floors import MoveError
 from magus.store.formats import one_line
@@ -237,8 +239,10 @@ def build_tools(
                       context: list[str] | None = None, project: str | None = None, move_to: str | None = None,
                       undo_move: bool = False, node: str | None = None, link: str | None = None,
                       unlink: str | None = None, item_id: str | None = None, checked: bool | None = None,
-                      scrap: bool | None = None) -> str:
+                      scrap: bool | None = None, parts: list[PartIn] | None = None) -> str:
         user = current_user()
+        if parts:  # 문헌 글에 쓸 부분 더하기(#100: 저자가 첨부의 어느 부분을 쓸 부분으로 저장하라고 했을 때)
+            return add_parts(user, book, project, item_id, parts)
         if scrap is not None:  # 글의 스크랩(★) 켜고 끄기(2026-10-09). 파일의 표시 하나만
             return set_scrap(user, book, project, item_id, scrap)
         if checked is not None:  # 문헌 글의 원문 확인 표시 켜고 끄기(2026-10-09). 쓸 부분·서지·전문은 그대로
@@ -291,6 +295,20 @@ def build_tools(
                 raise ToolError(" · ".join([*done, error_message(e, polite=False)])) from e
         head = view_for_book(store, user, found.key).header() + "\n" if context is not None else ""
         return head + (f"책 「{found.name}」을 고침: " + " · ".join(done) + ".").replace("..", ".")
+
+    def add_parts(user: str, book: str | None, project: str | None, key: str | None, parts: list[PartIn]) -> str:
+        if not key:
+            raise ToolError("parts에는 item_id(문헌 글의 key, 예: clack2012)를 함께 준다.")
+        ref = store.get_ref(user, key.strip())
+        if ref is None:
+            raise ToolError(f"문헌 글 {key!r}이 없다. category_search로 key를 확인한다. 문헌 글이 아니면 category_put으로 넣는다.")
+        if book and ref.book and find_book(user, book, project).key != ref.book:
+            raise ToolError(f"그 문헌 글은 「{book}」 책에 있지 않다.")
+        added, total = store.add_passages(user, ref.key, [Passage(p.text, p.reason or "", p.where) for p in parts])
+        label = cite_label(ref, ref.key)
+        state = ("원문 확인 표시는 그대로다." if ref.status == "verified"
+                 else "원문 확인 전이라 아직 인용하지 않는다(저자가 원문을 확인했다고 하면 checked=true).")
+        return f"{label}: 쓸 부분 {added}개 더함(모두 {total}개, 같은 대목은 한 번). {state}"
 
     def set_scrap(user: str, book: str | None, project: str | None, item_id: str | None, on: bool) -> str:
         if not item_id or not item_id.strip():
@@ -485,8 +503,11 @@ def build_tools(
     # ---- 찾기 ---------------------------------------------------------------------------------------
 
     def category_search(query: str = "", book: str | None = None, project: str | None = None,
-                        author: Literal["me", "ai", "all"] = "all", full: bool = False, k: int = 8, scrap_only: bool = False) -> str:
+                        author: Literal["me", "ai", "all"] = "all", full: bool = False, k: int = 8, scrap_only: bool = False,
+                        attachment: str | None = None, page: int = 1) -> str:
         user = current_user()
+        if attachment and attachment.strip():  # 첨부 글자 읽기(#100): 쪽 하나
+            return read_attachment(user, attachment, page)
         k = max(1, min(k, 30))
         query = " ".join((query or "").split())
         if not query and not scrap_only:
@@ -497,7 +518,7 @@ def build_tools(
         scope = search_projects(store, user, project)
         books = {c.id: c for c in store.list_categories(user, floors=scope)}
         # 문헌 글은 서지·key·한글 표기·첨부 이름(ref_bib)으로도 찾는다(2026-10-09 #100: 웹 찾기와 같게). 찾기는 넓게, 인용은 원문 확인 글의 쓸 부분만
-        lanes: list[Any] = ["category", "ref_bib", "ref_picked", *(["ref_full"] if full else [])]
+        lanes: list[Any] = ["category", "ref_bib", "ref_picked", *(["ref_full"] if full else []), "attach_text"]  # 첨부 글자는 맨 뒤(#100)
         hits: list[tuple[str, Any, Any]] = []  # (책 id, 글 또는 문헌, 맞은 청크)
         seen: set[str] = set()
         if not query:  # 스크랩한 글 전체(최근 것부터)
@@ -508,7 +529,7 @@ def build_tools(
                   if r.scrap and r.book in books and (not only or r.book == only.key) and author != "ai")]
             hits = sorted(starred, key=lambda h: h[1].created_at, reverse=True)
         for chunk in (find_chunks(store, user, lanes, query, k * 6, embedder) if query else []):
-            if chunk.lane == "category":
+            if chunk.owner_type == "category":  # 글(본문·칸·첨부 이름, 첨부 글자 #100)
                 cid, _, iid = chunk.owner_id.partition("/")
                 if cid not in books or (only and cid != only.key) or chunk.owner_id in seen:
                     continue
@@ -551,9 +572,69 @@ def build_tools(
                 n += 1
                 if isinstance(obj, CategoryItem):
                     lines += item_lines(user, n, obj, names)
+                    lines += attach_hit(user, f"{obj.category_id}/{obj.id}", chunk, query)
                 else:
                     lines += source_lines(user, n, obj, chunk)
+                    lines += attach_hit(user, f"ref:{obj.key}", chunk, query)
         return "\n".join(lines)
+
+    def attach_hit(user: str, owner: str, chunk: Any, query: str) -> list[str]:
+        """첨부 글자에서 맞았으면(#100) 어느 첨부의 어느 부분인지: 앞뒤 100자와 쪽 번호, 읽는 법."""
+        if chunk is None or chunk.lane != "attach_text" or not chunk.part:
+            return []
+        hit = store.attachment_path(user, owner, chunk.part)
+        status, text = store.attachment_text(user, owner, chunk.part, make=False)
+        if hit is None or not text:
+            return []
+        page = page_of(text, chunk.text[:80])
+        return [f"   📎 첨부 「{hit[1].name}」(첨부:{chunk.part}) 글자에서 맞음 · 쪽 {page}/{len(pages(text))}: “{around(chunk.text, query)}”",
+                f"   → 그 쪽 읽기: category_search(attachment=\"{chunk.part}\", page={page})"]
+
+    def around(text: str, query: str, width: int = 100) -> str:
+        """맞은 곳 앞뒤 width자(한 줄). 맞은 곳을 못 찾으면 앞부분."""
+        flat = one_line(text)
+        low = flat.lower()
+        phrases, words = query_parts(query)
+        at = next((low.find(t.lower()) for t in [*phrases, *words, *tokens(query)] if t and low.find(t.lower()) >= 0), -1)
+        if at < 0:
+            return flat[: width * 2] + ("…" if len(flat) > width * 2 else "")
+        start, end = max(0, at - width), min(len(flat), at + width)
+        return ("…" if start else "") + flat[start:end] + ("…" if end < len(flat) else "")
+
+    def read_attachment(user: str, ident: str, page: int) -> str:
+        """첨부 글자 읽기(#100): 3,000자씩 한 쪽. 한 번에 전체를 돌려주지 않는다. 아직 뽑지 않았으면 지금 뽑는다(20초)."""
+        att_id = ident.strip().removeprefix("첨부:").strip()
+        try:
+            found = store.find_attachment(user, att_id)
+        except ValueError:
+            found = None
+        if found is None:
+            raise ToolError(f"첨부 {ident!r}이 없다. category_search 결과나 files_list의 '첨부:<id>'를 준다.")
+        owner, att = found
+        status, text = store.attachment_text(user, owner, att.id)
+        if status is None:
+            return f"첨부 「{att.name}」: 글자를 뽑지 않는 형식이다(docx·pdf·txt·md만). 그림은 아직 읽지 않는다."
+        state = status["status"]
+        if state == "empty":
+            return f"첨부 「{att.name}」: 글자 없음(그림이나 스캔한 PDF일 수 있다. 글자 읽기(OCR)는 아직 하지 않는다)."
+        if state == "failed":
+            return f"첨부 「{att.name}」: 글자를 뽑지 못했다(깨진 파일이거나 암호가 걸린 파일). 저자에게 파일을 다시 올려 달라고 한다."
+        if state == "later" or not text:
+            return f"첨부 「{att.name}」: 글자를 아직 뽑는 중이다(파일이 커서 시간이 걸린다). 조금 뒤에 다시 부른다."
+        all_pages = pages(text)
+        page = max(1, min(page, len(all_pages)))
+        if owner.startswith("ref:"):
+            where = f"문헌 글 {owner[4:]}"
+        else:
+            book, _, item_id = owner.partition("/")
+            item = store.get_category_item(user, book, item_id)
+            category = store.get_category(user, book)
+            where = f"「{category.name if category else book}」 책의 글 「{(item.title or summary(item))[:40] if item else item_id}」"
+        cut = " · 30만 자가 넘어 앞부분만 뽑았다" if state == "truncated" else ""
+        more = f"다음 쪽: category_search(attachment=\"{att.id}\", page={page + 1})" if page < len(all_pages) else "마지막 쪽이다."
+        return (f"첨부 「{att.name}」(첨부:{att.id}) · {where} · 쪽 {page}/{len(all_pages)} · 글자 {status['chars']:,}자{cut}\n"
+                "이 글자는 찾고 읽는 데만 쓴다. 인용은 원문 확인 글의 쓸 부분만(저자가 이 부분을 쓸 부분으로 저장하라고 하면 category_edit parts).\n"
+                f"---\n{all_pages[page - 1]}\n---\n{more}")
 
     def item_lines(user: str, n: int, item: CategoryItem, names: dict[str, dict[int, str]]) -> list[str]:
         head = f"{n}. {item.id} · [{item.author}] {local_time(item.created_at, '%Y-%m-%d')}" + (" · ★스크랩" if item.scrap else "")
@@ -583,7 +664,12 @@ def build_tools(
         files = store.list_attachments(user, owner)
         if not files:
             return []
-        shown = " · ".join(describe(a.name, a.size) for a in files[:5])
+        def one(a: Any) -> str:
+            status, text = store.attachment_text(user, owner, a.id, make=False)
+            got = f", 글자 {len(pages(text))}쪽" if text else ", 글자 없음" if status and status["status"] == "empty" else ""
+            return describe(a.name, a.size)[:-1] + f", 첨부:{a.id}{got})"
+
+        shown = " · ".join(one(a) for a in files[:5])
         return [f"   첨부 {len(files)}개: {shown}" + (f" 외 {len(files) - 5}개" if len(files) > 5 else "")]
 
     def source_lines(user: str, n: int, ref: Ref, chunk: Any) -> list[str]:
@@ -679,12 +765,13 @@ def build_tools(
         Tool.from_function(
             category_edit, name="category_edit",
             description=(
-                "저자가 책·노드의 이름·색·컨텍스트·위치나 선, 문헌 글의 원문 확인 표시, 또는 글의 스크랩을 바꾸라고 분명히 말했을 때만 부른다. "
+                "저자가 책·노드의 이름·색·컨텍스트·위치나 선, 문헌 글의 원문 확인 표시·쓸 부분, 또는 글의 스크랩을 바꾸라고 분명히 말했을 때만 부른다. "
                 "book(책 이름) 또는 node(노드 이름). "
                 "context: 새 컨텍스트 목록(자주 쓰는 컨텍스트 이름이나 글, []이면 뗀다). move_to: 책을 옮길 노드('프로젝트 · 노드'나 프로젝트). "
                 "undo_move=true: 마지막 옮기기 되돌리기. node와 함께 link=이을 노드, unlink=끊을 노드. 같은 이름이 여러 프로젝트에 있으면 project. "
                 "checked=true|false와 item_id(문헌 글 key): 원문 확인 표시를 붙이거나 뗀다(저자가 그렇게 말했을 때만. 쓸 부분·서지는 그대로). "
-                "scrap=true|false와 item_id(글 id 또는 문헌 글 key): 글을 스크랩(★)하거나 뗀다(저자가 '스크랩해 줘'라고 했을 때만)."
+                "scrap=true|false와 item_id(글 id 또는 문헌 글 key): 글을 스크랩(★)하거나 뗀다(저자가 '스크랩해 줘'라고 했을 때만). "
+                "parts([{text, reason, where}])와 item_id(문헌 글 key): 저자가 고른 대목을 그 문헌 글의 쓸 부분으로 더한다(원문 확인 표시는 그대로)."
             ),
             structured_output=False,
         ),
@@ -707,7 +794,8 @@ def build_tools(
                 "책의 글에서 찾는다(문헌 글은 서지·key·첨부 이름과 쓸 부분, full=true면 원문 전체도. 원문 확인 전 문헌은 '미확인'으로 보이고 인용하지 않는다). "
                 "book을 주면 그 책만, project를 주면 그 프로젝트와 연결 노드. "
                 "author=me|ai|all(기본, 저자의 말을 먼저). k=8. scrap_only=true면 저자가 스크랩(★)한 글만(query 없이 부르면 스크랩 전체, "
-                "최근 것부터). 결과는 책마다 컨텍스트와 함께."
+                "최근 것부터). 결과는 책마다 컨텍스트와 함께. 첨부(docx·pdf·txt·md)에서 뽑은 글자도 찾는다(맞은 곳 앞뒤와 쪽). "
+                "attachment='첨부:<id>'와 page=N이면 그 첨부의 글자를 3,000자씩 한 쪽 읽는다(한 번에 전체를 읽지 않는다)."
             ),
             structured_output=False,
         ),

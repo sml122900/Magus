@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import html
+import time
 import urllib.parse
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -29,14 +30,15 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from magus.attachments import ACCEPT, MAX_FILES, kind_of, mb, media_type, shown_title, size_text, title_from_files
+from magus.extract import extractable
 from magus.book_migrate import legacy_book_id
 from magus.category.rules import BUILTINS, CONTENT_MAX, TITLE_MAX
 from magus.ids import local_time, new_id, utcnow
 from magus.melchior.author_report import cite_label
-from magus.store import Attachment, CategoryItem, Store
+from magus.store import Attachment, CategoryItem, Chunk, Store
 from magus.store.formats import one_line
 from magus.webshelf import (
-    AI_MARK, AI_TITLE, Book, Kind, clean_query, find, mark, paragraphs, snippet, state_url,
+    AI_MARK, AI_TITLE, Book, Kind, clean_query, find_hits, mark, paragraphs, snippet, state_url,
 )
 
 BOARD_SIZE = 20  # 게시판 한 쪽
@@ -95,6 +97,10 @@ font-weight:600;padding:0 16px;cursor:pointer}.lightbox button:focus-visible{out
 .lightbox .lb-count{position:absolute;bottom:16px;left:0;right:0;text-align:center;color:#fff;font-variant-numeric:tabular-nums}
 .board-bar a.gear.labeled{font-size:16px;padding:0 12px;min-height:44px;gap:4px;color:var(--ink)}
 .post-acts{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-start;margin:12px 0}
+ul.files a.as-text{display:inline-flex;align-items:center;min-height:44px;padding:0 10px;margin-left:4px}
+pre.att-text{white-space:pre-wrap;word-break:break-word;background:var(--canvas);border:1px solid var(--line);border-radius:12px;padding:16px 20px;
+font:inherit;font-size:16px;line-height:1.7;max-width:100%;overflow-x:auto}
+.att-head{color:var(--ink2);margin:8px 0}
 .post-acts a.act{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:44px;min-height:44px;padding:0 18px;
 border-radius:9999px;font-size:16px;font-weight:600;color:var(--ink);border:1px solid var(--mute);background:var(--canvas);text-decoration:none}
 .post-acts a.act:hover{background:var(--soft)}
@@ -299,6 +305,7 @@ class Post:
     files: tuple[Attachment, ...]
     text: str = ""  # 찾기의 맞은 곳 한 줄(제목 밖에서 맞았을 때)
     scrap: bool = False  # 스크랩(별표, 2026-10-09)
+    attach: str | None = None  # 첨부 글자에서 맞았으면 그 첨부 이름(#100). text는 맞은 조각
 
 
 def item_preview(item: CategoryItem, files: list[Attachment] | tuple[Attachment, ...]) -> str:
@@ -330,6 +337,8 @@ def post_row_html(post: Post, q: str = "", star: str = "") -> str:
         shown = mark(preview[:80] + ("…" if len(preview) > 80 else "") or "(제목 없음)", q)
         head = f'<span class="pt none">{shown}{post.badge}</span>'
     hit = snippet(post.text, q) if q and "<mark>" not in shown else ""  # 제목 밖에서 맞았으면 맞은 곳 한 줄
+    if q and post.attach:  # 첨부 글자에서 맞음(#100): 어느 첨부의 어느 부분인지 앞뒤 100자
+        hit = f'<span aria-hidden="true">📎</span> {html.escape(post.attach)} · ' + snippet(post.text, q, width=100)
     pic = next((a for a in post.files if _inline_image(a.name)), None)
     thumb = (f'<img class="thumb" src="{html.escape(post.link)}/thumbs/{html.escape(pic.id)}" alt="" loading="lazy">' if pic else "")
     count = len(post.files)
@@ -417,11 +426,19 @@ class BoardPages:
         if not q:
             return [p for _, p in sorted(pairs, key=lambda kv: (kv[1].at, kv[0]), reverse=True)]
         order: dict[str, int] = {}
-        for owner in find(self.store, uid, kind.lanes, q):  # 글은 "<책 id>/<글 id>", 문헌 글은 key
+        attached: dict[str, Chunk] = {}
+        for owner, chunk in find_hits(self.store, uid, kind.lanes, q):  # 글은 "<책 id>/<글 id>", 문헌 글은 key
             local = owner.split("/", 1)[1] if owner.startswith(f"{c.id}/") else owner if "/" not in owner else None
             if local is not None and local not in order:
                 order[local] = len(order)
-        return [p for k, p in sorted((kv for kv in pairs if kv[0] in order), key=lambda kv: order[kv[0]])]
+                if chunk.lane == "attach_text" and chunk.part:
+                    attached[local] = chunk
+        found = [p for k, p in sorted((kv for kv in pairs if kv[0] in order), key=lambda kv: order[kv[0]])]
+        for post in found:
+            if (chunk := attached.get(post.id)) is not None:
+                post.attach = next((a.name for a in post.files if a.id == chunk.part), "첨부")
+                post.text = chunk.text
+        return found
 
     async def board_list(self, request: Request) -> Response:
         session = self.user_of(request)
@@ -581,7 +598,9 @@ class BoardPages:
             f'<img src="{html.escape(link)}/thumbs/{html.escape(a.id)}" alt="{html.escape(a.name)}" loading="lazy"></a>' for a in pics)
         others = "".join(
             f'<li><a href="{html.escape(link)}/files/{html.escape(a.id)}" download>{html.escape(a.name)}</a> '
-            f'<small>{html.escape(kind_of(a.name))} · {size_text(a.size)}</small></li>' for a in rest)
+            f'<small>{html.escape(kind_of(a.name))} · {size_text(a.size)}</small>'
+            + (f' <a class="as-text" href="{html.escape(link)}/text/{html.escape(a.id)}">글자 보기</a>' if extractable(a.name) else "")
+            + "</li>" for a in rest)
         done = DONE.get(params.get("done") or "")
         star = star_html(link, obj.scrap, self._csrf_input(session), link, head=True) + STAR_SCRIPT
         body = ((f'<p class="msg">{done}</p>' if done else "")
@@ -621,9 +640,12 @@ class BoardPages:
 
             def save() -> CategoryItem:
                 item = self.store.put_category_item(uid, CategoryItem(new_id(), book, content, "me", title, "author" if title else None))
+                made = []
                 for name, data in files:
                     att = self.store.put_attachment(uid, f"{book}/{item.id}", name, data)
                     self.store.attachment_thumb(uid, f"{book}/{item.id}", att.id)  # 사진이면 썸네일(못 만들면 화면이 원본을 쓴다)
+                    made.append(att)
+                self._extract_texts(uid, f"{book}/{item.id}", made)
                 return item
 
             item = await run_in_threadpool(save)
@@ -658,6 +680,39 @@ class BoardPages:
             '<ul class="chosen" aria-label="담은 파일"></ul><p class="pick-note" role="status" aria-live="polite"></p></fieldset>'
             f'<p><button class="primary">저장</button> <a href="{html.escape(cancel)}">취소</a></p></form>{WRITE_SCRIPT}'
         )
+
+    # ---- 첨부 글자 보기(#100) ----------------------------------------------------------------------
+    async def board_text(self, request: Request) -> Response:
+        """글 보기의 첨부 옆 '글자 보기': 그 첨부에서 뽑은 글자를 그대로(저자가 무엇이 뽑혔는지 확인). 아직 뽑지 않았으면 지금 뽑는다(20초).
+        자기 글의 첨부만(다른 사용자는 404)."""
+        session = self.user_of(request)
+        if not session:
+            return self._need_login(request)
+        uid = session[0]
+        found = await run_in_threadpool(self._editable, uid, request.path_params["kind"], request.path_params["item"])
+        if found is None:
+            return self._shelf_page("글자 보기", '<p class="msg err">없는 글입니다. <a href="/shelf">프로젝트</a></p>', session, 404)
+        kind, obj = found
+        owner = self._owner(kind, obj)
+        try:
+            hit = await run_in_threadpool(self.store.attachment_path, uid, owner, request.path_params["att"])
+        except ValueError:
+            hit = None
+        status, text = (await run_in_threadpool(self.store.attachment_text, uid, owner, hit[1].id)) if hit else (None, None)
+        if hit is None or status is None:
+            return self._shelf_page("글자 보기", '<p class="msg err">글자를 볼 수 있는 첨부가 아닙니다(docx·pdf·txt·md).</p>', session, 404)
+        state = status["status"]
+        line = {"ok": f"글자 {status['chars']:,}자",
+                "truncated": f"30만 자가 넘어 앞부분 {status['chars']:,}자만 뽑았어요",
+                "empty": "글자 없음(그림이나 스캔한 PDF일 수 있어요)",
+                "failed": "글자를 뽑지 못했어요(깨진 파일이거나 암호가 걸린 파일)",
+                "later": "아직 뽑는 중이에요. 잠시 뒤 다시 열어 주세요."}.get(state, "")
+        link = f"/shelf/{kind.key}/{urllib.parse.quote(obj.id if isinstance(obj, CategoryItem) else obj.key)}"
+        body = (f'<p class="att-head"><b>{html.escape(hit[1].name)}</b> · {html.escape(line)}</p>'
+                + (f'<pre class="att-text">{html.escape(text)}</pre>' if text else "")
+                + f'<p><a href="{html.escape(link)}">글로 돌아가기</a></p>')
+        lead = await run_in_threadpool(self.trail, uid, kind.key, "글자 보기")
+        return self._shelf_page("글자 보기", body, session, lead=lead)
 
     # ---- 스크랩(별표, 2026-10-09) ------------------------------------------------------------------
     async def board_scrap(self, request: Request) -> Response:
@@ -760,6 +815,25 @@ class BoardPages:
             self.store.set_ref_memo(uid, obj.key, content)
         for att in drops:  # 뺀 첨부는 지우지 않고 휴지통으로(프로젝트 휴지통에서 되살린다)
             self.store.trash_attachment(uid, owner, att, "웹에서 뺌")
+        made = []
         for name, data in files:
             att = self.store.put_attachment(uid, owner, name, data)
             self.store.attachment_thumb(uid, owner, att.id)
+            made.append(att)
+        self._extract_texts(uid, owner, made)
+
+    def _extract_texts(self, uid: str, owner: str, made: list[Attachment]) -> None:
+        """올린 문서의 글자 뽑기(#100): 저장 한 번에 20초까지. 넘으면 남은 것은 '나중에'(처음 열 때 다시 뽑는다)."""
+        from magus.extract import DEADLINE, Extracted, extractable, save  # noqa: PLC0415
+
+        start = time.monotonic()
+        for att in made:
+            if not extractable(att.name):
+                continue
+            left = DEADLINE - (time.monotonic() - start)
+            if left <= 0:
+                hit = self.store.attachment_path(uid, owner, att.id)
+                if hit is not None:
+                    save(hit[0].parent, att.name, Extracted("later", ""))
+                continue
+            self.store.attachment_text(uid, owner, att.id, deadline=left)

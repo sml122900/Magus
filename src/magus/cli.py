@@ -77,6 +77,10 @@ def main(argv: list[str] | None = None) -> None:
     thumbs = sub.add_parser("thumbs", help="이미 올라간 사진 첨부의 썸네일을 한 번에 만든다(배포 때, 원본은 읽기만)")
     thumbs.add_argument("--user", action="append", default=None, help="사용자(여러 번 줄 수 있다). 없으면 USER_ID")
     thumbs.add_argument("--all-users", action="store_true", help="데이터 폴더의 모든 사용자")
+    extract = sub.add_parser("extract", help="이미 올라간 첨부(docx·pdf·txt·md)의 글자를 한 번에 뽑는다(배포 때, 원본은 읽기만, 첨부 폴더 안 .text/)")
+    extract.add_argument("--user", action="append", default=None, help="사용자(여러 번 줄 수 있다). 없으면 USER_ID")
+    extract.add_argument("--all-users", action="store_true", help="데이터 폴더의 모든 사용자")
+    extract.add_argument("--force", action="store_true", help="이미 뽑은 것도 다시")
     args = parser.parse_args(argv)
 
     # stdio 전송에서 stdout은 MCP 프로토콜 전용이다. 로그는 반드시 stderr로 보낸다. 내용은 로그에 남기지 않는다(logsafe).
@@ -268,6 +272,12 @@ def main(argv: list[str] | None = None) -> None:
                 else:
                     failed += 1  # 화면은 원본을 쓴다
             print(f"{user}: 만듦 {made} · 이미 있음 {have} · 못 만듦(원본으로 보임) {failed}")
+    elif args.cmd == "extract":  # 첨부 글자(#100). 개수만 보인다(파일 이름·글자는 보이지 않는다)
+        folders = store.root / "users"
+        everyone = sorted(p.name for p in folders.iterdir() if p.is_dir()) if folders.is_dir() else []
+        for user in everyone if args.all_users else (args.user or [settings.user_id]):
+            counts = store.extract_all(user, force=args.force)
+            print(f"{user}: " + " · ".join(f"{k} {v}" for k, v in counts.items()))
     elif args.cmd in ("maps", "floors"):  # 프로젝트·지도 이전(#95, 층 이전 #93을 포함). 실행은 백업 뒤에, 전후 비교를 보인다
         from magus import map_migrate as floor_migrate
 

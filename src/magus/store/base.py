@@ -28,8 +28,10 @@ RefStatus = Literal["unverified", "verified"]
 # category는 저자가 만든 카테고리의 항목(#92). owner_id는 "<카테고리 id>/<항목 id>"다.
 # document는 문서 책의 지금 판 내용(#94). 웹 책장 검색 전용이다.
 # #96: 생각·문체는 글(category 레인)이 됐다. idea_*·style* 레인은 쓰지 않는다(옛 인덱스를 읽을 일이 없어 이름만 남긴다).
-Lane = Literal["ref_picked", "ref_full", "idea_me", "idea_ai", "style", "style_passage", "ref_bib", "category", "document"]
-WEB_ONLY_LANES: tuple[str, ...] = ("style_passage", "ref_bib", "document")
+Lane = Literal["ref_picked", "ref_full", "idea_me", "idea_ai", "style", "style_passage", "ref_bib", "category", "document",
+               "attach_text"]  # attach_text: 첨부에서 뽑은 글자(2026-10-09 #100, chunks.part = 첨부 id)
+# 임베딩(벡터 검색)하지 않는 레인. 옛 이름 그대로(처음에는 웹 찾기 전용 레인이었다). #100: ref_bib은 대화 찾기도 보고, 첨부 글자는 길어서 임베딩하지 않는다
+WEB_ONLY_LANES: tuple[str, ...] = ("style_passage", "ref_bib", "document", "attach_text")
 TagsBy = Literal["ai", "author"]  # 문체 태그를 누가 정했나: Claude가 뽑음(ai) / 저자가 말함(author). 기록 전 항목은 None
 # 휴지통에 옮길 수 있는 책장 항목(#88). 카테고리는 통째(category, id = 카테고리 id)와 항목(category_item, id = "<카테고리 id>/<항목 id>")
 TrashKind = Literal["category", "category_item", "node", "attachment"]  # #96: 생각·문체 휴지통은 책의 글 휴지통(category_item)이 됐다. attachment: 글에서 뺀 첨부 하나(2026-10-09)
@@ -482,6 +484,7 @@ class Chunk:
     lane: Lane
     text: str
     score: float = 0.0
+    part: str | None = None  # attach_text 레인이면 그 첨부 id(어느 첨부의 글자인지)
 
 
 @dataclass(frozen=True)
@@ -532,6 +535,14 @@ class Store(Protocol):
         ...
     def trashed_item_attachments(self, user_id: str, book: str, item: str) -> list[str]:
         """휴지통에 있는 글의 첨부 이름(올린 순서)."""
+        ...
+    def attachment_text(self, user_id: str, owner: str, attachment_id: str, *, make: bool = True,
+                        deadline: float | None = None) -> tuple[dict | None, str | None]:
+        """첨부에서 뽑은 글자(#100): (상태 {status, chars, ms, at}, 글자). 상태가 없거나 '나중에'면 make일 때 지금 뽑아
+        첨부 폴더 안 .text/에 적고 그 글의 색인을 다시 만든다. 뽑지 않는 형식이면 (None, None). 원본은 읽기만."""
+        ...
+    def find_attachment(self, user_id: str, attachment_id: str) -> tuple[str, Attachment] | None:
+        """첨부 id → (owner, 첨부). 휴지통에 있는 것과 다른 사용자의 것은 찾지 않는다."""
         ...
     def file_attachments(self, user_id: str, suffixes: tuple[str, ...]) -> list[tuple[str, Attachment]]:
         """모든 글·문헌 글의 첨부 중 이름이 suffixes(소문자 확장자)로 끝나는 것 (owner, 첨부). 새것부터.
@@ -711,6 +722,9 @@ class Store(Protocol):
     def set_scrap(self, user_id: str, owner: str, on: bool) -> bool:
         """글("<책 id>/<글 id>") 또는 문헌 글("ref:<key>")의 스크랩(별표)을 켜고 끈다. 파일의 표시 하나만 바꾸고(고친 시각은 그대로)
         색인도 바꾼다. 없는 글이면 ValueError. 바꾼 뒤의 값을 돌려준다."""
+        ...
+    def add_passages(self, user_id: str, key: str, passages: list[Passage]) -> tuple[int, int]:
+        """문헌 글에 쓸 부분을 더한다(passages.json만, 같은 대목은 한 번). (더한 수, 모두). 없으면 ValueError."""
         ...
     def set_ref_memo(self, user_id: str, key: str, memo: str) -> Ref:
         """문헌 글의 본문(bib.memo)만 바꾼다(웹의 글 고치기). 서지·쓸 부분·원문 확인 표시와 그 기록은 그대로."""

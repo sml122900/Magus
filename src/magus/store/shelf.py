@@ -217,6 +217,25 @@ class ShelfMixin:
         return found
 
     @locked
+    def add_passages(self, user_id: str, key: str, passages: list[Passage]) -> tuple[int, int]:
+        """문헌 글에 쓸 부분을 더한다(#100). passages.json만 고치고(같은 대목은 한 번) bib.json·원문 확인 표시는 그대로. (더한 수, 모두)."""
+        rdir = self._melchior_dir(user_id) / safe_ref_key(key)
+        if not (rdir / "bib.json").exists():
+            raise ValueError(f"문헌 {key!r}가 없다")
+        old = self.get_passages(user_id, key)
+        seen = {p.text.strip() for p in old}
+        new = []
+        for p in passages:
+            if p.text.strip() and p.text.strip() not in seen:
+                seen.add(p.text.strip())
+                new.append(p)
+        if new:
+            write_json(rdir / "passages.json", [asdict(p) for p in [*old, *new]])
+            with self._db:
+                self._index_ref(user_id, rdir)
+        return len(new), len(old) + len(new)
+
+    @locked
     def set_scrap(self, user_id: str, owner: str, on: bool) -> bool:
         """스크랩(별표) 켜고 끄기(2026-10-09). 파일의 표시 하나("scrap": true, 끄면 키를 뺀다)만 바꾸고 고친 시각은 그대로 둔다."""
         if not owner.startswith("ref:"):
@@ -295,6 +314,8 @@ class ShelfMixin:
         self._replace_chunks(user_id, "ref", record["key"], "ref_picked", [p["text"] for p in passages])
         self._replace_chunks(user_id, "ref", record["key"], "ref_full", chunk_text(full) if full.strip() else [])
         names = [a.name for a in self.list_attachments(user_id, f"ref:{record['key']}")]  # type: ignore[attr-defined]
+        found = self._attachment_texts(user_id, f"ref:{record['key']}")  # type: ignore[attr-defined]  # 첨부 글자(#100)
+        self._replace_chunks(user_id, "ref", record["key"], "attach_text", [c for _, c in found], parts=[a for a, _ in found])
         self._replace_chunks(user_id, "ref", record["key"], "ref_bib",  # 웹 책장 검색 전용. 첨부 파일 이름도(2026-10-09)
                              [bib_text(record) + ("\n첨부: " + ", ".join(names) if names else "")])
 
@@ -340,7 +361,8 @@ class ShelfMixin:
     # ---- 검색 청크 -------------------------------------------------------------------
 
     def _replace_chunks(
-        self, user_id: str, owner_type: str, owner_id: str, lane: Lane, texts: list[str], fts_extra: str = ""
+        self, user_id: str, owner_type: str, owner_id: str, lane: Lane, texts: list[str], fts_extra: str = "",
+        parts: list[str] | None = None,
     ) -> None:
         """fts_extra: 키워드 색인에만 더하는 글(임베딩 대상인 chunks.text에는 넣지 않는다). 문체 표본의 work(출전)."""
         old = [
@@ -354,10 +376,10 @@ class ShelfMixin:
             marks = ",".join("?" * len(old))
             self._db.execute(f"DELETE FROM chunks_fts WHERE rowid IN ({marks})", old)
             self._db.execute(f"DELETE FROM chunks WHERE id IN ({marks})", old)
-        for text in texts:
+        for n, text in enumerate(texts):
             chunk_id = self._db.execute(
-                "INSERT INTO chunks (user_id, owner_type, owner_id, lane, text) VALUES (?, ?, ?, ?, ?) RETURNING id",
-                (user_id, owner_type, owner_id, lane, text),
+                "INSERT INTO chunks (user_id, owner_type, owner_id, lane, text, part) VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+                (user_id, owner_type, owner_id, lane, text, parts[n] if parts else None),
             ).fetchone()[0]
             tokens = index_text(f"{text}\n{fts_extra}" if fts_extra else text)
             self._db.execute("INSERT INTO chunks_fts (rowid, tokens) VALUES (?, ?)", (chunk_id, tokens))
@@ -377,7 +399,7 @@ class ShelfMixin:
         marks = ",".join("?" * len(lanes))
         rows = self._db.execute(
             f"""
-            SELECT c.id, c.owner_type, c.owner_id, c.lane, c.text, COALESCE(i.created_at, r.created_at, '') AS at
+            SELECT c.id, c.owner_type, c.owner_id, c.lane, c.text, c.part, COALESCE(i.created_at, r.created_at, '') AS at
               FROM chunks c
               LEFT JOIN category_items i ON c.owner_type = 'category' AND i.user_id = c.user_id
                    AND i.category_id = substr(c.owner_id, 1, instr(c.owner_id, '/') - 1)
@@ -388,27 +410,27 @@ class ShelfMixin:
             """,
             (user_id, *lanes, needle, limit),
         )
-        return [Chunk(r["id"], r["owner_type"], r["owner_id"], r["lane"], r["text"]) for r in rows]
+        return [Chunk(r["id"], r["owner_type"], r["owner_id"], r["lane"], r["text"], part=r["part"]) for r in rows]
 
     @locked
     def search_fts(self, user_id: str, lanes: list[Lane], match: str, limit: int) -> list[Chunk]:
         marks = ",".join("?" * len(lanes))
         rows = self._db.execute(
             f"""
-            SELECT c.id, c.owner_type, c.owner_id, c.lane, c.text, bm25(chunks_fts) AS rank
+            SELECT c.id, c.owner_type, c.owner_id, c.lane, c.text, c.part, bm25(chunks_fts) AS rank
               FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
              WHERE chunks_fts MATCH ? AND c.user_id = ? AND c.lane IN ({marks})
              ORDER BY rank LIMIT ?
             """,
             (match, user_id, *lanes, limit),
         )
-        return [Chunk(r["id"], r["owner_type"], r["owner_id"], r["lane"], r["text"], -r["rank"]) for r in rows]
+        return [Chunk(r["id"], r["owner_type"], r["owner_id"], r["lane"], r["text"], -r["rank"], r["part"]) for r in rows]
 
     @locked
     def search_vector(self, user_id: str, lanes: list[Lane], vector: list[float], limit: int) -> list[Chunk]:
         marks = ",".join("?" * len(lanes))
         rows = self._db.execute(
-            f"SELECT id, owner_type, owner_id, lane, text, embedding FROM chunks "
+            f"SELECT id, owner_type, owner_id, lane, text, embedding, part FROM chunks "
             f"WHERE user_id = ? AND lane IN ({marks}) AND embedding IS NOT NULL",
             (user_id, *lanes),
         ).fetchall()
@@ -422,7 +444,7 @@ class ShelfMixin:
         top = np.argsort(-scores)[:limit]
         return [
             Chunk(rows[i]["id"], rows[i]["owner_type"], rows[i]["owner_id"], rows[i]["lane"], rows[i]["text"],
-                  float(scores[i]))
+                  float(scores[i]), rows[i]["part"])
             for i in top
         ]
 
