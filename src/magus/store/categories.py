@@ -44,6 +44,7 @@ class CategoryMixin:
     # LocalStore·ShelfMixin이 구현한다(껍데기 메서드는 MRO에서 진짜를 가릴 수 있어 주석만 둔다)
     _user_dir: Callable[[str], Path]
     _replace_chunks: Callable[..., None]
+    _guard: Callable[..., object]  # LocalStore: 파일 하나 색인, 실패하면 그것만 건너뜀(2026-10-09)
     _drop_chunks: Callable[[str, str, str], None]
     _layout: Callable[[str], Any]  # FloorMixin
     _known: Callable[[str, Any], set[str]]
@@ -381,13 +382,13 @@ class CategoryMixin:
         if category.floor not in known:  # 층이 없거나 모르는 층(휴지통으로 간 작업물)이면 공용(파일은 그대로, #93)
             category = replace(category, floor=COMMON)
         self._index_category(user_id, category)
-        for path in sorted((cdir / "items").glob("*.json")):
-            self._index_item(user_id, _item_from_record(category.id, read_json(path)))
+        for path in sorted((cdir / "items").glob("*.json")):  # 깨진 글 파일은 그것만 건너뛴다(2026-10-09 점검 12-b)
+            self._guard(path, lambda p=path: self._index_item(user_id, _item_from_record(category.id, read_json(p))))
 
     def _reindex_categories(self, user_id: str) -> None:
         known = self._known(user_id, self._layout(user_id))
         for path in sorted(self._categories_dir(user_id).glob("*/category.json")):
-            self._reindex_category(user_id, path.parent, known)
+            self._guard(path, self._reindex_category, user_id, path.parent, known)
 
 
 # ---- 파일 ↔ 객체 ----------------------------------------------------------------------------
@@ -428,6 +429,16 @@ _OPTIONAL = ("reason", "where", "parent_id", "origin", "kind", "tags_by")
 # 이 코드가 글 파일에 쓰는 칸 전부. 이 밖의 칸은 put_category_item이 그대로 둔다
 _ITEM_KEYS = frozenset(("schema_version", "id", "title", "title_by", "content", "fields", "author", "tags", "chapters",
                         "created_at", "updated_at", "edited_at", "edited_by", "passages", "scrap", *_OPTIONAL))
+
+
+def item_changes(old: CategoryItem, new: CategoryItem, keys: set[str]) -> dict[str, Any]:
+    """고치기(2026-10-09 점검 10-b): keys(파일의 칸 이름) 중 old와 new가 다른 칸만 파일 형식으로. patch_category_item에 그대로 준다.
+    새 칸(이유·쓸 부분 등)이 생기면 형식 버전도 함께."""
+    before, after = _item_record(old), _item_record(new)
+    out = {k: after.get(k) for k in keys if after.get(k) != before.get(k)}
+    if out and int(after.get("schema_version") or 0) > int(before.get("schema_version") or 0):
+        out["schema_version"] = after["schema_version"]
+    return out
 
 
 def _item_record(item: CategoryItem) -> dict[str, Any]:

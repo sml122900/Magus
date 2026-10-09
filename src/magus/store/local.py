@@ -12,10 +12,11 @@ import secrets
 import shutil
 import sqlite3
 import threading
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from magus.ids import safe_id, utcnow
 from magus.store import formats
@@ -41,6 +42,7 @@ from magus.store.base import (
     ANCHOR_MAX,
     BookTitles,
     Edition,
+    CHAPTER_NUMBER_MAX,
     CHAPTER_STATUSES,
     AuthorKind,
     Change,
@@ -77,6 +79,7 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
         self.root = Path(data_dir)
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._skipped: list[str] = []  # 마지막 색인 다시 만들기에서 건너뛴 파일(데이터 루트 기준 경로)
         self._db = sqlite3.connect(self.root / "index.sqlite", check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA foreign_keys = ON")
@@ -348,8 +351,8 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
         label: str | None = None,
         edition: int | None = None,
     ) -> ChapterMeta:
-        if number < 0:
-            raise ValueError("장 번호는 0 이상")
+        if not 0 <= number <= CHAPTER_NUMBER_MAX:  # 쓰기 전에(2026-10-09 점검 15-1)
+            raise ValueError(f"장 번호는 0~{CHAPTER_NUMBER_MAX:,}입니다(0은 서장).")
         if status is not None and status not in CHAPTER_STATUSES:
             raise ValueError(f"status={status!r}: {'|'.join(CHAPTER_STATUSES)} 중 하나")
         # 메타는 서버가 관리한다. 호출자가 front matter를 붙여 보내도 버리고 본문만 쓴다.
@@ -670,26 +673,64 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
     # ---- 인덱스 ----------------------------------------------------------------------
 
     @_locked
-    def reindex(self) -> None:
-        db = self._db
-        for table in reversed(TABLES):
-            db.execute(f"DROP TABLE IF EXISTS {table}")
-        db.executescript(SCHEMA)
-        users_dir = self.root / "users"
-        with db:
-            for udir in sorted(users_dir.iterdir()) if users_dir.is_dir() else []:
-                if not udir.is_dir():
-                    continue
-                self._index_user(udir.name, udir)
-        db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    def reindex(self) -> list[str]:
+        """파일 → 색인(2026-10-09 점검 12-b). 새 색인을 옆 파일(index.sqlite.new)에 따로 만든 뒤 지금 색인에 통째로 옮긴다(SQLite backup).
+        깨진 파일(JSON·앞머리를 읽지 못함, 범위 밖 장 번호 등)은 그것만 건너뛰고 경로를 로그에 남긴다(내용은 남기지 않는다).
+        만드는 일 자체가 실패하면 지금 색인을 그대로 둔다 — 스키마가 다른 옛 색인이면 빈 새 스키마로(user_version은 올리지 않아 다음 시작 때 다시 만든다).
+        어느 쪽이든 예외를 올리지 않아 서버는 뜬다. 건너뛴 파일의 경로를 돌려준다."""
+        tmp = self.root / "index.sqlite.new"
+        tmp.unlink(missing_ok=True)
+        new = sqlite3.connect(tmp, check_same_thread=False)
+        new.row_factory = sqlite3.Row
+        new.execute("PRAGMA foreign_keys = ON")
+        old, self._db, self._skipped = self._db, new, []
+        try:
+            new.executescript(SCHEMA)
+            users_dir = self.root / "users"
+            with new:
+                for udir in sorted(users_dir.iterdir()) if users_dir.is_dir() else []:
+                    if udir.is_dir():
+                        self._index_user(udir.name, udir)
+            new.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            new.commit()
+            new.backup(old)  # 지금 색인 자리로 통째로(다 만든 뒤에만 바뀐다)
+        except Exception as e:  # noqa: BLE001 — 색인은 파생값이다. 무엇이 실패해도 서버는 떠야 한다
+            log.error("색인 다시 만들기 실패, 지금 색인을 그대로 둔다(%s)", type(e).__name__)
+            self._db = old
+            if old.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:  # 옛 스키마로는 화면이 깨진다 → 빈 새 스키마
+                for table in reversed(TABLES):
+                    old.execute(f"DROP TABLE IF EXISTS {table}")
+                old.executescript(SCHEMA)
+                log.error("색인을 빈 새 스키마로 두었다. 다음 시작 때 다시 만든다")
+        finally:
+            self._db = old
+            new.close()
+            tmp.unlink(missing_ok=True)
+        if self._skipped:
+            log.warning("색인 다시 만들기: 파일 %d개를 건너뛰었다(위 경로들)", len(self._skipped))
+        return list(self._skipped)
+
+    def _guard(self, path: Path, fn: Callable[..., Any], *args: Any) -> Any:
+        """파일 하나(또는 한 덩어리)를 색인한다. 실패하면 그것만 되돌리고 건너뛴다 — 경로와 오류 종류만 남긴다(내용은 남기지 않는다)."""
+        self._db.execute("SAVEPOINT one_file")
+        try:
+            return fn(*args)
+        except Exception as e:  # noqa: BLE001 — 깨진 파일 하나 때문에 나머지 색인이 멈추지 않게
+            self._db.execute("ROLLBACK TO one_file")
+            rel = path.relative_to(self.root).as_posix() if path.is_relative_to(self.root) else path.name
+            self._skipped.append(rel)
+            log.warning("색인 건너뜀: %s (%s)", rel, type(e).__name__)
+            return None
+        finally:
+            self._db.execute("RELEASE one_file")
 
     def _index_user(self, user_id: str, udir: Path) -> None:
         self._db.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (user_id,))
         for project_json in sorted((udir / "projects").glob("*/project.json")):
-            self._reindex_project(user_id, project_json.parent)
-        self._reindex_shelf(user_id)
-        self._reindex_categories(user_id)
-        self._reindex_documents(user_id)
+            self._guard(project_json, self._reindex_project, user_id, project_json.parent)
+        self._guard(udir / "shelf" / "melchior", self._reindex_shelf, user_id)
+        self._guard(udir / "shelf" / "categories", self._reindex_categories, user_id)
+        self._guard(udir / "shelf" / "documents", self._reindex_documents, user_id)
 
     @_locked
     def _reindex_user(self, user_id: str) -> None:
@@ -715,11 +756,15 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
         chapter_ids = {}
         for f in sorted((pdir / "book").glob("ch-*.md")):
             if m := _CHAPTER_FILE.fullmatch(f.name):
-                chapter_ids[int(m.group(1))] = self._index_chapter(user_id, project_id, int(m.group(1)), f)
+                if int(m.group(1)) > CHAPTER_NUMBER_MAX:  # 범위 밖 번호(2026-10-09 점검 15-1): 색인에 넣지 않는다(파일은 그대로)
+                    self._guard(f, _out_of_range, f.name)
+                    continue
+                if (cid := self._guard(f, self._index_chapter, user_id, project_id, int(m.group(1)), f)) is not None:
+                    chapter_ids[int(m.group(1))] = cid
         for f in sorted((pdir / "versions").glob("ch-*.v*.md")):
             m = _VERSION_FILE.fullmatch(f.name)
             if m and int(m.group(1)) in chapter_ids:
-                self._index_version(user_id, chapter_ids[int(m.group(1))], f)
+                self._guard(f, self._index_version, user_id, chapter_ids[int(m.group(1))], f)
         self._index_decisions(user_id, project_id, formats.parse_decisions(_read_text(pdir / "decisions.md")))
         self._index_issues(user_id, project_id, formats.parse_issues(_read_text(pdir / "issues.md")))
         latest = self._db.execute(
@@ -858,3 +903,7 @@ def _chapter_meta(r: sqlite3.Row) -> ChapterMeta:
         uncertain_cite_keys=tuple(json.loads(r["uncertain_cite_keys"])),
         edition=r["edition"],
     )
+
+
+def _out_of_range(name: str) -> None:
+    raise ValueError(f"장 번호가 범위(0~{CHAPTER_NUMBER_MAX:,}) 밖이다: {name}")

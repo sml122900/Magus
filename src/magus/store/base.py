@@ -23,6 +23,8 @@ ANCHOR_MAX = 1000  # 미해결에 남기는 걸린 문장의 최대 길이(#73)
 IssueStale = Literal["comment_removed", "anchor_missing"]  # 다시 올린 뒤 "해결됐을 수 있음"(#76)
 ChapterStatus = Literal["draft", "revising", "done"]
 CHAPTER_STATUSES: tuple[str, ...] = ("draft", "revising", "done")
+# 장 번호 범위(2026-10-09 점검 15-1): 0(서장)~9,999. 너무 큰 번호(2^63 이상)는 색인(SQLite 정수)에 들어가지 않아 다시 만들기를 막았다
+CHAPTER_NUMBER_MAX = 9_999
 # 저자에게 보이는 장 상태 이름(웹·내려받기, 2026-10-09). 도구 인자·파일 값은 영문 그대로
 CHAPTER_STATUS_NAMES: dict[str, str] = {"draft": "초안", "revising": "고치는 중", "done": "완성"}
 RefStatus = Literal["unverified", "verified"]

@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
+from pydantic import Field
 
 from magus.book.comments import source_label
 from magus.book.export import export_docx
@@ -22,7 +23,7 @@ from magus.contexts import attach_manuscript_context, view_for_book
 from magus.melchior.check import CheckResult, Resolver, check_chapter, check_text, terms_of
 from magus.inbox import FileResolver, ResolveFile
 from magus.store import BookTitles, Issue, Project, Store
-from magus.store.base import STALE_REASONS, ChapterStatus
+from magus.store.base import CHAPTER_NUMBER_MAX, STALE_REASONS, ChapterStatus
 from magus.store.formats import one_line, strip_front_matter
 
 FRONT_MATTER_WARNING = (
@@ -35,6 +36,7 @@ UNVERIFIED_CITES_MEANING = (
     "needs_source는 본문의 [출처 필요: …] 표시 수."
 )
 ISSUE_LIST_MAX = 200
+ChapterNumber = Annotated[int, Field(ge=0, le=CHAPTER_NUMBER_MAX)]  # 장 번호 0(서장)~9,999(2026-10-09 점검 15-1)
 
 
 def _json(data: dict[str, Any]) -> str:
@@ -112,7 +114,7 @@ def build_tools(
         )
 
     def book_write_chapter(
-        number: int,
+        number: ChapterNumber,
         content: str,
         note: str,
         title: str | None = None,

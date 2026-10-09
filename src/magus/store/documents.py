@@ -37,6 +37,7 @@ class DocumentMixin:
     _lock: threading.RLock
     _user_dir: Callable[[str], Path]
     _replace_chunks: Callable[..., None]
+    _guard: Callable[..., object]  # LocalStore: 파일 하나 색인, 실패하면 그것만 건너뜀(2026-10-09)
     _drop_chunks: Callable[[str, str, str], None]
     _layout: Callable[[str], Any]
     _known: Callable[[str, Any], set[str]]
@@ -170,13 +171,16 @@ class DocumentMixin:
 
     def _reindex_documents(self, user_id: str) -> None:
         known = self._known(user_id, self._layout(user_id))
-        for path in sorted(self._documents_dir(user_id).glob("*/document.json")):
-            doc = _document(read_json(path), path.parent.name)
-            if doc.floor not in known or doc.floor == COMMON:  # 사라진 층이면 기준 원고의 층으로(그것도 없으면 색인만 건너뛴다)
-                if doc.project_id not in known:
-                    continue
-                doc = replace(doc, floor=doc.project_id)
-            self._index_document(user_id, doc, read_text(path.parent / f"v{doc.versions[-1].number}.md"))
+        for path in sorted(self._documents_dir(user_id).glob("*/document.json")):  # 깨진 문서는 그것만 건너뛴다(2026-10-09 점검 12-b)
+            self._guard(path, self._reindex_document, user_id, path, known)
+
+    def _reindex_document(self, user_id: str, path: Path, known: set[str]) -> None:
+        doc = _document(read_json(path), path.parent.name)
+        if doc.floor not in known or doc.floor == COMMON:  # 사라진 층이면 기준 원고의 층으로(그것도 없으면 색인만 건너뛴다)
+            if doc.project_id not in known:
+                return
+            doc = replace(doc, floor=doc.project_id)
+        self._index_document(user_id, doc, read_text(path.parent / f"v{doc.versions[-1].number}.md"))
 
 
 def _record(doc: Document) -> dict[str, Any]:

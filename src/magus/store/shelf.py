@@ -59,6 +59,7 @@ class ShelfMixin:
     # FloorMixin이 구현한다
     _layout: Callable[[str], Layout]
     _known: Callable[[str, Layout], set[str]]
+    _guard: Callable[..., object]  # LocalStore: 파일 하나 색인, 실패하면 그것만 건너뜀(2026-10-09)
     # CategoryMixin이 구현한다(메서드 껍데기를 두면 MRO에서 진짜를 가리므로 주석만 둔다)
     _trashed_categories: Callable[[str], list[tuple[str, str, dict[str, Any], str]]]
     _restore_category: Callable[[str, str, str | None], list[str]]
@@ -369,9 +370,12 @@ class ShelfMixin:
         """문헌. 프로젝트가 없거나 모르는 프로젝트(휴지통으로 간 작업물)면 배치에서 정한 프로젝트로 색인한다(파일은 그대로, #93)."""
         layout = self._layout(user_id)
         known = self._known(user_id, layout)
-        for bib in sorted(self._melchior_dir(user_id).glob("*/bib.json")):
-            data = read_json(bib)
-            self._index_ref(user_id, bib.parent, data["floor"] if data.get("floor") in known else layout.fallback("refs"))
+        for bib in sorted(self._melchior_dir(user_id).glob("*/bib.json")):  # 깨진 문헌 파일은 그것만 건너뛴다(2026-10-09 점검 12-b)
+            self._guard(bib, self._reindex_ref, user_id, bib, layout, known)
+
+    def _reindex_ref(self, user_id: str, bib: Path, layout: Layout, known: set[str]) -> None:
+        data = read_json(bib)
+        self._index_ref(user_id, bib.parent, data["floor"] if data.get("floor") in known else layout.fallback("refs"))
 
     # ---- 검색 청크 -------------------------------------------------------------------
 
