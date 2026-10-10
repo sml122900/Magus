@@ -9,6 +9,8 @@ from test_web import _csrf, server_proc  # noqa: F401 - 픽스처
 from magus.category.rules import NAME_MAX, TITLE_MAX
 from magus.store import CategoryItem, LocalStore
 
+from conftest import with_library
+
 BOOK = "notes-common"
 ITEM = "20261009000000000-aaaaaa"
 
@@ -16,6 +18,7 @@ ITEM = "20261009000000000-aaaaaa"
 def test_lengths_are_shown_and_not_cut(server_proc):  # noqa: F811
     base, data_dir, _ = server_proc({})
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id=BOOK)
     store.put_category_item("alice", CategoryItem(ITEM, BOOK, "본문", "me", "제목", "author"))
     store.close()

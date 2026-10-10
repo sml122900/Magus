@@ -77,8 +77,8 @@ async def test_stdio_subprocess(data_dir: Path, tmp_path: Path):
                                                                                 "untitled": True}))
         assert "[me]" in _text(await client.call_tool("category_search", {"query": "고래"}))
 
-        # 6단계 → #96: 「내 서재」의 책(컨텍스트 「문체」)
-        _text(await client.call_tool("category_create", {"name": "문체", "context": ["문체"], "project": "내 서재"}))
+        # 6단계 → #96: 책(컨텍스트 「문체」). 2026-10-11부터 「내 서재」는 자동으로 없다
+        _text(await client.call_tool("category_create", {"name": "문체", "context": ["문체"], "project": "synth"}))
         styled = _text(await client.call_tool("category_put", {"book": "문체", "author": "me", "content": "고래는 돌아갔다.",
                                                                "reason": "짧은 문장의 리듬", "tags": ["호흡: 짧음"], "untitled": True}))
         assert styled.startswith("컨텍스트(책 「문체」): 「문체」 문학적 부분이 마음에 드는 구절을 모아놓은것.")
@@ -110,6 +110,7 @@ async def test_relative_file_path_from_other_cwd(data_dir: Path, tmp_path: Path)
     )
     bib_line = "Kremer, M. (1993). Population growth and technological change: One million B.C. to 1990. Quarterly Journal of Economics, 108(3), 681–716."
     async with Client(params) as client:
+        await client.call_tool("book_import", {"title": "책"})  # 새 사용자는 프로젝트 0개(2026-10-11)
         assert "새 문헌 글 1건" in _text(await client.call_tool("ref_import_bibliography", {"text": bib_line}))
         passage = {"text": "인구가 많을수록 기술 진보가 빠르다", "reason": "35장 크레머 문단의 근거"}
         # 저자·연도 없이 파일만: 전문 첫머리의 제목으로 참고문헌을 찾는다

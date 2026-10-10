@@ -10,6 +10,8 @@ from magus.config import Settings
 from magus.server import build_server
 from magus.store import LocalStore
 
+from conftest import with_library
+
 pytestmark = pytest.mark.anyio
 RANGE = "장 번호는 0~9,999입니다(0은 서장)."
 
@@ -33,12 +35,12 @@ async def test_read_tools_check_chapter_range(store: LocalStore, settings: Setti
 
 # ---- 13-b 연결 노드 되살리기 뒤 인용 수 ----
 
-def _unverified(store: LocalStore) -> int:
+def _unverified(store: LocalStore, project: str = "book") -> int:
     import re
 
     from magus.book.outline import build_outline
 
-    return int(re.search(r"미확인 문헌 (\d+)편", build_outline(store, "alice", "book")).group(1))
+    return int(re.search(r"미확인 문헌 (\d+)편", build_outline(store, "alice", project)).group(1))
 
 
 async def test_restoring_link_node_recounts(store: LocalStore, settings: Settings):
@@ -49,17 +51,20 @@ async def test_restoring_link_node_recounts(store: LocalStore, settings: Setting
 
     import_manuscript(store, "alice", Path(__file__).parent / "fixtures" / "synthetic" / "닿으려는_종_합성.docx", project_id="book",
                       synthetic=True)
+    store.create_project("alice", "둘째", project_id="second")
+    store.write_chapter("alice", "second", 1, "다시 Clack(2012)을 본다.", "x", title="다시")
     async with Client(build_server(settings, store)) as c:
-        await c.call_tool("category_create", {"name": "읽은 논문", "project": "내 서재"})
-        r = await c.call_tool("category_put", {"book": "읽은 논문", "project": "내 서재", "author": "me", "source": {"key": "clack2012"},
+        await c.call_tool("category_create", {"name": "읽은 논문", "project": "둘째"})
+        # 다른 프로젝트(book)의 문헌을 둘째 원고도 쓴다: 문헌은 제자리, 둘째 지도에 연결 노드(2026-10-11)
+        r = await c.call_tool("category_put", {"book": "읽은 논문", "project": "둘째", "author": "me", "source": {"key": "clack2012"},
                                                "checked": True, "parts": [{"text": "네발동물 대목", "reason": "근거"}]})
         assert not r.is_error, r.content[0].text
-    shared = _unverified(store)
-    link = next(n for n in store.get_map("alice", "book").nodes if n.link)
-    trash_node_with_books(store, "alice", "book", link.id, "시험")
-    assert _unverified(store) == shared + 1  # 연결 노드가 없으면 clack2012가 이 원고에서 미확인으로
-    restore_node(store, "alice", f"book/{link.id}")
-    assert _unverified(store) == shared  # 전에는 다음 문헌 변경·재시작까지 shared + 1이 남았다
+    shared = _unverified(store, "second")
+    link = next(n for n in store.get_map("alice", "second").nodes if n.link)
+    trash_node_with_books(store, "alice", "second", link.id, "시험")
+    assert _unverified(store, "second") == shared + 1  # 연결 노드가 없으면 clack2012가 이 원고에서 미확인으로
+    restore_node(store, "alice", f"second/{link.id}")
+    assert _unverified(store, "second") == shared  # 전에는 다음 문헌 변경·재시작까지 shared + 1이 남았다
 
 
 # ---- 15-3 대화 기록이 Word·PDF·UTF-8 아님 ----
@@ -67,6 +72,7 @@ async def test_restoring_link_node_recounts(store: LocalStore, settings: Setting
 async def test_conversation_rejects_word_and_bad_encoding(store: LocalStore, settings: Settings):
     from pathlib import Path
 
+    with_library(store, "alice")
     store.create_category("alice", "대화", "blank", "#1f2f5c", (), "common", category_id="talk")
     inbox = store.root / "users" / "alice" / "inbox"
     inbox.mkdir(parents=True)
@@ -419,6 +425,7 @@ def test_later_retry_waits_and_one_per_user(store: LocalStore, monkeypatch: pyte
     from magus.store import CategoryItem
     from magus.store import attachments as store_attachments
 
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="notes")
     store.put_category_item("alice", CategoryItem("20261009000000000-aaaaaa", "notes", "글", "me"))
     owner = "notes/20261009000000000-aaaaaa"

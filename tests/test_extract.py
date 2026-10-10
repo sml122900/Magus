@@ -27,6 +27,8 @@ from magus.config import Settings
 from magus.server import build_server
 from magus.store import CategoryItem, LocalStore, Ref
 
+from conftest import with_library
+
 POST = "20261009000000000-aaaaaa"
 
 
@@ -85,7 +87,9 @@ def test_extract_kinds(tmp_path: Path):
 
 
 def _seed(store: LocalStore, user: str = "alice") -> dict[str, str]:
+    with_library(store, user)
     book = store.create_category(user, "장날 메모", "blank", "#1f2f5c", (), "common").id
+    with_library(store, user)
     refs = store.create_category(user, "읽은 논문", "blank", "#1f2f5c", (), "common").id
     store.put_category_item(user, CategoryItem(POST, book, "답사 자료 모음", "me", title="답사 자료"))
     owner = f"{book}/{POST}"
@@ -134,6 +138,7 @@ def test_store_keeps_text_beside_attachment_and_moves_with_trash(store: LocalSto
 
 def test_extract_all_command_counts_and_keeps_originals(data_dir: Path, tmp_path: Path):
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     book = store.create_category("alice", "장날 메모", "blank", "#1f2f5c", (), "common").id
     store.put_category_item("alice", CategoryItem(POST, book, "옛 글", "me"))
     for name, data in (("a.docx", _docx(["옛 문서"])), ("b.pdf", _scan_pdf()), ("c.png", b"\x89PNG"), ("d.txt", "옛 글자".encode())):
@@ -193,6 +198,7 @@ async def test_chat_finds_and_reads_pages(store: LocalStore, data_dir: Path):
 def test_web_upload_extracts_search_and_text_page(server_proc):  # noqa: F811
     base, data_dir, log_path = server_proc({})
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     book = store.create_category("alice", "장날 메모", "blank", "#1f2f5c", (), "common").id
     store.close()
     big = ("머리말\n" + "물안개 낀 나루터의 하루\n" * 520_000).encode()  # 약 19MB(첨부 한도 20MB 안)
@@ -228,6 +234,7 @@ def test_other_user_cannot_read_or_find_attachment_text(server_proc, fake_issuer
     })
     store = LocalStore(data_dir)
     ids = _seed(store, "alice")
+    with_library(store, "bob")
     store.create_category("bob", "장날 메모", "blank", "#1f2f5c", (), "common")
     store.close()
     with httpx2.Client(base_url=base, timeout=120) as bob:
@@ -241,6 +248,7 @@ def test_other_user_cannot_read_or_find_attachment_text(server_proc, fake_issuer
 
 
 def test_late_extraction_is_retried_when_opened(store: LocalStore, data_dir: Path):
+    with_library(store, "alice")
     book = store.create_category("alice", "장날 메모", "blank", "#1f2f5c", (), "common").id
     store.put_category_item("alice", CategoryItem(POST, book, "글", "me"))
     att = store.put_attachment("alice", f"{book}/{POST}", "느린 문서.txt", "늦게 뽑힌 글자".encode())

@@ -44,11 +44,20 @@ def settings(data_dir: Path) -> Settings:
     return Settings.from_env({"USER_ID": "alice", "DATA_DIR": str(data_dir)})
 
 
+def with_library(store: LocalStore, user: str) -> None:
+    """옛 사용자처럼 「내 서재」(id common) 프로젝트가 있게 한다(지도 파일). 2026-10-11부터 새 사용자에게는 자동으로 생기지 않는다."""
+    if not (store._user_dir(user) / "shelf" / "maps" / "common.json").exists():
+        store._write_map(user, "common", {"nodes": [{"id": "center", "x": 0.0, "y": 0.0, "books": []}], "edges": []})
+
+
 def make_book(store: LocalStore, user: str, name: str, context: str | None = None, floor: str = "common", node: str | None = None,
               fields: tuple[str, ...] = (), template: str = "blank") -> str:
-    """시험용 책(#96: 종류 없음). context: 자주 쓰는 컨텍스트 이름(문체·원고·논문·생각 메모) 또는 None."""
+    """시험용 책(#96: 종류 없음). context: 자주 쓰는 컨텍스트 이름(문체·원고·논문·생각 메모) 또는 None.
+    floor가 "common"(기본)이면 「내 서재」가 있는 옛 사용자로 만든다(with_library)."""
     from magus.contexts import Context
 
+    if floor == "common":
+        with_library(store, user)
     saved = {c.name: c for c in store.list_saved_contexts(user)}
     contexts = (Context(saved[context].name, saved[context].text),) if context else ()
     return store.create_category(user, name, template, "#1f2f5c", fields, floor, node, contexts=contexts).id

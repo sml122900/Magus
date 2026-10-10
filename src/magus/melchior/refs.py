@@ -100,10 +100,11 @@ def add_ref(
     file_label: str | None = None,
     verified: bool = True,
     memo: str | None = None,
-) -> tuple[Ref, str | None, int, str | None]:
-    """(저장된 ref, 이전 상태 또는 None, 새로 추가된 발췌 수, 옮긴 책 또는 None).
+) -> tuple[Ref, str | None, int, str | None, str | None]:
+    """(저장된 ref, 이전 상태 또는 None, 새로 추가된 발췌 수, 옮긴 책 또는 None, 연결 노드를 붙인 원래 프로젝트 또는 None).
     book(#96): 그 글을 넣을 책(카테고리 id). 새 문헌은 그 책에 든다. 이미 있는 문헌은 같은 프로젝트면 그 책으로 옮기고,
-    그 프로젝트 원고의 인용 점검이 보지 못하는 다른 프로젝트에 있으면 「내 서재」로 옮기고 두 지도에 연결 노드를 붙인다(#95).
+    그 프로젝트 원고의 인용 점검이 보지 못하는 다른 프로젝트에 있으면 제자리에 두고 이 프로젝트 지도에 그 노드로 가는
+    연결 노드를 붙인다(2026-10-11, 전에는 「내 서재」로 옮겼다).
     verified=False면 '원문 확인' 없이 서지만 넣는다(발췌 없어도 된다, 이미 확인한 문헌이면 확인은 그대로). memo: 글의 내용(bib "memo")."""
     passages = [p for p in passages if p.text.strip()]
     if verified and not passages:
@@ -139,14 +140,14 @@ def add_ref(
             created_at=existing.created_at,
         )
         stored = store.put_ref(user_id, ref, passages=[*old, *new], full_text=full_text)
-        moved = None
-        if needs_share(store, user_id, stored.floor, target_floor):  # 두 프로젝트가 함께 쓰게 됐다: 「내 서재」로, 이유를 남긴다
+        moved = linked = None
+        if needs_share(store, user_id, stored.floor, target_floor):  # 다른 프로젝트에 있는 문헌: 제자리에 두고 연결 노드를 붙인다
+            linked = stored.floor
             stored = share_ref(store, user_id, stored.key, stored.floor, target_floor)
-            moved = stored.book
         elif stored.floor == target_floor and stored.book != book:  # 같은 프로젝트: 저자가 고른 책으로
             stored = store.set_ref_book(user_id, stored.key, book)
             moved = book
-        return stored, existing.status, len(new), moved
+        return stored, existing.status, len(new), moved, linked
     ref = Ref(key=key, status="verified" if verified else "unverified", bib=clean_bib, aliases=tuple(aliases or ()),
               file_path=file_label or file_path, book=book)
-    return store.put_ref(user_id, ref, passages=passages, full_text=full_text), None, len(passages), None
+    return store.put_ref(user_id, ref, passages=passages, full_text=full_text), None, len(passages), None, None

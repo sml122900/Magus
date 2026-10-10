@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from conftest import make_book
+from conftest import make_book, with_library
 
 from magus.attachments import clean_name, describe
 from magus.melchior.check import refresh_cite_counts
@@ -49,6 +49,7 @@ def test_put_list_read_and_folder_is_inside_user_dir(store: LocalStore, data_dir
 def test_other_user_cannot_reach_attachments(store: LocalStore):
     """같은 책 id·글 id를 써도 다른 사용자의 첨부는 보이지 않는다."""
     for user in ("alice", "bob"):
+        with_library(store, user)
         store.create_category(user, "생각", "blank", "#1f2f5c", (), "common", category_id="ideas-x")
         _item(store, user, "ideas-x")
     owner = "ideas-x/20261008120000000-aaaaaa"

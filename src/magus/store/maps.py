@@ -132,6 +132,7 @@ class MapMixin:
     ensure_layout: Callable[[str], Any]
     _write_layout: Callable[[str, Any], None]
     _known: Callable[[str, Any], set[str]]  # FloorMixin
+    _has_library: Callable[[str, Any], bool]  # FloorMixin
     _drop_chunks: Callable[[str, str, str], None]  # ShelfMixin
     _reindex_category: Callable[[str, Path, set[str]], None]  # CategoryMixin
     _reindex_documents: Callable[[str], None]  # DocumentMixin
@@ -149,7 +150,8 @@ class MapMixin:
         return data if isinstance(data, dict) else None
 
     def _known_floors(self, user_id: str, layout: Any) -> list[str]:
-        return [LIBRARY, *self._existing(user_id, layout)]
+        """「내 서재」(있으면, 2026-10-11부터 보통 프로젝트) + 프로젝트 순서."""
+        return [*([LIBRARY] if self._has_library(user_id, layout) else []), *self._existing(user_id, layout)]
 
     # ---- 지금 책 ------------------------------------------------------------------------------
 
@@ -239,7 +241,7 @@ class MapMixin:
                 added.append(target)
                 edges.add(_edge(CENTER, nid))
             target["books"].append(b)
-        if not stored and floor != LIBRARY:  # 이전 규칙: 「내 서재」의 문헌, (자기 문체가 없으면) 문체로 가는 연결 노드
+        if not stored and floor != LIBRARY and not layout.books:  # 이전(#95) 규칙: 「내 서재」의 문헌, (자기 문체가 없으면) 문체로 가는 연결 노드
             library, _ = self._reconcile(user_id, LIBRARY, layout)
             for kind in ("styles", "refs"):
                 if kind == "styles" and kind in layout.kinds(floor):
@@ -465,7 +467,7 @@ class MapMixin:
     @locked
     def ensure_link(self, user_id: str, floor: str, target_floor: str, book: str) -> MapNode | None:
         """floor의 지도에 target_floor의 그 책(지도 파일의 책 이름: 카테고리 id, 옛 기본 책이면 refs 등)이 꽂힌 노드로 가는
-        연결 노드가 없으면 붙인다(문헌을 「내 서재」로 옮길 때). 이미 있으면 None. 같은 프로젝트거나 그 책이 없으면 None."""
+        연결 노드가 없으면 붙인다(다른 프로젝트의 문헌을 이 원고도 쓰게 될 때). 이미 있으면 None. 같은 프로젝트거나 그 책이 없으면 None."""
         layout = self._layout(user_id)
         if floor == target_floor or floor not in self._known_floors(user_id, layout):
             return None

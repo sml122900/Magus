@@ -753,14 +753,13 @@ class ShelfPages:
         choice: str | None = None
         attached: tuple = ()
         error = ""
-        # 꽂을 곳(#95): 노드의 '책 추가'에서 온 프로젝트와 노드. 없으면 「내 서재」(노드는 이름이 같은 새 노드)
+        # 꽂을 곳(#95): 노드의 '책 추가'에서 온 프로젝트와 노드. 프로젝트가 없으면 프로젝트 목록에서 고르게(2026-10-11: 「내 서재」로 보내지 않는다)
         params = request.query_params
-        if request.method == "GET" and not (params.get("project") or params.get("floor")):  # 프로젝트 없이 열면 프로젝트 목록에서 고르게
+        if not (params.get("project") or params.get("floor")):
             return RedirectResponse("/shelf?pick=book", status_code=303)
-        floor = await run_in_threadpool(self.store.get_floor, uid, params.get("project") or params.get("floor") or COMMON)
-        if floor is None and (params.get("project") or params.get("floor")):
+        floor = await run_in_threadpool(self.store.get_floor, uid, params.get("project") or params.get("floor") or "")
+        if floor is None:
             return self.not_found(request, session, "프로젝트")
-        floor = floor or await run_in_threadpool(self.store.get_floor, uid, COMMON)
         found_map = await run_in_threadpool(self.store.get_map, uid, floor.id)
         node = found_map.node(params.get("node") or "") if found_map else None
         node = node if node is not None and not node.link else None

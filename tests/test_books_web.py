@@ -21,6 +21,7 @@ from magus.config import Settings
 from magus.server import build_server
 from magus.store import LocalStore
 from magus.synthetic import build_manuscript_docx
+from conftest import with_library
 
 pytestmark = pytest.mark.anyio
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -55,6 +56,9 @@ def _attach(c, csrf: str, book: str, path, title: str) -> str:
 
 async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
     base, data_dir, _ = server_proc({})
+    setup = LocalStore(data_dir)
+    with_library(setup, "alice")  # 「내 서재」가 있는 옛 사용자(올린 문서가 없는 프로젝트로 옮기기를 막는지 본다)
+    setup.close()
     manuscript = build_manuscript_docx(tmp_path / "닿으려는_종_합성.docx")
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         shelf = c.get("/login?next=/shelf").text

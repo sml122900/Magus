@@ -284,6 +284,7 @@ async def test_concurrent_requests_keep_their_own_user(keys, auth_server):  # no
     tokens = {"앨리스": _token(good, aud=url), "밥": _token(good, aud=url, sub="sub-bob")}
     for word, token in tokens.items():
         async with _client(url, token) as c:
+            await c.call_tool("book_import", {"title": f"{word}의 책"})  # 새 사용자는 프로젝트 0개(2026-10-11)
             await c.call_tool("category_create", {"name": "생각"})
             await c.call_tool("category_put", {"book": "생각", "author": "me", "content": f"{word}의 바다 생각", "untitled": True})
     results: list[tuple[str, str]] = []

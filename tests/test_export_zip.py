@@ -16,6 +16,7 @@ from magus.config import Settings
 from magus.export_zip import build_zip
 from magus.server import build_server
 from magus.store import CategoryItem, LocalStore, Passage
+from conftest import with_library
 
 pytestmark = pytest.mark.anyio
 SYNTH = Path(__file__).parent / "fixtures" / "synthetic" / "닿으려는_종_합성.docx"
@@ -36,6 +37,7 @@ async def test_project_zip_has_every_kind(store: LocalStore, settings: Settings)
         r = await c.call_tool("category_put", {"book": refs_book(store), "author": "me", "source": {"key": "clack2012"}, "checked": True,
                                                "parts": [{"text": "네발동물 대목", "reason": "근거", "where": "p.3"}]})
         assert not r.is_error, r.content[0].text
+    with_library(store, "alice")
     store.add_link_node("alice", "common", "book", walk.id)
 
     data = build_zip(store, "alice", ["book", "common"])

@@ -34,7 +34,7 @@ from magus.category.rules import PALETTE, parse_color
 from magus.floors import MAX_FLOORS, josa
 from magus.ids import local_time
 from magus.melchior.check import after_refs_changed
-from magus.maps import CENTER, LIBRARY_NAME, MAX_NODES, NODE_NAME_MAX
+from magus.maps import CENTER, MAX_NODES, NODE_NAME_MAX
 from magus.store import Floor, MapNode, ProjectMap, Store
 from magus.store.floors import MoveError
 from magus.store.formats import UNTITLED, clip, display_title, one_line
@@ -113,7 +113,7 @@ def when_text(iso: str) -> str:
 
 
 def project_name(floor: Floor) -> str:
-    return LIBRARY_NAME if floor.common else floor.title
+    return floor.title
 
 
 def short_title(title: str, width: int = 24) -> str:
@@ -211,24 +211,23 @@ class MapPages:
         notices = error + await run_in_threadpool(self._notices, uid, request, session, "/shelf")
         cards = await run_in_threadpool(self._project_cards, uid, floors, session, draft_title)
         trashed = len(await run_in_threadpool(self.store.list_trashed_projects, uid))
-        body = (f"{notices}{form}<ul class=\"projects\">{cards}</ul>"
+        start = "" if floors else '<p class="empty">+ 프로젝트로 시작하세요.</p>'  # 새 사용자는 프로젝트 0개(2026-10-11)
+        body = (f"{notices}{form if floors else ''}{start}<ul class=\"projects\">{cards}</ul>"
                 '<p class="muted"><a href="/shelf/export.zip">전체 내려받기(zip)</a> · '
                 f'<a href="/shelf/trash">휴지통{f" {trashed}" if trashed else ""}</a></p>')
         return self._map_page("프로젝트", body, session, status, css=PROJECTS_STYLE)
 
     def _project_cards(self, uid: str, floors: list[Floor], session: tuple[str, str], draft_title: str = "") -> str:
-        library = [f for f in floors if f.common]
-        works = sorted((f for f in floors if not f.common), key=lambda f: f.updated_at, reverse=True)
         cards = []
-        for f in [*works, *library]:
+        for f in sorted(floors, key=lambda f: f.updated_at, reverse=True):  # 「내 서재」도 보통 프로젝트(2026-10-11)
             found = self.store.get_map(uid, f.id)
             nodes = len(found.nodes) if found else 0
             what = f" · {len(self.store.list_chapters(uid, f.id))}장" if f.has_manuscript else ""
-            cards.append(f'<li class="pcard{" library" if f.common else ""}"><a href="{html.escape(state_url(f.id))}">'
+            cards.append(f'<li class="pcard"><a href="{html.escape(state_url(f.id))}">'
                          f'<span class="pname">{html.escape(project_name(f))}</span>'
                          f'<span class="pmeta">{when_text(f.updated_at)}</span>'
                          f'<span class="pmeta">노드 {nodes}{what}</span></a></li>')
-        room = sum(1 for f in floors if not f.common) < MAX_FLOORS
+        room = len(floors) < MAX_FLOORS
         csrf = self._csrf_input(session)
         # '+ 프로젝트'는 제목만(2026-10-10). 만들면 올린 문서 없는 프로젝트(가운데 노드만)의 지도로 간다
         new = (
@@ -531,9 +530,7 @@ class MapPages:
 
     def _project_delete(self, uid: str, session: tuple[str, str], floor: Floor) -> str:
         """지도 머리의 '🗑 휴지통으로'와 화면 안 확인 창(2026-10-09). 프로젝트째(가운데 노드·올린 문서 포함) 휴지통으로.
-        「내 서재」에는 없다. 다른 프로젝트가 연결 중이면 그 프로젝트 이름과 '닫기'만. 수정본이 있으면 크게 알린다."""
-        if floor.common:
-            return ""
+        다른 프로젝트가 연결 중이면 그 프로젝트 이름과 '닫기'만. 수정본이 있으면 크게 알린다(「내 서재」도 같다, 2026-10-11)."""
         info = self.store.project_trash_info(uid, floor.id)
         if info is None:
             return ""
@@ -572,8 +569,7 @@ class MapPages:
             code = e.args[0] if e.args else ""
             if code == "missing":
                 return self.not_found(request, session, "프로젝트")
-            said = ("「내 서재」는 휴지통으로 옮기지 않습니다." if code == "library" else
-                    f"{e.args[1]}에서 연결하고 있어 휴지통으로 옮길 수 없습니다." if code == "linked" else "휴지통으로 옮기지 못했습니다.")
+            said = (f"{e.args[1]}에서 연결하고 있어 휴지통으로 옮길 수 없습니다." if code == "linked" else "휴지통으로 옮기지 못했습니다.")
             return await self.project_page(request, f'<p class="msg err">{html.escape(said)}</p>', 400)
         await run_in_threadpool(after_refs_changed, self.store, uid)  # 장별 미확인 수는 파생값이라 색인을 다시 만든 뒤 맞춘다
         return RedirectResponse(with_query("/shelf", done="project_trashed", t=trash_id), status_code=303)

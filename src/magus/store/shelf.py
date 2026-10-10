@@ -161,9 +161,12 @@ class ShelfMixin:
 
     @locked
     def default_project(self, user_id: str) -> str:
-        """프로젝트를 말하지 않았을 때 문헌이 갈 프로젝트: 프로젝트가 하나면 그것, 아니면 「내 서재」(옛 규칙과 같다, #93)."""
-        works = sorted(self._known(user_id, self._layout(user_id)) - {COMMON})
-        return works[0] if len(works) == 1 else COMMON
+        """프로젝트를 말하지 않았을 때 갈 프로젝트: 프로젝트가 하나면 그것. 없거나 여럿이면 ValueError
+        (2026-10-11: 「내 서재」는 보통 프로젝트라 그리로 보내지 않는다. 도구는 그 전에 project_args로 묻는다)."""
+        known = sorted(self._known(user_id, self._layout(user_id)))
+        if len(known) == 1:
+            return known[0]
+        raise ValueError("프로젝트가 없다. 먼저 프로젝트를 만든다" if not known else "프로젝트가 여럿이라 어디에 넣을지 정해야 한다")
 
     def _book_floor_of(self, user_id: str, book: str) -> str | None:
         """책(카테고리 id)의 프로젝트. 없는 책이면 None."""

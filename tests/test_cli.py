@@ -2,6 +2,8 @@ import pytest
 
 from magus.cli import main
 
+from conftest import with_library
+
 
 @pytest.mark.parametrize("argv", [["seed-demo"], ["import", "x.docx", "--synthetic"]])
 def test_synthetic_data_never_goes_to_default_user(argv, monkeypatch, tmp_path):
@@ -29,6 +31,7 @@ def test_alias_command_links_confirmed_transliteration(monkeypatch, tmp_path, ca
     monkeypatch.setenv("USER_ID", "alice")
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     store = LocalStore(tmp_path / "data")
+    with_library(store, "alice")
     import_bibliography(store, "alice", "Hayashi, R. (2016). Population as a source of long-term growth. Springer.")
     assert [g.matched_by for g in check_text(store, "alice", "하야시(2016)").groups] == ["음역 추정"]
     store.close()

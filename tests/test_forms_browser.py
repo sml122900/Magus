@@ -6,7 +6,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from conftest import needs_tools
+from conftest import needs_tools, with_library
 from test_attach_browser import CHROME, NODE
 from test_web import server_proc  # noqa: F401 - 픽스처
 
@@ -25,6 +25,7 @@ def test_star_focus_counts_leave_guard_and_back(server_proc, tmp_path):  # noqa:
         "SESSION_SECRET": secret, "WEB_CLIENT_ID": "web-client",
     })
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     book = store.create_category("alice", "장날 메모", "blank", "#1f2f5c", (), "common").id
     store.put_category_item("alice", CategoryItem(POST, book, "고칠 글", "me", "제목", "author"))
     store.close()

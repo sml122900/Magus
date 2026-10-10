@@ -220,13 +220,13 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
     ) -> Project:
         project_id = safe_id(project_id or secrets.token_hex(4), "project_id")
         if project_id == COMMON:
-            raise ValueError(f"{COMMON!r}은 「내 서재」의 id라 작업물 id로 쓸 수 없다")
+            raise ValueError(f"{COMMON!r}은 「내 서재」(옛 공용 층)의 id라 다른 프로젝트 id로 쓸 수 없다")
         pdir = self._project_dir(user_id, project_id)
         if (pdir / "project.json").exists():
             raise ValueError(f"프로젝트 {project_id!r}가 이미 있다")
         layout = self.ensure_layout(user_id)  # 층 배치를 먼저 파일로 적는다(이전 전 사용자, #93)
-        if project_id not in layout.order and len(self._existing(user_id, layout)) >= MAX_FLOORS:
-            raise ValueError(f"프로젝트는 {MAX_FLOORS}개까지다(「내 서재」 빼고)")
+        if project_id not in layout.order and len(self._known(user_id, layout)) >= MAX_FLOORS:  # 「내 서재」도 하나로 센다(2026-10-11)
+            raise ValueError(f"프로젝트는 {MAX_FLOORS}개까지다")
         now = utcnow()
         for sub in ("book", "versions", "original"):
             (pdir / sub).mkdir(parents=True, exist_ok=True)

@@ -24,6 +24,7 @@ from magus.book.importer import import_manuscript
 from magus.docupdate import UpdateError, find_rows, list_documents, update_document
 from magus.server import build_server
 from magus.store import CategoryItem, LocalStore
+from conftest import with_library
 
 pytestmark = pytest.mark.anyio
 U = "alice"
@@ -33,6 +34,8 @@ LIMITS = {"max_attach": 20_000_000, "max_upload": 50_000_000, "max_user": 1_000_
 
 def _post(store: LocalStore, title: str | None = "회의록", floor: str = "common", book: str = "bk") -> str:
     if store.get_category(U, book) is None:
+        if floor == "common":
+            with_library(store, U)
         store.create_category(U, "자료", "blank", "#1f2f5c", (), floor, category_id=book)
     store.put_category_item(U, CategoryItem(ITEM, book, "본문", "me", title, "author" if title else None))
     return f"{book}/{ITEM}"

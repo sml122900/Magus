@@ -23,6 +23,8 @@ from magus.server import build_server
 from magus.store import CategoryItem, LocalStore, Passage
 from magus.store.schema import SCHEMA_VERSION
 
+from conftest import with_library
+
 pytestmark = pytest.mark.anyio
 W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
 
@@ -39,6 +41,7 @@ def _bomb(path: Path, paragraphs: int = 3_000_000) -> Path:
 # ---- 7-a 그림 폭탄 ----
 
 def _post(store: LocalStore) -> str:
+    with_library(store, "alice")
     store.create_category("alice", "사진", "blank", "#1f2f5c", (), "common", category_id="pics")
     store.put_category_item("alice", CategoryItem("20261009000000000-aaaaaa", "pics", "사진 글", "me"))
     return "pics/20261009000000000-aaaaaa"
@@ -119,6 +122,7 @@ def _seed(store: LocalStore) -> None:
     store.create_project("alice", "책", project_id="b")
     for n in range(1, 4):
         store.write_chapter("alice", "b", n, f"{n}장 본문", "x", title=f"{n}장")
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="notes")
     for n in range(5):
         store.put_category_item("alice", CategoryItem(f"2026100900000000{n}-aaaaaa", "notes", f"글 {n}", "me"))
@@ -184,6 +188,7 @@ async def test_chapter_number_range(store: LocalStore, settings: Settings):
 # ---- 10-b 대화로 글 고치기 ----
 
 async def test_chat_edit_keeps_scrap_record_author_and_hidden_fields(store: LocalStore, settings: Settings):
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="notes")
     item = "20261009000000000-aaaaaa"
     store.put_category_item("alice", CategoryItem(item, "notes", "처음 본문", "me", "저자가 지은 제목", "author", reason="장터 답사",

@@ -130,7 +130,6 @@ PROJECTS_STYLE = """
 .pcard>a:hover .pname,.pcard>a:focus-visible .pname{text-decoration:underline;color:var(--primary)}
 .pname{font-size:22px;font-weight:600;line-height:1.3}
 .pmeta{color:var(--ink2)}
-.pcard.library{border-left:6px solid #2e2b8c}
 .pcard.new{border:2px dashed var(--ink2);box-shadow:none;padding:16px 20px}
 .pcard.new h2{margin:4px 0 8px}.pcard.new form{margin:8px 0}
 .fgroup{background:var(--canvas);border:1px solid var(--line);border-radius:12px;padding:8px 16px;margin:12px 0}

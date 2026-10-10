@@ -20,6 +20,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from conftest import with_library
 from mcp import Client
 
 from magus import map_migrate
@@ -73,11 +74,13 @@ def _node(store: LocalStore, floor: str, name: str, user: str = "alice") -> str:
 # ---- 계산한 지도 -------------------------------------------------------------------------------
 
 def test_new_users_have_no_kind_books(store: LocalStore):
-    """#96: 새 사용자에게는 기본 책이 없다. 지도에는 가운데 노드(올린 문서 자리)만."""
-    assert _names(store, COMMON) == [("가운데", ())]
+    """#96: 새 사용자에게는 기본 책이 없다. 지도에는 가운데 노드(올린 문서 자리)만.
+    2026-10-11: 「내 서재」도 자동으로 생기지 않는다(프로젝트 0개로 시작)."""
+    assert store.list_floors("alice") == [] and store.get_map("alice", COMMON) is None
     _book(store)
     floors = store.list_floors("alice")
-    assert [(f.label, f.id, f.common, f.builtins) for f in floors] == [("내 서재", COMMON, True, ()), ("물에서 뭍으로", "book", False, ())]
+    assert [(f.label, f.id, f.common, f.builtins) for f in floors] == [("물에서 뭍으로", "book", False, ())]
+    assert not (store.root / "users/alice/shelf/maps/common.json").exists()
     assert _names(store, "book") == [("가운데", ("ms.book",))]
     found = store.get_map("alice", "book")
     assert found.stored and store.cite_scope("alice", "book") == ("book",)
@@ -256,6 +259,7 @@ def test_move_book_with_refs_takes_them_along(store: LocalStore):
 
 def test_cite_check_sees_own_and_linked_refs(store: LocalStore):
     _book(store)
+    with_library(store, "alice")  # 「내 서재」가 있는 옛 사용자
     import_bibliography(store, "alice", BIB, "book")
     book = store.source_book("alice", "book")
     store.put_ref("alice", Ref("daeschler2006", "verified", store.get_ref("alice", "daeschler2006").bib))
@@ -280,27 +284,26 @@ def test_cite_check_sees_own_and_linked_refs(store: LocalStore):
     assert _gate(store, "alice", "book") == before
 
 
-def test_shared_refs_go_to_the_library_with_links(store: LocalStore):
+def test_shared_refs_stay_and_the_new_project_links_to_them(store: LocalStore):
+    """2026-10-11: 다른 프로젝트의 문헌을 이 원고도 쓰게 되면 문헌은 제자리, 이 지도에 그 문헌 책의 노드로 가는 연결 노드(「내 서재」로 옮기지 않는다)."""
     _book(store)
     import_bibliography(store, "alice", BIB, "book")
+    book_refs = store.source_book("alice", "book")
     store.create_project("alice", "둘째", project_id="second")
     store.write_chapter("alice", "second", 1, "다시 Clack(2012)을 본다.", "x", title="다시")
     report = import_bibliography(store, "alice", BIB.splitlines()[1] + "\nZimmer, C. (1998). At the water's edge. Free Press.", "second")
-    assert report.shared == ["clack2012"] and report.created == ["zimmer1998"]
-    library = store.source_book("alice", COMMON)
-    assert library and store.get_category("alice", library).name == "참고문헌"  # 「내 서재」의 문헌 책(없으면 만든다)
-    assert store.get_ref("alice", "clack2012").floor == COMMON and store.get_ref("alice", "clack2012").book == library
+    assert report.shared == ["clack2012"] and report.created == ["zimmer1998"] and report.links == 1
+    assert store.get_ref("alice", "clack2012").floor == "book" and store.get_ref("alice", "clack2012").book == book_refs
+    assert store.get_ref("alice", "clack2012").moved is None and store.get_map("alice", COMMON) is None
     assert store.get_ref("alice", "zimmer1998").floor == "second" and store.get_ref("alice", "daeschler2006").floor == "book"
-    for floor in ("book", "second"):  # 두 지도 모두 「내 서재」의 그 책이 꽂힌 노드로 가는 연결 노드가 붙었다
-        assert COMMON in store.cite_scope("alice", floor)
-        assert ("연결 참고문헌", (library,)) in _names(store, floor)
+    assert store.cite_scope("alice", "second") == ("second", "book") and store.cite_scope("alice", "book") == ("book",)
+    assert ("연결 참고문헌", (book_refs,)) in _names(store, "second")
     assert _gate(store, "alice", "book")["unverified"] == ["clack2012", "daeschler2006"]
     assert _gate(store, "alice", "second", 1)["unverified"] == ["clack2012"]
-    assert ("- 「내 서재」로 옮긴 문헌 1편(다른 프로젝트의 올린 문서도 쓰는 문헌. 두 지도에 연결 노드를 붙이고, 각 문헌에 옮긴 시각과 이유를 남김): "
+    assert ("- 다른 프로젝트에 있는 문헌 1편(이 올린 문서도 씀. 문헌은 그대로 두고 이 프로젝트 지도의 연결 노드로 봄, 연결 노드 1개를 새로 붙임): "
             "clack2012") in report.render()
-    moved = store.get_ref("alice", "clack2012").moved
-    assert moved["from"] == "book" and moved["to"] == COMMON
-    assert moved["reason"] == "「물에서 뭍으로」·「둘째」 올린 문서가 함께 쓰는 문헌이라 「내 서재」로 옮김"
+    again = import_bibliography(store, "alice", BIB.splitlines()[1], "second")  # 이미 보는 문헌: 연결 노드를 또 붙이지 않는다
+    assert again.shared == ["clack2012"] and again.links == 0
 
 
 # ---- 이전 ---------------------------------------------------------------------------------
@@ -474,7 +477,7 @@ async def test_tools_project_args_and_map(settings: Settings, store: LocalStore)
         assert undone == "되돌림: 「인물」 → 「도시의 시간」 · 노드 「생각」(옮기기 전 자리)."
         # 지도 보기·전체 현황: 컨텍스트는 이름만([ ])
         listed = _text(await c.call_tool("category_list", {}))
-        assert listed.startswith("책장: 프로젝트 3개(내 서재 · 「물에서 뭍으로」(book) · 「도시의 시간」(")
+        assert listed.startswith("책장: 프로젝트 2개(「물에서 뭍으로」(book) · 「도시의 시간」(")  # 「내 서재」는 자동으로 없다(2026-10-11)
         assert f"## 「도시의 시간」({second}) · 올린 문서 없음 · 노드 4 · 선 2" in listed
         assert "- 「골목길」: 책 없음" in listed and "- 연결 「생각」(물에서 뭍으로): 「생각」 0[생각 메모]" in listed
         assert "- 「생각」: 「생각」 1 · 「인물」 0 (인물 칸: 원어 표기, 생몰, 소속·국적)" in listed
@@ -520,6 +523,8 @@ def test_isolation(store: LocalStore):
     _book(store, "alice")
     _book(store, "bob")
     c = store.create_category("alice", "인물", "person", "#2a7f86", (), "book")
+    with_library(store, "alice")
+    with_library(store, "bob")
     with pytest.raises(MoveError):
         move_book(store, "bob", c.id, COMMON)  # bob의 책장에는 없는 카테고리
     move, _ = move_book(store, "alice", c.id, COMMON)
@@ -534,7 +539,7 @@ def test_isolation(store: LocalStore):
     assert store.get_map("alice", "book").node(node.id).name == "앨리스의 노드"
 
 
-async def test_ref_add_tells_when_moved_to_library(settings: Settings, store: LocalStore):
+async def test_ref_add_tells_when_it_links_another_projects_source(settings: Settings, store: LocalStore):
     _book(store)
     import_bibliography(store, "alice", BIB, "book")
     store.create_project("alice", "둘째", project_id="second")
@@ -542,15 +547,16 @@ async def test_ref_add_tells_when_moved_to_library(settings: Settings, store: Lo
     async with Client(build_server(settings, store)) as c:
         added = _text(await c.call_tool("category_put", {"book": "읽은 것", "author": "me", "source": {"key": "clack2012"}, "checked": True,
                                                           "parts": [{"text": "네발동물의 기원", "reason": "둘째 1장의 근거"}]}))
-        assert ("책 「참고문헌」(「내 서재」) · 옮김: 「물에서 뭍으로」·「둘째」 올린 문서가 함께 쓰는 문헌이라 「내 서재」로 옮김(저자에게 알린다)"
-                in added)
+        assert ("책 「참고문헌」(「물에서 뭍으로」) · 다른 프로젝트 「물에서 뭍으로」에 있는 문헌이라 그대로 두고, 이 프로젝트 지도에 "
+                "그 노드로 가는 연결 노드를 붙임(저자에게 알린다)") in added
         again = _text(await c.call_tool("category_put", {"book": "읽은 것", "author": "me", "source": {"key": "clack2012"}, "checked": True,
                                                           "parts": [{"text": "더 고른 문장", "reason": "보탬"}]}))
-        assert "옮김" not in again  # 이미 두 원고가 보는 곳이면 다시 옮기지 않는다
+        assert "연결 노드를 붙임" not in again and "옮김" not in again  # 이미 두 원고가 보면 다시 붙이지 않는다
 
 
 def test_passage_ref_keeps_floor(store: LocalStore):
     _book(store)
+    with_library(store, "alice")
     store.put_ref("alice", Ref("kremer1993", "unverified", {"title": "Population growth"}, floor=COMMON))
     stored = store.put_ref("alice", Ref("kremer1993", "verified", {"title": "Population growth"}), [Passage("인구", "이유")])
     assert stored.floor == COMMON  # 고칠 때 프로젝트를 주지 않으면 그대로

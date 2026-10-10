@@ -17,6 +17,8 @@ from magus.server import build_server
 from magus.store import CategoryItem, Chunk, LocalStore
 from magus.textindex import chunk_text, search_match, tokens
 
+from conftest import with_library
+
 pytestmark = pytest.mark.anyio
 
 
@@ -40,6 +42,7 @@ class BrokenEmbedder:
 
 def _book(store: LocalStore) -> str:
     found = [c for c in store.list_categories("alice") if c.name == "생각"]
+    with_library(store, "alice")
     return found[0].id if found else store.create_category("alice", "생각", "blank", "#1f2f5c", (), "common").id
 
 
@@ -135,7 +138,7 @@ async def test_every_tool_is_user_scoped(settings: Settings, store: LocalStore, 
     async with Client(build_server(settings, store)) as client:
         await client.call_tool("category_put", {"book": "생각", "author": "me", "source": {"authors": "Clack, J.", "year": "2012", "title": "Gaining ground"},
                                                 "checked": True, "parts": [{"text": "네발동물", "reason": "근거"}]})
-        await client.call_tool("category_create", {"name": "앨리스의 사례", "template": "사례"})
+        await client.call_tool("category_create", {"name": "앨리스의 사례", "template": "사례", "project": "demo"})  # 「내 서재」도 하나로 센다
         await client.call_tool("category_put", {"book": "앨리스의 사례", "author": "me", "content": "앨리스의 바다 사례", "untitled": True})
     bob = dataclasses.replace(settings, user_id="bob")
     empty_markers = ("없습니다", "결과 없음", "0건", "비어 있다", "아직 없다", "문서가 없다")
@@ -174,6 +177,7 @@ async def test_every_tool_is_user_scoped(settings: Settings, store: LocalStore, 
         # 같은 id라도 bob의 휴지통 일이다(앨리스 것은 못 옮긴다)
         assert (await client.call_tool("category_trash", {"book": "생각", "item_id": alice_idea, "note": "x"})).is_error
         # 만들기·제목 기본값은 밥 자신의 책장에만 쓴다(앨리스와 같은 이름이어도)
+        assert not (await client.call_tool("book_import", {"title": "밥의 책"})).is_error  # 새 사용자는 프로젝트 0개(2026-10-11)
         assert not (await client.call_tool("category_create", {"name": "앨리스의 사례"})).is_error
         await client.call_tool("category_title_default", {"mode": "ai"})
     # 쓰기 도구(ref_import_bibliography, category_put, idea_add_conversation)는 bob 자신의 책장에만 쓴다

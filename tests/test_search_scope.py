@@ -12,10 +12,13 @@ from magus.config import Settings
 from magus.server import build_server
 from magus.store import LocalStore, Passage, Ref
 
+from conftest import with_library
+
 pytestmark = pytest.mark.anyio
 
 
 def _seed(store: LocalStore) -> str:
+    with_library(store, "alice")
     book = store.create_category("alice", "읽은 논문", "blank", "#1f2f5c", (), "common").id
     store.put_ref("alice", Ref(key="galor2022", status="verified", bib={"authors": "Galor, O.", "year": 2022, "title": "The journey of humanity"},
                                aliases=("갤러2022",), book=book), passages=[Passage("인류의 여정은 성장의 역사다", "핵심 주장", "12쪽")])

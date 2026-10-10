@@ -15,6 +15,8 @@ from magus.search import find_all_words, find_chunks
 from magus.server import build_server
 from magus.store import CategoryItem, LocalStore
 
+from conftest import with_library
+
 pytestmark = pytest.mark.anyio
 
 BOOK = "notes-common"
@@ -33,6 +35,7 @@ POSTS = {
 
 def _seed(data_dir) -> LocalStore:
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id=BOOK)
     for item_id, text in POSTS.items():  # 제목이 있어야 파일 이름이 제목 자리에 보이지 않는다(제목 자동 채움)
         store.put_category_item("alice", CategoryItem(item_id, BOOK, text, "me", "글", "author"))

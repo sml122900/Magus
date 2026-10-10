@@ -18,11 +18,14 @@ from magus.store import CategoryItem, LocalStore, Ref
 from magus.textindex import search_match
 from magus.webshelf import find, mark
 
+from conftest import with_library
+
 LANES = ["category", "ref_bib", "ref_picked"]
 CITY, SEOUL, LONDON, Y1700, MAPPED = (f"2026100900000000{n}-aaaaaa" for n in range(5))
 
 
 def _seed(store: LocalStore, user: str = "alice") -> str:
+    with_library(store, user)
     book = store.create_category(user, "도시 메모", "blank", "#1f2f5c", (), "common").id
     store.put_category_item(user, CategoryItem(CITY, book, "도시가 커지면 밀도가 오른다", "me", title="도시와 밀도"))
     store.put_category_item(user, CategoryItem(SEOUL, book, "서울은 왜 이렇게 넓어졌나", "me"))

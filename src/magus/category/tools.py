@@ -34,13 +34,12 @@ from magus.category.titles import decide_title
 from magus.contexts import View, from_values, view_for_book, view_for_node
 from magus.ids import local_time, new_id
 from magus.inbox import FileResolver, ResolveFile
-from magus.maps import LIBRARY, LIBRARY_NAME
 from magus.maps import name_key as node_key
 from magus.melchior.author_report import cite_label
 from magus.melchior.check import after_refs_changed, chapters_citing
 from magus.melchior.refs import add_ref
 from magus.project_args import (
-    find_project, floor_name, match_project, projects_text, resolve_project, search_projects, short,
+    NO_PROJECT, find_project, floor_name, match_project, projects_text, resolve_project, search_projects, short,
 )
 from magus.search import Embedder, find_all_words
 from magus.attachments import describe, title_from_files
@@ -140,7 +139,7 @@ def build_tools(
     def chapter_project(user: str, floor: str, project: str | None) -> str | None:
         """장을 이을 원고: project(원고가 있으면) → 책이 있는 프로젝트 → 가장 최근 원고."""
         for f in (find_project(store, user, project).id if project and project.strip() else None, floor):
-            if f and f != LIBRARY and (found := store.get_floor(user, f)) and found.has_manuscript:
+            if f and (found := store.get_floor(user, f)) and found.has_manuscript:
                 return f
         return None
 
@@ -168,6 +167,8 @@ def build_tools(
         user = current_user()
         settings = store.get_shelf_settings(user)
         floors = store.list_floors(user)
+        if not floors:  # 새 사용자는 프로젝트 0개로 시작한다(2026-10-11). 오류가 아니라 안내
+            return f"프로젝트가 아직 없다. 저자에게 이렇게 알린다: {NO_PROJECT}"
         only = find_project(store, user, project).id if project and project.strip() else None
         counts = Counts(store, user)
         saved = store.list_saved_contexts(user)
@@ -180,7 +181,7 @@ def build_tools(
         for f in floors:
             if only and f.id != only:
                 continue
-            head = f"## {LIBRARY_NAME}" if f.common else f"## 「{short(f.title)}」({f.id}) · 올린 문서 {'있음' if f.has_manuscript else '없음'}"
+            head = f"## 「{short(f.title)}」({f.id}) · 올린 문서 {'있음' if f.has_manuscript else '없음'}"
             lines += project_block(store, user, f.id, counts, header=head)
         if not counts.categories and not any(f.has_manuscript for f in floors):
             lines.append("책이 아직 없다(저자가 만들자고 하면 category_create로 만든다).")
@@ -298,7 +299,7 @@ def build_tools(
         except ValueError as e:
             raise ToolError(str(e)) from e
         if move_to:  # 노드 이름, '프로젝트 · 노드', 또는 프로젝트 이름
-            source = store.book_floor(user, found.key) or LIBRARY
+            source = store.book_floor(user, found.key) or ""
             to_floor, to_node = move_target(user, source, move_to)
             try:
                 move, lost = move_book(store, user, found.key, to_floor, to_node)
@@ -532,7 +533,7 @@ def build_tools(
         passages = [Passage(p.text, (p.reason or reason or "").strip(), p.where or where or None) for p in parts]
         try:
             path, label = resolve_file(user, file) if file else (None, None)
-            ref, before, added, moved = add_ref(store, user, bib, passages, book=category.id, file_path=str(path) if path else None,
+            ref, before, added, moved, link_from = add_ref(store, user, bib, passages, book=category.id, file_path=str(path) if path else None,
                                                 file_label=label, aliases=aliases, verified=checked, memo=content)
         except (ValueError, FileNotFoundError) as e:
             raise ToolError(str(e)) from e
@@ -546,7 +547,9 @@ def build_tools(
             f"{ref.key}: {SOURCE_LIGHT.get(before or '', '새 문헌 글')} → {state} · 쓸 부분 {added}개 더함(모두 {total}개) · "
             f"원문 파일 {'있음' if ref.has_fulltext else '없음'} · 한글 표기 {list(ref.aliases) or '없음'} · "
             f"책 「{shelf.name if shelf else '?'}」({floor_name(store, user, ref.floor or '')})"
-            + (f" · 옮김: {ref.moved['reason']}(저자에게 알린다)" if ref.moved and ref.moved.get("at", "") >= started
+            + (f" · 다른 프로젝트 {floor_name(store, user, link_from)}에 있는 문헌이라 그대로 두고, 이 프로젝트 지도에 그 노드로 가는 연결 노드를 붙임"
+               "(저자에게 알린다)" if link_from
+               else f" · 옮김: {ref.moved['reason']}(저자에게 알린다)" if ref.moved and ref.moved.get("at", "") >= started
                else " · 저자가 고른 책으로 옮김" if moved else "")
             + f"\n확인 요청과의 연결 변경 {linked}건 · 이 문헌을 인용하는 장: {cites or '없음'}"
             + ("" if checked else "\n원문 확인 전이라 인용 점검은 아직 확인으로 보지 않는다(저자가 원문을 읽고 쓸 부분을 고르면 checked=true).")

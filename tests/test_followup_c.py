@@ -14,6 +14,8 @@ from magus.search import find_all_words, relaxed_words, stem_of
 from magus.server import build_server
 from magus.store import CategoryItem, LocalStore
 
+from conftest import with_library
+
 pytestmark = pytest.mark.anyio
 
 BOOK, OTHER = "notes-a", "notes-b"
@@ -29,7 +31,9 @@ POSTS = {
 
 def _seed(data_dir) -> LocalStore:
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id=BOOK)
+    with_library(store, "alice")
     store.create_category("alice", "다른 책", "blank", "#1f2f5c", (), "common", category_id=OTHER)
     for item_id, text in POSTS.items():
         store.put_category_item("alice", CategoryItem(item_id, BOOK, text, "me", "글", "author"))

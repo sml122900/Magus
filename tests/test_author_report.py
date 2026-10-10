@@ -9,6 +9,8 @@ from magus.melchior.bibliography import import_bibliography
 from magus.melchior.check import after_refs_changed
 from magus.store import LocalStore
 
+from conftest import with_library
+
 BIB = (
     "Graunt, J. (1662). Natural and Political Observations Made upon the Bills of Mortality. London.\n"
     "Lee, R. B. (1969). Eating Christmas in the Kalahari. Natural History.\n"
@@ -31,6 +33,7 @@ def test_labels_and_chapters():
 
 
 def test_name_mentions_only_certain_spots(store: LocalStore):
+    with_library(store, "alice")
     import_bibliography(store, "alice", BIB)
     graunt, lee, nordhaus = (store.get_ref("alice", k) for k in ("graunt1662", "lee1969", "nordhaus1972"))
     texts = [

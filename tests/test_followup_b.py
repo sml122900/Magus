@@ -13,6 +13,8 @@ from magus.config import Settings
 from magus.server import build_server
 from magus.store import CategoryItem, LocalStore
 
+from conftest import with_library
+
 pytestmark = pytest.mark.anyio
 BOUND = "----fbtest"
 
@@ -36,6 +38,7 @@ def _chunked(fields: dict[str, str], field: str, name: str, size: int):
 def test_body_limit_and_streamed_uploads(server_proc):  # noqa: F811
     base, data_dir, log = server_proc({"MAX_ATTACH_MB": "2", "MAX_UPLOAD_MB": "3"})
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="bk1")
     store.close()
     headers = {"content-type": f"multipart/form-data; boundary={BOUND}"}
@@ -74,6 +77,7 @@ def test_body_limit_and_streamed_uploads(server_proc):  # noqa: F811
 async def test_put_attachment_and_inbox_take_files(store: LocalStore, tmp_path):
     import io
 
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="bk1")
     store.put_category_item("alice", CategoryItem("20261009000000000-aaaaaa", "bk1", "글", "me"))
     stream = io.BytesIO(b"0123456789" * 1000)
@@ -96,6 +100,7 @@ async def test_index_lag_is_repaired_in_background(data_dir, settings: Settings,
     monkeypatch.setattr(local, "RETRY_WAITS", (0.0, 0.05))
     monkeypatch.setattr(local, "REPAIR_EVERY", 0.1)
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="notes")
     store.put_category_item("alice", CategoryItem("20261009000000001-aaaaaa", "notes", "버릴 글", "me", "버릴 글", "author"))
     store._db.execute("PRAGMA busy_timeout = 50")
@@ -120,6 +125,7 @@ async def test_index_lag_is_repaired_in_background(data_dir, settings: Settings,
 
 def test_pending_index_is_repaired_at_start(data_dir):
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="notes")
     store.put_category_item("alice", CategoryItem("20261009000000001-aaaaaa", "notes", "글", "me", "글", "author"))
     store._db.execute("DELETE FROM category_items")  # 지난번에 색인이 늦은 채 서버가 꺼졌다
@@ -137,6 +143,7 @@ def test_pending_index_is_repaired_at_start(data_dir):
 async def test_input_limits_in_schema_and_enforced(store: LocalStore, settings: Settings):
     store.create_project("alice", "책", project_id="b")
     store.write_chapter("alice", "b", 1, "본문(Clack, 2012).", "x", title="하나")
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="notes")
     async with Client(build_server(settings, store)) as c:
         tools = {t.name: t.input_schema for t in (await c.list_tools()).tools}
@@ -261,6 +268,7 @@ async def test_same_name_everywhere(store: LocalStore, settings: Settings):
 
     from magus.export_zip import build_zip
 
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="notes")
     item = "20261009000000001-aaaaaa"
     store.put_category_item("alice", CategoryItem(item, "notes", "본문은 따로 있다", "me"))

@@ -16,6 +16,8 @@ from magus.server import build_server
 from magus.store import CategoryItem, Document, LocalStore, Passage, Ref
 from magus.store.maps import MapError
 
+from conftest import with_library
+
 CHAPTER = "물고기가 뭍으로 올라왔다(Clack, 2012). 강가의 장날 이야기."
 
 
@@ -46,6 +48,7 @@ def _seed(store: LocalStore, user: str = "alice") -> dict[str, str]:
                   passages=[Passage("네발동물이 뭍으로", "근거")])
     other = store.add_node(user, "book", "강")
     store.connect_nodes(user, "book", walk.id, other.id)
+    with_library(store, user)
     case = store.add_node(user, "common", "사례")
     store.ensure_maps(user)
     return {"walk": walk.id, "notes": notes, "photos": photos, "doc": doc.id, "refs": refs.id, "other": other.id, "case": case.id}

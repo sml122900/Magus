@@ -22,7 +22,7 @@ from pathlib import Path
 import httpx2
 import jwt
 import pytest
-from conftest import wait_log
+from conftest import wait_log, with_library
 from cryptography.hazmat.primitives.asymmetric import rsa
 from test_http import FIXTURES, _free_port, _wait_healthy  # tests/는 패키지가 아니다(rootdir 모드)
 
@@ -332,14 +332,13 @@ def test_new_book_replaces_add_book(server_proc):
                          r'.*?<a href="/shelf/p/empty\?node=center">가운데</a></nav>', empty)
         assert 'action="/shelf/new?project=empty&amp;node=center"' in empty and 'type="file"' not in empty and "문서 올리기" not in empty
         assert str(c.get("/shelf/add?floor=empty").url).endswith("/shelf/new?floor=empty")  # 옛 주소 이름(floor)도 받는다
-        common = c.get("/shelf/new?project=common").text
-        assert '<a href="/shelf/p/common">내 서재</a>' in common and 'type="file"' not in common
+        assert c.get("/shelf/new?project=common").status_code == 404  # 새 사용자에게 「내 서재」는 없다(2026-10-11)
         assert c.get("/shelf/add?project=nothing").status_code == 404 and c.get("/shelf/new?project=nothing").status_code == 404
         assert c.get("/book", follow_redirects=False).headers["location"] == "/shelf/book/full?tab=chapters"
     assert "aria-current=page>프로젝트</a>" in empty  # 메뉴는 프로젝트 하나(#95)
     assert "border:1px solid var(--mute)" in empty and "--input" not in empty  # 입력칸 테두리 대비 4.75
     for word in ("새 판", "미해결", "받은함", "인용 체크리스트", "층", "공용", "원고 책", "모음 책", "문서 책", "카테고리"):  # #96: 종류 이름도
-        assert word not in empty and word not in common
+        assert word not in empty
 
 
 def _seed_shelf(data_dir: Path) -> None:
@@ -350,6 +349,7 @@ def _seed_shelf(data_dir: Path) -> None:
     store = LocalStore(data_dir)  # 서버와 같은 데이터 폴더에 직접 넣는다(서버는 매 요청 인덱스를 읽는다)
     saved = {c.name: c for c in store.list_saved_contexts("alice")}
     for book, name, context in (("ideas-common", "생각", "생각 메모"), ("styles-common", "문체", "문체"), ("refs-common", "문헌", "논문")):
+        with_library(store, "alice")
         store.create_category("alice", name, "blank", "#1f2f5c", (), "common", category_id=book,
                               contexts=(Context(saved[context].name, saved[context].text),))
     for item in (

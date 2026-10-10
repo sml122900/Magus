@@ -10,6 +10,8 @@ from test_web import _csrf, server_proc  # noqa: F401 - 픽스처
 
 from magus.store import CategoryItem, LocalStore
 
+from conftest import with_library
+
 BOOK = "notes-common"
 ITEM = "20261009000000000-aaaaaa"
 GONE = "20261009000000001-bbbbbb"
@@ -17,6 +19,7 @@ GONE = "20261009000000001-bbbbbb"
 
 def _seed(data_dir) -> None:
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id=BOOK)
     store.put_category_item("alice", CategoryItem(ITEM, BOOK, "남은 글", "me"))
     store.put_category_item("alice", CategoryItem(GONE, BOOK, "버린 글", "me"))

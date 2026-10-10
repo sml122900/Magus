@@ -140,12 +140,22 @@ class FloorMixin:
         return [p for p in layout.order if p in projects]
 
     def _check_floor(self, user_id: str, layout: Layout, floor: str) -> str:
-        if floor == COMMON or floor in self._existing(user_id, layout):
+        if floor in self._known(user_id, layout):
             return floor
         raise MoveError("unknown_floor", f"층 {floor!r}가 없다", floor=floor)
 
+    def _has_library(self, user_id: str, layout: Layout) -> bool:
+        """「내 서재」(id common, 옛 공용 층)가 있나. 2026-10-11부터 보통 프로젝트라 자동으로 만들지 않는다(새 사용자는 프로젝트 0개).
+        지도 파일이 있거나 그 프로젝트에 책·문헌·문서가 있으면(옛 사용자) 있다. #96 전 형식(이전만 쓴다)은 언제나 있다."""
+        if not layout.books:
+            return True
+        if (self._user_dir(user_id) / "shelf" / "maps" / f"{COMMON}.json").exists():
+            return True
+        return any(self._db.execute(f"SELECT 1 FROM {table} WHERE user_id = ? AND floor = ? LIMIT 1", (user_id, COMMON)).fetchone()
+                   for table in ("categories", "refs", "documents"))
+
     def _known(self, user_id: str, layout: Layout) -> set[str]:
-        return {COMMON, *self._existing(user_id, layout)}
+        return {*([COMMON] if self._has_library(user_id, layout) else []), *self._existing(user_id, layout)}
 
     # ---- 이전(= 배치를 파일로 적기) -------------------------------------------------------------
 
@@ -217,7 +227,8 @@ class FloorMixin:
         projects = {r["id"]: r for r in self._db.execute(
             "SELECT p.id, p.title, (SELECT COUNT(*) FROM chapters c WHERE c.user_id = p.user_id AND c.project_id = p.id) AS n "
             "FROM projects p WHERE p.user_id = ?", (user_id,))}
-        floors = [Floor(COMMON, 0, COMMON_NAME, tuple(layout.kinds(COMMON)), False, self._floor_updated(user_id, COMMON, layout))]
+        floors = ([Floor(COMMON, 0, COMMON_NAME, tuple(layout.kinds(COMMON)), False, self._floor_updated(user_id, COMMON, layout))]
+                  if self._has_library(user_id, layout) else [])
         for n, pid in enumerate(self._existing(user_id, layout), 1):
             row = projects[pid]
             floors.append(Floor(pid, n, row["title"], tuple(layout.kinds(pid)), bool(row["n"]),

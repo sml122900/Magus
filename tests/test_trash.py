@@ -19,6 +19,8 @@ from magus.search import find_chunks
 from magus.server import build_server
 from magus.store import CategoryItem, LocalStore
 
+from conftest import with_library
+
 pytestmark = pytest.mark.anyio
 
 ME, AI, OTHER = "20261005141301887-3e167c", "20261005141301888-aaaaaa", "20261005141301889-bbbbbb"
@@ -27,7 +29,9 @@ IDEAS, STYLES = "ideas-common", "styles-common"
 
 
 def _seed(store: LocalStore, user: str = "alice") -> None:
+    with_library(store, user)
     store.create_category(user, "생각", "blank", "#1f2f5c", (), "common", category_id=IDEAS)
+    with_library(store, user)
     store.create_category(user, "문체", "blank", "#6e1f2f", (), "common", category_id=STYLES)
     for item in (CategoryItem(ME, IDEAS, "바다는 모든 생명이 돌아가는 곳", "me"),
                  CategoryItem(AI, IDEAS, "바다 비유는 3부에 어울립니다", "ai", parent_id=ME),

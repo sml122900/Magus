@@ -16,12 +16,17 @@ from magus.config import Settings
 from magus.server import build_server
 from magus.store import CategoryItem, LocalStore, Passage, Ref
 
+from conftest import with_library
+
 pytestmark = pytest.mark.anyio
 
 
 def _seed(store: LocalStore) -> dict[str, str]:
+    with_library(store, "alice")
     ideas = store.create_category("alice", "생각", "blank", "#1f2f5c", (), "common").id
+    with_library(store, "alice")
     refs = store.create_category("alice", "문헌", "blank", "#1f4a3a", (), "common").id
+    with_library(store, "alice")
     styles = store.create_category("alice", "문체", "blank", "#6e1f2f", (), "common").id
     for n in range(12):
         store.put_category_item("alice", CategoryItem(f"202610090000000{n:02d}-aaaaaa", ideas, f"도시는 모이는 곳이다 {n}", "me"))

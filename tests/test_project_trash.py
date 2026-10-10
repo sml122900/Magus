@@ -47,10 +47,10 @@ def test_project_trash_round_trip(store: LocalStore):
     bob_before = _hashes(store.root / "users" / "bob")
     info = store.project_trash_info("alice", "city")
     assert info is not None and info.blocked is None and info.books == 2 and info.items == 1 and info.refs == 1 and info.chapters == 1
-    assert store.project_trash_info("alice", "common").blocked == "library"
+    assert store.project_trash_info("alice", "common") is None  # 새 사용자에게 「내 서재」는 없다(2026-10-11)
     trash_id = store.trash_project("alice", "city", "웹에서 옮김")
     # 휴지통에 있는 동안: 목록·책·문헌·검색·현황에서 빠진다
-    assert [f.id for f in store.list_floors("alice")] == ["common", "river"]
+    assert [f.id for f in store.list_floors("alice")] == ["river"]
     assert store.get_project("alice", "city") is None and store.get_category("alice", "walk") is None
     assert store.get_ref("alice", "clack2012") is None and store.get_ref("alice", "daeschler2006") is not None
     assert not find_chunks(store, "alice", ["category"], "골목", 10)
@@ -63,7 +63,7 @@ def test_project_trash_round_trip(store: LocalStore):
     assert store.restore_project("alice", trash_id) == "city"
     assert _hashes(udir) == before
     assert not (udir / "trash" / "projects" / trash_id).exists()
-    assert [f.id for f in store.list_floors("alice")] == ["common", "city", "river"]
+    assert [f.id for f in store.list_floors("alice")] == ["city", "river"]
     assert find_chunks(store, "alice", ["category"], "골목", 10) and store.get_ref("alice", "clack2012") is not None
     assert any(t.id == "walk/20261009000000001-bbbbbb" for t in store.list_trash("alice"))  # 먼저 버린 글도 따로 되살릴 수 있게 남는다
 
@@ -80,7 +80,7 @@ def test_project_trash_blocks(store: LocalStore):
     assert e.value.args == ("linked", "「강의 책」")
     with pytest.raises(ValueError) as e:
         store.trash_project("alice", "common", "x")
-    assert e.value.args[0] == "library"
+    assert e.value.args[0] == "missing"  # 없는 「내 서재」(있으면 보통 프로젝트처럼 옮긴다: test_batch_library)
     trash_id = store.trash_project("alice", "river", "x")  # 연결하는 쪽은 옮길 수 있다
     store.create_project("alice", "같은 id", project_id="river")
     with pytest.raises(ValueError) as e:
@@ -128,4 +128,4 @@ def test_project_trash_web(server_proc):  # noqa: F811
         assert "「강의 책」에서 연결하고 있어 휴지통으로 옮길 수 없습니다." in blocked
         refused = c.post("/shelf/p/city/discard", data={"csrf": csrf})
         assert refused.status_code == 400 and "「강의 책」에서 연결하고 있어 휴지통으로 옮길 수 없습니다." in refused.text
-        assert c.post("/shelf/p/common/discard", data={"csrf": csrf}).status_code == 400
+        assert c.post("/shelf/p/common/discard", data={"csrf": csrf}).status_code == 404  # 새 사용자에게 「내 서재」는 없다

@@ -252,7 +252,7 @@ async def test_remote_auth_rejects_and_isolates_users(keys, auth_server, data_di
         _text(await c.call_tool("category_create", {"name": "생각", "project": "synth"}))
         _text(await c.call_tool("category_put", {"book": "생각", "author": "me", "content": "앨리스의 생각", "untitled": True}))
     async with _client(mcp_url, bob) as c:  # 다른 계정: 앨리스의 원고·생각이 보이지 않는다
-        assert _text(await c.call_tool("book_outline", {})).startswith("프로젝트가 없습니다")
+        assert "'+ 프로젝트'로 먼저 만들어 주세요" in _text(await c.call_tool("book_outline", {}))  # 새 사용자는 프로젝트 0개(2026-10-11)
         assert "문서가 없다" in _text(await c.call_tool("files_list", {}))  # 올린 파일·첨부도 사용자별
         assert (await c.call_tool("book_import", {"path": "원고.docx", "project_id": "x"})).is_error
         assert _text(await c.call_tool("category_search", {"query": "앨리스의 생각"})).endswith("결과 없음.")

@@ -17,6 +17,8 @@ from test_web import _csrf, _login, fake_issuer, server_proc  # noqa: F401 - 픽
 from magus.floors import COMMON
 from magus.store import CategoryItem, Context, LocalStore
 
+from conftest import with_library
+
 pytestmark = pytest.mark.anyio
 
 
@@ -27,7 +29,9 @@ def _seed(data_dir, user: str = "alice") -> dict[str, str]:
     store.create_project(user, "강과 사람", project_id="river")
     person = store.create_category(user, "인물", "person", "#7a4e2d", ("시기",), "city")
     store.put_category_item(user, CategoryItem("20261007000000000-aaaaaa", person.id, "제인 제이콥스", "me", "제이콥스", "author"))
+    with_library(store, user)
     case = store.create_category(user, "사례", "case", "#b8923a", (), COMMON)
+    with_library(store, user)
     styles = store.create_category(user, "문체", "blank", "#6e1f2f", (), COMMON, contexts=(Context("문체", "문학적 부분이 마음에 드는 구절"),))
     ideas = store.create_category(user, "생각", "blank", "#1f2f5c", (), "city", contexts=(Context("생각 메모", "떠오른 생각을 적어 둔 메모다."),))
     store.put_category_item(user, CategoryItem("20261007000000001-bbbbbb", ideas.id, "도시는 서로를 찾는 곳", "me"))
@@ -49,7 +53,7 @@ def test_project_list_and_new_project(server_proc):  # noqa: F811
         listed = c.get("/login?next=/shelf").text
         csrf = _csrf(listed)
         names = re.findall(r'<span class="pname">([^<]+)</span>', listed)
-        assert names[-1] == "내 서재" and set(names[:-1]) == {"도시는 어떻게 태어났나", "강과 사람"}  # 「내 서재」는 끝에
+        assert set(names) == {"도시는 어떻게 태어났나", "강과 사람", "내 서재"}  # 「내 서재」도 보통 프로젝트(최근 수정 순, 2026-10-11)
         assert listed.count("최근 수정 ") >= 3 and '<span class="pmeta">노드 4 · 1장</span>' in listed and '<span class="pmeta">노드 1</span>' in listed
         assert '<h2>+ 프로젝트</h2>' in listed and 'action="/shelf/projects"' in listed  # 제목만(2026-10-10, 문서 올리기 칸 없음)
         assert 'name="project" value="new"' not in listed and 'type="file"' not in listed
@@ -211,27 +215,28 @@ def test_move_books_between_nodes_and_undo(server_proc):  # noqa: F811
         assert "「인물」을 「강과 사람」 · 노드 「인물」로 옮겼습니다." in dest.text
         # 같은 이름이 받는 프로젝트에 있으면 옮기지 않는다
         store = LocalStore(data_dir)
+        with_library(store, "alice")
         store.create_category("alice", "인물", "person", "#7a4e2d", (), COMMON)
         store.close()
         clash = c.post("/shelf/move", data={"csrf": csrf, "book": ids["person"], "to": COMMON, "next": "/shelf/p/river"})
         assert "「내 서재」에 같은 이름 「인물」이 있어 옮기지 못했습니다. 이름을 바꾼 뒤 옮겨 주세요." in clash.text
         evil = c.post("/shelf/move", data={"csrf": csrf, "book": ids["case"], "to": "city", "next": "https://evil.example/x"})
         assert str(evil.url).startswith(f"{base}/shelf?moved=")  # 돌아갈 주소는 책장 안만
-    # 두 프로젝트가 같은 문헌을 쓰게 되어 「내 서재」로 옮긴 문헌: 항목에 옮긴 시각과 이유
+    # 두 프로젝트가 같은 문헌을 쓰게 되면 문헌은 제자리, 쓰게 된 프로젝트 지도에 연결 노드(2026-10-11, 「내 서재」로 옮기지 않는다)
     from magus.melchior.bibliography import import_bibliography  # noqa: PLC0415
 
     store = LocalStore(data_dir)
     line = "Jacobs, J. (1969). The economy of cities. Random House."
     import_bibliography(store, "alice", line, "city")
     assert import_bibliography(store, "alice", line, "river").shared == ["jacobs1969"]
+    city_refs = store.source_book("alice", "city")
+    assert store.get_ref("alice", "jacobs1969").book == city_refs and "city" in store.cite_scope("alice", "river")
     store.close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         c.get("/login?next=/shelf")
-        library = LocalStore(data_dir).source_book("alice", COMMON)
-        refs = c.get(f"/shelf/{library}").text  # 「내 서재」의 문헌 책(없어서 만든 「참고문헌」)
-        assert f'href="/shelf/{library}/jacobs1969"' in refs
-        post = c.get(f"/shelf/{library}/jacobs1969").text  # 글 보기에 옮긴 시각과 이유
-        assert "「도시는 어떻게 태어났나」·「강과 사람」 올린 문서가 함께 쓰는 문헌이라 「내 서재」로 옮김" in post
+        refs = c.get(f"/shelf/{city_refs}").text
+        assert f'href="/shelf/{city_refs}/jacobs1969"' in refs
+        assert "연결 · 참고문헌" in c.get("/shelf/p/river").text  # 강 지도의 연결 노드
 
 
 def test_export_zip(server_proc):  # noqa: F811

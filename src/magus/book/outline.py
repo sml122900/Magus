@@ -98,9 +98,16 @@ def build_outline(
 ) -> str:
     project = store.get_project(user_id, project_id)
     if project is None:
+        from magus.project_args import NO_PROJECT, projects_text  # noqa: PLC0415
+
+        floors = store.list_floors(user_id)
         if project_id:
-            return f"프로젝트 {project_id!r}가 없습니다."
-        return "프로젝트가 없습니다. book_import(path)로 문서를 가져오세요."
+            found = next((f for f in floors if f.id == project_id), None)
+            return f"「{found.title}」에는 올린 문서가 없습니다." if found else f"프로젝트 {project_id!r}가 없습니다."
+        if not floors:  # 새 사용자는 프로젝트 0개로 시작한다(2026-10-11). 오류가 아니라 안내
+            return f"프로젝트가 아직 없다. 저자에게 이렇게 알린다: {NO_PROJECT}"
+        return (f"올린 문서가 있는 프로젝트가 없습니다(프로젝트: {projects_text(floors)}). "
+                "문서는 게시판 글에 첨부한 뒤 book_import로 가져옵니다.")
 
     parts = {p.number: p.title for p in store.list_parts(user_id, project.id)}
     chapters = store.list_chapters(user_id, project.id)

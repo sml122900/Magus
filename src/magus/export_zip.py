@@ -23,7 +23,7 @@ from typing import Any
 
 from magus.ids import local_time, utcnow
 from magus.contexts import book_contexts
-from magus.maps import BOOK_NAMES, LIBRARY_NAME, local_key
+from magus.maps import BOOK_NAMES, local_key
 from magus.store.formats import display_title
 from magus.store import MapNode, Store
 from magus.store.base import CHAPTER_STATUS_NAMES
@@ -194,7 +194,7 @@ def build_zip(store: Store, user: str, floors: list[str]) -> bytes:
         found = store.get_map(user, floor_id)
         if floor is None or found is None:
             continue
-        title = LIBRARY_NAME if floor.common else floor.title
+        title = floor.title
         root = z.path("", safe_name(title, 50))
         projects.append(root)
         names = {n.id: ("가운데" if n.center else f"연결 · {n.name}" if n.link else n.name) for n in found.nodes}

@@ -4,7 +4,8 @@
   그 프로젝트의 휴지통 기록(노드·글·첨부·책). 모두 사용자 폴더 안 `trash/projects/<프로젝트>-<시각>/files/`로, 옮긴 목록은 같은 폴더의
   manifest.json에. 파일 내용은 그대로라 되살리면 바이트까지 같다. floors.json(프로젝트 순서)은 건드리지 않는다(되살리면 그 자리).
 - 휴지통에 있는 동안 색인에서 빠지므로 검색·전체 현황·MCP·숫자에 보이지 않는다(옮긴 뒤 그 사용자 색인만 다시 만든다).
-- 막는 경우: 「내 서재」, 다른 프로젝트의 연결 노드가 이 프로젝트의 노드를 가리킬 때(그 프로젝트 이름을 보인다).
+- 막는 경우: 다른 프로젝트의 연결 노드가 이 프로젝트의 노드를 가리킬 때(그 프로젝트 이름을 보인다).
+  「내 서재」(옛 공용 층)도 2026-10-11부터 보통 프로젝트라 같은 규칙이다(올린 문서가 없으므로 지도·책·문헌·문서만 옮긴다).
 - 되살리기를 막는 경우: 같은 id의 프로젝트가 그사이 생겼을 때, 프로젝트가 가득 찼을 때, 같은 책·문헌·문서 폴더가 그사이 생겼을 때.
 - 옛 코드는 trash/projects/를 읽지 않는다. 옛 코드가 보면 그 프로젝트는 그냥 없다(순서에만 자리가 남는다).
 """
@@ -89,8 +90,6 @@ class ProjectTrashMixin:
         floor = next((f for f in self.list_floors(user_id) if f.id == project_id), None)
         if floor is None:
             return None
-        if floor.common:
-            return ProjectTrashInfo(project_id, floor.title, 0, 0, 0, 0, 0, 0, "library")
         _, cats, refs, _ = self._project_parts(user_id, project_id)
         items, chapters, revisions = self._counts(user_id, project_id, cats)
         shown = self.get_map(user_id, project_id)
@@ -148,7 +147,7 @@ class ProjectTrashMixin:
         floors = self.list_floors(user_id)
         if any(f.id == project_id for f in floors) or (udir / "projects" / project_id).exists():
             raise ValueError("taken", str(data.get("title") or project_id))
-        if sum(1 for f in floors if not f.common) >= MAX_FLOORS:
+        if len(floors) >= MAX_FLOORS:
             raise ValueError("full", "")
         paths = [str(p) for p in data.get("paths") or []]
         for rel in paths:  # 먼저 모두 살핀 뒤 옮긴다(반쯤 되살린 채 남지 않게)

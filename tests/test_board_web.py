@@ -16,6 +16,8 @@ from magus.inbox import FileResolver, attached_file
 from magus.server import build_server
 from magus.store import CategoryItem, LocalStore, Passage, Ref
 
+from conftest import with_library
+
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
 NOTES = "notes-common"
 
@@ -24,6 +26,7 @@ def _seed(data_dir, user: str, word: str) -> None:
     store = LocalStore(data_dir)
     store.create_project(user, f"{word}의 책", project_id="b")
     store.write_chapter(user, "b", 1, f"{word}의 문장(Clack, 2012).", "x", title="하나")
+    with_library(store, user)
     store.create_category(user, "메모", "blank", "#1f2f5c", (), "common", category_id=NOTES)
     store.create_category(user, "문헌", "blank", "#1f2f5c", (), "b", category_id="refs-b")
     store.put_ref(user, Ref(key="clack2012", status="unverified", bib={"title": "Gaining ground", "authors": "Clack, J."}, book="refs-b"),
@@ -164,6 +167,7 @@ def test_board_pages_are_per_user(server_proc, fake_issuer):  # noqa: F811
     _seed(data_dir, "alice", "앨리스")
     _seed(data_dir, "bob", "밥")
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     store.create_category("alice", "앨리스만", "blank", "#1f2f5c", (), "common", category_id="alice-only")
     hidden = store.put_category_item("alice", CategoryItem("20261009000000000-dddddd", "alice-only", "앨리스만의 글", "me"))
     secret = store.put_attachment("alice", f"{NOTES}/20261008000000000-aaaaaa", "비밀.pdf", b"%PDF alice-only")

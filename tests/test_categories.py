@@ -27,7 +27,7 @@ from magus.config import Settings
 from magus.server import build_server
 from magus.store import CategoryItem, Context, LocalStore, SavedContext, ShelfSettings
 from magus.webshelf import contrast, text_color
-from tests.conftest import make_book
+from tests.conftest import make_book, with_library
 
 pytestmark = pytest.mark.anyio
 
@@ -75,6 +75,7 @@ def test_text_color_always_readable():
 # ---- 저장 ----------------------------------------------------------------------------------
 
 def test_store_files_are_source_with_schema_version(store: LocalStore, data_dir: Path):
+    with_library(store, "alice")
     c = store.create_category("alice", "사례", "case", "#b3261e", ("시기", "장소", "출처"))
     item = store.put_category_item("alice", CategoryItem("20261006000000000-aaaaaa", c.id, "강가 장날", "me", "장날", "author",
                                                          {"시기": "1850년대"}, ("예시",), (("book", 3),)))
@@ -109,6 +110,7 @@ def test_settings_file_is_filtered(store: LocalStore, data_dir: Path):
 
 
 def test_trash_and_restore_with_cli(store: LocalStore, data_dir: Path, monkeypatch, capsys):
+    with_library(store, "default")
     c = store.create_category("default", "사례", "case", "#b3261e", ())
     store.put_category_item("default", CategoryItem("20261006000000000-aaaaaa", c.id, "하나", "me"))
     store.put_category_item("default", CategoryItem("20261006000000001-aaaaab", c.id, "둘", "ai"))
@@ -245,6 +247,7 @@ async def test_title_default_is_kept_on_server(settings: Settings, store: LocalS
 
 async def test_category_limit(settings: Settings, store: LocalStore):
     for n in range(MAX_CATEGORIES):
+        with_library(store, "alice")
         store.create_category("alice", f"책아님{n}", "blank", "#000000", ())
     async with Client(build_server(settings, store)) as c:
         over = await c.call_tool("category_create", {"name": "하나 더"})
@@ -278,23 +281,27 @@ async def test_saved_contexts_defaults_and_editing(store: LocalStore, data_dir: 
 def test_web_categories_round_trip(server_proc):  # noqa: F811
     """노드의 '책 추가' → 새 책(컨텍스트 단추) → 바로 적기 → 이름·색·컨텍스트 고치기(그 자리에서·등록) → 내 색 → 휴지통. POST는 CSRF."""
     base, data_dir, _ = server_proc({})
+    setup = LocalStore(data_dir)  # 「내 서재」가 있는 옛 사용자(2026-10-11부터 새 사용자는 프로젝트 0개)
+    with_library(setup, "alice")
+    setup.close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         shelf = c.get("/login?next=/shelf").text
         csrf = _csrf(shelf)
-        # 책 추가 자리는 노드의 책장에 있다(#95). 프로젝트가 없으면 「내 서재」 하나
+        # 책 추가 자리는 노드의 책장에 있다(#95)
         assert '<a class="book add" href="/shelf/new?project=common&amp;node=center" aria-label="새 책">' in c.get(
             "/shelf/p/common?node=center").text
         form = c.get("/shelf/new?project=common").text  # 프로젝트 없이 열면 목록으로(2026-10-09)
         assert 'name="template"' not in form and form.count('name="color" value="#') == 18 and 'value="custom"' in form  # 칸 모양은 대화로(#97)
         assert 'name="ctx_pick" value="ctx-style"' in form and 'data-name="문체"' in form and 'name="ctx_new"' in form
-        assert c.post("/shelf/new", data={"csrf": "틀림", "name": "사례", "template": "case", "color": "#b3261e"}).status_code == 403
+        assert c.post("/shelf/new?project=common", data={"csrf": "틀림", "name": "사례", "template": "case", "color": "#b3261e"}).status_code == 403
+        assert c.post("/shelf/new", data={"csrf": csrf, "name": "사례"}).url.path == "/shelf"  # 프로젝트 없이는 만들지 않는다(2026-10-11)
         for data, why in (({"name": "전체"}, "Magus가 쓰는 말"), ({"name": "<b>x</b>"}, "쓸 수 없는 글자"),
                           ({"name": "새것", "color": "red;}"}, "책 색을 골라 주세요"),
                           ({"name": "새것", "color": "custom", "hex": '"><script>', "r": "300", "g": "0", "b": "0"}, "직접 고른 색을 읽지 못했습니다"),
                           ({"name": "새것", "ctx_new": "가" * 501}, "500자까지")):
-            page = c.post("/shelf/new", data={"csrf": csrf, "template": "blank", "color": "#b3261e", **data})
+            page = c.post("/shelf/new?project=common", data={"csrf": csrf, "template": "blank", "color": "#b3261e", **data})
             assert page.status_code == 400 and why in page.text and '"><script>' not in page.text, data
-        made = c.post("/shelf/new", data={"csrf": csrf, "name": "사례", "template": "case", "color": "custom", "hex": "",
+        made = c.post("/shelf/new?project=common", data={"csrf": csrf, "name": "사례", "template": "case", "color": "custom", "hex": "",
                                           "r": "74", "g": "103", "b": "65", "keep": "1", "ctx_pick": "ctx-paper"})
         assert "「사례」 만들었습니다." in made.text  # 만들면 그 책의 게시판으로(2026-10-09)
         cid = re.search(r"/shelf/(\d{17}-[0-9a-f]{6})\?done=made", str(made.url)).group(1)
@@ -401,6 +408,7 @@ def test_web_saved_contexts_page(server_proc):  # noqa: F811
 def test_web_category_list_search_and_titles(server_proc):  # noqa: F811
     base, data_dir, _ = server_proc({})
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     c1 = store.create_category("alice", "사례", "case", "#b3261e", ("시기", "장소", "출처"))
     store.put_category_item("alice", CategoryItem("20261006000000000-aaaaaa", c1.id, "항구의 장날 이야기", "ai", "장날", "ai"))
     store.put_category_item("alice", CategoryItem("20261006000000001-aaaaab", c1.id, "제목 없는 글 물결", "me", tags=("물",)))
@@ -432,6 +440,7 @@ def test_web_categories_are_per_user(server_proc, fake_issuer):  # noqa: F811
     store = LocalStore(data_dir)
     ids = {}
     for user, word in (("alice", "앨리스"), ("bob", "밥")):
+        with_library(store, user)
         c = store.create_category(user, "사례", "case", "#123456" if user == "alice" else "#654321", (),
                                   contexts=(Context("", f"{word}의 컨텍스트"),))
         store.put_category_item(user, CategoryItem("20261006000000000-aaaaaa", c.id, f"{word}의 바다 사례", "me"))
@@ -515,6 +524,7 @@ async def test_template_item_needs_only_one_of_content_title_fields(settings: Se
 def test_web_list_shows_fields_when_no_title_or_content(server_proc):  # noqa: F811
     base, data_dir, _ = server_proc({})
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     c = store.create_category("alice", "사례", "case", "#b3261e", ("시기", "장소", "출처"))
     store.put_category_item("alice", CategoryItem("20261006000000000-aaaaaa", c.id, "", "me", fields={"장소": "엘알토, 볼리비아"}))
     store.close()

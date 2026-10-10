@@ -82,7 +82,7 @@ class CategoryMixin:
         category_id·created_at은 이전(#96: 옛 기본 책을 책으로)만 준다."""
         if not HEX.fullmatch(color):
             raise ValueError(f"색은 #RRGGBB: {color!r}")
-        floor = self._check_floor(user_id, self._layout(user_id), floor or COMMON)
+        floor = self._check_floor(user_id, self._layout(user_id), floor or self.default_project(user_id))  # type: ignore[attr-defined]
         self.ensure_maps(user_id)  # type: ignore[attr-defined]  # 지도를 먼저 적고(이 책 없이), 만든 뒤 그 지도에 꽂는다
         if self._db.execute("SELECT 1 FROM categories WHERE user_id = ? AND floor = ? AND name_key = ?",
                             (user_id, floor, name_key(name))).fetchone():
@@ -150,8 +150,8 @@ class CategoryMixin:
             raise ValueError(f"휴지통에 category {category_id}가 없다")
         record = {k: v for k, v in read_json(src / "category.json").items() if k != "_trash"}
         record["name"] = name or record["name"]
-        if record.get("floor") not in self._known(user_id, self._layout(user_id)):
-            record["floor"] = COMMON  # 층이 없거나 그사이 사라진 층이면 공용으로
+        if record.get("floor") not in self._known(user_id, self._layout(user_id)):  # 그 프로젝트가 없으면 되살리지 않는다(2026-10-11: 「내 서재」로 보내지 않음)
+            raise ValueError("missing_project", f"책 {category_id}의 프로젝트가 없어 되살리지 못했다")
         clash = self._db.execute("SELECT name FROM categories WHERE user_id = ? AND floor = ? AND name_key = ?",
                                  (user_id, record["floor"], name_key(record["name"]))).fetchone()
         if clash:
@@ -233,12 +233,15 @@ class CategoryMixin:
         trash = self._user_dir(user_id) / "trash" / "shelf"
         alone = trash / "category-items" / category_id / f"{item_id}.json"
         with_book = trash / "categories" / category_id / "items" / f"{item_id}.json"
-        if not alone.exists() and not with_book.exists():
+        in_node = sorted((trash / "nodes").glob(f"*/*/categories/{category_id}/items/{item_id}.json"))  # 노드째 옮긴 책의 글
+        if not alone.exists() and not with_book.exists() and not in_node:
             return None
         for meta in (self._category_dir(user_id, category_id) / "category.json", trash / "categories" / category_id / "category.json"):
             if meta.exists():
                 return str(read_json(meta).get("floor") or COMMON)
-        return COMMON
+        if in_node:  # trash/shelf/nodes/<프로젝트>/<노드>/categories/<책>/items/<글>.json
+            return in_node[0].parents[4].name
+        return None
 
     @locked
     def trash_item_with_replies(self, user_id: str, category_id: str, item_id: str, note: str) -> list[CategoryItem]:

@@ -19,6 +19,8 @@ from magus.config import Settings
 from magus.server import build_server
 from magus.store import CategoryItem, LocalStore
 
+from conftest import with_library
+
 OLD = "20261009000000000-aaaaaa"  # 제목 없이 저장된 옛 글(첨부만)
 
 
@@ -32,6 +34,7 @@ def test_rule():
 def _seed(data_dir: Path) -> str:
     store = LocalStore(data_dir)
     try:
+        with_library(store, "alice")
         book = store.create_category("alice", "장날 메모", "blank", "#1f2f5c", (), "common").id
         store.put_category_item("alice", CategoryItem(OLD, book, "", "me"))
         store.put_attachment("alice", f"{book}/{OLD}", "나루 지도.pdf", b"%PDF-1.4 x")
@@ -81,6 +84,7 @@ def test_web_write_and_edit_fill_title_from_first_file(server_proc):  # noqa: F8
 
 @pytest.mark.anyio
 async def test_mcp_results_show_file_title_without_writing(store: LocalStore, data_dir: Path):
+    with_library(store, "alice")
     book = store.create_category("alice", "장날 메모", "blank", "#1f2f5c", (), "common").id
     store.put_category_item("alice", CategoryItem(OLD, book, "강가 장날 기록", "me"))
     store.put_attachment("alice", f"{book}/{OLD}", "나루 지도.docx", b"PK x")

@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from conftest import needs_tools
+from conftest import needs_tools, with_library
 from test_attach_browser import CHROME, NODE
 from test_web import server_proc  # noqa: F401 - 픽스처
 
@@ -33,6 +33,7 @@ def test_header_targets_and_help_button(server_proc, tmp_path, width):  # noqa: 
     store = LocalStore(data_dir)
     store.create_project("alice", "도시는 어떻게 태어났나 — 아주 긴 제목의 시험 프로젝트", project_id="city")
     store.write_chapter("alice", "city", 1, "본문(Clack, 2012).", "x", title="하나")
+    with_library(store, "alice")
     store.create_category("alice", "장날 메모", "blank", "#1f2f5c", (), "common", category_id="notes", contexts=(Context("문체", "문체 표본이다."),))
     for n in range(25):  # 두 쪽(쪽 번호)
         store.put_category_item("alice", CategoryItem(f"2026100900000{n:04d}-aaaaaa", "notes", f"글 {n} 본문", "me", f"제목 {n}", "author"))

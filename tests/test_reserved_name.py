@@ -13,6 +13,8 @@ from magus.category.rules import RESERVED, RESERVED_HIDDEN, RESERVED_SHOWN, chec
 from magus.instructions import CORE_NAMES, OLD_NAMES
 from magus.store import LocalStore
 
+from conftest import with_library
+
 
 def test_reserved_name_message_says_why_and_what_next():
     with pytest.raises(ValueError) as e:
@@ -39,6 +41,7 @@ def test_scrap_is_reserved_but_existing_books_stay():
 
 
 def test_existing_scrap_book_is_not_blocked(store):
+    with_library(store, "alice")
     made = store.create_category("alice", "스크랩", "blank", "#1f2f5c", (), "common")  # 이전에 만든 책(저장소는 이름 규칙을 묻지 않는다)
     store.update_category("alice", made.id, color="#b3261e")  # 이름을 그대로 두고 색만 바꾸는 것은 된다
     assert store.get_category("alice", made.id).name == "스크랩"
@@ -46,14 +49,16 @@ def test_existing_scrap_book_is_not_blocked(store):
 
 def test_web_new_book_shows_reserved_message_and_picker(server_proc):  # noqa: F811
     base, data_dir, _ = server_proc({})
-    LocalStore(data_dir).close()
+    setup = LocalStore(data_dir)
+    with_library(setup, "alice")  # 「내 서재」가 있는 옛 사용자
+    setup.close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         page = c.get("/login?next=/shelf/new%3Fproject%3Dcommon").text
         csrf = _csrf(page)
         assert page.index('type="color" name="picker"') < page.index('<details class="palette">')
-        bad = c.post("/shelf/new", data={"csrf": csrf, "name": "수정본", "color": "custom", "hex": "#123456"})
+        bad = c.post("/shelf/new?project=common", data={"csrf": csrf, "name": "수정본", "color": "custom", "hex": "#123456"})
         assert bad.status_code == 400 and "Magus가 쓰는 말이라 책 이름으로 쓸 수 없습니다. 다른 이름을 붙여 주세요." in bad.text
-        made = c.post("/shelf/new", data={"csrf": csrf, "name": "2026 답사", "color": "#b3261e", "was": "#b3261e", "picker": "#00ff88"})
+        made = c.post("/shelf/new?project=common", data={"csrf": csrf, "name": "2026 답사", "color": "#b3261e", "was": "#b3261e", "picker": "#00ff88"})
         assert made.status_code == 200 and re.search(r"/shelf/[^/?]+\?done=made$", str(made.url))
     store = LocalStore(data_dir)
     [book] = [b for b in store.list_categories("alice") if b.name == "2026 답사"]

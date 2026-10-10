@@ -3,6 +3,8 @@ import pytest
 from magus.melchior.bibliography import import_bibliography, parse_bib_line, ref_from_bib
 from magus.store import LocalStore
 
+from conftest import with_library
+
 
 @pytest.mark.parametrize(
     ("line", "key", "title"),
@@ -46,16 +48,19 @@ def test_translation_aliases():
 
 def test_import_keeps_failures_as_raw_and_is_idempotent(store: LocalStore):
     text = "참고문헌\nClack, J. A. (2012). Gaining ground. Press.\n\n편집부. 연도 없는 책.\nClack, J. B. (2012). Other. Press."
+    with_library(store, "alice")
     report = import_bibliography(store, "alice", text)
     assert report.lines == 3 and report.created[0] == "clack2012" and report.created[2] == "clack2012-2"
     raw = store.get_ref("alice", report.created[1])
     assert raw.key.startswith("raw-") and raw.bib == {"raw": "편집부. 연도 없는 책."}
+    with_library(store, "alice")
     again = import_bibliography(store, "alice", text)
     assert again.created == [] and len(again.existing) == 3
     assert store.list_refs("bob") == []
 
 
 def test_shelf_files_are_the_source(store: LocalStore, data_dir):
+    with_library(store, "alice")
     import_bibliography(store, "alice", "Galor, O. (2022). The journey. Dutton. [국역: 오데드 갤러, 『인류의 여정』, 시공사, 2023]")
     before = store.list_refs("alice")
     store.reindex()
@@ -66,6 +71,7 @@ def test_shelf_files_are_the_source(store: LocalStore, data_dir):
 
 def test_duplicate_entries_and_differences_are_reported(store: LocalStore):
     # 같은 문헌이 목록에 두 번 → "중복 서지"(원고 오류일 수 있다). key는 여전히 -2로 받는다(사용자 결정 #5).
+    with_library(store, "alice")
     first = import_bibliography(
         store, "alice",
         "Clack, J. A. (2012). Gaining ground. Indiana University Press.\n"
@@ -77,6 +83,7 @@ def test_duplicate_entries_and_differences_are_reported(store: LocalStore):
     assert len(first.collisions) == 2  # clack2012-2(중복)와 acemoglu2001-2(다른 문헌) 모두 -2
     assert "중복 서지 1건" in first.render()
     # 다시 들여올 때 기존 key는 갱신하지 않고, 제목·연도가 다르면 차이를 리포트한다(사용자 결정 #6)
+    with_library(store, "alice")
     again = import_bibliography(store, "alice", "Clack, J. A. (2012). Gaining ground: The origin of tetrapods. IUP.")
     assert again.existing == ["clack2012"] and again.created == []
     assert again.differs == ["clack2012: 제목 'Gaining ground' → 새 목록 'Gaining ground: The origin of tetrapods'"]
@@ -86,6 +93,7 @@ def test_duplicate_entries_and_differences_are_reported(store: LocalStore):
 def test_same_title_and_year_with_different_author_forms_is_a_duplicate(store: LocalStore):
     """최신본: 같은 보고서가 'IEA (International Energy Agency)'와 'International Energy Agency (IEA)'로 두 번 있다.
     저자에 괄호가 있어도 제목을 읽고(key는 그대로), 제목·연도가 같으면 중복 서지로 리포트한다."""
+    with_library(store, "alice")
     report = import_bibliography(
         store, "alice",
         "IEA (International Energy Agency). (2025). Energy and AI. IEA.\n"

@@ -75,8 +75,10 @@ def test_outline_demo(store: LocalStore):
 
 
 def test_outline_without_project(store: LocalStore):
-    assert "book_import" in build_outline(store, "alice")
+    assert "'+ 프로젝트'로 먼저 만들어 주세요" in build_outline(store, "alice")  # 새 사용자는 프로젝트 0개(2026-10-11)
     assert "없습니다" in build_outline(store, "alice", "nope")
+    store.create_project("alice", "제목만", project_id="t")
+    assert build_outline(store, "alice", "t").startswith("프로젝트: 제목만 (t)")
 
 
 def test_estimate_is_conservative_for_korean():

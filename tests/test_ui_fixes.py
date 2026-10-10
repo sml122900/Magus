@@ -7,6 +7,8 @@ from test_web import server_proc  # noqa: F401 - 픽스처
 
 from magus.store import LocalStore
 
+from conftest import with_library
+
 
 def test_chapter_status_names(server_proc):  # noqa: F811
     """장 상태는 한국어(초안·고치는 중·완성). 모두 초안이면 상태 칸을 숨긴다."""
@@ -76,6 +78,7 @@ def test_edit_conflict_is_refused(server_proc):  # noqa: F811
 
     base, data_dir, _ = server_proc({})
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", category_id="notes")
     store.put_category_item("alice", CategoryItem("20261009000000001-aaaaaa", "notes", "처음 본문", "me", "제목", "author"))
     store.put_ref("alice", Ref(key="clack2012", status="unverified", bib={"title": "Gaining ground", "authors": "Clack, J."}, book="notes"))
@@ -114,6 +117,7 @@ def test_category_edit_checks_conflict(store: LocalStore, settings):
     from magus.store import Passage, Ref  # noqa: PLC0415
     from magus.store.base import EditConflict  # noqa: PLC0415
 
+    with_library(store, "alice")
     store.create_category("alice", "문헌", "blank", "#1f2f5c", (), "common", category_id="refs-x")
     store.put_ref("alice", Ref(key="clack2012", status="unverified", bib={"title": "Gaining ground", "authors": "Clack, J."}, book="refs-x"),
                   passages=[Passage("쓸 부분", "근거", "p.1")])
@@ -160,8 +164,10 @@ def test_small_things(server_proc):  # noqa: F811
 
     base, data_dir, _ = server_proc({})
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     node = store.add_node("alice", "common", "현장")
     store.set_node_contexts("alice", "common", node.id, (Context("", "현장 메모다."),))
+    with_library(store, "alice")
     store.create_category("alice", "메모", "blank", "#1f2f5c", (), "common", node.id, category_id="notes")
     store.close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=60) as c:

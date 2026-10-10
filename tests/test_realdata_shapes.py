@@ -8,6 +8,8 @@ from magus.melchior.check import check_text, link_citation_issues
 from magus.melchior.translit import best_match, score
 from magus.store import LocalStore
 
+from conftest import with_library
+
 
 def test_transliteration_scores():
     for hangul, latin in [("케인스", "Keynes"), ("모리스", "Morris"), ("넌", "Nunn"), ("마셜", "Marshall"),
@@ -21,6 +23,7 @@ def test_transliteration_scores():
 
 
 def test_check_counts_unique_refs_and_locates_paragraphs(store: LocalStore):
+    with_library(store, "alice")
     import_bibliography(
         store, "alice",
         "Keynes, J. M. (1930). Economic possibilities for our grandchildren. Nation.\n"
@@ -58,6 +61,7 @@ def test_conversation_heading_and_parenthetical_markers():
 
 
 def test_same_author_year_disambiguated_by_coauthors(store: LocalStore):
+    with_library(store, "alice")
     report = import_bibliography(
         store, "alice",
         "Acemoglu, D., & Zilibotti, F. (2001). Productivity differences. QJE.\n"
@@ -74,6 +78,7 @@ def test_year_range_and_ab_ambiguity(store: LocalStore):
 
     assert [c.key for c in find_citations("(Toynbee, 1934–1961)")] == ["toynbee1934"]
     assert find_citations("한국(1965~1995) 0.16, 일본(1955~1973년)") == []  # 서술형 기간은 인용이 아니다
+    with_library(store, "alice")
     import_bibliography(
         store, "alice",
         "Keynes, J. M. (1930a). A treatise on money. Macmillan.\nKeynes, J. M. (1930b). Economic possibilities. Nation.",

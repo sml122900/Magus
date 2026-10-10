@@ -19,7 +19,6 @@ from magus.attachments import clean_name
 from magus.book.reupload import ReuploadReport, reupload_manuscript
 from magus.ids import utcnow
 from magus.inbox import INBOX_TYPES, MANUSCRIPT_TYPES, file_sha, has_format_chars, safe_filename
-from magus.maps import LIBRARY_NAME
 from magus.store import Store
 from magus.store.fileio import write_data
 from magus.store.formats import display_title, one_line
@@ -126,7 +125,7 @@ def list_documents(store: Store, user_id: str) -> list[DocRow]:
         floor = floors.get(book.floor) if book else None
         rows.append(DocRow(
             f"att:{att.id}", att.name, att.size, att.at,
-            project=(LIBRARY_NAME if floor.common else floor.title) if floor else None, project_id=floor.id if floor else None,
+            project=floor.title if floor else None, project_id=floor.id if floor else None,
             node=nodes.get(book_id or ""), book=book.name if book else None, book_id=book_id, post=post, link=link,
             source=source_of(store, user_id, hit[0], att.name, known)))
     for f in store.list_inbox(user_id):
