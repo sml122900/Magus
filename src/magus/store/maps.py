@@ -557,6 +557,8 @@ class MapMixin:
             raise MapError("center", "가운데 노드는 휴지통으로 옮기지 않는다")
         if node.get("books"):
             raise MapError("not_empty", "책이 꽂힌 노드는 휴지통으로 옮기지 않는다", books=len(node["books"]))
+        if (cited := self._cite_link(user_id, floor, node)) is not None:
+            raise MapError("cite_link", "인용 점검이 쓰는 연결 노드는 휴지통으로 옮기지 않는다", name=cited)
         shown = self.get_map(user_id, floor)
         before = shown.node(node_id) if shown else None
         edges = [e for e in data["edges"] if node_id in e]
@@ -567,6 +569,22 @@ class MapMixin:
         self._write_map(user_id, floor, data)
         assert before is not None
         return before
+
+    def _cite_link(self, user_id: str, floor: str, node: dict[str, Any]) -> str | None:
+        """인용 점검이 쓰는 연결 노드면 그 문헌 책 이름(2026-10-11): 올린 문서가 있는 프로젝트의 연결 노드가 문헌 글이 든 책의 노드를 가리킬 때.
+        다른 프로젝트의 문헌을 이 원고도 쓰게 되어 서버가 붙인 연결 노드(share_ref)와, 예전 「내 서재」 문헌으로 가는 연결 노드가 이것이다.
+        지우면 이 원고의 인용 점검이 그 문헌을 보지 못하므로, 문헌 글이 든 노드처럼 지우지 않는다."""
+        link = node.get("link") or {}
+        layout = self._layout(user_id)
+        if not link or link.get("project") not in self._known_floors(user_id, layout) or not self._db.execute(
+                "SELECT 1 FROM chapters WHERE user_id = ? AND project_id = ? LIMIT 1", (user_id, floor)).fetchone():
+            return None
+        target, _ = self._reconcile(user_id, link["project"], layout)
+        source = next((m for m in target["nodes"] if m["id"] == link.get("node")), None)
+        for b in (source or {}).get("books") or []:
+            if b == "refs" or self._holds_refs(user_id, b):
+                return self._book_title(user_id, b)
+        return None
 
     def _linked_from(self, user_id: str, floor: str, node_id: str) -> list[str]:
         """그 노드를 가리키는 연결 노드가 있는 다른 프로젝트의 이름."""
@@ -603,9 +621,10 @@ class MapMixin:
             return None
         if node.center:
             return NodeTrashInfo(node, 0, 0, "center")
-        if node.link:
-            return NodeTrashInfo(node, 0, 0)
         raw = next((n for n in self._reconcile(user_id, floor, self._layout(user_id))[0]["nodes"] if n["id"] == node_id), {})
+        if node.link:
+            cited = self._cite_link(user_id, floor, raw)
+            return NodeTrashInfo(node, 0, 0, "cite_link" if cited is not None else None, (), cited or "")
         cats, docs, blocked, refs_book = self._node_books(user_id, raw)
         items = sum(int(self._db.execute("SELECT COUNT(*) FROM category_items WHERE user_id = ? AND category_id = ?",
                                          (user_id, c)).fetchone()[0]) for c in cats)

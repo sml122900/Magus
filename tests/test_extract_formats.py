@@ -311,6 +311,47 @@ def test_xlsx_row_cap_per_sheet(tmp_path: Path):
     assert f"메모 {ex.SHEET_ROWS + 1}" not in got.text and got.status == "ok"
 
 
+def test_xlsx_dates_read_as_dates(tmp_path: Path):
+    """날짜 서식 칸은 YYYY-MM-DD, 시각이 있으면 HH:MM까지(2026-10-11). 숫자 서식·지수 표기는 그대로, 1904 기준도 읽는다."""
+    styles = (f'<styleSheet {S}><numFmts count="3"><numFmt numFmtId="164" formatCode="yyyy&quot;년&quot; m&quot;월&quot; d&quot;일&quot;"/>'
+              '<numFmt numFmtId="165" formatCode="0.00E+00"/><numFmt numFmtId="166" formatCode="[$-412]AM/PM h:mm"/></numFmts>'
+              '<cellXfs count="6"><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="22"/><xf numFmtId="164"/><xf numFmtId="165"/>'
+              '<xf numFmtId="166"/></cellXfs></styleSheet>')
+    cells = ('<row r="1"><c r="A1" s="1"><v>45941</v></c><c r="B1" s="2"><v>45941.395833333336</v></c><c r="C1" s="3"><v>45941</v></c>'
+             '<c r="D1" s="4"><v>45941</v></c><c r="E1" s="5"><v>0.75</v></c><c r="F1"><v>45941</v></c><c r="G1" s="1" t="s"><v>0</v></c>'
+             '<c r="H1" t="d"><v>2025-10-11T09:30:00</v></c><c r="I1" s="2"><v>45941.5</v></c><c r="J1" s="1"><v>45941.999999</v></c></row>')
+
+    def book(pr: str = "") -> bytes:
+        return _zip({"xl/workbook.xml": f'<workbook {S} {R}>{pr}<sheets><sheet name="날짜" sheetId="1" r:id="rId1"/></sheets></workbook>',
+                     "xl/_rels/workbook.xml.rels": _rels({"rId1": ("worksheet", "worksheets/sheet1.xml"), "rId2": ("styles", "styles.xml"),
+                                                          "rId3": ("sharedStrings", "sharedStrings.xml")}),
+                     "xl/styles.xml": styles, "xl/sharedStrings.xml": f'<sst {S}><si><t>글자 칸</t></si></sst>',
+                     "xl/worksheets/sheet1.xml": _sheet([cells])})
+
+    got = ex.extract(_write(tmp_path, "날짜.xlsx", book()))
+    row = got.text.split("## 날짜\n")[1].splitlines()[0].split("\t")
+    assert row == ["2025-10-11", "2025-10-11 09:30", "2025-10-11", "45941", "18:00", "45941", "글자 칸", "2025-10-11 09:30",
+                   "2025-10-11 12:00", "2025-10-12"], row  # 지수 표기(D)·서식 없는 숫자(F)는 그대로, 23:59:59.9는 다음 날 00:00
+    old = ex.extract(_write(tmp_path, "1904.xlsx", book('<workbookPr date1904="1"/>')))
+    assert old.text.split("## 날짜\n")[1].split("\t")[0] == "2029-10-12"  # 1904 기준(맥의 옛 엑셀)
+
+
+def test_extract_check_command_prints_only_counts_and_head(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    """`magus extract-check <파일…>`: 실제 파일 확인용(private/samples/). 형식·상태·쪽 수·글자 수·앞 300자만, 파일 이름은 찍지 않는다."""
+    long_hwp = _write(tmp_path, "비밀이름_답사.hwp", _hwp([["엘알토 장날 " + "가" * 4000]]))
+    sheet = _write(tmp_path, "비밀이름_표.xlsx", _xlsx(3))
+    old = _write(tmp_path, "비밀이름_옛.doc", b"\xd0\xcf\x11\xe0" + b"\x00" * 600)
+    locked = _write(tmp_path, "비밀이름_암호.hwp", _hwp([["숨은 글"]], flags=0x02))
+    cli.main(["extract-check", str(long_hwp), str(sheet), str(old), str(locked), str(tmp_path / "없음.hwpx")])
+    out = capsys.readouterr().out
+    assert "비밀이름" not in out and str(tmp_path) not in out  # 파일 이름·경로는 보이지 않는다
+    first = out.split("[2/5]")[0]
+    assert "형식: .hwp · 한글 문서" in first and "상태: 뽑음" in first and "쪽 수: 2(대화에서 읽는 3,000자 쪽)" in first
+    assert first.count("가") == 300 - len("엘알토 장날 ")  # 앞 300자만
+    assert "## 메모" in out and "상태: 글자를 뽑지 않는 형식" in out and "상태: 읽을 수 없는 hwp(암호가 걸렸거나 배포용 문서)" in out
+    assert "숨은 글" not in out and "상태: 파일이 없습니다" in out
+
+
 def test_text_formats(tmp_path: Path):
     rtf = ex.extract(_write(tmp_path, "a.rtf", _rtf()))
     assert rtf.status == "ok" and rtf.text.startswith("나루터 통행료\n옥가😀 Smith’s tea\tend\n나\n"), repr(rtf.text)
@@ -458,6 +499,8 @@ def test_web_labels_hwp_html_and_old_formats(server_proc):  # noqa: F811
         html_file = re.search(rf'href="(/shelf/{book}/{post}/files/[^"]+)" download>자료.html', made.text).group(1)
         got = c.get(html_file)
         assert got.headers["content-type"] == "application/octet-stream" and got.headers["content-disposition"].startswith("attachment")
+        assert got.headers["x-content-type-options"] == "nosniff"  # 브라우저가 html로 짐작해 그리지 않게(2026-10-11 확인)
+        assert c.get(html_file, params={"inline": "1"}).headers["content-disposition"].startswith("attachment")  # 바꿀 길 없음
         xls_file = re.search(rf'href="(/shelf/{book}/{post}/files/([^"]+))" download>옛 표.xls', made.text)
         missing = c.get(f"/shelf/{book}/{post}/text/{xls_file.group(2)}")
         assert missing.status_code == 404 and "글자를 뽑지 않는 형식입니다(doc·ppt·xls)." in missing.text

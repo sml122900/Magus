@@ -43,11 +43,14 @@ def _unverified(store: LocalStore, project: str = "book") -> int:
     return int(re.search(r"미확인 문헌 (\d+)편", build_outline(store, "alice", project)).group(1))
 
 
-async def test_restoring_link_node_recounts(store: LocalStore, settings: Settings):
+async def test_cite_link_node_is_kept(store: LocalStore, settings: Settings):
+    """둘째 원고가 다른 프로젝트의 문헌을 쓰게 되어 서버가 붙인 연결 노드는 지우지 않는다(2026-10-11). 전에는 지우면 미확인이 늘고,
+    되살리면 다시 셌다(점검 13-b) — 이제는 지우는 길을 막아 인용 점검이 늘 그 문헌을 본다."""
     from pathlib import Path
 
     from magus.book.importer import import_manuscript
     from magus.category.moves import restore_node, trash_node_with_books
+    from magus.store.maps import MapError
 
     import_manuscript(store, "alice", Path(__file__).parent / "fixtures" / "synthetic" / "닿으려는_종_합성.docx", project_id="book",
                       synthetic=True)
@@ -61,10 +64,14 @@ async def test_restoring_link_node_recounts(store: LocalStore, settings: Setting
         assert not r.is_error, r.content[0].text
     shared = _unverified(store, "second")
     link = next(n for n in store.get_map("alice", "second").nodes if n.link)
-    trash_node_with_books(store, "alice", "second", link.id, "시험")
-    assert _unverified(store, "second") == shared + 1  # 연결 노드가 없으면 clack2012가 이 원고에서 미확인으로
-    restore_node(store, "alice", f"second/{link.id}")
-    assert _unverified(store, "second") == shared  # 전에는 다음 문헌 변경·재시작까지 shared + 1이 남았다
+    with pytest.raises(MapError) as refused:
+        trash_node_with_books(store, "alice", "second", link.id, "시험")
+    assert refused.value.code == "cite_link" and store.get_map("alice", "second").node(link.id) is not None
+    assert _unverified(store, "second") == shared
+    async with Client(build_server(settings, store)) as c:  # 대화로도 지우지 않는다
+        gone = await c.call_tool("category_trash", {"node": link.name, "project": "둘째", "note": "x"})
+        assert gone.is_error and "인용 점검이 이 문헌" in gone.content[0].text
+    assert not any(t.kind == "node" for t in store.list_trash("alice")) and restore_node
 
 
 # ---- 15-3 대화 기록이 Word·PDF·UTF-8 아님 ----

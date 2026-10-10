@@ -403,7 +403,7 @@ def edit_stamp(record: dict[str, Any]) -> str:
 
 @dataclass(frozen=True)
 class NodeTrashInfo:
-    """웹의 노드 삭제 확인 창에 보일 것(#97). blocked: 옮길 수 없는 까닭 코드(center | linked | has_refs | unknown_book), 없으면 None."""
+    """웹의 노드 삭제 확인 창에 보일 것(#97). blocked: 옮길 수 없는 까닭 코드(center | linked | has_refs | unknown_book | cite_link), 없으면 None."""
 
     node: MapNode
     books: int

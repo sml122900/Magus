@@ -708,6 +708,9 @@ class MapPages:
                      f"<p>{close.format('닫기')}</p>")
         elif info.blocked == "has_refs":
             inner = f'<p>문헌 글이 든 책 「{html.escape(info.refs_book)}」이 있어 지울 수 없습니다.</p><p>{close.format("닫기")}</p>'
+        elif info.blocked == "cite_link":  # 인용 점검이 쓰는 연결 노드(2026-10-11)
+            inner = (f'<p>인용 점검이 이 문헌을 씁니다(「{html.escape(info.refs_book)}」). 그래서 이 연결 노드는 지울 수 없습니다.</p>'
+                     f'<p>{close.format("닫기")}</p>')
         elif info.blocked:
             inner = f'<p>지울 수 없는 노드입니다.</p><p>{close.format("닫기")}</p>'
         else:

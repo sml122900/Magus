@@ -3,7 +3,7 @@
 - 줄마다 [되살리기](되살릴 수 있을 때)와 [영구 삭제], 맨 위에 [휴지통 비우기](그 화면의 전부).
 - 누르면 같은 자리에서 확인 창: "되살릴 수 없습니다. 영구 삭제할까요?" [영구 삭제][취소]. 브라우저 alert·confirm은 쓰지 않는다.
   Esc로 닫고, 열면 첫 단추에 초점(지도 화면의 노드 삭제 확인 창과 같은 모양 `.node-del`·`.del-box`).
-- 안내 한 줄: "백업에는 30일 동안 남아 있습니다."
+- 안내 한 줄: "백업에는 최대 1년까지 남을 수 있습니다."
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from magus.ids import local_time
 
 CONFIRM = "되살릴 수 없습니다. 영구 삭제할까요?"
-BACKUP_NOTE = "백업에는 30일 동안 남아 있습니다."
+BACKUP_NOTE = "백업에는 최대 1년까지 남을 수 있습니다."
 EMPTY = '<p class="empty">휴지통이 비었습니다.</p>'
 PURGED = {"purged": "영구 삭제했습니다.", "emptied": "휴지통을 비웠습니다."}
 

@@ -81,6 +81,9 @@ def main(argv: list[str] | None = None) -> None:
     extract.add_argument("--user", action="append", default=None, help="사용자(여러 번 줄 수 있다). 없으면 USER_ID")
     extract.add_argument("--all-users", action="store_true", help="데이터 폴더의 모든 사용자")
     extract.add_argument("--force", action="store_true", help="이미 뽑은 것도 다시")
+    check = sub.add_parser("extract-check", help="로컬 파일 하나(또는 여럿)에서 첨부 글자를 뽑아 보기만 한다(실제 hwp·hwpx·xlsx 확인용, "
+                                                 "private/samples/). 형식·상태·쪽 수·글자 수·앞 300자만 보인다(파일 이름·본문 전체는 보이지 않는다)")
+    check.add_argument("files", nargs="+", help="확인할 파일(저장소 밖이면 사용자가 경로를 준 것만)")
     warm = sub.add_parser("warm-cache", help="인용 계산 캐시를 미리 만들고(배포 때, 프로젝트 폴더 .cache/, 결정 f), "
                                              "아직 글자를 뽑지 않은 첨부(새로 뽑게 된 hwp 등)도 뽑는다. 원본은 읽기만")
     warm.add_argument("--user", action="append", default=None, help="사용자(여러 번 줄 수 있다). 없으면 USER_ID")
@@ -101,6 +104,13 @@ def main(argv: list[str] | None = None) -> None:
             parser.exit(2, "알림 설정이 없습니다(ALERT_TELEGRAM_BOT_TOKEN+ALERT_TELEGRAM_CHAT_ID 또는 ALERT_WEBHOOK_URL).\n")
         alert.deliver("[Magus] 알림 시험: 이 메시지가 보이면 오류 알림이 동작합니다.")  # type: ignore[attr-defined]
         print("보냈습니다(전송 실패는 조용히 버리므로, 메신저에서 도착했는지 확인하세요).")
+        return
+    if args.cmd == "extract-check":  # 데이터 폴더·저장소를 열지 않는다. 파일 이름은 찍지 않는다(몇 번째 파일인지만)
+        from magus.extract import check_report
+
+        for n, name in enumerate(args.files, 1):
+            print(f"[{n}/{len(args.files)}]")
+            print(check_report(Path(name)))
         return
     if args.cmd == "synth":
         from magus.synthetic import write_all

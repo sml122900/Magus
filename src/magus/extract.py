@@ -522,11 +522,73 @@ def _column(ref: str) -> int | None:
     return n - 1
 
 
-class _Sheet(_Target):
-    """xlsx 시트: 행마다 한 줄, 칸은 탭으로(빈칸은 열 자리에 맞춰 채우되 한 번에 50칸까지). 숫자·날짜는 저장된 값 그대로."""
+# xlsx 날짜(2026-10-11): 날짜 서식 칸의 일련번호를 YYYY-MM-DD(시각이 있으면 HH:MM까지)로. 기본 서식 번호 중 날짜·시각
+_DATE_IDS = {14, 15, 16, 17, 22, 27, 28, 29, 30, 31, 34, 35, 36, 50, 51, 52, 53, 54, 57, 58}  # 날짜(22·27~31·50~58은 날짜+시각 또는 동아시아 날짜)
+_TIME_IDS = {18, 19, 20, 21, 32, 33, 45, 46, 47, 55, 56}  # 시각만
+_FMT_LITERAL = re.compile(r'"[^"]*"|\\.|\[(?!h|m|s)[^\]]*\]', re.I)  # 따옴표 글자·\글자·[색·조건](경과 시간 [h]는 남긴다)
 
-    def __init__(self, sink: _Sink, shared: list[str], head: str) -> None:
+
+def date_kind(fmt_id: int, code: str | None) -> str | None:
+    """서식 → 'date'(날짜, 시각이 있으면 함께) · 'time'(시각만) · None(날짜 아님)."""
+    if code is None:
+        return "date" if fmt_id in _DATE_IDS else "time" if fmt_id in _TIME_IDS else None
+    bare = _FMT_LITERAL.sub("", code).lower()
+    if re.search(r"[yd]", bare):  # 연·일(지수 표기 0.00E+00·General은 날짜가 아니다)
+        return "date"
+    if re.search(r"[hs]", bare):
+        return "time"
+    return None
+
+
+def date_text(raw: str, kind: str, date1904: bool) -> str:
+    """일련번호(1900 또는 1904 기준) → YYYY-MM-DD[ HH:MM] 또는 HH:MM. 숫자가 아니거나 범위 밖이면 그대로."""
+    from datetime import datetime, timedelta  # noqa: PLC0415
+
+    try:
+        serial = float(raw)
+    except ValueError:
+        return raw
+    if not 0 <= serial < 2_958_466:  # 9999-12-31까지
+        return raw
+    minutes = round((serial - int(serial)) * 1440)
+    if kind == "time":
+        return f"{minutes // 60 % 24:02d}:{minutes % 60:02d}"
+    base = datetime(1904, 1, 1) if date1904 else datetime(1899, 12, 30)  # 1900 기준은 엑셀의 1900-02-29 오류를 따라 30일
+    when = base + timedelta(days=int(serial), minutes=minutes)
+    return when.strftime("%Y-%m-%d %H:%M") if minutes % 1440 else when.strftime("%Y-%m-%d")
+
+
+def _xlsx_dates(z: zipfile.ZipFile, rels: dict[str, str]) -> dict[int, str]:
+    """styles.xml의 칸 서식 번호(cellXfs 순서) → 'date'·'time'. 날짜 서식이 아닌 것은 넣지 않는다."""
+    name = next((t for t in rels.values() if t.endswith("styles.xml")), "xl/styles.xml")
+    root = _small_xml(z, name)
+    if root is None:
+        return {}
+    codes = {}
+    for el in root.iter("{*}numFmt"):
+        try:
+            codes[int(el.get("numFmtId") or -1)] = str(el.get("formatCode") or "")
+        except ValueError:
+            continue
+    out: dict[int, str] = {}
+    xfs = next(root.iter("{*}cellXfs"), None)
+    for n, xf in enumerate(xfs if xfs is not None else ()):
+        try:
+            fmt_id = int(xf.get("numFmtId") or 0)
+        except ValueError:
+            continue
+        if kind := date_kind(fmt_id, codes.get(fmt_id)):
+            out[n] = kind
+    return out
+
+
+class _Sheet(_Target):
+    """xlsx 시트: 행마다 한 줄, 칸은 탭으로(빈칸은 열 자리에 맞춰 채우되 한 번에 50칸까지). 숫자는 저장된 값 그대로,
+    날짜 서식 칸은 YYYY-MM-DD(시각이 있으면 HH:MM까지, 2026-10-11)."""
+
+    def __init__(self, sink: _Sink, shared: list[str], head: str, dates: dict[int, str] | None = None, date1904: bool = False) -> None:
         self.sink, self.shared, self.head = sink, shared, head
+        self.dates, self.date1904, self.style = dates or {}, date1904, -1
         self.rows = self.in_v = self.in_t = self.rph = self.width = 0
         self.cells: list[str] | None = None
         self.cell: list[str] | None = None
@@ -538,6 +600,8 @@ class _Sheet(_Target):
             self.cells, self.width = [], 0
         elif name == "c" and self.cells is not None:
             self.cell, self.kind, self.ref = [], str(attrib.get("t") or "n"), str(attrib.get("r") or "")
+            style = str(attrib.get("s") or "")
+            self.style = int(style) if style.isdigit() and len(style) < 7 else -1
         elif name == "v":
             self.in_v += 1
         elif name == "t":
@@ -563,6 +627,11 @@ class _Sheet(_Target):
                 value = self.shared[int(index)] if index.isdigit() and len(index) < 10 and int(index) < len(self.shared) else ""
             elif self.kind == "b":
                 value = {"1": "TRUE", "0": "FALSE"}.get(raw.strip(), raw)
+            elif self.kind == "n" and self.style in self.dates:  # 날짜 서식 칸: 일련번호 → YYYY-MM-DD[ HH:MM]
+                value = date_text(raw.strip(), self.dates[self.style], self.date1904)
+            elif self.kind == "d":  # ISO 8601로 적힌 날짜(드묾): 2026-10-11T09:30:00 → 2026-10-11 09:30
+                stamp = raw.strip().replace("T", " ")
+                value = stamp[:10] if stamp[11:16] in ("", "00:00") else stamp[:16]
             else:  # n·str·inlineStr·e: 적힌 그대로
                 value = raw
             col = _column(self.ref)
@@ -601,6 +670,9 @@ def _xlsx(path: Path, check) -> tuple[str, bool]:
         if shared_name in names:
             _feed(z, shared_name, shared, _Sink(), check)
         root = _small_xml(z, "xl/workbook.xml")
+        dates = _xlsx_dates(z, rels)
+        pr = next(root.iter("{*}workbookPr"), None) if root is not None else None
+        date1904 = pr is not None and str(pr.get("date1904") or "").lower() in ("1", "true")
         sheets = [(str(el.get("name") or ""), rels[r]) for el in (root.iter("{*}sheet") if root is not None else ())
                   if (r := _rel_id(el)) in rels and rels[r] in names]
         if not sheets:  # 목록을 읽지 못하면 파일 이름의 번호 순, 시트 이름은 번호
@@ -608,7 +680,7 @@ def _xlsx(path: Path, check) -> tuple[str, bool]:
         for title, name in sheets:
             if "/worksheets/" not in name:  # 차트 시트 등
                 continue
-            _feed(z, name, _Sheet(sink, shared.items, ("\n" if sink.total else "") + f"## {title}\n"), sink, check)
+            _feed(z, name, _Sheet(sink, shared.items, ("\n" if sink.total else "") + f"## {title}\n", dates, date1904), sink, check)
             if sink.cut:
                 break
     return sink.result()
@@ -980,6 +1052,30 @@ def save(att_dir: Path, name: str, result: Extracted) -> dict:
         status["reason"] = result.reason
     write_json(status_file, status)
     return status
+
+
+def check_report(path: Path) -> str:
+    """`magus extract-check`(2026-10-11): 실제 파일로 뽑기를 확인한다. 형식·상태·쪽 수(대화에서 읽는 3,000자 쪽)·글자 수·시간·앞 300자.
+    파일 이름과 본문 전체는 내보내지 않는다(로그에도 형식·상태만 남는다)."""
+    from magus.attachments import kind_of  # noqa: PLC0415
+
+    suffix = path.suffix.lower()
+    head = f"형식: {suffix or '(확장자 없음)'} · {kind_of(path.name) or '알 수 없음'}"
+    if not path.is_file():
+        return f"{head}\n상태: 파일이 없습니다"
+    if no_text(path.name):
+        return f"{head}\n상태: {NO_TEXT}"
+    if not extractable(path.name):
+        return f"{head}\n상태: 글자를 뽑는 형식이 아닙니다({FORMATS})"
+    got = extract(path)
+    why = _WHY.get(got.reason or "")
+    state = {"ok": "뽑음", "truncated": f"앞부분만({TEXT_MAX:,}자에서 자름)", "empty": "글자 없음", "later": f"시간 넘음({DEADLINE:.0f}초)",
+             "failed": f"{HWP_UNREADABLE}({why})" if why else "글자를 뽑지 못함"}.get(got.status, got.status)
+    lines = [head, f"상태: {state}", f"글자 수: {len(got.text):,}", f"쪽 수: {len(pages(got.text)) if got.text else 0}(대화에서 읽는 {PAGE_CHARS:,}자 쪽)",
+             f"시간: {got.ms:,}ms"]
+    if got.text:
+        lines += ["앞 300자:", got.text[:300]]
+    return "\n".join(lines)
 
 
 def pages(text: str) -> list[str]:

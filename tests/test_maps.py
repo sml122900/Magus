@@ -24,7 +24,7 @@ from conftest import with_library
 from mcp import Client
 
 from magus import map_migrate
-from magus.category.moves import move_book, trash_node, undo_move
+from magus.category.moves import error_message, move_book, trash_node, undo_move
 from magus.config import Settings
 from magus.floors import COMMON, MAX_FLOORS, josa
 from magus.maps import CENTER, MAX_BOOKS_PER_NODE, MAX_NODES
@@ -276,10 +276,13 @@ def test_cite_check_sees_own_and_linked_refs(store: LocalStore):
     assert store.cite_scope("alice", "book") == ("book", COMMON)
     assert _gate(store, "alice", "book") == before
     assert [c.unverified_cite_keys for c in store.list_chapters("alice", "book")] == outline_keys
-    # 연결 노드를 휴지통으로 옮기면 다시 보지 않고, 그 원고를 알려 준다
+    # 인용 점검이 쓰는 연결 노드는 휴지통으로 옮기지 않는다(2026-10-11, 문헌 글이 든 노드와 같다)
     link = next(n for n in store.get_map("alice", "book").nodes if n.link and book in n.books)
-    _, lost = trash_node(store, "alice", "book", link.id, "x")
-    assert lost == ["book"] and _gate(store, "alice", "book")["unknown"] == ["clack2012", "daeschler2006"]
+    assert store.node_trash_info("alice", "book", link.id).blocked == "cite_link"
+    with pytest.raises(MapError) as refused:
+        trash_node(store, "alice", "book", link.id, "x")
+    assert refused.value.code == "cite_link" and "인용 점검이 이 문헌을 씁니다" in error_message(refused.value, polite=True)
+    assert _gate(store, "alice", "book") == before
     undo_move(store, "alice", move.id)
     assert _gate(store, "alice", "book") == before
 
@@ -457,9 +460,11 @@ async def test_tools_project_args_and_map(settings: Settings, store: LocalStore)
         # 노드·연결 노드·선
         node = _text(await c.call_tool("category_create", {"name": "골목", "template": "노드", "project": "도시의 시간"}))
         assert node.endswith("노드를 만듦: 「골목」(「도시의 시간」 지도, 가운데 노드와 이음).")
-        link = _text(await c.call_tool("category_create", {"name": "물에서 뭍으로 · 생각", "template": "연결 노드",
-                                                            "project": "도시의 시간"}))
-        assert link.startswith("연결 노드를 만듦: 「도시의 시간」 지도에 「물에서 뭍으로」의 「생각」") and "원본에 들어간다" in link
+        refused = await c.call_tool("category_create", {"name": "물에서 뭍으로 · 생각", "template": "연결 노드", "project": "도시의 시간"})
+        assert refused.is_error  # 대화로는 연결 노드를 만들지 않는다(2026-10-11). 이미 있는 연결 노드는 그대로 동작한다
+        from magus.category.moves import add_link  # noqa: PLC0415
+
+        add_link(store, "alice", second, "book", next(n.id for n in store.get_map("alice", "book").nodes if n.name == "생각"))
         joined = _text(await c.call_tool("category_edit", {"node": "골목", "project": "도시의 시간", "link": "가운데"}))
         assert joined == "「도시의 시간」 지도: 이미 이어져 있음 「골목」–「가운데」."
         cut = _text(await c.call_tool("category_edit", {"node": "골목", "project": "도시의 시간", "unlink": "가운데",

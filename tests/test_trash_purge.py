@@ -1,7 +1,7 @@
 """휴지통 비우기(2026-10-11 묶음 3, docs/decisions/2026-10-11-batch.md): 항목마다 [영구 삭제], 화면마다 [휴지통 비우기].
 
 지우면 그 항목의 파일(첨부 폴더 안 .text·.thumb, 프로젝트 폴더 안 .cache 포함)이 사라지고 용량이 준다. 휴지통에 옮길 때 이미
-색인에서 빠지므로 색인에 지운 것을 가리키는 줄이 없다. 확인은 같은 자리의 창(브라우저 confirm 없음). 백업에는 30일 남는다는 안내."""
+색인에서 빠지므로 색인에 지운 것을 가리키는 줄이 없다. 확인은 같은 자리의 창(브라우저 confirm 없음). 백업에는 최대 1년까지 남을 수 있다는 안내."""
 
 from __future__ import annotations
 
@@ -128,7 +128,7 @@ def test_web_purge_one_and_empty_with_in_page_confirm(server_proc):  # noqa: F81
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         page = c.get("/login?next=/shelf/p/city/trash").text
         csrf = _csrf(page)
-        assert "되살릴 수 없습니다. 영구 삭제할까요?" in page and "백업에는 30일 동안 남아 있습니다." in page
+        assert "되살릴 수 없습니다. 영구 삭제할까요?" in page and "백업에는 최대 1년까지 남을 수 있습니다." in page
         assert '<summary class="btn quiet">휴지통 비우기</summary>' in page and page.count('<summary class="btn quiet">영구 삭제</summary>') >= 5
         assert "confirm(" not in page and "alert(" not in page  # 브라우저 확인 창은 쓰지 않는다
         assert "책 「버린 책」" in page and "올린 문서 「도시」 · 2장" in page and "올린 문서에서 만든 문서 「출처 확인 문서」" in page

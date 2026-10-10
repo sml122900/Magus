@@ -24,7 +24,7 @@ from magus.limits import ALIAS_MAX, PART_MAX, Alias, check_chat_body
 from magus.category.books import BookRef, writable_book
 from magus.category.books import find_book as find_book_
 from magus.category.maptext import Counts, project_block
-from magus.category.moves import add_link, error_message, move_book, tool_message, trash_node, undo_move as undo_last
+from magus.category.moves import error_message, move_book, tool_message, trash_node, undo_move as undo_last
 from magus.category.moves import scope_names
 from magus.category.rules import (
     CONTENT_MAX, FIELD_MAX, MAX_CATEGORIES, NEW_COLOR_ORDER, PALETTE_BY_NAME, TEMPLATE_BY_KEY, TITLE_MAX,
@@ -198,7 +198,7 @@ def build_tools(
 
     # ---- 만들기 ---------------------------------------------------------------------------------------
 
-    def category_create(name: str, template: Literal["빈 책", "인물", "사례", "수치", "용어", "노드", "연결 노드"] = "빈 책",
+    def category_create(name: str, template: Literal["빈 책", "인물", "사례", "수치", "용어", "노드"] = "빈 책",
                         color: str | None = None, project: str | None = None, node: str | None = None,
                         context: list[str] | None = None) -> str:
         user = current_user()
@@ -209,16 +209,6 @@ def build_tools(
                 made = store.add_node(user, where, name, color=parse_color(color) if color else None, contexts=contexts)
                 return (view_for_node(store, user, where, made.id).header() + "\n"
                         f"노드를 만듦: 「{made.name}」({floor_name(store, user, where)} 지도, 가운데 노드와 이음).")
-            if template == "연결 노드":  # name = 원본 '프로젝트 · 노드'
-                if contexts:
-                    raise ToolError("연결 노드에는 컨텍스트를 붙이지 않는다(원본 노드의 것을 따른다).")
-                source_floor, source = find_node(user, where, name)
-                if source.link and source.missing:
-                    raise ToolError("그 연결 노드의 원본이 없다.")
-                target = source.link or (source_floor, source.id)
-                made = add_link(store, user, where, target[0], target[1])
-                return (f"연결 노드를 만듦: {floor_name(store, user, where)} 지도에 {floor_name(store, user, made.link[0])}의 "  # type: ignore[index]
-                        f"「{made.name}」(가운데 노드와 이음). 여기서 보거나 넣으면 원본에 들어간다.")
         except (MapError, MoveError) as e:
             raise _map_error(e) from e
         except ValueError as e:
@@ -886,7 +876,8 @@ def build_tools(
             category_create, name="category_create",
             description=(
                 (
-                "저자가 새 책이나 노드를 만들자고 분명히 말했을 때만 부른다(이름을 확인받은 뒤). template: 빈 책·인물·사례·수치·용어(칸이 다름)·노드·연결 노드(name에 '프로젝트 · 노드'). node: 꽂을 "
+                "저자가 새 책이나 노드를 만들자고 분명히 말했을 때만 부른다(이름을 확인받은 뒤). template: 빈 책·인물·사례·수치·용어(칸이 다름)·노드. 연결 노드는 만들지 않는다"
+                "(다른 프로젝트의 노드는 저자가 웹의 '다른 프로젝트로 복사'로). node: 꽂을 "
                 "노드(없으면 같은 이름의 새 노드). context: 자주 쓰는 컨텍스트 이름이나 글. color: 색 이름 또는 #RRGGBB. 책 이름 12자까지."
             )
             ),
