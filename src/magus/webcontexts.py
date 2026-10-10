@@ -307,11 +307,11 @@ class ContextPages:
         )
         from magus.webshelf import SHELF_STYLE  # noqa: PLC0415  # 입력칸·글 상자 모양(책장 화면과 같다)
 
-        from magus.webmap_assets import MAP_STYLE  # noqa: PLC0415  # 같은 자리 확인 창(.node-del·.del-box)
+        from magus.webmap_assets import DEL_STYLE  # noqa: PLC0415  # 같은 자리 확인 창(.node-del·.del-box)
         from magus.webtrash import TRASH_SCRIPT  # noqa: PLC0415  # Esc로 닫기·초점
 
         return self._page("자주 쓰는 컨텍스트", body + TRASH_SCRIPT, session, 400 if message.startswith('<p class="msg err">') else 200,
-                          current="", css=SHELF_STYLE + MAP_STYLE + CONTEXT_STYLE)
+                          current="", css=SHELF_STYLE + DEL_STYLE + CONTEXT_STYLE)
 
 
 def _delete_box(c: SavedContext, places: list[str], csrf: str) -> str:

@@ -8,7 +8,18 @@
 - 스크립트가 꺼지면: 지도는 가운데 노드를 화면 가운데에 두고 그대로 보이며(끌기·확대 없음), 목록 보기·노드 설정·'+ 노드' 폼으로 모든 일을 한다.
 """
 
-MAP_STYLE = """
+# 같은 자리 확인 창(노드·프로젝트 휴지통으로, 휴지통 영구 삭제·비우기, 자주 쓰는 컨텍스트 지우기). confirm() 쓰지 않음
+DEL_STYLE = """
+.node-del{position:relative;margin-left:auto}
+.node-del>summary:not(.btn){list-style:none;display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;border-radius:9999px;
+cursor:pointer;font-size:20px}.node-del>summary::-webkit-details-marker{display:none}.node-del>summary:not(.btn):hover{background:var(--soft)}
+.del-box{position:absolute;right:0;top:48px;z-index:30;width:min(340px,80vw);background:var(--canvas);border:1px solid var(--line);
+border-left:4px solid var(--ruby);border-radius:10px;padding:4px 16px;box-shadow:0 8px 24px rgb(0 0 0/.18)}
+.del-box p{margin:10px 0}
+.del-box .big-warn{font-size:19px;font-weight:600;border-left:4px solid var(--ruby);padding:4px 0 4px 10px}
+"""
+
+MAP_STYLE = DEL_STYLE + """
 main{max-width:1560px}
 main>h1{display:none}
 .pm-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin:0 0 8px}
@@ -98,14 +109,7 @@ list-style:none;position:relative}
 .pp-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
 .pp-title{margin:4px 0;font-size:22px}.pp-title:focus{outline:none}.pp-title:focus-visible{outline:3px solid var(--primary)}
 .pp-kind{color:var(--ink2)}
-.node-del{position:relative;margin-left:auto}
-.node-del>summary:not(.btn){list-style:none;display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;border-radius:9999px;
-cursor:pointer;font-size:20px}.node-del>summary::-webkit-details-marker{display:none}.node-del>summary:not(.btn):hover{background:var(--soft)}
-.del-box{position:absolute;right:0;top:48px;z-index:30;width:min(340px,80vw);background:var(--canvas);border:1px solid var(--line);
-border-left:4px solid var(--ruby);border-radius:10px;padding:4px 16px;box-shadow:0 8px 24px rgb(0 0 0/.18)}
-.del-box p{margin:10px 0}
 .proj-del{margin-left:0}
-.del-box .big-warn{font-size:19px;font-weight:600;border-left:4px solid var(--ruby);padding:4px 0 4px 10px}
 .pp-link{background:var(--soft);border-radius:8px;padding:8px 12px}
 .pm-panel .case{margin:12px 0}.pm-panel .books{padding:26px 10px 0}
 .pp-alone{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;background:var(--soft);border-left:4px solid var(--primary);
@@ -117,7 +121,7 @@ a.book.lifting{opacity:.4}
 """
 
 # 노드 휴지통 화면(#97)
-TRASH_STYLE = """
+TRASH_STYLE = DEL_STYLE + """
 ol.trash-list{list-style:none;padding:0;margin:12px 0;display:grid;gap:8px}
 ol.trash-list li{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;background:var(--canvas);border:1px solid var(--line);
 border-radius:10px;padding:8px 16px}ol.trash-list time{color:var(--ink2);font-variant-numeric:tabular-nums}
