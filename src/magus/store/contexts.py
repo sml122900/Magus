@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from magus.contexts import CONTEXTS_SCHEMA, DEFAULTS, MAX_SAVED, clean_context, clean_contexts, name_key, to_record
+from magus.contexts import CONTEXTS_SCHEMA, DEFAULTS, MAX_SAVED, clean_context, clean_contexts, from_record, name_key, to_record
 from magus.ids import new_id, utcnow
 from magus.store.base import Context, SavedContext
 from magus.store.fileio import locked, read_json, write_json
@@ -80,6 +80,61 @@ class ContextMixin:
             return False
         self._write_saved(user_id, kept)  # 붙여 둔 사본은 그대로다(노드·책의 컨텍스트는 사본)
         return True
+
+    @locked
+    def context_places(self, user_id: str) -> dict[str, list[str]]:
+        """이름 붙은 컨텍스트가 붙어 있는 곳(2026-10-11, 자주 쓰는 컨텍스트를 지우기 전에 보인다): 이름 열쇠 → ['책 「…」 · 「프로젝트」', …]."""
+        return {k: [label for label, _ in v] for k, v in self._context_uses(user_id).items()}
+
+    def _context_uses(self, user_id: str) -> dict[str, list[tuple[str, tuple[str, str]]]]:
+        """이름 열쇠 → [(보일 이름, (종류 book|node, 열쇠))]. 책: 카테고리 id·ms.<프로젝트>·doc.<id>, 노드: '<프로젝트>/<노드>'."""
+        floors = {f.id: f.title for f in self.list_floors(user_id)}  # type: ignore[attr-defined]
+        out: dict[str, list[tuple[str, tuple[str, str]]]] = {}
+
+        def add(record: str | None, label: str, where: tuple[str, str]) -> None:
+            for ctx in json.loads(record or "[]"):
+                if isinstance(ctx, dict) and (name := " ".join(str(ctx.get("name") or "").split())):
+                    out.setdefault(name_key(name), []).append((label, where))
+
+        for r in self._db.execute("SELECT id, name, floor, contexts FROM categories WHERE user_id = ? ORDER BY created_at, id", (user_id,)):
+            add(r["contexts"], f"책 「{r['name']}」 · 「{floors.get(r['floor'], r['floor'])}」", ("book", r["id"]))
+        for r in self._db.execute("SELECT id, title, contexts FROM projects WHERE user_id = ? ORDER BY created_at, id", (user_id,)):
+            add(r["contexts"], f"올린 문서 「{r['title']}」", ("book", f"ms.{r['id']}"))
+        for r in self._db.execute("SELECT id, title, contexts FROM documents WHERE user_id = ? ORDER BY created_at, id", (user_id,)):
+            add(r["contexts"], f"올린 문서에서 만든 문서 「{r['title']}」", ("book", f"doc.{r['id']}"))
+        for floor, title in floors.items():
+            found = self.get_map(user_id, floor)  # type: ignore[attr-defined]
+            for n in (found.nodes if found else ()):
+                if not n.link and n.contexts:
+                    add(json.dumps(to_record(n.contexts), ensure_ascii=False), f"노드 「{title if n.center else n.name}」 · 「{title}」",
+                        ("node", f"{floor}/{n.id}"))
+        return out
+
+    @locked
+    def detach_context(self, user_id: str, name: str) -> int:
+        """그 이름의 컨텍스트(사본)를 붙어 있는 모든 책·노드에서 뗀다(자주 쓰는 컨텍스트를 지울 때, 2026-10-11). 뗀 곳 수."""
+        key = name_key(name)
+        done = 0
+        for _, (kind, where) in self._context_uses(user_id).get(key, []):
+            if kind == "node":
+                floor, _, node_id = where.partition("/")
+                found = self.get_map(user_id, floor)  # type: ignore[attr-defined]
+                node = found.node(node_id) if found else None
+                if node is not None:
+                    self.set_node_contexts(user_id, floor, node_id,  # type: ignore[attr-defined]
+                                           tuple(c for c in node.contexts if name_key(c.name) != key))
+                    done += 1
+                continue
+            current = self._book_contexts(user_id, where)
+            self.set_book_contexts(user_id, where, tuple(c for c in current if name_key(c.name) != key))
+            done += 1
+        return done
+
+    def _book_contexts(self, user_id: str, key: str) -> tuple[Context, ...]:
+        base, _, rest = key.partition(".")
+        table, ident = ("projects", rest) if base == "ms" and rest else ("documents", rest) if base == "doc" and rest else ("categories", key)
+        row = self._db.execute(f"SELECT contexts FROM {table} WHERE user_id = ? AND id = ?", (user_id, ident)).fetchone()
+        return from_record(json.loads(row[0] or "[]")) if row else ()
 
     @locked
     def set_book_contexts(self, user_id: str, key: str, contexts: tuple[Context, ...]) -> None:

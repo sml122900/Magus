@@ -384,7 +384,7 @@ def test_web_categories_round_trip(server_proc):  # noqa: F811
 
 
 def test_web_saved_contexts_page(server_proc):  # noqa: F811
-    """내 정보 → 자주 쓰는 컨텍스트(/me/contexts): 고치기·더하기·지우기. 붙여 둔 사본은 그대로."""
+    """내 정보 → 자주 쓰는 컨텍스트(/me/contexts): 고치기·더하기·지우기(지우면 같은 이름으로 붙은 사본도 뗀다: test_contexts_ui)."""
     base, data_dir, _ = server_proc({})
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         me = c.get("/login?next=/me").text
@@ -394,7 +394,8 @@ def test_web_saved_contexts_page(server_proc):  # noqa: F811
         assert page.count('class="saved-ctx"') == 4 and ">문학적 부분이 마음에 드는 구절을 모아놓은것. 내 문장 표현을 다듬을때 사용</textarea>" in page
         assert c.post("/me/contexts", data={"csrf": "틀림", "action": "add", "name": "x", "text": "y"}).status_code == 403
         added = c.post("/me/contexts", data={"csrf": csrf, "action": "add", "name": "<b>신문</b>", "text": "신문 기사 <script>"}).text
-        assert "더했습니다." in added and "&lt;b&gt;신문&lt;/b&gt;" in added and "<script>" not in added.split("<main>")[1].split("</main>")[0]
+        assert "더했습니다." in added and "&lt;b&gt;신문&lt;/b&gt;" in added and "신문 기사 &lt;script&gt;" in added
+        assert "신문 기사 <script>" not in added  # 화면의 스크립트(확인 창 Esc, 2026-10-11)와 별개로 적은 글은 이스케이프된다
         dup = c.post("/me/contexts", data={"csrf": csrf, "action": "add", "name": "문체", "text": "x"})
         assert dup.status_code == 400 and "이미 있습니다" in dup.text
         saved = c.post("/me/contexts", data={"csrf": csrf, "action": "save", "id": "ctx-note", "name": "생각 메모", "text": "고친 생각 메모"}).text

@@ -43,8 +43,8 @@ from magus.webboard import marked_query, post_row_html, search_line
 from magus.webmap_assets import MAP_SCRIPT, MAP_STYLE, PROJECTS_STYLE, TRASH_STYLE
 from magus.webtrash import PURGED, TrashRow, trash_list_html
 from magus.contexts import Context, View
-from magus.webcontexts import (CONTEXT_SCRIPT, CONTEXT_STYLE, context_fieldset, contexts_as_typed, contexts_from_form, contexts_view_html,
-                               register_row)
+from magus.webcontexts import (CONTEXT_SCRIPT, CONTEXT_STYLE, MANAGE, PICK_TITLE, context_fieldset, contexts_as_typed, contexts_from_form,
+                               contexts_view_html, register_row)
 from magus.webshelf import (
     GROUP_SIZE, Book, Kind, add_book, book_html, category_kind, clean_query, find,
     safe_at, shelf_html, state_url, text_color,
@@ -406,7 +406,8 @@ class MapPages:
         typed = draft.new_text if draft else ""
         contexts = (
             '<fieldset class="ctx ctx-mini"><legend>컨텍스트</legend>'
-            + (f'<div class="chips" role="group" aria-label="자주 쓰는 컨텍스트">{chips}</div>' if chips else "")
+            f'<p class="ctx-pick-title" id="ctx-pick-new">{PICK_TITLE}</p>'  # 단추가 자주 쓰는 컨텍스트라는 것(2026-10-11)
+            + f'<div class="chips" role="group" aria-labelledby="ctx-pick-new">{chips}{MANAGE}</div>'
             + f'<details{" open" if typed else ""}><summary>직접 적기</summary>'
             f'<label class="block">내용 <textarea name="ctx_new" data-count-max="500" rows="2">{html.escape(typed)}'
             "</textarea></label></details></fieldset>"
@@ -834,6 +835,9 @@ class MapPages:
                     if "msg err" in text:
                         raise MapError("ctx_register", "등록하지 못했다")
                     done = "ctx_saved"
+                    if str(form.get("register")) == "new":  # '+ 새로 만들기'는 등록하고 이 노드에 붙인다(2026-10-11)
+                        saved = await run_in_threadpool(self.store.list_saved_contexts, uid)
+                        await run_in_threadpool(self.store.set_node_contexts, uid, floor_id, node, contexts_from_form(form, saved))
                 else:
                     saved = await run_in_threadpool(self.store.list_saved_contexts, uid)
                     attached = contexts_from_form(form, saved)

@@ -831,6 +831,12 @@ class Store(Protocol):
     def restore_project(self, user_id: str, trash_id: str) -> str:
         """되살린 프로젝트 id. 막히면 아무것도 옮기지 않고 ValueError(code: missing·taken·full·clash, 보일 이름)."""
         ...
+    def context_places(self, user_id: str) -> dict[str, list[str]]:
+        """이름 붙은 컨텍스트가 붙은 책·노드(보일 이름), 이름 열쇠별(자주 쓰는 컨텍스트를 지우기 전에, 2026-10-11)."""
+        ...
+    def detach_context(self, user_id: str, name: str) -> int:
+        """그 이름의 컨텍스트 사본을 모든 책·노드에서 뗀다. 뗀 곳 수."""
+        ...
     # 노드 복사(2026-10-11, 연결 노드 대신, 웹만) — 책·글·첨부·컨텍스트째 다른 프로젝트에 선 없이 따로
     def node_copy_block(self, user_id: str, floor: str, node_id: str) -> tuple[str, str] | None:
         """복사할 수 없으면 (까닭 코드 center·link·has_refs·has_docs, 책 이름), 할 수 있으면 None."""
