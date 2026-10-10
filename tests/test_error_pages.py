@@ -26,7 +26,7 @@ def _seed(data_dir) -> None:
 
 def _error(page: httpx2.Response, status: int, sentence: str, back: str = "/shelf") -> None:
     assert page.status_code == status, (page.status_code, page.text[:300])
-    assert '<span class="brand">Magus</span>' in page.text and f'<p class="msg err">{sentence}</p>' in page.text
+    assert '<a class="brand" href="/shelf" aria-label="처음으로">Magus</a>' in page.text and f'<p class="msg err">{sentence}</p>' in page.text
     assert f'<a class="back" href="{back}">돌아가기</a>' in page.text
 
 

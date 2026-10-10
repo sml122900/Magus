@@ -299,6 +299,7 @@ def test_empty_allow_list_starts_and_denies_everyone(server_proc, fake_issuer):
     with httpx2.Client(base_url=base, timeout=60) as c:
         page = _login(c, issuer_state, "user_01FIRST")
         assert page.status_code == 403 and "<code>user_01FIRST</code>" in page.text
+        assert '<a class="brand" href="/login" aria-label="처음으로">Magus</a>' in page.text  # 로그인 전 화면의 로고는 로그인으로
     assert "ALLOWED_USERS가 비어 있다" in log_path.read_text(encoding="utf-8")
 
 

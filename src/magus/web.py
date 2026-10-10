@@ -76,6 +76,8 @@ p{margin:12px 0}a{color:var(--primary)}a:hover{color:var(--press)}small{color:va
 .site{background:var(--canvas);border-bottom:1px solid var(--line)}
 .site-in{max-width:1100px;margin:0 auto;padding:8px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px}
 .brand{font-weight:600;font-size:18px;letter-spacing:-.2px;color:var(--ink);margin-right:auto}
+/* 로고 = 처음으로(2026-10-10): 모양은 글자 그대로(밑줄·색 변화 없음), 누르는 곳만 위아래로 넓힘(자리는 그대로) */
+a.brand,a.brand:hover{color:var(--ink);text-decoration:none;padding:8px 0;margin-top:-8px;margin-bottom:-8px}
 .site nav{display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px}
 .site nav a{color:var(--ink2);text-decoration:none;padding:8px 0;border-bottom:2px solid transparent}
 .site nav a:hover{color:var(--primary)}
@@ -394,7 +396,7 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPag
         return HTMLResponse(
             f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)} · Magus</title><style>{STYLE}{css}{HELP_STYLE if helper else ""}</style></head><body data-screen="{screen}">
-<header class="site"><div class="site-in"><span class="brand">Magus</span>{nav}</div></header>
+<header class="site"><div class="site-in"><a class="brand" href="{"/shelf" if session else "/login"}" aria-label="처음으로">Magus</a>{nav}</div></header>
 <main>{lead}<h1>{html.escape(title)}</h1>{body}</main>{helper}{COUNT_SCRIPT if 'data-count-max="' in body + helper else ""}{FORM_SCRIPT}</body></html>""",
             status_code=status,
         )
