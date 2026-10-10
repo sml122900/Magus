@@ -423,6 +423,21 @@ up.sh 출력이 SSH 끊김으로 잘려 남은 단계는 `up2.sh`로 다시 했�
 **되돌리기**: `docker tag magus:rollback-fb76fb0 magus:latest && docker compose up -d --no-build`(데이터 형식 같음. 도구 설명이 옛것으로 돌아가므로 커넥터 재연결).
 문서 업데이트로 바꾼 첨부·올린 파일은 옛 코드에서도 그대로 읽힌다(같은 자리의 파일, 이전 파일은 휴지통 폴더).
 
+### 2-16. 머리의 Magus 로고 = 처음 페이지 링크 — 2026-10-10 사용자 승인
+
+반영 전 서버는 `p1-doc-update`(`9316d37`), 반영할 것은 태그 `p1-logo-home`(`681020d`). **데이터 이전 없음, 인덱스 v23 그대로. 웹만, 커넥터 재연결 필요 없음.**
+바뀐 것: 모든 화면 머리의 'Magus'가 처음 페이지(`/shelf`) 링크, 로그인 전 화면은 `/login`(status.md 0-37절). 의존성·Dockerfile·deploy 그대로.
+
+절차는 2-11절과 같다(`private/tmp/deploy-logo/pre.sh`·`build.sh`·`up.sh`·`cleanup.sh`, 도구 `/root/logo-tools/`, 되돌리기 이미지 `magus:rollback-9316d37`, 백업 태그 p1-logo-home).
+실데이터 화면 점검은 없고(읽기만 수치·전체 현황·해시), 바깥 GET으로 로그인 전 404 화면의 로고(/login), 컨테이너 /tmp에서 로그인한 9화면의 로고(/shelf)를 본다(`smoke.py`).
+
+반영 기록(2026-10-10 23:56 서버 시각): `9316d37` → `681020d`. 백업 `4998f295`(predeploy·p1-logo-home, 2,383개, 오류 없음). healthy·재시작 0·오류 로그 0,
+데이터 2,383개 해시 같음(index.sqlite만 빼고 파생 포함, 두 번), 수치 전후 같음(default book 299·297·0·86, default 3b0d82fd 수정본 E2, father 337·335·5·129·수정본 3(E3)),
+전체 현황 다섯 개 모두 같음, 인용 상태 첫 열기 0.0~0.19초. 로그인 전 404 로고 /login 1개, /tmp 점검 2/2.
+정리: `rollback-c0e8c55` 지움(남김: latest·rollback-9316d37·rollback-fb76fb0), 디스크 52%.
+
+**되돌리기**: `docker tag magus:rollback-9316d37 magus:latest && docker compose up -d --no-build`(데이터 형식 같음, 재연결 필요 없음).
+
 ## 3. 알림 확인
 
 ```sh
