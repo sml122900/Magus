@@ -4,7 +4,9 @@
 - 파일 이름은 폴더 이름을 떼고(브라우저가 붙이는 C:\\fakepath\\ 등) 폴더 구분자·상대 경로·숨김·제어 문자를 막는다.
   저장 경로에는 이름 대신 서버가 만든 id 폴더를 쓰므로 이름으로 다른 곳을 가리킬 수 없다.
 - 크기 한도는 MAX_ATTACH_MB(기본 20), 사용자 전체는 MAX_USER_MB(받은함·원고와 함께).
-- 웹에서 바로 여는(inline) 것은 브라우저가 안전하게 그리는 그림과 PDF뿐이다. 나머지는 내려받기로만 준다(SVG·HTML은 받지 않는다).
+- 웹에서 바로 여는(inline) 것은 브라우저가 안전하게 그리는 그림과 PDF뿐이다. 나머지는 내려받기로만 준다(SVG는 받지 않는다).
+  html·htm은 2026-10-11부터 받는다(글자 뽑기 형식 늘림): 미디어 타입을 application/octet-stream으로 두어 브라우저가 그리지 않고 내려받기만 한다
+  (nosniff·attachment). 글자는 magus.extract가 태그를 걷어 내고 뽑는다.
 """
 
 from __future__ import annotations
@@ -22,12 +24,14 @@ ATTACH_TYPES: dict[str, tuple[str, str, bool]] = {
     ".pdf": ("PDF", "application/pdf", True),
     ".docx": ("문서", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", False),
     ".doc": ("문서", "application/msword", False),
-    ".hwp": ("문서", "application/x-hwp", False),
-    ".hwpx": ("문서", "application/hwp+zip", False),
+    ".hwp": ("한글 문서", "application/x-hwp", False),
+    ".hwpx": ("한글 문서", "application/hwp+zip", False),
     ".odt": ("문서", "application/vnd.oasis.opendocument.text", False),
     ".rtf": ("문서", "application/rtf", False),
     ".txt": ("문서", "text/plain; charset=utf-8", False),
     ".md": ("문서", "text/markdown; charset=utf-8", False),
+    ".html": ("웹 문서", "application/octet-stream", False),  # 그리지 않고 내려받기만(위 설명)
+    ".htm": ("웹 문서", "application/octet-stream", False),
     ".csv": ("표", "text/csv; charset=utf-8", False),
     ".xlsx": ("표", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", False),
     ".xls": ("표", "application/vnd.ms-excel", False),

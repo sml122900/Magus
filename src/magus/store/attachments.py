@@ -235,7 +235,7 @@ class AttachmentMixin:
             return None, None
         att_dir = hit[0].parent
         status = ex.read_status(att_dir)
-        if make and (status is None or (status["status"] == "later" and ex.retry_due(status))) and _claim(user_id):
+        if make and ex.due(status, hit[1].name) and _claim(user_id):  # 없음·옛 VERSION 상태(그때 뽑지 않던 형식)·때가 된 '나중에'
             try:  # 사용자마다 한 번에 하나만 뽑는다(점검 7-e: 새로 고침·동시 요청이 20초씩 겹쳤다)
                 result = ex.extract(hit[0], ex.DEADLINE if deadline is None else deadline)
                 status = ex.save(att_dir, hit[1].name, result)
@@ -260,7 +260,8 @@ class AttachmentMixin:
         return None
 
     def extract_all(self, user_id: str, *, force: bool = False) -> dict[str, int]:
-        """그 사용자의 모든 첨부(휴지통 빼고) 글자 뽑기(배포 때 한 번에, `magus extract`). 이미 뽑은 것은 force가 아니면 건너뛴다.
+        """그 사용자의 모든 첨부(휴지통 빼고) 글자 뽑기(배포 때 한 번에, `magus extract`·`magus warm-cache`). 이미 뽑은 것은 force가 아니면
+        건너뛴다. 형식을 늘린 뒤(2026-10-11)에는 새로 뽑게 된 형식(hwp 등)의 이미 올라간 첨부가 상태가 없으므로 여기서 뽑힌다.
         돌려주는 것은 개수뿐(이름·내용 없음)."""
         from magus import extract as ex  # noqa: PLC0415
 
@@ -284,10 +285,11 @@ class AttachmentMixin:
                 continue
             counts["대상"] += 1
             old = ex.read_status(folder)
-            if old is not None and old["status"] != "later" and not force:
+            again = old is not None and (force or ex.stale(old, att.name))
+            if old is not None and old["status"] != "later" and not again:
                 counts["이미"] += 1
                 continue
-            if force and old is not None:
+            if again:
                 (folder / ex.TEXT_DIR / ex.STATUS_FILE).unlink()
             status, _ = self.attachment_text(user_id, owner, att.id)
             counts[names.get((status or {}).get("status", "failed"), "실패")] += 1

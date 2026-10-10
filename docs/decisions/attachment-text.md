@@ -31,3 +31,23 @@
 - 도구 23개, 목록 8,787 → 9,207토큰, instructions 2,305 → 2,385토큰(커넥터 재연결).
 
 대안을 버린 이유: 새 도구와 새 의존성·별도 프로세스는 늘리는 것만 많고, 찾기 도구의 두 인자와 쪽마다 살피는 시간 제한으로 충분하다.
+
+## 형식 늘림(2026-10-11, 상태 VERSION 2)
+
+- **P**: 첨부로 받는 형식(hwp·hwpx·pptx·xlsx·odt·rtf·csv) 중 글자를 뽑는 것은 docx·pdf·txt·md뿐이었다. 아버지 원고처럼 한글(hwp)로 쓴 문서는 찾지도 읽지도 못했다.
+- **A**: hwp·hwpx·pptx·xlsx·odt·rtf·csv·html·htm을 뽑는다. 새 의존성은 olefile(BSD) 하나. pyhwp 등 GPL·AGPL 계열은 쓰지 않았다.
+  - hwp: olefile로 `BodyText/Section{N}`(번호 순)을 열어 레코드(머리 32비트, 크기 0xFFF면 다음 4바이트)를 흘려 읽고 `HWPTAG_PARA_TEXT`(67)만 UTF-16LE로 읽는다.
+    한 글자짜리 제어 문자(0·10·13·24~31)는 2바이트, 나머지 컨트롤(1~9·11·12·14~23)은 16바이트를 건너뛴다(탭은 탭). 압축 구역은 raw deflate를 1MB씩 풀고
+    zipguard와 같은 규칙(1MB를 넘으면 압축률 100:1, 파일 전체 200MB)에서 멈춘다. OLE 스트림 하나는 50MB까지.
+    FileHeader 속성의 암호·배포용·DRM 비트나 ViewText가 있으면 status=failed + reason=hwp_locked, 한글 97 이전(HWP 3.x)은 reason=hwp_old → 화면·대화에 '읽을 수 없는 hwp'.
+  - hwpx(Contents/section*.xml 번호 순, hp:t)·pptx(presentation.xml의 슬라이드 차례, '## 슬라이드 N', a:t)·xlsx(workbook.xml의 시트 차례, '## 시트 이름', 행마다 한 줄·칸은 탭,
+    공유 문자열·인라인·숫자는 적힌 그대로, 시트마다 2,000행)·odt(content.xml의 text:p·text:h, 변경 추적의 지운 글자·메모는 뺌): docx처럼 zipguard를 먼저 거치고,
+    lxml target 파서에 64KB씩 흘려 넣는다(트리를 만들지 않는다. DTD가 든 XML은 받지 않는다).
+  - rtf(\ansicpg의 코드 페이지로 \'hh, \uN과 \ucN, 글꼴·색·스타일·정보·그림·머리말 묶음과 {\*…}는 건너뜀), csv(txt와 같다), html(stdlib html.parser, script·style 버림,
+    블록은 줄바꿈·표 칸은 탭, <meta charset>을 따르고 없으면 UTF-8 → cp949). html·htm은 이번에 첨부로 받기 시작했다(내려받기만: application/octet-stream).
+  - 옛 Office 바이너리(doc·ppt·xls)는 뽑지 않고 글 보기 파일 목록·대화의 첨부 줄·첨부 읽기에 '글자를 뽑지 않는 형식'으로 보인다.
+  - 이미 올라간 첨부: 상태가 없거나 그 형식을 뽑기 전 VERSION의 상태면 `magus warm-cache`(와 `magus extract`)·처음 열 때 뽑는다. 출력은 개수·시간뿐.
+- **R**: 시험 `tests/test_extract_formats.py` 12개(형식마다·hwp 압축/비압축·암호/배포용/옛 형식·압축 폭탄·zip 폭탄·DTD·30만 자·xlsx 행 상한·doc 등 표시·warm-cache·대화 찾기·쪽 읽기·웹).
+  hwp 시험 파일은 olefile이 쓰지 못해 시험 안의 작은 CFB 작성기로 만든다(미니 스트림 없이). 실제 한글 프로그램이 저장한 hwp·hwpx로는 아직 확인하지 않았다.
+
+대안을 버린 이유: pyhwp는 AGPL이고, python-pptx·openpyxl·striprtf·bs4는 필요한 일(글자만)에 비해 무겁다. 표준 라이브러리 + lxml + olefile로 충분하다.

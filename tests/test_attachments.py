@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from conftest import make_book, with_library
 
-from magus.attachments import clean_name, describe
+from magus.attachments import clean_name, describe, media_type
 from magus.melchior.check import refresh_cite_counts
 from magus.store import CategoryItem, LocalStore, Passage, Ref
 
@@ -20,10 +20,13 @@ def test_clean_name_blocks_paths_and_odd_types():
     assert clean_name("논문.pdf") == "논문.pdf"
     assert clean_name("C:\\fakepath\\사진.JPG") == "사진.JPG"  # 브라우저가 붙인 폴더는 뗀다
     assert clean_name("../../etc/메모.txt") == "메모.txt"  # 폴더는 떼고 이름만(경로로 쓰지 않는다)
-    for bad in ("..", ".hidden.pdf", "a<b>.pdf", "x.svg", "x.html", "x.exe", "x.json", "", "CON.pdf", "가" * 80 + ".pdf"):
+    for bad in ("..", ".hidden.pdf", "a<b>.pdf", "x.svg", "x.xhtml", "x.exe", "x.json", "", "CON.pdf", "가" * 80 + ".pdf"):
         with pytest.raises(ValueError):
             clean_name(bad)
     assert describe("a.pdf", 1_200_000) == "a.pdf(PDF, 1.2 MB)"
+    # html은 받되(2026-10-11, 글자 뽑기) 브라우저가 그리지 않게 내려받기로만 준다
+    assert clean_name("자료.html") == "자료.html" and media_type("자료.HTM") == ("application/octet-stream", False)
+    assert describe("원고.hwp", 2_000) == "원고.hwp(한글 문서, 2 KB)"
 
 
 def test_put_list_read_and_folder_is_inside_user_dir(store: LocalStore, data_dir: Path):

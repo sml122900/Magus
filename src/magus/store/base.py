@@ -563,7 +563,7 @@ class Store(Protocol):
         ...
     def attachment_text(self, user_id: str, owner: str, attachment_id: str, *, make: bool = True,
                         deadline: float | None = None) -> tuple[dict | None, str | None]:
-        """첨부에서 뽑은 글자(#100): (상태 {status, chars, ms, at}, 글자). 상태가 없거나 '나중에'면 make일 때 지금 뽑아
+        """첨부에서 뽑은 글자(#100): (상태 {status, chars, ms, at, reason?}, 글자). 상태가 없거나(그 형식을 뽑기 전 VERSION의 상태 포함) '나중에'면 make일 때 지금 뽑아
         첨부 폴더 안 .text/에 적고 그 글의 색인을 다시 만든다. 뽑지 않는 형식이면 (None, None). 원본은 읽기만."""
         ...
     def find_attachment(self, user_id: str, attachment_id: str) -> tuple[str, Attachment] | None:
