@@ -31,7 +31,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from magus.attachments import ACCEPT, MAX_FILES, kind_of, mb, media_type, shown_title, size_text, title_from_files
-from magus.extract import extractable
+from magus.extract import FORMATS, HWP_UNREADABLE, NO_TEXT, extractable, no_text, unreadable_hwp
 from magus.book_migrate import legacy_book_id
 from magus.category.rules import BUILTINS, CONTENT_MAX, TITLE_MAX
 from magus.ids import local_time, new_id, utcnow
@@ -654,7 +654,7 @@ class BoardPages:
             f'<img src="{html.escape(link)}/thumbs/{html.escape(a.id)}" alt="{html.escape(a.name)}" loading="lazy"></a>' for a in pics)
         others = "".join(
             f'<li><a href="{html.escape(link)}/files/{html.escape(a.id)}" download>{html.escape(a.name)}</a> '
-            f'<small>{html.escape(kind_of(a.name))} · {size_text(a.size)}</small>'
+            f'<small>{html.escape(kind_of(a.name))} · {size_text(a.size)}' + (f" · {NO_TEXT}" if no_text(a.name) else "") + '</small>'
             + (f' <a class="as-text" href="{html.escape(link)}/text/{html.escape(a.id)}">글자 보기</a>' if extractable(a.name) else "")
             + "</li>" for a in rest)
         done = DONE.get(params.get("done") or "")
@@ -769,12 +769,14 @@ class BoardPages:
         if hit is None:
             return self.not_found(request, session, "첨부")
         if status is None:
-            return self.error_page(request, 404, "글자를 볼 수 있는 첨부가 아닙니다(docx·pdf·txt·md).", session)
+            said = f"{NO_TEXT}입니다(doc·ppt·xls)." if no_text(hit[1].name) else f"글자를 볼 수 있는 첨부가 아닙니다({FORMATS})."
+            return self.error_page(request, 404, said, session)
         state = status["status"]
+        why = unreadable_hwp(status)
         line = {"ok": f"글자 {status['chars']:,}자",
                 "truncated": f"30만 자가 넘어 앞부분 {status['chars']:,}자만 뽑았습니다.",
                 "empty": "글자가 없습니다(그림이나 스캔한 PDF일 수 있습니다).",
-                "failed": "글자를 뽑지 못했습니다(깨진 파일이거나 암호가 걸린 파일).",
+                "failed": f"{HWP_UNREADABLE}입니다({why})." if why else "글자를 뽑지 못했습니다(깨진 파일이거나 암호가 걸린 파일).",
                 "later": "아직 뽑는 중입니다. 잠시 뒤 다시 열어 주세요."}.get(state, "")
         link = f"/shelf/{kind.key}/{urllib.parse.quote(obj.id if isinstance(obj, CategoryItem) else obj.key)}"
         body = (f'<p class="att-head"><b>{html.escape(hit[1].name)}</b> · {html.escape(line)}</p>'

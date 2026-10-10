@@ -44,7 +44,7 @@ from magus.project_args import (
 )
 from magus.search import Embedder, find_all_words
 from magus.attachments import describe, title_from_files
-from magus.extract import page_of, pages
+from magus.extract import FORMATS, HWP_UNREADABLE, NO_TEXT, no_text, page_of, pages, unreadable_hwp
 from magus.textindex import query_parts, tokens
 from magus.store import Category, CategoryItem, MapNode, Passage, Ref, ShelfSettings, Store
 from magus.store.base import EditConflict
@@ -728,11 +728,17 @@ def build_tools(
             raise ToolError(f"첨부 {ident!r}이 없다. category_search 결과나 files_list의 '첨부:<id>'를 준다.")
         owner, att = found
         status, text = store.attachment_text(user, owner, att.id)
+        if status is None and no_text(att.name):  # doc·ppt·xls(2026-10-11)
+            return (f"첨부 「{att.name}」: {NO_TEXT}이다(doc·ppt·xls 같은 옛 형식). "
+                    "저자가 원하면 docx·pptx·xlsx로 다시 저장해 올려 달라고 한다.")
         if status is None:
-            return f"첨부 「{att.name}」: 글자를 뽑지 않는 형식이다(docx·pdf·txt·md만). 그림은 아직 읽지 않는다."
+            return f"첨부 「{att.name}」: {NO_TEXT}이다({FORMATS}만). 그림은 아직 읽지 않는다."
         state = status["status"]
         if state == "empty":
             return f"첨부 「{att.name}」: 글자 없음(그림이나 스캔한 PDF일 수 있다. 글자 읽기(OCR)는 아직 하지 않는다)."
+        if why := unreadable_hwp(status):  # 암호·배포용·한글 97 이전 hwp(2026-10-11)
+            return (f"첨부 「{att.name}」: {HWP_UNREADABLE}다({why}). "
+                    "저자에게 한글에서 암호·배포용을 풀거나 hwp·hwpx로 다시 저장해 올려 달라고 한다.")
         if state == "failed":
             return f"첨부 「{att.name}」: 글자를 뽑지 못했다(깨진 파일이거나 암호가 걸린 파일). 저자에게 파일을 다시 올려 달라고 한다."
         if state == "later" or not text:
@@ -784,7 +790,8 @@ def build_tools(
             return []
         def one(a: Any) -> str:
             status, text = store.attachment_text(user, owner, a.id, make=False)
-            got = f", 글자 {len(pages(text))}쪽" if text else ", 글자 없음" if status and status["status"] == "empty" else ""
+            got = (f", 글자 {len(pages(text))}쪽" if text else ", 글자 없음" if status and status["status"] == "empty"
+                   else f", {HWP_UNREADABLE}" if unreadable_hwp(status) else f", {NO_TEXT}" if no_text(a.name) else "")
             return describe(a.name, a.size)[:-1] + f", 첨부:{a.id}{got})"
 
         shown = " · ".join(one(a) for a in files[:5])

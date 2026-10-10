@@ -12,6 +12,7 @@ dependencies = [
     "lxml>=6.1.3",  # docx_reader·extract가 직접 쓴다(전에는 python-docx를 통해서만 들어옴, 점검 20-3)
     "mcp>=2.2.0",
     "numpy>=2.5.3",
+    "olefile>=0.47",  # hwp(OLE 복합 파일) 첨부 글자 뽑기(BSD). pyhwp 등 GPL 계열은 쓰지 않는다
     "pillow>=12.3.0",
     "pyjwt[crypto]>=2.15.1",
     "pymupdf>=1.28.2",

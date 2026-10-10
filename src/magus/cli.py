@@ -77,11 +77,12 @@ def main(argv: list[str] | None = None) -> None:
     thumbs = sub.add_parser("thumbs", help="이미 올라간 사진 첨부의 썸네일을 한 번에 만든다(배포 때, 원본은 읽기만)")
     thumbs.add_argument("--user", action="append", default=None, help="사용자(여러 번 줄 수 있다). 없으면 USER_ID")
     thumbs.add_argument("--all-users", action="store_true", help="데이터 폴더의 모든 사용자")
-    extract = sub.add_parser("extract", help="이미 올라간 첨부(docx·pdf·txt·md)의 글자를 한 번에 뽑는다(배포 때, 원본은 읽기만, 첨부 폴더 안 .text/)")
+    extract = sub.add_parser("extract", help="이미 올라간 첨부(문서·표·발표 자료)의 글자를 한 번에 뽑는다(배포 때, 원본은 읽기만, 첨부 폴더 안 .text/)")
     extract.add_argument("--user", action="append", default=None, help="사용자(여러 번 줄 수 있다). 없으면 USER_ID")
     extract.add_argument("--all-users", action="store_true", help="데이터 폴더의 모든 사용자")
     extract.add_argument("--force", action="store_true", help="이미 뽑은 것도 다시")
-    warm = sub.add_parser("warm-cache", help="인용 계산 캐시를 미리 만든다(배포 때, 프로젝트 폴더 .cache/, 결정 f). 원본은 읽기만")
+    warm = sub.add_parser("warm-cache", help="인용 계산 캐시를 미리 만들고(배포 때, 프로젝트 폴더 .cache/, 결정 f), "
+                                             "아직 글자를 뽑지 않은 첨부(새로 뽑게 된 hwp 등)도 뽑는다. 원본은 읽기만")
     warm.add_argument("--user", action="append", default=None, help="사용자(여러 번 줄 수 있다). 없으면 USER_ID")
     warm.add_argument("--all-users", action="store_true", help="데이터 폴더의 모든 사용자")
     args = parser.parse_args(argv)
@@ -290,7 +291,7 @@ def main(argv: list[str] | None = None) -> None:
         for user in everyone if args.all_users else (args.user or [settings.user_id]):
             counts = store.extract_all(user, force=args.force)
             print(f"{user}: " + " · ".join(f"{k} {v}" for k, v in counts.items()))
-    elif args.cmd == "warm-cache":  # 인용 계산 캐시(결정 f). 프로젝트 id·시간만 보인다
+    elif args.cmd == "warm-cache":  # 인용 계산 캐시(결정 f) + 아직 뽑지 않은 첨부 글자(2026-10-11). 프로젝트 id·개수·시간만 보인다
         import time
 
         from magus.melchior.cache import warm as warm_cites
@@ -302,6 +303,9 @@ def main(argv: list[str] | None = None) -> None:
                 started = time.monotonic()
                 warm_cites(store, user, project_id)
                 print(f"{user}/{project_id}: {time.monotonic() - started:.1f}초")
+            started = time.monotonic()
+            counts = store.extract_all(user)  # 상태가 없는 것(형식을 늘리기 전에 올라간 hwp 등)만 뽑는다. 이미 뽑은 것은 그대로
+            print(f"{user}: 첨부 글자 " + " · ".join(f"{k} {v}" for k, v in counts.items()) + f" · {time.monotonic() - started:.1f}초")
     elif args.cmd in ("maps", "floors"):  # 프로젝트·지도 이전(#95, 층 이전 #93을 포함). 실행은 백업 뒤에, 전후 비교를 보인다
         from magus import map_migrate as floor_migrate
 
