@@ -14,6 +14,7 @@ import pytest
 from test_http import FIXTURES  # noqa: F401
 from test_web import _csrf, _login, fake_issuer, server_proc  # noqa: F401 - 픽스처
 
+from magus.category.moves import add_link
 from magus.floors import COMMON
 from magus.store import CategoryItem, Context, LocalStore
 
@@ -82,7 +83,7 @@ def test_project_page_map_panel_and_board(server_proc):  # noqa: F811
         assert page.count('<g class="edge"') == 3 and '<svg class="edges" aria-hidden="true"' in page
         assert '<section class="map-list" aria-label="노드 목록">' in page and 'id="map-data"' in page
         assert '<details class="pm-new" id="new-node"><summary class="btn primary-ish">+ 노드</summary>' in page
-        assert '<optgroup label="내 서재">' in page and '<optgroup label="강과 사람">' in page  # 연결 노드로 고를 다른 프로젝트의 노드
+        assert "<optgroup" not in page and 'value="add_link"' not in page  # 연결 노드 고르기 상자는 없앴다(2026-10-11, 노드 복사로)
         assert '<h2 class="pp-title" id="pp-title" tabindex="-1">노드를 고르세요</h2>' in page
         assert 'id="book-panel"' not in page and "<iframe" not in page  # 옆 패널의 게시판 자리는 없앴다(책은 별도 페이지)
         # 노드를 열면 패널에 그 노드의 정면 책장(책 목록 + '새 책' 하나). 책은 그 책의 게시판 페이지로 가는 보통 링크
@@ -172,11 +173,14 @@ def test_map_edits_with_forms_and_script(server_proc):  # noqa: F811
         assert "컨텍스트를 저장하지 못했습니다." in too_long.text
         c.post(post, data={"csrf": csrf, "action": "trash", "node": field})
         # 노드 삭제(#97): 책이 꽂힌 노드도 옮기지만, 다른 프로젝트(「강과 사람」)의 연결 노드가 가리키는 노드는 막는다
-        c.post("/shelf/p/river/map", data={"csrf": csrf, "action": "add_link", "target": f"city:{ids['person_node']}"})
+        refused = c.post("/shelf/p/river/map", data={"csrf": csrf, "action": "add_link", "target": f"city:{ids['person_node']}"})
+        assert "이 화면에서 할 수 없는 일입니다." in refused.text  # 웹에서는 연결 노드를 만들지 않는다(2026-10-11)
+        setup = LocalStore(data_dir)  # 이미 있는 연결 노드(대화나 옛 화면에서 만든 것)는 그대로 동작한다
+        add_link(setup, "alice", "river", "city", ids["person_node"])
+        add_link(setup, "alice", "city", "river", "center")
+        setup.close()
         busy = c.post(post, data={"csrf": csrf, "action": "trash", "node": ids["person_node"]})
         assert "「강과 사람」에서 연결하고 있어 지울 수 없습니다." in busy.text
-        linked = c.post(post, data={"csrf": csrf, "action": "add_link", "target": "river:center"})
-        assert "연결 노드 「강과 사람」을 만들었습니다." in linked.text
         gone = c.post(post, data={"csrf": csrf, "action": "trash", "node": node})
         assert "노드를 휴지통으로 옮겼습니다." in gone.text and 'data-node="' + node not in gone.text
         # 스크립트(fetch, JSON): 노드 옮기기는 위치만 저장, 잘못되면 저자에게 보일 문장

@@ -28,7 +28,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from magus.category.moves import (add_link, book_name, error_message, move_book, restore_node, trash_node_with_books, undo_move,
+from magus.category.moves import (book_name, error_message, move_book, restore_node, trash_node_with_books, undo_move,
                                   web_message)
 from magus.category.rules import PALETTE, parse_color
 from magus.floors import MAX_FLOORS, josa
@@ -74,7 +74,7 @@ WHEN = "%m-%d %H:%M"
 _NEXT = re.compile(r"/shelf(/[A-Za-z0-9_.\-/%]*)?")
 _ID = re.compile(r"[A-Za-z0-9_.\-]{1,80}")
 MAP_DONE = ("node", "link", "rename", "color", "connect", "disconnect", "node_trash", "project", "contexts", "ctx_saved",
-            "restored", "project_restored")  # 지도 바꾸기 뒤 한 줄의 종류
+            "restored", "project_restored", "copied")  # 지도 바꾸기 뒤 한 줄의 종류
 
 
 def done_text(done: str, name: str) -> str:
@@ -90,6 +90,8 @@ def done_text(done: str, name: str) -> str:
         "restored": "되살렸습니다.",
         "project_restored": "프로젝트를 되살렸습니다.",
         "ctx_saved": "자주 쓰는 컨텍스트에 등록했습니다.",
+        "copied": (f"노드 {josa(name, '을/를')} 복사했습니다. 선이 없이 따로 놓여 있으니 '선 잇기'로 이어 주세요." if name
+                   else "노드를 복사했습니다. 선이 없이 따로 놓여 있으니 '선 잇기'로 이어 주세요."),
     }[done]
 
 
@@ -387,30 +389,14 @@ class MapPages:
         )
 
     def _new_node_form(self, uid: str, session: tuple[str, str], floor: Floor, found: ProjectMap, draft: NodeDraft | None = None) -> str:
-        """'+ 노드': 새 노드(이름) 또는 다른 프로젝트의 노드를 연결. 지도의 빈 곳을 두 번 누르면 그 자리로 열린다.
-        draft가 있으면(거절한 뒤) 펼친 채 적었던 이름·고른 단추·직접 적은 글을 다시 채운다."""
+        """'+ 노드': 새 노드(이름). 지도의 빈 곳을 두 번 누르면 그 자리로 열린다.
+        draft가 있으면(거절한 뒤) 펼친 채 적었던 이름·고른 단추·직접 적은 글을 다시 채운다.
+        2026-10-11: 다른 프로젝트의 노드를 연결하는 상자는 없앴다(노드 설정의 '다른 프로젝트로 복사'로 대신). 이미 있는 연결 노드는 그대로."""
         csrf = self._csrf_input(session)
         post = f"/shelf/p/{urllib.parse.quote(floor.id)}/map"
-        groups = []
-        linked = {n.link for n in found.nodes if n.link}
-        for other in self.store.list_floors(uid):
-            if other.id == floor.id:
-                continue
-            other_map = self.store.get_map(uid, other.id)
-            options = "".join(
-                f'<option value="{html.escape(other.id)}:{html.escape(n.id)}"{" disabled" if (other.id, n.id) in linked else ""}>'
-                f'{html.escape(node_label(n) if not n.center else "가운데 · " + project_name(other))}'
-                f'{" — 이미 연결됨" if (other.id, n.id) in linked else ""}</option>'
-                for n in (other_map.nodes if other_map else ()) if not n.link)
-            if options:
-                groups.append(f'<optgroup label="{html.escape(project_name(other))}">{options}</optgroup>')
         room = len(found.nodes) < MAX_NODES
         if not room:
             return f'<p class="muted pm-full">노드 {MAX_NODES}개 가득</p>'
-        link = (f'<form method="post" action="{post}" class="pm-form">{csrf}<input type="hidden" name="action" value="add_link">'
-                '<input type="hidden" name="x"><input type="hidden" name="y">'
-                f'<label class="block">연결 노드 <select name="target" required>{"".join(groups)}</select></label>'
-                '<p><button>연결</button></p></form>' if groups else "")
         saved = self.store.list_saved_contexts(uid)
         picks = draft.picks if draft else frozenset()
         chips = "".join(
@@ -433,7 +419,7 @@ class MapPages:
             f'<label class="block">이름 <input name="name" value="{html.escape(draft.name if draft else "")}"'
             f' data-count-max="{NODE_NAME_MAX}" required></label>'
             f'{contexts}'
-            f'<p><button class="primary">만들기</button></p></form>{link}</div></details>'
+            '<p><button class="primary">만들기</button></p></form></div></details>'
         )
 
     # ---- 지도 ------------------------------------------------------------------------------
@@ -524,9 +510,25 @@ class MapPages:
         settings = self._node_settings(uid, session, floor, found, node, draft)
         context = "" if node.missing else contexts_view_html(View(node.contexts, node=node.name))  # 노드의 컨텍스트(#96)
         delete = self._node_delete(uid, session, floor, node)
+        alone = self._alone_html(session, floor, found, node)
         return (f'<div class="pp-node" id="pp-node" data-node="{html.escape(node.id)}">'
                 f'<div class="pp-head"><h2 class="pp-title" id="pp-title" tabindex="-1">{html.escape(title)}</h2>'
-                f'<span class="pp-kind">{kind} · 책 {len(books)}권</span>{delete}</div>{context}{intro}{shelf}{hint}{settings}</div>')
+                f'<span class="pp-kind">{kind} · 책 {len(books)}권</span>{delete}</div>{alone}{context}{intro}{shelf}{hint}{settings}</div>')
+
+    def _alone_html(self, session: tuple[str, str], floor: Floor, found: ProjectMap, node: MapNode) -> str:
+        """선이 하나도 없는 노드(복사해 온 노드 등): 설정을 열지 않아도 '선 잇기'가 바로 보인다(이을 노드는 가운데가 먼저)."""
+        if node.center or any(node.id in edge for edge in found.edges):
+            return ""
+        others = sorted((n for n in found.nodes if n.id != node.id), key=lambda n: not n.center)
+        if not others:
+            return ""
+        choices = "".join(f'<option value="{html.escape(n.id)}">{html.escape("가운데 · " + found.title if n.center else node_label(n))}</option>'
+                          for n in others)
+        return (f'<form method="post" action="/shelf/p/{urllib.parse.quote(floor.id)}/map" class="pp-alone">{self._csrf_input(session)}'
+                f'<input type="hidden" name="action" value="connect"><input type="hidden" name="node" value="{html.escape(node.id)}">'
+                f'<input type="hidden" name="next" value="{html.escape(state_url(floor.id, node=node.id))}">'
+                f'<p>선이 없는 노드입니다.</p><label>이을 노드 <select name="other">{choices}</select></label> '
+                '<button class="primary">선 잇기</button></form>')
 
     def _project_delete(self, uid: str, session: tuple[str, str], floor: Floor) -> str:
         """지도 머리의 '🗑 휴지통으로'와 화면 안 확인 창(2026-10-09). 프로젝트째(가운데 노드·올린 문서 포함) 휴지통으로.
@@ -755,9 +757,26 @@ class MapPages:
             contexts = (f'<form method="post" action="{post}" class="pm-form" data-guard>{hidden}'
                         '<input type="hidden" name="action" value="contexts">'
                         + context_fieldset(saved, draft.contexts if draft else node.contexts) + '<p><button>저장</button></p></form>')
+        copy = self._copy_form(uid, session, floor, node, hidden, post)
         return (f'<details class="pp-set"{" open" if draft else ""}><summary>⚙ 설정</summary>{rename}{color}{contexts}'
-                f'<h3>선</h3><ul class="pp-lines">{lines or "<li>없음</li>"}</ul>{connect}'
+                f'<h3>선</h3><ul class="pp-lines">{lines or "<li>없음</li>"}</ul>{connect}{copy}'
                 f"</details>{CONTEXT_SCRIPT}")
+
+    def _copy_form(self, uid: str, session: tuple[str, str], floor: Floor, node: MapNode, hidden: str, post: str) -> str:
+        """노드 설정의 '다른 프로젝트로 복사'(2026-10-11, 연결 노드 대신): 프로젝트를 고르고 [복사]. 못 하면 까닭 한 줄."""
+        head = "<h3>다른 프로젝트로 복사</h3>"
+        if node.missing:
+            return ""
+        why = self.store.node_copy_block(uid, floor.id, node.id)
+        if why is not None:
+            said = error_message(MapError(why[0], why[0], name=why[1]), polite=True)
+            return f'{head}<p class="muted">{html.escape(said)}</p>'
+        others = [f for f in self.store.list_floors(uid) if f.id != floor.id]
+        if not others:
+            return f'{head}<p class="muted">복사할 다른 프로젝트가 없습니다.</p>'
+        options = "".join(f'<option value="{html.escape(f.id)}">{html.escape(project_name(f))}</option>' for f in others)
+        return (f'{head}<form method="post" action="{post}" class="pm-form">{hidden}<input type="hidden" name="action" value="copy">'
+                f'<label>프로젝트 <select name="to">{options}</select></label> <button>복사</button></form>')
 
     async def project_panel(self, request: Request) -> Response:
         """패널 위쪽(노드의 책장)만: 스크립트가 노드를 열 때 받아 바꾼다."""
@@ -820,10 +839,13 @@ class MapPages:
                     attached = contexts_from_form(form, saved)
                     await run_in_threadpool(self.store.set_node_contexts, uid, floor_id, node, attached)
                     done = "contexts"
-            elif action == "add_link":
-                target_floor, _, target_node = str(form.get("target") or "").partition(":")
-                made = await run_in_threadpool(lambda: add_link(self.store, uid, floor_id, target_floor, target_node, x=num("x"), y=num("y")))
-                result["node"], done, back = made.id, "link", state_url(floor_id, node=made.id)
+            elif action == "copy":  # 다른 프로젝트로 복사(2026-10-11, 연결 노드 대신). 받는 프로젝트 지도에 선 없이
+                to = str(form.get("to") or "")
+                if await run_in_threadpool(self.store.get_floor, uid, to) is None:
+                    raise MapError("unknown_floor", "없는 프로젝트")
+                made = await run_in_threadpool(lambda: self.store.copy_node(uid, floor_id, node, to,
+                                                                            max_user_bytes=self.settings.max_user_bytes))
+                result["node"], done, back = made.id, "copied", state_url(to, node=made.id)
             elif action == "rename":
                 await run_in_threadpool(lambda: self.store.update_node(uid, floor_id, node, name=str(form.get("name") or "")))
                 done = "rename"

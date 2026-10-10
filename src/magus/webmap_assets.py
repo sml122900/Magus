@@ -108,6 +108,8 @@ border-left:4px solid var(--ruby);border-radius:10px;padding:4px 16px;box-shadow
 .del-box .big-warn{font-size:19px;font-weight:600;border-left:4px solid var(--ruby);padding:4px 0 4px 10px}
 .pp-link{background:var(--soft);border-radius:8px;padding:8px 12px}
 .pm-panel .case{margin:12px 0}.pm-panel .books{padding:26px 10px 0}
+.pp-alone{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;background:var(--soft);border-left:4px solid var(--primary);
+border-radius:8px;padding:8px 12px;margin:8px 0}.pp-alone p{margin:0;font-weight:600;flex-basis:100%}
 .pp-set{border-top:1px solid var(--line);padding-top:4px}.pp-set>summary{font-weight:600;color:var(--ink2);min-height:44px;display:flex;align-items:center}
 .pp-set h3{font-size:16px;margin:12px 0 4px}.pp-lines{margin:4px 0;padding-left:20px}.pp-lines li{margin:4px 0}
 a.book.lifting{opacity:.4}

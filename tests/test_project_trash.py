@@ -123,7 +123,11 @@ def test_project_trash_web(server_proc):  # noqa: F811
         assert str(back.url).endswith("/shelf/p/city?done=project_restored") and "프로젝트를 되살렸습니다." in back.text
         assert '<p class="empty">휴지통이 비었습니다.</p>' in c.get("/shelf/trash").text
         # 다른 프로젝트가 연결 중이면 막는다(까닭과 닫기만, 보내도 400)
-        c.post("/shelf/p/river/map", data={"csrf": csrf, "action": "add_link", "target": "city:center"})
+        from magus.category.moves import add_link  # noqa: PLC0415
+
+        setup = LocalStore(data_dir)  # 웹에서는 연결 노드를 만들지 않는다(2026-10-11). 이미 있는 연결 노드로 막히는지 본다
+        add_link(setup, "alice", "river", "city", "center")
+        setup.close()
         blocked = c.get("/shelf/p/city").text
         assert "「강의 책」에서 연결하고 있어 휴지통으로 옮길 수 없습니다." in blocked
         refused = c.post("/shelf/p/city/discard", data={"csrf": csrf})

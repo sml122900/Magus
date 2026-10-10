@@ -15,6 +15,7 @@ from typing import Any
 
 from magus.floors import josa
 from magus.ids import new_id, utcnow
+from magus.category.rules import MAX_CATEGORIES
 from magus.maps import BOOK_NAMES, CENTER, MAX_BOOKS_PER_NODE, MAX_NODES, NODE_NAME_MAX, local_key
 from magus.melchior.check import after_refs_changed
 from magus.project_args import floor_name
@@ -245,6 +246,17 @@ def error_message(e: MoveError | MapError, polite: bool) -> str:
         "linked": (f"{info.get('projects', '')}에서 연결하고 있어 지울 수 없습니다.",
                    f"{info.get('projects', '')}의 연결 노드가 가리키고 있어 옮기지 않았다."),
         "has_refs": (f"문헌 글이 든 책 「{name}」이 있어 지울 수 없습니다.", f"문헌 글이 든 책 「{name}」이 있어 옮기지 않았다."),
+        "unknown_action": ("이 화면에서 할 수 없는 일입니다.", "할 수 없는 일이다."),
+        # 노드 복사(2026-10-11, 웹만)
+        "copy_center": ("가운데 노드는 복사할 수 없습니다(올린 문서의 자리입니다).", "가운데 노드는 복사하지 않는다."),
+        "copy_link": ("연결 노드는 복사할 수 없습니다. 원본 노드에서 복사해 주세요.", "연결 노드는 복사하지 않는다."),
+        "copy_refs": (f"문헌 글이 든 책 「{name}」이 있어 복사할 수 없습니다(문헌은 한 사람에게 한 권입니다).",
+                      f"문헌 글이 든 책 「{name}」이 있어 복사하지 않는다."),
+        "copy_docs": ("올린 문서에서 만든 문서가 든 노드는 복사할 수 없습니다(그 문서는 올린 문서에 매여 있습니다).",
+                      "올린 문서에서 만든 문서가 든 노드는 복사하지 않는다."),
+        "copy_same": ("같은 프로젝트로는 복사하지 않습니다.", "같은 프로젝트로는 복사하지 않는다."),
+        "books_full": (f"책은 {MAX_CATEGORIES}권까지라 복사하지 못했습니다.", f"책은 {MAX_CATEGORIES}권까지다."),
+        "too_big": ("저장 용량이 모자라 복사하지 못했습니다.", "저장 용량이 모자란다."),
         "bad_context": ("컨텍스트를 저장하지 못했습니다. 하나에 500자까지, 노드·책마다 4개까지입니다.",
                         "컨텍스트는 하나에 500자까지, 노드·책마다 4개까지다."),
         "ctx_register": ("자주 쓰는 컨텍스트로 등록하지 못했습니다. 이름을 적었는지, 같은 이름이 이미 있는지 확인해 주세요.",

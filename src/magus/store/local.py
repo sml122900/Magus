@@ -41,6 +41,7 @@ from magus.store.floors import FloorMixin
 from magus.store.maps import MapMixin
 from magus.store.project_trash import ProjectTrashMixin
 from magus.store.trash_purge import TrashPurgeMixin
+from magus.store.node_copy import NodeCopyMixin
 from magus.store.shelf import ShelfMixin, safe_ref_key
 from magus.store.base import (
     ANCHOR_MAX,
@@ -84,7 +85,7 @@ _CHAPTER_FILE = re.compile(r"ch-(\d+)\.md")
 _VERSION_FILE = re.compile(r"ch-(\d+)\.v(\d+)\.md")
 
 class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, DocumentMixin, AttachmentMixin, ProjectTrashMixin,
-                 TrashPurgeMixin):
+                 TrashPurgeMixin, NodeCopyMixin):
     def __init__(self, data_dir: Path):
         self.root = Path(data_dir)
         self.root.mkdir(parents=True, exist_ok=True)
