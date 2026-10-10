@@ -63,7 +63,7 @@ def build_tools(
             description=(
                 (
                 "참고문헌 텍스트(한 줄에 한 문헌)를 원문 확인 전 문헌 글로 넣는다(book, 없으면 그 프로젝트의 문헌 책). key는 첫 저자 성(영문 소문자)+연도, '[국역: …]'은 한글 성+연도를 aliases에. 있는 "
-                "key는 그대로(다른 프로젝트에만 있으면 「내 서재」로 옮기고 연결 노드를 붙인다). 파싱 실패 줄은 raw로 보관·리포트. project: instructions의 프로젝트 규칙."
+                "key는 그대로(다른 프로젝트에만 있으면 제자리에 두고 이 프로젝트 지도에 연결 노드를 붙인다). 파싱 실패 줄은 raw로 보관·리포트. project: instructions의 프로젝트 규칙."
             )
             ),
             structured_output=False,

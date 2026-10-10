@@ -23,7 +23,7 @@ from magus.contexts import attach_manuscript_context, view_for_book
 from magus.melchior.check import CheckResult, Resolver, check_chapter, check_text, terms_of
 from magus.inbox import FileResolver, ResolveFile
 from magus.store import BookTitles, Issue, Project, Store
-from magus.limits import ChapterNumber, Note, Text, Title
+from magus.limits import SITE_CHAPTER, ChapterNumber, Note, Text, Title, check_chat_body
 from magus.store.base import CHAPTER_RANGE, CHAPTER_STATUS_NAMES, STALE_REASONS, ChapterStatus, chapter_number_ok
 from magus.store.formats import one_line, strip_front_matter
 
@@ -123,6 +123,7 @@ def build_tools(
         status: ChapterStatus | None = None,
         project_id: str | None = None,
     ) -> str:
+        check_chat_body(content, SITE_CHAPTER)  # 대화로는 3,000자까지(2026-10-11)
         project = resolve_project(project_id)
         body, had_front_matter = strip_front_matter(content)
         if not body:
@@ -355,7 +356,7 @@ def build_tools(
             description=(
                 (
                 "저자가 'Magus의 올린 문서에 저장'하라고 분명히 말했을 때만 부른다. 넣을 곳을 되묻는 선택지에도 올린 문서를 넣지 않는다. 그 밖에는 수정안을 대화로 내고 저자가 원본 파일에 반영한다. 장 하나를 "
-                "저장한다(다음 수정본이 오면 저자 파일 내용으로 바뀐다). content는 본문만, note에 바꾼 것. 이전 본문은 versions/로, 버전 +1. 없는 번호면 새 장(title). 빈 본문은 거부. 응답: "
+                "저장한다(다음 수정본이 오면 저자 파일 내용으로 바뀐다). content는 본문만(3,000자까지, 넘으면 원본 파일에서 고쳐 수정본으로), note에 바꾼 것. 이전 본문은 versions/로, 버전 +1. 없는 번호면 새 장(title). 빈 본문은 거부. 응답: "
                 "unverified_cites(null은 아직 검사 전, []는 검사했고 없음)·needs_source."
             )
             ),

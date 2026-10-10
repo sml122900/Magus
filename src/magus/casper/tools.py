@@ -12,7 +12,7 @@ from collections.abc import Callable
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 
-from magus.limits import Origin
+from magus.limits import Origin, check_chat_body
 from magus.casper.conversation import split_conversation
 from magus.category.books import writable_book
 from magus.contexts import view_for_book
@@ -46,6 +46,7 @@ def build_tools(
                               project: str | None = None) -> str:
         if bool(markdown) == bool(path):
             raise ToolError("markdown(대화 기록 본문)과 path(올린 .md 파일 이름) 중 하나만 준다")
+        check_chat_body(markdown)  # 대화로는 3,000자까지(2026-10-11). path(사이트에 올린 파일)는 그대로
         user = current_user()
         target = writable_book(store, user, book, project)
         key, name = target.key, target.name
@@ -77,7 +78,7 @@ def build_tools(
             description=(
                 (
                 "대화 기록 markdown(본문, 또는 올린 .md·.txt 이름 path)을 발화로 나눠 책(book)에 글로 넣는다. 마커: **사용자:**/**Claude:**, 질문:/답변:, '> 인용' 뒤 **Claude "
-                "요지**. 사용자 → me, 바로 뒤 AI → ai(parent_id). 리포트: me·ai 건수, 분리 실패 구간."
+                "요지**. 사용자 → me, 바로 뒤 AI → ai(parent_id). markdown은 3,000자까지(긴 기록은 사이트에 올린 파일 이름 path로). 리포트: me·ai 건수, 분리 실패 구간."
             )
             ),
             structured_output=False,

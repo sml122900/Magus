@@ -20,7 +20,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 from pydantic import BaseModel, Field
 
-from magus.limits import ALIAS_MAX, PART_MAX, Alias
+from magus.limits import ALIAS_MAX, PART_MAX, Alias, check_chat_body
 from magus.category.books import BookRef, writable_book
 from magus.category.books import find_book as find_book_
 from magus.category.maptext import Counts, project_block
@@ -441,6 +441,7 @@ def build_tools(
         item_id: str | None = None,
         project: str | None = None,
     ) -> str:
+        check_chat_body(content)  # 대화로는 3,000자까지(2026-10-11, 긴 글·파일은 사이트 게시판)
         user = current_user()
         target = writable(user, book, project)
         category = target.category
@@ -908,6 +909,7 @@ def build_tools(
             description=(
                 (
                 "글 넣기. 저자가 그 책에 넣으라고 분명히 말했을 때만 부른다. 넣을 책이 대화에서 분명하지 않으면 부르지 말고 책 이름과 컨텍스트를 보여 주며 묻는다(category_list). item_id면 그 글을 고친다. "
+                "content는 3,000자까지(대화에 붙인 파일·긴 글은 넣지 않고 사이트 게시판의 글쓰기로 안내). "
                 "응답 머리의 컨텍스트를 따른다. author: 저자의 말 me, Claude가 쓴 글 ai. reason·where(출전·쪽)·tags·fields·chapters는 저자가 말한 것만. 문헌이면 source(서지 "
                 "{authors, year, title…} 또는 {key}). checked=true(저자가 원문을 읽고 확인)는 parts(원문에서 고른 대목) 하나 이상 필요, 인용 점검은 checked만 확인으로 본다. "
                 "file: 원문 파일(files_list의 이름, 첨부는 '첨부:<id>'), aliases: 한글 표기(갤러2022). 제목을 넣으면 title_by도 반드시(저자가 말한 제목 author, Claude가 지은 제목 ai). 제목을 말하지 않았으면 "
@@ -922,7 +924,7 @@ def build_tools(
                 (
                 "책의 글에서 찾는다(문헌 글은 서지·key·첨부 이름·쓸 부분, full=true면 원문까지. 원문 확인 전 문헌은 '미확인'이고 인용하지 않는다). 낱말 여럿은 모두 맞는 글을 먼저, 없으면 일부만 맞는 글(표시됨). "
                 "book: 그 책만, "
-                "project: 그 프로젝트와 연결 노드. author 기본 all(저자의 말 먼저). scrap_only=true: 스크랩(★)만(query 없으면 전체, 최근순). 첨부(docx·pdf·txt·md) 글자도 "
+                "project: 그 프로젝트와 연결 노드. author 기본 all(저자의 말 먼저). scrap_only=true: 스크랩(★)만(query 없으면 전체, 최근순). 첨부(docx·hwp·pdf·pptx·xlsx 등) 글자도 "
                 "찾는다. attachment='첨부:<id>'와 page=N: 그 첨부를 3,000자씩 한 쪽 읽는다."
             )
             ),
