@@ -407,6 +407,22 @@ father 337·335·5·129·수정본 3(E3)), 전체 현황 다섯 개 모두 같�
 
 **되돌리기**: `docker tag magus:rollback-c0e8c55 magus:latest && docker compose up -d --no-build`(데이터 형식 같음, 재연결 필요 없음).
 
+### 2-15. 내 정보 '문서 업데이트' + 내 정보 올리기 없애기 — 2026-10-10 사용자 승인
+
+반영 전 서버는 `p1-btn-photo`(`fb76fb0`), 반영할 것은 태그 `p1-doc-update`(`9316d37`). **데이터 이전 없음, 인덱스 v23 그대로. 도구 설명·instructions가 바뀌어 커넥터 재연결 필요.**
+바뀐 것: 내 정보 › 문서 업데이트(`/me/documents`), 내 정보의 올리기·지우기 없앰(옛 `/inbox/upload`·`/inbox/delete` POST 410), 바꾸기 실패 로그(종류·스택만)(status.md 0-35·0-36절).
+
+절차는 2-11절과 같다(`private/tmp/deploy-du/pre.sh`·`build.sh`·`up.sh`·`cleanup.sh`, 도구 `/root/du-tools/`, 되돌리기 이미지 `magus:rollback-fb76fb0`, 백업 태그 p1-doc-update).
+이번부터 데이터 해시는 index.sqlite만 빼고 파생(.cache·.text·.thumb)까지 본다. 실데이터 확인은 읽기만·GET만(`docs_check.py`: 화면을 컨테이너 안에서 그려 줄 수 대조),
+쓰는 점검(410·바꾸기·실패)은 컨테이너 /tmp 임시 공간(`smoke.py`)에서.
+
+반영 기록(2026-10-10 03:35 서버 시각): `fb76fb0` → `9316d37`. 백업 `a1573b3f`(predeploy·p1-doc-update, 2,383개, 오류 없음). healthy·재시작 0·오류 로그 0, 데이터 2,383개 해시 같음(index.sqlite만 빼고 파생 .cache 3·.text 10·.thumb 3 포함, 올린 뒤·화면 점검 뒤·캐시 뒤·첫 열기 뒤 네 번), 수치 전후 같음(default book 299·297·0·86, default 3b0d82fd 수정본 E2,
+father 337·335·5·129·수정본 3(E3)), 전체 현황은 장 상태 말만 다름(셋)·같음(둘). 문서 업데이트 화면 default 4줄·father 1줄 맞음(father 원고 1개 = E1~E3 원본, 같은 파일이라 '수정본 E3'으로 표시). /tmp 점검 7/7.
+up.sh 출력이 SSH 끊김으로 잘려 남은 단계는 `up2.sh`로 다시 했다(결과 같음). 정리: `rollback-8806621` 지움(남김: latest·rollback-fb76fb0·rollback-c0e8c55), 디스크 52%.
+
+**되돌리기**: `docker tag magus:rollback-fb76fb0 magus:latest && docker compose up -d --no-build`(데이터 형식 같음. 도구 설명이 옛것으로 돌아가므로 커넥터 재연결).
+문서 업데이트로 바꾼 첨부·올린 파일은 옛 코드에서도 그대로 읽힌다(같은 자리의 파일, 이전 파일은 휴지통 폴더).
+
 ## 3. 알림 확인
 
 ```sh
