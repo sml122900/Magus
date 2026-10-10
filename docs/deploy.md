@@ -438,6 +438,30 @@ up.sh 출력이 SSH 끊김으로 잘려 남은 단계는 `up2.sh`로 다시 했�
 
 **되돌리기**: `docker tag magus:rollback-9316d37 magus:latest && docker compose up -d --no-build`(데이터 형식 같음, 재연결 필요 없음).
 
+### 2-17. 2026-10-11 묶음(대화 넣기 제한·여러 문서 형식·휴지통 비우기·「내 서재」 보통 프로젝트·노드 복사·컨텍스트 칸) — 2026-10-11 사용자 승인
+
+반영 전 서버는 `p1-logo-home`(`681020d`), 반영할 것은 태그 `p1-batch-1011`(`5962dce`). **데이터 이전 없음, 인덱스 v23 그대로. 의존성 olefile 0.47 추가(이미지 다시 빌드).
+도구 설명·instructions가 바뀌어 커넥터 재연결 필요.** 바뀐 것: status.md 0-38·0-39절, `docs/decisions/2026-10-11-batch.md`.
+
+절차는 2-11절과 같고 warm 단계를 더했다(`private/tmp/deploy-batch/pre.sh`·`build.sh`·`up.sh`·`warm.sh`·`cleanup.sh`, 도구 `/root/batch-tools/`,
+되돌리기 이미지 `magus:rollback-681020d`, 백업 태그 p1-batch-1011). 실데이터는 읽기만·GET만(`batch_check.py`: 「내 서재」·연결 노드·프로젝트 목록을
+프로세스 안에서 그림), 쓰는 점검은 컨테이너 /tmp(`smoke.py` 11가지). 배포 뒤 `magus warm-cache --all-users` 한 번(새로 뽑게 된 형식의 이미 올라간 첨부).
+
+반영 기록(2026-10-11 04:26 서버 시각): `681020d` → `5962dce`. 백업 `c971a18e`(predeploy·p1-batch-1011, 2,431개, 오류 없음). healthy·재시작 0·오류 로그 0,
+데이터 2,431개 해시 같음(index.sqlite만 빼고 파생 포함, 올린 뒤·읽기만 점검 뒤 두 번), 수치 전후 같음(default book 299·297·0·86), 전체 현황 셋 모두 같음,
+인용 상태 첫 열기 0.27초·새로 계산 0장. 「내 서재」: default·father 모두 보통 프로젝트로 목록에 보임(특별 모양 없음, 휴지통 단추 있음),
+default 「내 서재」 노드 2·책 1·글 5, father 「내 서재」 노드 1·책 0. 연결 노드는 두 사용자 모두 지금 지도에 없음. /tmp 점검 11/11.
+warm-cache: default 첨부 글자 새로 0(이미 1·형식 아님 1), father 새로 1(실패 0), 원본 2,415개 해시 같음(파생 빼고), .text 10 → 12.
+정리: `rollback-fb76fb0` 지움(남김: latest·rollback-681020d·rollback-9316d37), 디스크 59%.
+
+배포 전 기록에서 본 것(배포와 무관, 사용자 확인 필요): father의 원고 프로젝트 `book`(장 42·수정본 2·책 3)이 2026-10-11 00:13 KST 웹에서 프로젝트 휴지통으로 옮겨져 있고
+(`trash/projects/book-…`), 지금 father의 프로젝트는 원고 없는 `834536a5` 하나다. default의 `3b0d82fd`(장 3·수정본 1)·`a47cf6fb`도 같은 날 휴지통으로 옮겨졌다.
+이번 배포로 휴지통 '영구 삭제'·'휴지통 비우기'가 생겼으므로, father 원고를 되살릴지 먼저 정한다(되살리기: 프로젝트 목록 › 휴지통 › 되살리기).
+
+**되돌리기**: `docker tag magus:rollback-681020d magus:latest && docker compose up -d --no-build`(데이터 형식 같음. 도구 설명이 옛것으로 돌아가므로 커넥터 재연결).
+새 코드로 생긴 것은 옛 코드에서도 그대로 읽힌다: 복사한 노드·책(보통 노드·책), 새 형식의 .text(옛 코드는 hwp 등 첨부를 '뽑지 않음'으로 보고 .text를 읽지 않는다).
+영구 삭제한 것은 되돌리기로 돌아오지 않는다(백업에서 복구).
+
 ## 3. 알림 확인
 
 ```sh
