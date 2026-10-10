@@ -82,6 +82,7 @@
 - **대화 검색 순위 보정 + 쓸 부분 저장 뒤 원문 확인 묻기(2026-10-09, 사용자 요청 #101, 서버 배포 `p1-search-rank`)**: category_search 결과 등급
   (제목·본문·쓸 부분 > 첨부 글자·원문 > 서지·key·한글 표기·첨부 이름만), 책을 말하지 않은 찾기는 책마다 4개까지(`PER_BOOK`)·남는 칸은 다른 책, 머리에 '책별 개수'.
   book 지정은 제한 없음, 웹 찾기 그대로. instructions 규칙 2 끝에 원문 확인 묻기(2,437토큰, 커넥터 재연결). 태그 `rank-1-search`·`rank-2-ask-check`, status.md 0-27절, `docs/deploy.md` 2-7절.
+- **2026-10-11 묶음(사용자 요청, 로컬만·배포 전 멈춤, `docs/decisions/2026-10-11-batch.md`, status.md 0-38절)**: 1 대화로 넣는 본문 3,000자까지(category_put content·idea_add_conversation markdown·book_write_chapter content, `limits.check_chat_body`, 규칙 7·8: 대화에 붙인 파일은 넣지 않고 사이트 게시판 글쓰기로, 2,000자에서 먼저 멈춤) · 2 첨부 글자 hwp(olefile+zlib)·hwpx·pptx·xlsx·odt·rtf·csv·html, doc·ppt·xls는 '글자를 뽑지 않는 형식', `magus warm-cache`가 새 형식도 뽑음 · 3 휴지통 [영구 삭제]·[휴지통 비우기](`Store.purge_trash`, `magus/webtrash.py`) · 4 「내 서재」를 보통 프로젝트로(새 사용자 0개, `FloorMixin._has_library`, 공유 문헌은 옮기지 않고 연결 노드) · 5 노드를 다른 프로젝트로 복사(`store/node_copy.py`, 웹 연결 노드 만들기 없앰) · 6 컨텍스트 칸 '자주 쓰는 컨텍스트에서 고르기'·새로 만들기·관리, 지우면 붙은 곳에서도 뗌. 도구 목록 6,487·instructions 2,706토큰, 커넥터 재연결 필요.
 - (고침 2026-10-06 밤) `tests/test_http.py::test_request_size_limit`의 Windows 간헐 실패: 머리만 보내고 응답을 먼저 읽게 고쳤다(status.md 7절).
 - 대기 사항: 계정·키·결정·아버지 docx처럼 사용자만 할 수 있는 것(status.md에 "대기"로 적는다), 저자 보고서 답변. 상세는 status.md에만 적는다.
 
@@ -129,7 +130,7 @@
 | 결정 | 정해 둔 방침 | | book_decide |
 | 수정본 | 원본 파일(Word 등)에서 고친 문서를 다시 올린 것. 번호 E2, E3…는 "수정본 번호". 첫 업로드 E1은 "처음 올린 문서"(#96 답 s) | 새 판, 다시 올리기 | book_import new_edition |
 | 프로젝트 | 작업물 하나(원고와 그 자료). 원고 없는 프로젝트도 있다. 웹 첫 화면은 프로젝트 목록(#95) | 층(#93), 작업물 | projects + floor id, `project` 인자, `/shelf/p/<id>` |
-| 「내 서재」 | 여러 프로젝트가 함께 쓰는 자료를 두는 프로젝트. 원고는 없다(#95, 이름 검토 대기) | 공용 층(#93) | floor `common`, `magus.maps.LIBRARY_NAME` |
+| 「내 서재」 | 옛 사용자에게 있는 프로젝트 하나(옛 공용 층). 2026-10-11부터 보통 프로젝트: 자동으로 만들지 않고(새 사용자 0개), 휴지통·프로젝트 수·고르기가 다른 프로젝트와 같다 | 공용 층(#93) | floor `common`, `FloorMixin._has_library` |
 | 지도 | 프로젝트의 마인드맵. 노드와 선(방향 없음)(#95) | | `shelf/maps/<id>.json`, get_map, category_list |
 | 노드 | 지도의 한 점. 열면 책장이 보인다. 가운데 노드는 원고 자리(이름 = 프로젝트 제목)(#95) | | node 인자, MapNode |
 | 연결 노드 | 다른 프로젝트의 노드를 가리키는 노드. 보거나 넣으면 원본에 들어간다. 원본이 없어지면 '원본 없음'(#95) | 공용(#93) | MapNode.link |
@@ -272,7 +273,7 @@
     있어도 읽을 때 맞춘다(없어진 책은 빼고, 노드에 없는 책은 이름이 같은 노드나 빈자리의 새 노드). 책이 생기거나 옮겨 오면 놓을 노드와 함께 그 자리에서 파일에 적고,
     지도를 바꾸는 쓰기 전에는 모든 지도를 먼저 파일로 적는다(`store/maps.py: ensure_maps`). 옮기며 생긴 노드는 되돌릴 때 비면 치운다(FloorMove.made_node).
   - 인용 점검 범위 `cite_scope` = 자기 + 연결 노드가 가리키는 노드에 그 프로젝트의 문헌 책이 꽂힌 프로젝트. 문헌은 사람마다 한 권(key 하나): 이 원고가 못 보는 다른 프로젝트에만 있는
-    문헌을 쓰게 되면 「내 서재」로 옮기고 두 지도에 연결 노드를 붙인다(`project_args.share_ref`). refs.moved(bib.json "moved" = {at, from, to, reason})에 옮긴 기록.
+    문헌을 쓰게 되면 문헌은 제자리, 쓰게 된 프로젝트 지도에 그 문헌 책의 노드로 가는 연결 노드를 붙인다(`project_args.share_ref`, 2026-10-11. 전에는 「내 서재」로 옮겼다). refs.moved(bib.json "moved" = {at, from, to, reason})에 옮긴 기록.
   - 휴지통의 노드 `trash/shelf/nodes/<프로젝트>/<노드>.json`(이어진 선 포함). 되살리기 `magus trash restore node <프로젝트>/<노드>`.
 - **문서 책(#94)**: documents(id, user_id, floor, title, doc_type, project_id, color, edition, versions json, created_at, updated_at). 원본은 `shelf/documents/<id>/document.json`
   ({id, title, title_by, doc_type: source_check, project_id, floor, color, versions: [{number, at, edition, method, preface_by, stats}], schema_version 1}) + `v1.md, v2.md…`(만든 때의 본문).
@@ -439,7 +440,7 @@ data/index.sqlite
 
 ### 프로젝트 인자(#95, 옛 층 인자 #93, `magus/project_args.py`)
 - 넣는 도구(category_put·idea_add_conversation·ref_import_bibliography·category_create)에 `project`(「내 서재」·프로젝트 id·제목, 앞부분이 하나만 맞아도).
-  말하지 않았으면 프로젝트가 하나면 그것, 없으면 「내 서재」, 둘 이상이면 넣지 않고 묻게 하는 오류(프로젝트 목록).
+  말하지 않았으면 프로젝트가 하나면 그것, 없으면 사이트에서 '+ 프로젝트'로 만들라는 안내(`project_args.NO_PROJECT`), 둘 이상이면 넣지 않고 묻게 하는 오류(프로젝트 목록). 「내 서재」도 하나로 센다(2026-10-11).
   (#96) 넣을 책은 `book`(이름)으로 고른다: 이름이 같은 책이 여럿이면 그 프로젝트의 것 → 지도의 연결 노드가 가리키는 것 → 그래도 여럿이거나 없으면 책 이름과 컨텍스트 이름을 담은 오류(`category/books.py: find_book`).
 - 찾는 도구(category_search·category_list)는 project가 없으면 모두, 있으면 그 프로젝트 + 연결 노드가 가리키는 같은 책. 같은 종류가 여러 프로젝트에 있으면 결과마다 프로젝트.
 - 문헌 글(category_put source): 새 문헌만 프로젝트가 필요하다. 이미 있는 문헌은 제자리, project를 줬고 그 원고가 못 보는 곳에 있으면 「내 서재」로 옮기고 두 지도에 연결 노드. ref_import_bibliography·book_import의 참고문헌도 같다.
@@ -518,6 +519,7 @@ Claude는 도구를 고를 때마다 설명을 읽는다. instructions만으로�
   수정본으로 올린다(book_import, path는 files_list에 보이는 이름, new_edition=true)." 웹의 수정본 올리기 폼을 없앴기 때문이다(status.md 0-23절).
 - 예외: **#101(2026-10-09, 사용자 요청)로 규칙 2 끝에 "쓸 부분을 저장한 뒤에는 원문 확인 표시도 할지 한 번 묻고, 저자가 그렇다고 하면 category_edit(checked=true)로 표시한다."를 더했다**(2,385 → 2,437토큰).
 - 예외: **#100(2026-10-09, 사용자 요청 첨부 글자)로 규칙 2 끝에 "첨부에서 뽑은 글자는 찾고 읽는 데 쓰되, 인용은 여전히 원문 확인 글의 쓸 부분만 쓴다. 저자가 첨부의 어느 부분을 쓸 부분으로 저장하라고 하면 그 문헌 글에 넣는다(category_edit)."를 더했다**(2,305 → 2,385토큰).
+- 예외: **2026-10-11 묶음(사용자 요청)**: 규칙 7 끝에 대화에 붙인 파일·그 내용은 넣지 않고 '파일은 Magus 사이트의 책 게시판에서 글쓰기로 올려 주세요'로 안내, 규칙 8 끝에 넣을 본문이 2,000자를 넘을 것 같으면 부르기 전에 멈추기(서버는 3,000자 넘으면 거절), 규칙 6의 「내 서재」 풀이와 규칙 11의 「내 서재」 문장을 빼고 규칙 11에 프로젝트가 없을 때 안내(2,498 → 2,706토큰, 커넥터 재연결). 원문은 `tests/test_instructions.py`의 SPEC.
 - 예외: **#99(2026-10-09, 사용자 요청 스크랩)로 규칙 6 용어에 「스크랩(저자가 별표로 표시해 둔 글. 중요 표시)」, 규칙 7 끝에 "'스크랩 보여 줘'는 category_search(scrap_only=true)다."를 더했다**(2,261 → 2,305토큰).
 - **instructions는 등록된 도구만 언급한다.** `build_instructions(등록된 도구 이름)`은 규칙 문장에 나오는 도구(`book_|ref_|idea_|style_|files_|category_` 이름)가 모두 등록된 규칙만 넣고, 번호는 다시 매긴다. 도구를 부르지 않는 규칙(#96 번호 5·6·10·11)은 언제나 실린다. 도구가 모두 등록되면 SPEC과 똑같아진다(`tests/test_instructions.py`).
 - 새 도구를 추가하면 그 도구가 필요한 규칙이 자동으로 instructions에 들어간다. 따로 손댈 것은 없다.
