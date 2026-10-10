@@ -442,6 +442,18 @@ class TrashedProject:
 
 
 @dataclass(frozen=True)
+class TrashedExtra:
+    """휴지통의 만든 문서(document)·올린 문서(manuscript)(2026-10-11 휴지통 비우기에서 화면에 보이게 됐다). id는 휴지통 폴더 이름."""
+
+    kind: str
+    id: str
+    project_id: str
+    title: str
+    trashed_at: str
+    detail: str = ""
+
+
+@dataclass(frozen=True)
 class ProjectMap:
     """프로젝트 하나의 지도(#95): 노드와 선. stored: 지도 파일이 있나(없으면 지금 배치에서 계산한 지도)."""
 
@@ -818,6 +830,15 @@ class Store(Protocol):
     def list_trashed_projects(self, user_id: str) -> list[TrashedProject]: ...
     def restore_project(self, user_id: str, trash_id: str) -> str:
         """되살린 프로젝트 id. 막히면 아무것도 옮기지 않고 ValueError(code: missing·taken·full·clash, 보일 이름)."""
+        ...
+    # 휴지통 비우기(2026-10-11) — 영구 삭제. 되살릴 수 없다(백업에는 남는다)
+    def list_trashed_documents(self, user_id: str) -> list[TrashedExtra]: ...
+    def list_trashed_manuscripts(self, user_id: str) -> list[TrashedExtra]: ...
+    def trashed_books(self, user_id: str) -> dict[str, tuple[str, str, int]]:
+        """책째 휴지통으로 옮긴 책: 휴지통 폴더 이름 → (프로젝트, 책 이름, 글 수)."""
+        ...
+    def purge_trash(self, user_id: str, kind: str, item_id: str) -> int:
+        """kind: node·category_item·attachment·category·document·manuscript·project·inbox. 지운 바이트 수. 없으면 ValueError("missing")."""
         ...
     def trashed_node_books(self, user_id: str, floor: str) -> dict[str, tuple[str, str]]:
         """이 프로젝트에서 책째 휴지통으로 옮긴 노드의 책: 책 id → (책 이름, 노드 이름)."""

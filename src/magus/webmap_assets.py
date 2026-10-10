@@ -119,8 +119,11 @@ TRASH_STYLE = """
 ol.trash-list{list-style:none;padding:0;margin:12px 0;display:grid;gap:8px}
 ol.trash-list li{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;background:var(--canvas);border:1px solid var(--line);
 border-radius:10px;padding:8px 16px}ol.trash-list time{color:var(--ink2);font-variant-numeric:tabular-nums}
-ol.trash-list form{margin-left:auto}
+ol.trash-list .trash-acts{margin-left:auto;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+ol.trash-list .trash-acts form.inline{margin:0}
 .trash-count{color:var(--ink2);margin:8px 0}.trash-sub{flex-basis:100%;color:var(--ink2)}
+.trash-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}.trash-head .purge{margin-left:auto}
+.trash-backup{margin:0 0 8px}
 """
 
 PROJECTS_STYLE = """

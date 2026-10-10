@@ -28,6 +28,7 @@ from magus.store.base import (
     ShelfSettings,
     Store,
     TrashItem,
+    TrashedExtra,
     TrashedProject,
 )
 from magus.store.local import LocalStore
@@ -63,5 +64,6 @@ __all__ = [
     "ShelfSettings",
     "Store",
     "TrashItem",
+    "TrashedExtra",
     "TrashedProject",
 ]

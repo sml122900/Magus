@@ -239,9 +239,9 @@ class CategoryMixin:
         for meta in (self._category_dir(user_id, category_id) / "category.json", trash / "categories" / category_id / "category.json"):
             if meta.exists():
                 return str(read_json(meta).get("floor") or COMMON)
-        if in_node:  # trash/shelf/nodes/<프로젝트>/<노드>/categories/<책>/items/<글>.json
-            return in_node[0].parents[4].name
-        return None
+        # 노드째 옮긴 책: trash/shelf/nodes/<프로젝트>/<노드>/categories/<책>/category.json(글은 그 안에 있거나, 먼저 버려 category-items/에)
+        bundled = sorted((trash / "nodes").glob(f"*/*/categories/{category_id}/category.json"))
+        return bundled[0].parents[3].name if bundled else None
 
     @locked
     def trash_item_with_replies(self, user_id: str, category_id: str, item_id: str, note: str) -> list[CategoryItem]:

@@ -40,6 +40,7 @@ from magus.store.documents import DocumentMixin
 from magus.store.floors import FloorMixin
 from magus.store.maps import MapMixin
 from magus.store.project_trash import ProjectTrashMixin
+from magus.store.trash_purge import TrashPurgeMixin
 from magus.store.shelf import ShelfMixin, safe_ref_key
 from magus.store.base import (
     ANCHOR_MAX,
@@ -82,7 +83,8 @@ ANSWERS_HEADER = ("# 저자 답\n\n질문은 매번 올린 문서와 문헌에�
 _CHAPTER_FILE = re.compile(r"ch-(\d+)\.md")
 _VERSION_FILE = re.compile(r"ch-(\d+)\.v(\d+)\.md")
 
-class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, DocumentMixin, AttachmentMixin, ProjectTrashMixin):
+class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, DocumentMixin, AttachmentMixin, ProjectTrashMixin,
+                 TrashPurgeMixin):
     def __init__(self, data_dir: Path):
         self.root = Path(data_dir)
         self.root.mkdir(parents=True, exist_ok=True)
