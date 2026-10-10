@@ -26,6 +26,8 @@ from magus.config import Settings
 from magus.server import build_server
 from magus.store import CategoryItem, LocalStore
 
+from conftest import with_library
+
 POST = "20261011000000000-aaaaaa"
 
 # ---- hwp(CFB) ------------------------------------------------------------------------------------------------
@@ -357,6 +359,7 @@ def test_stale_status_is_extracted_again(tmp_path: Path):
 # ---- 저장소·대화·명령·웹 ----------------------------------------------------------------------------------------
 
 def _post(store: LocalStore, user: str = "alice") -> str:
+    with_library(store, user)
     book = store.create_category(user, "장날 메모", "blank", "#1f2f5c", (), "common").id
     store.put_category_item(user, CategoryItem(POST, book, "답사 자료", "me", title="답사"))
     return book
@@ -430,6 +433,7 @@ def test_warm_cache_and_extract_pick_up_hwp_uploaded_before(data_dir: Path, monk
 def test_web_labels_hwp_html_and_old_formats(server_proc):  # noqa: F811
     base, data_dir, log_path = server_proc({})
     store = LocalStore(data_dir)
+    with_library(store, "alice")
     book = store.create_category("alice", "장날 메모", "blank", "#1f2f5c", (), "common").id
     store.close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
