@@ -1,6 +1,6 @@
 """문서 업데이트(2026-10-10, docs/decisions/document-update.md): 내 정보 › 문서 업데이트의 목록과 바꾸기.
 
-- 목록: 게시판 첨부 문서(docx·pdf·txt·md, 글과 문헌 글) + 예전 올린 파일(inbox). 새것부터.
+- 목록: 게시판 첨부 문서(docx·hwpx·hwp·pdf·txt·md, 글과 문헌 글) + 예전 올린 파일(inbox). 새것부터.
 - 원본 판정: 파일의 sha256이 어느 프로젝트의 판(edition) sha256과 같으면 그 프로젝트의 올린 문서 원본이다(가장 늦게 올린 판).
 - 바꾸기(update_document): 그 문서 자리를 새 파일로. 이전 파일은 휴지통(첨부는 첨부 휴지통, 예전 올린 파일은 trash/inbox/).
   올린 문서의 원본이면 바꾸기가 곧 수정본 올리기다(book_import new_edition과 같은 규칙). **수정본을 먼저 만들고, 성공해야 파일을 바꾼다.**
@@ -222,7 +222,7 @@ def update_document(store: Store, user_id: str, key: str, chosen: str, data: IO[
     source = source_of(store, user_id, old_path, old_name)
     suffix = Path(name).suffix.lower()
     if source is not None and suffix not in MANUSCRIPT_TYPES:
-        raise UpdateError("올린 문서의 원본은 docx나 pdf 파일로만 바꿀 수 있습니다.", "type")
+        raise UpdateError("올린 문서의 원본은 docx·hwpx·hwp·pdf 파일로만 바꿀 수 있습니다.", "type")
     if allowed is not None and suffix not in allowed:
         raise UpdateError(f"받지 않는 형식입니다: {name}", "type")
     if inbox and suffix not in INBOX_TYPES:

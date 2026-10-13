@@ -81,8 +81,9 @@ def test_bibliography_and_files(store: LocalStore, report, data_dir: Path):
 
 
 def test_reimport_is_safe(store: LocalStore, report, manuscript: Path, data_dir: Path):
-    with pytest.raises(ValueError, match="replace"):
+    with pytest.raises(ValueError, match="new_edition=true") as refused:  # 대화에는 replace가 없다(2026-10-14): 수정본·사이트 휴지통 안내
         import_manuscript(store, "alice", manuscript, project_id="synth")
+    assert "휴지통" in str(refused.value) and "replace" not in str(refused.value)
     again = import_manuscript(store, "alice", manuscript, project_id="synth2")
     assert len(again.bib.created) == 0 and len(again.bib.existing) == 30  # 책장은 사람 소유: 다시 만들지 않는다
     store.write_chapter("alice", "synth", 1, "사람이 고친 본문", "수정")
