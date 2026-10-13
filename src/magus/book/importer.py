@@ -5,7 +5,8 @@
 - 첫 제목 앞(표지·목차·머리말)은 "분할 못 한 구간"으로 리포트하고 original/unsplit.md에 보관한다.
 - 코멘트 → issues(origin=import_comment, 앵커가 속한 장, classify_comment로 kind·ref_key).
 - 참고문헌 섹션 → import_bibliography.
-- 원본 파일은 무엇보다 먼저 original/에 복사한다. 재실행할 때는 새 project_id를 쓰거나 replace=True로 기존 것을 휴지통으로 옮긴다.
+- 원본 파일은 무엇보다 먼저 original/에 복사한다. 재실행할 때는 새 project_id를 쓰거나 replace=True로 기존 것을 휴지통으로 옮긴다
+  (replace는 운영자 CLI `magus import --replace`만. 대화의 book_import에는 없다, 2026-10-14).
 """
 
 from __future__ import annotations
@@ -384,10 +385,10 @@ def import_manuscript(
              and not store.list_editions(user_id, existing.id))
     if existing is not None and not empty:
         if not replace:
-            raise ValueError(
-                f"프로젝트 {project_id!r}가 이미 있다. 같은 책을 Word에서 고쳐 다시 올리는 것이면 수정본으로 올린다"
-                "(book_import new_edition=true, 웹 '수정본으로 올리기'). 다른 책이면 새 project_id를 쓴다. "
-                "replace=True는 결정·확인 요청까지 휴지통으로 보내고 새로 만든다."
+            raise ValueError(  # 대화에서는 바꾸기(replace)를 받지 않는다(2026-10-14, 운영 규칙 #78). 운영자 CLI는 --replace
+                f"프로젝트 {project_id!r}에 이미 올린 문서가 있다. 같은 책을 원본 파일에서 고쳐 다시 올리는 것이면 수정본으로 올린다"
+                "(book_import new_edition=true). 다른 책이면 새 project_id를 쓴다. 처음부터 다시 가져와야 하면 저자가 사이트에서 "
+                "그 올린 문서를 휴지통으로 옮긴 뒤(책 설정의 '🗑 휴지통으로', 이름 입력) 같은 project_id로 다시 가져온다."
             )
         terms = store.get_non_citation_terms(user_id, existing.id)  # 사람이 정한 비인용 용어는 다시 임포트해도 유지
         ai_names = store.get_ai_authors(user_id, existing.id)  # AI 작성자 이름 목록도 같다
