@@ -23,7 +23,8 @@ from magus.store import Store
 from magus.store.base import InboxFile
 from magus.store.formats import display_title
 
-INBOX_TYPES = {".docx": "올린 문서(book_import)", ".pdf": "올린 문서·논문(book_import, category_put file)",
+INBOX_TYPES = {".docx": "올린 문서(book_import)", ".hwpx": "올린 문서(book_import)", ".hwp": "올린 문서(book_import)",
+               ".pdf": "올린 문서·논문(book_import, category_put file)",
                ".md": "대화 기록(idea_add_conversation)", ".txt": "논문 전문(category_put file)"}
 ATTACHED = "첨부:"  # 게시판 글의 첨부를 도구의 파일 인자로 줄 때의 이름 앞머리(2026-10-09)
 ATTACHED_SHOWN = 20  # files_list에 보이는 게시판 첨부 수(새것부터)
@@ -51,7 +52,7 @@ def has_format_chars(name: str) -> bool:
 
 
 def safe_filename(name: str) -> str:
-    """받은함 파일 이름. 폴더 구분자·상대 경로·숨김 파일·제어 문자를 막고, 형식은 docx·pdf·md·txt만 받는다."""
+    """받은함 파일 이름. 폴더 구분자·상대 경로·숨김 파일·제어 문자를 막고, 형식은 INBOX_TYPES(docx·hwpx·hwp·pdf·md·txt)만 받는다."""
     clean = unicodedata.normalize("NFC", name.strip())
     if (
         not clean
@@ -116,7 +117,7 @@ def attached_file(store: Store, user_id: str, attachment_id: str) -> tuple[Path,
     return None
 
 
-MANUSCRIPT_TYPES = (".docx", ".pdf")  # 수정본으로 올릴 수 있는 파일
+MANUSCRIPT_TYPES = (".docx", ".hwpx", ".hwp", ".pdf")  # 올린 문서·수정본으로 올릴 수 있는 파일(한글 문서는 2026-10-14부터)
 _SHA: dict[tuple[str, int, float], str] = {}  # (경로, 크기, 고친 시각) → sha256. 프로세스 안에서만(파생값)
 
 
@@ -207,7 +208,7 @@ def build_tools(store: Store, current_user: Callable[[], str], max_user_bytes: i
             name="files_list",
             description=(
                 (
-                "게시판 글의 첨부 문서와 예전에 올린 파일(docx·pdf·md·txt) 목록(이름·크기·시각·어느 글, 가져온 문서는 '이미 가져옴'). 파일 인자(book_import·category_put "
+                "게시판 글의 첨부 문서와 예전에 올린 파일(docx·hwpx·hwp·pdf·md·txt) 목록(이름·크기·시각·어느 글, 가져온 문서는 '이미 가져옴'). 파일 인자(book_import·category_put "
                 "file·idea_add_conversation)에는 여기 나온 이름만 준다(첨부는 '첨부:<id>')."
             )
             ),

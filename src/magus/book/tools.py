@@ -319,8 +319,8 @@ def build_tools(
             name="book_import",
             description=(
                 (
-                "올린 문서(docx, 없으면 pdf)를 새 프로젝트(또는 올린 문서가 없는 project_id)의 가운데 노드로 가져온다. path: files_list의 이름(첨부는 '첨부:<id>'). 문서 없이 프로젝트만 "
-                "만들면 path 없이 title. '제N부'·'제N장'으로 장을 나누고, Word 코멘트는 확인 요청, 참고문헌은 원문 확인 전 문헌 글로 넣는다. 수정본은 new_edition=true와 그 책의 "
+                "올린 문서(docx·hwpx·hwp, 없으면 pdf)를 새 프로젝트(또는 올린 문서가 없는 project_id)의 가운데 노드로 가져온다. path: files_list의 이름(첨부는 '첨부:<id>'). 문서 없이 프로젝트만 "
+                "만들면 path 없이 title. '제N부'·'제N장'으로 장을 나누고, Word 코멘트·hwpx 메모는 확인 요청, 참고문헌은 원문 확인 전 문헌 글로 넣는다. 수정본은 new_edition=true와 그 책의 "
                 "project_id: 바뀐 장만 바꾸고(E2, E3…), 같은 코멘트는 다시 넣지 않고, 사라진 코멘트는 '해결됐을 수 있음' 표시만 한다(결정·직접 남긴 확인 요청·다른 책은 그대로). 마지막 수정본과 같은 "
                 "파일이거나 장 제목이 30% 미만 겹치면 멈춘다(맞으면 force=true). title·subtitle을 비우면 문서에서 "
                 "읽는다. 리포트와 장 매핑표를 돌려준다."

@@ -1,4 +1,4 @@
-"""book_import: 원고(docx, 없으면 PDF)를 장 단위로 나눠 프로젝트를 만든다.
+"""book_import: 원고(docx·hwpx·hwp, 없으면 PDF)를 장 단위로 나눠 프로젝트를 만든다. 한글 문서는 book.hwp_reader가 같은 블록 열로 읽는다.
 
 - "제N부"·"제N장" 제목(공백 변형, 콜론·대시, 제목이 다음 줄에 오는 경우)으로 나눈다.
 - 같은 장 번호가 여러 번 나오면(목차) 뒤따르는 본문이 가장 긴 것을 진짜 제목으로 보고 나머지는 리포트에 남긴다.
@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import struct
 import zipfile
 import zlib
 from collections import Counter
@@ -23,6 +24,7 @@ from pathlib import Path
 
 from magus.book.comments import author_kind, classify_comment, comment_fingerprint
 from magus.book.docx_reader import Block, Comment, Manuscript, read_docx
+from magus.book.hwp_reader import Unreadable, read_hangul
 from magus.book.outline import count_by_labels
 from magus.book.pdf_reader import read_pdf
 from magus.melchior.bibliography import BibReport, import_bibliography
@@ -43,6 +45,7 @@ _SPECIAL = re.compile(rf"^\s*(?P<label>서장|프롤로그|맺음말?|에필로�
 _BIB = re.compile(r"^\s*(참\s*고\s*문\s*헌|참고\s*자료|references|bibliography|works cited)\s*$", re.I)
 _TOC_TAIL = re.compile(r"\s*(?:\t|\.{2,}|…+|·{2,})[\s.…·]*\d*\s*$")  # 목차의 점선(쪽번호는 없어도 됨)
 _SENTENCE_END = re.compile(r"[.!?。]$|다\.?$")
+_NOTE_REF = re.compile(r"\[\^\d+\]")  # 한글 문서의 각주 표시(hwp_reader). 제목 줄 판정에서는 뗀다
 MAX_HEADING_LEN = 80
 MAX_TITLE_LINE_LEN = 60
 FRONT_NUMBER = 0
@@ -104,7 +107,7 @@ def _heads(blocks: list[Block]) -> list[Head]:
     for i, b in enumerate(blocks):
         if b.kind != "para":
             continue
-        text = _TOC_TAIL.sub("", b.text).strip()
+        text = _TOC_TAIL.sub("", _NOTE_REF.sub("", b.text)).strip()
         if not text or len(text) > MAX_HEADING_LEN:
             continue
         styled = b.heading_level is not None
@@ -129,7 +132,7 @@ def _heads(blocks: list[Block]) -> list[Head]:
         nxt = h.index + 1
         if h.kind != "bib" and not h.title and nxt < len(blocks) and nxt not in head_index:
             cand = blocks[nxt]
-            text = cand.text.strip()
+            text = _NOTE_REF.sub("", cand.text).strip()
             if cand.kind == "para" and 0 < len(text) <= MAX_TITLE_LINE_LEN and not _SENTENCE_END.search(text):
                 h.title, h.title_index = _TOC_TAIL.sub("", text).strip(), nxt
     for n, h in enumerate(heads):
@@ -341,9 +344,10 @@ def book_titles(manuscript: Manuscript, split: Split, title: str | None, subtitl
     )
 
 
-UNREADABLE = "문서를 읽지 못했습니다. 파일이 깨졌거나 Word(.docx)·PDF가 아닌 형식입니다. 원본 파일에서 다시 저장해 올려 주세요."
-# 깨진 문서가 내는 예외(zip이 아님·word/document.xml 없음·XML 오류·압축 손상·깨진 PDF). 저자에게 보일 문장(ValueError)으로 바꾼다(점검 7-d)
-_BROKEN = (zipfile.BadZipFile, KeyError, etree.LxmlError, zlib.error, EOFError, RuntimeError)
+UNREADABLE = ("문서를 읽지 못했습니다. 파일이 깨졌거나 Word(.docx)·한글(.hwpx·.hwp)·PDF가 아닌 형식입니다. "
+              "원본 파일에서 다시 저장해 올려 주세요.")
+# 깨진 문서가 내는 예외(zip이 아님·word/document.xml 없음·XML 오류·압축 손상·깨진 PDF·깨진 hwp). 저자에게 보일 문장(ValueError)으로 바꾼다(점검 7-d)
+_BROKEN = (zipfile.BadZipFile, KeyError, etree.LxmlError, zlib.error, EOFError, RuntimeError, Unreadable, struct.error)
 log = logging.getLogger("magus.import")
 
 
@@ -354,10 +358,12 @@ def read_manuscript(path: Path) -> Manuscript:
             return read_docx(path)
         if suffix == ".pdf":
             return read_pdf(path)
+        if suffix in (".hwpx", ".hwp"):  # 한글 문서(2026-10-14). 암호·배포용·한글 97 이전은 저자에게 보일 문장(ValueError)
+            return read_hangul(path)
     except _BROKEN as e:  # 전에는 500(운영자 알림)이었다. 압축 폭탄(UnsafeDocument)은 ValueError라 그대로 간다
         log.info("원고 읽기 실패 kind=%s error=%s", suffix, type(e).__name__)
         raise ValueError(UNREADABLE) from e
-    raise ValueError(f"지원하지 않는 형식: {path.name} (docx 또는 pdf)")
+    raise ValueError(f"지원하지 않는 형식: {path.name} (docx·hwpx·hwp·pdf)")
 
 
 def import_manuscript(

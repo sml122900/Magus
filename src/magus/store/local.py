@@ -351,7 +351,7 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
             if editions:
                 last = editions[-1]
                 names = [f"E{last.number}-{last.file}", last.file]
-            names += sorted((p.name for p in folder.glob("*") if p.suffix.lower() in (".docx", ".pdf")),
+            names += sorted((p.name for p in folder.glob("*") if p.suffix.lower() in (".docx", ".hwpx", ".hwp", ".pdf")),
                             key=lambda n: (folder / n).stat().st_mtime, reverse=True) if folder.exists() else []
         for name in names:
             path = folder / Path(name).name
