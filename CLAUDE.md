@@ -375,7 +375,8 @@ data/index.sqlite
 - `book_decide(text, project_id?)` → D번호.
 - `book_issue_add(text, chapter_number?, origin=user|agent, project_id?)` → 없는 장 번호는 거부한다.
 - `book_issue_close(id="I3"|"3", note?, project_id?)`
-- `book_import(path, project_id?, title?, subtitle?, replace=false)` → 로컬 docx(없으면 pdf)를 새 프로젝트로 만든다(`magus/book/importer.py`).
+- `book_import(path, project_id?, title?, subtitle?, new_edition?, force?)` → 로컬 docx·hwpx·hwp(없으면 pdf)를 새 프로젝트로 만든다(`magus/book/importer.py`).
+  - **한글(2026-10-14, 아침 승인 묶음)**: `magus/book/hwp_reader.py`가 hwpx(OWPML)·hwp 5.0을 docx와 같은 블록 열로 읽는다. 개요 번호('제^1장')는 글자로 붙이고, hwpx 메모는 코멘트, 각주는 markdown 각주(`[^N]`), hwp 메모는 리포트에 수만. 암호·배포용·hwp 3.x는 저자에게 보일 문장으로 멈춘다(`docs/decisions/hwp-import.md`).
   - 제목: "제N장"·"제N부"(공백·콜론·대시 변형 허용, 제목이 다음 줄에 와도 됨)와 번호 없는 장(서장·맺음·부록 N, 제목 서식이 있을 때만). "제N부 들어가며 …"는 부 제목이 아니라 그 부의 장(100+N)이다(#70).
   - 같은 장 번호가 여러 번 나오면(목차) 제목 서식이 있는 것, 그다음 본문이 가장 긴 것이 진짜다.
   - 첫 제목 앞의 글(표지·목차)과 부 서문은 `original/unsplit.md`에 둔다(목차 점선은 줄임). 장 안의 절·소절은 `##`·`###`이다.
@@ -385,6 +386,7 @@ data/index.sqlite
   - 참고문헌 섹션은 import_bibliography로 넘긴다. 그다음 citation 이슈를 refs와 연결한다.
   - 그림·수식은 자리표시자(`[그림 N]`, `[수식]`)로 남긴다. docx 표는 칸의 글까지 markdown 표(`| 칸 |`)로 싣는다(#69, 칸이 모두 비면 `[표 N]`). export에서는 Word 표로 나간다. 원본은 **무엇보다 먼저** original/에 복사한다.
   - 재실행: 같은 project_id는 거부한다. `replace=true`면 기존 프로젝트를 trash/로 옮긴다. refs는 이미 있는 key를 건드리지 않는다.
+    **replace는 운영자 CLI(`magus import --replace`)만이다. 대화의 book_import에는 2026-10-14부터 없다**(입력 스키마에서 뺌). 처음부터 다시는 저자가 사이트에서 올린 문서를 휴지통으로(이름 입력) 옮긴 뒤 같은 project_id로.
     - **replace는 수정본 올리기가 아니다.** 결정·직접 남긴 확인 요청·닫은 확인 요청·판 이력까지 휴지통으로 간다. 같은 책의 수정본은 `new_edition=true`로 올린다(아래).
   - **수정본 = 같은 책의 새 업로드**(`book_import(path, project_id, new_edition=true, force?)`, CLI `--new-edition`, 웹 "수정본으로 올리기", `magus/book/reupload.py`, #76)
     - 같은 책은 사용자가 project_id로 고른다. 장 제목이 기존 판과 30% 미만으로 겹치면 멈춘다(맞으면 force).
