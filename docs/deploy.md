@@ -462,6 +462,25 @@ warm-cache: default 첨부 글자 새로 0(이미 1·형식 아님 1), father �
 새 코드로 생긴 것은 옛 코드에서도 그대로 읽힌다: 복사한 노드·책(보통 노드·책), 새 형식의 .text(옛 코드는 hwp 등 첨부를 '뽑지 않음'으로 보고 .text를 읽지 않는다).
 영구 삭제한 것은 되돌리기로 돌아오지 않는다(백업에서 복구).
 
+### 2-18. 원고 프로젝트 삭제 보호 + 활동 기록 — 2026-10-14 사용자 승인
+
+반영 전 서버는 `p1-batch-1011`(`5962dce`), 반영할 것은 태그 `p1-guard-project`(`a1d7f22`). **데이터 이전 없음, 인덱스 v23 그대로, 의존성 그대로.
+도구 설명·스키마·instructions 그대로라 커넥터 재연결은 필요 없다.** 바뀐 것: status.md 0-41절, `docs/decisions/guard-project.md`.
+
+절차는 2-17절과 같고 warm 단계는 없다(`private/tmp/deploy-guard/pre.sh`·`build.sh`·`up.sh`·`cleanup.sh`, 도구 `/root/guard-tools/`,
+되돌리기 이미지 `magus:rollback-5962dce`, 백업 태그 p1-guard-project). 실데이터는 읽기만·GET만(`guard_check.py`: 프로젝트마다 확인 창의 이름 칸과
+휴지통 화면을 프로세스 안에서 그림), 쓰는 점검은 컨테이너 /tmp(`smoke.py` 10가지).
+
+반영 기록(2026-10-14 04:16 서버 시각): `5962dce` → `a1d7f22`. 백업 `e693aeb1`(predeploy·p1-guard-project, 2,431개, 오류 없음).
+healthy·재시작 0·오류 로그 0, 데이터 2,431개 해시 같음(index.sqlite만 빼고, 올린 뒤·읽기만 점검 뒤 두 번), 수치 전후 같음
+(default book 299·297·0·86, father book 원고 337·전체 338·335·5·129·E3·원본 없음 0), 전체 현황 넷 모두 같음, 인용 상태 첫 열기 default 0.14초·father 0.17초(새로 계산 0장).
+읽기만 점검: 이름 칸은 올린 문서가 든 프로젝트에만(default book 장 40, father book 장 42 · 수정본 E3), 프로젝트 목록 휴지통 default 3줄 중 이름 칸 1(장이 있는 3b0d82fd),
+GET 뒤 활동 기록 파일 없음(GET은 쓰지 않는다). /tmp 점검 10/10. 정리: `rollback-9316d37` 지움(남김: latest·rollback-5962dce·rollback-681020d),
+72시간 넘은 빌드 캐시 2.84GB, 디스크 59% → 47%.
+
+**되돌리기**: `docker tag magus:rollback-5962dce magus:latest && docker compose up -d --no-build`(데이터 형식 같음). 새 코드가 쓴 `.activity.log`와
+휴지통 묶음 manifest의 `edition` 칸은 옛 코드가 읽지 않는다(그대로 두어도 된다). 옛 코드로 돌아가면 이름 입력 보호와 활동 기록이 없어진다.
+
 ## 3. 알림 확인
 
 ```sh
