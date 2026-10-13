@@ -696,11 +696,20 @@ def build_tools(
         status, text = store.attachment_text(user, owner, chunk.part, make=False)
         if hit is None or not text:
             return []
-        low = chunk.text.lower()  # 조각 안에서 맞은 곳(조각은 800자라 맞은 곳이 다음 쪽일 수 있다, 2026-10-14)
+        # 조각 안에서 맞은 곳(2026-10-14): 조각은 800자라 맞은 곳이 다음 쪽일 수 있고, 공공 문서처럼 빈 줄이 없는 글은 조각이 글자 수로
+        # 잘려 맞은 곳 앞이 비기도 했다. 앞뒤 100자는 조각이 아니라 뽑은 글자 전체에서 보인다
+        low = chunk.text.lower()
         phrases, words = query_parts(query)
-        offset = next((low.find(t.lower()) for t in [*phrases, *words, *tokens(query)] if t and low.find(t.lower()) >= 0), 0)
-        page = page_of(text, chunk.text[:80], offset)
-        return [f"   📎 첨부 「{hit[1].name}」(첨부:{chunk.part}) 글자에서 맞음 · 쪽 {page}/{len(pages(text))}: “{around(chunk.text, query)}”",
+        offset = next((low.find(t.lower()) for t in [*phrases, *words, *tokens(query)] if t and low.find(t.lower()) >= 0), -1)
+        page = page_of(text, chunk.text[:80], max(offset, 0))
+        start = text.find(chunk.text[:80])
+        if start >= 0 and offset >= 0:
+            at = start + offset
+            s, e = max(0, at - 100), min(len(text), at + 100)
+            shown = ("…" if s else "") + one_line(text[s:e]) + ("…" if e < len(text) else "")
+        else:
+            shown = around(chunk.text, query)
+        return [f"   📎 첨부 「{hit[1].name}」(첨부:{chunk.part}) 글자에서 맞음 · 쪽 {page}/{len(pages(text))}: “{shown}”",
                 f"   → 그 쪽 읽기: category_search(attachment=\"{chunk.part}\", page={page})"]
 
     def around(text: str, query: str, width: int = 100) -> str:

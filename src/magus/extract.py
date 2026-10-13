@@ -57,7 +57,7 @@ FORMATS = "docx·hwp·hwpx·pdf·pptx·xlsx·odt·rtf·txt·md·csv·html"  # �
 VERSION = 3
 # status: ok(뽑음) · truncated(30만 자 넘어 앞부분만) · empty(글자 없음: 그림·스캔 PDF·빈 문서) · failed(읽지 못함: 깨진 파일·암호) · later(시간 넘음)
 # reason(failed일 때만, 있으면): hwp_password(암호) · hwp_dist(배포용 문서) · hwp_drm(DRM·공인인증서) · hwp_old(한글 97 이전 hwp)
-#   (2026-10-14 전에는 앞의 셋을 hwp_locked 하나로 적었다. 옛 상태는 그대로 읽는다)
+#   hwp_locked(암호·배포용을 가리지 못함): 2026-10-14 전에 뽑은 hwp 상태(앞의 셋을 하나로 적었다), 그리고 암호화된 hwpx
 DONE = ("ok", "truncated", "empty", "failed")
 READABLE = ("ok", "truncated")
 SHEET_ROWS = 2_000  # xlsx 시트 하나에서 뽑는 행(빈 행은 세지 않는다)
@@ -65,7 +65,7 @@ RAW_MAX = 50_000_000  # 통째로 읽는 것(hwp의 OLE 스트림 하나, rtf �
 log = logging.getLogger("magus.extract")
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 _WHY = {"hwp_password": "암호가 걸린 문서", "hwp_dist": "배포용 문서", "hwp_drm": "보안(DRM)이 걸린 문서", "hwp_old": "한글 97 이전 형식",
-        "hwp_locked": "암호가 걸렸거나 배포용 문서"}  # hwp_locked: 2026-10-14 전에 뽑은 상태(암호·배포용을 가르지 않았다)
+        "hwp_locked": "암호가 걸렸거나 배포용 문서"}  # 옛 hwp 상태·암호화된 hwpx
 
 
 class _Late(Exception):
@@ -448,10 +448,24 @@ class _Hwpx(_Target):
             self.sink.add(data)
 
 
+def _hwpx_locked(z: zipfile.ZipFile, name: str) -> bool:
+    """암호·배포용 hwpx(2026-10-14): 목록(META-INF/manifest.xml)에 암호화 정보가 있고 구역이 XML이 아니면(암호화된 바이트).
+    전에는 XML 오류로 까닭 없는 '뽑지 못함'이 되었다."""
+    try:
+        manifest = z.read("META-INF/manifest.xml") if z.getinfo("META-INF/manifest.xml").file_size < 5_000_000 else b""
+        with z.open(name) as f:
+            head = f.read(64).lstrip(b"\xef\xbb\xbf \t\r\n")
+    except KeyError:
+        return False
+    return b"encryption-data" in manifest and not head.startswith(b"<")
+
+
 def _hwpx(path: Path, check) -> tuple[str, bool]:
     sink = _Sink()
     with _zip_open(path) as z:
         for name in _numbered(z, r"Contents/section(\d{1,6})\.xml"):
+            if _hwpx_locked(z, name):
+                raise _Unreadable("hwp_locked")  # 암호인지 배포용인지는 목록만으로 가리지 못한다
             _feed(z, name, _Hwpx(sink), sink, check)
             if sink.cut:
                 break

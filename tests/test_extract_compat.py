@@ -80,6 +80,23 @@ def test_docx_without_extra_parts_unchanged(tmp_path: Path):
     assert ex.extract(_write(tmp_path, "a.docx", data)).text == "첫 문단\n둘째 문단\n"
 
 
+def test_encrypted_hwpx_says_locked(tmp_path: Path):
+    """암호·배포용 hwpx: 목록에 암호화 정보가 있고 구역이 XML이 아니면 '읽을 수 없는 hwp'(까닭 있음). 전에는 까닭 없는 실패였다."""
+    manifest = ('<?xml version="1.0"?><odf:manifest xmlns:odf="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0">'
+                '<odf:file-entry odf:full-path="Contents/section0.xml" odf:media-type="application/xml">'
+                '<odf:encryption-data odf:checksum-type="SHA1" odf:checksum="x"><odf:algorithm odf:algorithm-name="AES"/>'
+                "</odf:encryption-data></odf:file-entry></odf:manifest>")
+    locked = _zip({"mimetype": "application/hwp+zip", "META-INF/manifest.xml": manifest, "Contents/section0.xml": b"\x8f\x01\xfe" * 300})
+    got = ex.extract(_write(tmp_path, "배포.hwpx", locked))
+    assert (got.status, got.reason, ex.unreadable_hwp({"status": got.status, "reason": got.reason})) == (
+        "failed", "hwp_locked", "암호가 걸렸거나 배포용 문서")
+    plain = _zip({"mimetype": "application/hwp+zip", "META-INF/manifest.xml": "<odf:manifest/>",
+                  "Contents/section0.xml": '<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:t>보통 문서</hp:t></hp:run></hp:p></hs:sec>'})
+    assert ex.extract(_write(tmp_path, "보통.hwpx", plain)).text == "보통 문서\n"
+    broken = _zip({"Contents/section0.xml": b"\x8f\x01\xfe" * 300})  # 목록에 암호화 정보가 없으면 그냥 깨진 파일
+    assert (ex.extract(_write(tmp_path, "깨짐.hwpx", broken)).reason) == ""
+
+
 @pytest.mark.anyio
 async def test_search_item_with_only_attachment_has_no_empty_quote(store: LocalStore, data_dir: Path):
     """본문 없이 첨부만 있는 글(2026-10-14 메인 세션 보고): category_search 결과에 빈 인용 줄 `“”`이 보이지 않는다."""
@@ -113,3 +130,6 @@ async def test_search_hit_page_is_where_the_word_is(store: LocalStore, data_dir:
     async with Client(build_server(settings, store)) as c:
         found = (await c.call_tool("category_search", {"query": "옹기장수"})).content[0].text
     assert "글자에서 맞음 · 쪽 2/" in found and f'category_search(attachment="{att.id}", page=2)' in found, found
+    # 앞뒤 100자는 뽑은 글자 전체에서(조각 첫머리에 잘리지 않는다): 앞 줄(29번 줄)의 끝이 보인다
+    shown = found.split("글자에서 맞음 · 쪽 2/", 1)[1].split("“", 1)[1].split("”", 1)[0]
+    assert shown.startswith("…") and "옹기장수" in shown and "29번 줄" not in shown and shown.index("옹기장수") > 90, shown
