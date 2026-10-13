@@ -31,7 +31,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from magus.attachments import ACCEPT, MAX_FILES, kind_of, mb, media_type, shown_title, size_text, title_from_files
-from magus.extract import FORMATS, HWP_UNREADABLE, NO_TEXT, extractable, no_text, unreadable_hwp
+from magus.extract import FORMATS, HWP_UNREADABLE, NO_TEXT, extractable, no_text, read_status, unreadable_hwp
 from magus.book_migrate import legacy_book_id
 from magus.category.rules import BUILTINS, CONTENT_MAX, TITLE_MAX
 from magus.ids import local_time, new_id, utcnow
@@ -52,6 +52,26 @@ SEP = ' <span aria-hidden="true">›</span> '
 WHEN = "%Y-%m-%d %H:%M"
 DONE = {"made": "만들었습니다.", "edit": "저장했습니다.", "trashed": "휴지통으로 옮겼습니다.", "restored": "되살렸습니다.",
         "edited": "고쳤습니다."}
+ASK_HINT = "Claude에서 이렇게 물어보세요: 「magus에서 {title} 읽어 줘」 · 「magus {book} 책에서 ○○ 찾아 줘」"  # 글쓰기 뒤(2026-10-14)
+
+
+def text_state(status: dict | None, name: str) -> tuple[str, str]:
+    """첨부 글자 상태(2026-10-14): (Claude가 읽을 수 있나 한 줄, 'ok'|'no'|'wait'). 글자를 뽑는 형식이 아니면 ('', '')."""
+    if no_text(name):
+        return "Claude가 읽을 수 없음 · 새 형식(docx·pptx·xlsx)으로 저장해 올려 주세요", "no"
+    if not extractable(name):
+        return "", ""
+    state = (status or {}).get("status")
+    if state == "ok":
+        return f"Claude가 읽을 수 있음 · 글자 {int(status.get('chars') or 0):,}자", "ok"
+    if state == "truncated":
+        return f"Claude가 읽을 수 있음 · 앞 {int(status.get('chars') or 0):,}자(30만 자까지)", "ok"
+    if state == "empty":
+        return "Claude가 읽을 수 없음 · 글자가 없습니다(그림이나 스캔한 PDF)", "no"
+    if state == "failed":
+        why = unreadable_hwp(status)
+        return (f"Claude가 읽을 수 없음 · {why}" if why else "Claude가 읽을 수 없음 · 글자를 뽑지 못했습니다(깨졌거나 암호가 걸린 파일)"), "no"
+    return "글자를 뽑는 중 · '글자 보기'를 누르면 이어서 뽑습니다", "wait"
 
 BOARD_STYLE = """
 .trail{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;margin:0 0 4px;color:var(--ink2);font-size:15px}
@@ -103,6 +123,9 @@ font-weight:600;padding:0 16px;cursor:pointer}.lightbox button:focus-visible{out
 .board-bar a.gear.labeled{font-size:16px;padding:0 12px;min-height:44px;gap:4px;color:var(--ink)}
 .post-acts{position:relative}
 ul.files a.as-text{display:inline-flex;align-items:center;min-height:44px;padding:0 10px;margin-left:4px}
+ul.files .tstate{display:block;font-size:14px;padding-left:2px}ul.files .tstate.ok{color:var(--ink2)}
+ul.files .tstate.no{color:var(--ink);border-left:3px solid var(--ruby);padding-left:6px}ul.files .tstate.wait{color:var(--ink2)}
+label.each{display:inline-flex;gap:8px;align-items:center;margin-top:8px;min-height:44px}
 pre.att-text{white-space:pre-wrap;word-break:break-word;background:var(--canvas);border:1px solid var(--line);border-radius:12px;padding:16px 20px;
 font:inherit;font-size:16px;line-height:1.7;max-width:100%;overflow-x:auto}
 .att-head{color:var(--ink2);margin:8px 0}
@@ -525,6 +548,9 @@ class BoardPages:
         c = kind.category
         base = f"/shelf/{c.id}"
         done = DONE.get(params.get("done") or "")
+        if params.get("done") == "each" and (params.get("n") or "").isdigit():  # 파일마다 글 하나로(2026-10-14)
+            example = one_line(str(params.get("t") or ""))[:TITLE_MAX] or "글 제목"
+            done = f"글 {int(params['n'])}개를 만들었습니다. " + ASK_HINT.format(title=f"「{example}」", book=f"「{c.name}」")
         name = f"「{c.name}」 " if params.get("done") in ("made", "edit") else ""
         trash = (f' <a href="/shelf/p/{urllib.parse.quote(c.floor)}/trash">휴지통</a>' if params.get("done") == "trashed" else "")
         message = f'<p class="msg">{html.escape(name)}{done}{trash}</p>' if done else ""
@@ -626,6 +652,10 @@ class BoardPages:
         lead = await run_in_threadpool(self.trail, uid, kind.key, title[:40] + ("…" if len(title) > 40 else ""))
         return self._shelf_page(title, body, session, lead=lead)
 
+    def _att_status(self, uid: str, owner: str, att_id: str) -> dict | None:
+        hit = self.store.attachment_path(uid, owner, att_id)
+        return read_status(hit[0].parent) if hit else None
+
     def _post_body(self, uid: str, session: tuple[str, str], kind: Kind, obj: Any, params: Any) -> tuple[str, str]:
         assert kind.category is not None
         if isinstance(obj, CategoryItem):
@@ -652,10 +682,12 @@ class BoardPages:
         pictures = "".join(
             f'<a href="{html.escape(link)}/files/{html.escape(a.id)}" target="_blank" rel="noopener" data-full>'
             f'<img src="{html.escape(link)}/thumbs/{html.escape(a.id)}" alt="{html.escape(a.name)}" loading="lazy"></a>' for a in pics)
+        states = {a.id: text_state(self._att_status(uid, owner, a.id), a.name) for a in rest}
         others = "".join(
             f'<li><a href="{html.escape(link)}/files/{html.escape(a.id)}" download>{html.escape(a.name)}</a> '
             f'<small>{html.escape(kind_of(a.name))} · {size_text(a.size)}' + (f" · {NO_TEXT}" if no_text(a.name) else "") + '</small>'
             + (f' <a class="as-text" href="{html.escape(link)}/text/{html.escape(a.id)}">글자 보기</a>' if extractable(a.name) else "")
+            + (f'<small class="tstate {states[a.id][1]}">{html.escape(states[a.id][0])}</small>' if states[a.id][0] else "")
             + "</li>" for a in rest)
         done = DONE.get(params.get("done") or "")
         if done and params.get("done") == "edited":  # 첨부를 바꿔 올린 문서의 수정본이 됐으면(2026-10-10)
@@ -666,6 +698,8 @@ class BoardPages:
                 + (f'<div class="post-body">{text}</div>' if text.strip() else "")
                 + (f'<div class="pics{" one" if len(pics) == 1 else ""}">{pictures}</div>{LIGHTBOX}' if pictures else "")
                 + (f'<ul class="files" aria-label="첨부">{others}</ul>' if others else "")
+                + (f'<p class="muted ask">{html.escape(ASK_HINT.format(title=f"「{title}」", book=f"「{kind.category.name}」"))}</p>'
+                   if any(st[1] == "ok" for st in states.values()) else "")  # 첨부를 Claude가 읽을 수 있으면 묻는 법 한 줄(2026-10-14)
                 + self._post_actions(uid, session, kind, obj, link) + DEL_SCRIPT)
         return title, body
 
@@ -697,19 +731,26 @@ class BoardPages:
                         + self._write_form(session, here, f"/shelf/{book}", title=title or "", content=content))
                 lead = await run_in_threadpool(self.trail, uid, kind.key, "글쓰기")
                 return self._shelf_page("글쓰기", body, session, 400, lead=lead)
+            each = bool(form.get("each")) and len(files) > 1  # 파일마다 글 하나로(2026-10-14: 논문 여럿을 한 번에)
             title = title or title_from_files(u.name for u in files)  # 제목이 비고 첨부가 있으면 첫 첨부의 파일 이름(2026-10-09)
 
-            def save() -> CategoryItem:
-                item = self.store.put_category_item(uid, CategoryItem(new_id(), book, content, "me", title, "author" if title else None))
+            def save(item_title: str | None, ups: list[Any]) -> CategoryItem:
+                item = self.store.put_category_item(uid, CategoryItem(new_id(), book, content, "me", item_title,
+                                                                      "author" if item_title else None))
                 made = []
-                for up in files:
+                for up in ups:
                     att = self.store.put_attachment(uid, f"{book}/{item.id}", up.name, up.file)  # 받은 임시 파일에서 흘려 쓴다
                     self.store.attachment_thumb(uid, f"{book}/{item.id}", att.id)  # 사진이면 썸네일(못 만들면 화면이 원본을 쓴다)
                     made.append(att)
                 self._extract_texts(uid, f"{book}/{item.id}", made)
                 return item
 
-            item = await run_in_threadpool(save)
+            if each:  # 글 제목은 파일 이름, 본문은 글마다 같게. 글자 뽑기는 글마다 20초까지
+                for up in files:
+                    await run_in_threadpool(save, title_from_files([up.name]), [up])
+                first = title_from_files([files[0].name]) or ""
+                return RedirectResponse(f"/shelf/{book}?" + urllib.parse.urlencode({"done": "each", "n": len(files), "t": first}), status_code=303)
+            item = await run_in_threadpool(save, title, files)
             return RedirectResponse(f"/shelf/{book}/{item.id}", status_code=303)
         error = self._write_error(request.query_params.get("error") or "")
         body = (f'<p class="msg err">{html.escape(error)}</p>' if error else "") + self._write_form(session, here, f"/shelf/{book}")
@@ -743,7 +784,9 @@ class BoardPages:
             f'data-types="{ACCEPT}">'
             f'<label class="pick">파일 고르기<input type="file" name="files" multiple accept="{ACCEPT}"></label>'
             f'<span class="drop-word">끌어다 놓기 · {MAX_FILES}개까지</span></div>'
-            '<ul class="chosen" aria-label="담은 파일"></ul><p class="pick-note" role="status" aria-live="polite"></p></fieldset>'
+            '<ul class="chosen" aria-label="담은 파일"></ul><p class="pick-note" role="status" aria-live="polite"></p>'
+            + ('' if current or heading or base else '<label class="each"><input type="checkbox" name="each" value="1"> 파일마다 글 하나로</label>')
+            + '</fieldset>'
             f'<p><button class="primary">저장</button> <a href="{html.escape(cancel)}">취소</a></p></form>{WRITE_SCRIPT}'
             + (SWAP_SCRIPT if current else "")
         )

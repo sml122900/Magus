@@ -17,6 +17,7 @@ from typing import IO
 
 from magus import activity
 from magus.attachments import clean_name
+from magus.extract import EXTRACTABLE, NO_TEXT_SUFFIXES
 from magus.book.reupload import ReuploadReport, reupload_manuscript
 from magus.ids import utcnow
 from magus.inbox import INBOX_TYPES, MANUSCRIPT_TYPES, file_sha, has_format_chars, safe_filename
@@ -24,7 +25,7 @@ from magus.store import Store
 from magus.store.fileio import write_data
 from magus.store.formats import display_title, one_line
 
-DOC_TYPES = (".docx", ".pdf", ".txt", ".md")  # 문서 업데이트 화면에 보이는 첨부
+DOC_TYPES = EXTRACTABLE + NO_TEXT_SUFFIXES  # 문서 업데이트 화면에 보이는 첨부(2026-10-14: hwp·pptx 등 글자를 뽑는 형식 모두 + doc·ppt·xls)
 _BAD_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')  # 이름 칸의 금지 문자(폴더 구분자·제어 문자)
 
 

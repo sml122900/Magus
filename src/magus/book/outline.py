@@ -66,6 +66,34 @@ def _fit(head: str, items: list[str], budget: int, more: Callable[[int], str]) -
     return text, estimate_tokens(text)
 
 
+ATTACHED_SHOWN = 5
+
+
+def attached_lines(store: Store, user_id: str, project_id: str) -> list[str]:
+    """이 프로젝트의 책에 첨부한 문서(글자를 뽑는 형식) 최근 5개와 읽는 법. 없으면 빈 목록."""
+    from magus.extract import EXTRACTABLE, PAGE_CHARS, read_status  # noqa: PLC0415
+
+    books = {c.id: c for c in store.list_categories(user_id) if c.floor == project_id}
+    found = []
+    for owner, att in store.file_attachments(user_id, EXTRACTABLE):
+        book_id = owner.partition("/")[0]
+        if owner.startswith("ref:"):
+            ref = store.get_ref(user_id, owner[4:])
+            book_id = (ref.book or "") if ref and ref.floor == project_id else ""
+        if book_id not in books:
+            continue
+        hit = store.attachment_path(user_id, owner, att.id)
+        status = read_status(hit[0].parent) if hit else None
+        chars = int((status or {}).get("chars") or 0) if (status or {}).get("status") in ("ok", "truncated") else 0
+        state = f"글자 {-(-chars // PAGE_CHARS)}쪽" if chars else "글자 없음·뽑는 중"
+        found.append(f"{_clip(att.name, 40)}(「{books[book_id].name}」, {state}, 첨부:{att.id})")
+    if not found:
+        return []
+    more = f" 외 {len(found) - ATTACHED_SHOWN}개" if len(found) > ATTACHED_SHOWN else ""
+    return [f"책에 첨부한 문서 {len(found)}개: " + " · ".join(found[:ATTACHED_SHOWN]) + more,
+            "— 첨부 문서 읽기: category_search(attachment=첨부 id, page=1). 찾기: category_search(query)"]
+
+
 def edition_line(store: Store, user_id: str, project: Project, chapters: list[ChapterMeta], now: datetime | None = None) -> str:
     """'수정본 E2 · 마지막 업로드 10-06 14:20(원고.docx) · 그 뒤 Magus에서 고친 장 0'(#76). 첫 업로드는 '처음 올린 문서 E1'.
     원고 본문의 원본은 저자 파일이다(#68). 마지막 업로드가 STALE_UPLOAD_DAYS보다 오래되면 최신본을 올렸는지 묻게 한다.
@@ -143,6 +171,8 @@ def build_outline(
     )
     header_lines.append(edition_line(store, user_id, project, chapters, now))
     header_lines += outline_lines(store, user_id, project.id)  # 이 프로젝트의 지도: 노드·책·연결과 선(#95)
+    if not chapters:  # 올린 문서가 없으면 책에 첨부한 문서로 안내한다(2026-10-14: hwp 원고를 첨부로 올린 저자의 '전체 보여 줘')
+        header_lines += attached_lines(store, user_id, project.id)
     header = "\n".join(header_lines)
 
     # 목차 줄에는 집계만 싣는다. 장별 미해결 수에는 코멘트 유래까지 모두 센다.

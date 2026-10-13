@@ -48,6 +48,7 @@ from magus.webcontexts import ContextPages
 from magus.webdocs import DocumentPages
 from magus.webmap import MapPages
 from magus.webshelf import ShelfPages
+from magus.webstart import StartPages
 
 log = logging.getLogger("magus.web")
 SCREEN: contextvars.ContextVar[str] = contextvars.ContextVar("magus_screen", default="other")  # 도움말에 보낼 화면 이름 열쇠(#97)
@@ -285,7 +286,7 @@ def _pkce() -> tuple[str, str]:
 
 
 @dataclass
-class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPages):
+class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPages, StartPages):
     store: Store
     settings: Settings
     base_url: str  # 바깥에서 보이는 주소(원격: PUBLIC_URL, 로컬: http://127.0.0.1:포트)
@@ -348,7 +349,8 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPag
     # --- 라우트 등록 ---
     def register(self, server: MCPServer) -> None:
         routes: list[tuple[str, list[str], Callable[[Request], Awaitable[Response]]]] = [
-            ("/", ["GET"], self.home), ("/login", ["GET"], self.login), ("/auth/callback", ["GET"], self.callback),
+            *self.start_routes(),  # 로그인 전 첫 화면(/)·Claude 연결 안내(/connect)(2026-10-14)
+            ("/login", ["GET"], self.login), ("/auth/callback", ["GET"], self.callback),
             ("/logout", ["POST"], self.logout), ("/me", ["GET", "POST"], self.me),
             *self.document_routes(),  # 내 정보 › 문서 업데이트(2026-10-10). 옛 올린 파일 화면·올리기·지우기 주소도 여기서
             ("/book/export", ["POST"], self.do_export), ("/download/{token}", ["GET"], self.download),
@@ -520,9 +522,6 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPag
         return JSONResponse(body, status_code=status)
 
     # --- 로그인 ---
-    async def home(self, request: Request) -> Response:
-        return RedirectResponse("/shelf" if self.user_of(request) else "/login", status_code=303)
-
     async def login(self, request: Request) -> Response:
         nxt = request.query_params.get("next", "/shelf")
         nxt = nxt if nxt.startswith("/") and not nxt.startswith("//") else "/shelf"
@@ -643,7 +642,8 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPag
             f'data-count-max="{DISPLAY_NAME_MAX}"></label></p>'
             f"<p>메일 {html.escape(profile.email or '—')}</p>"
             '<p><button class="primary">저장</button></p></form>'
-            '<ul class="links"><li><a href="/me/contexts">자주 쓰는 컨텍스트</a></li><li><a href="/me/documents">문서 업데이트</a></li></ul>'
+            '<ul class="links"><li><a href="/me/contexts">자주 쓰는 컨텍스트</a></li><li><a href="/me/documents">문서 업데이트</a></li>'
+            '<li><a href="/connect">Claude 연결</a></li></ul>'
         )
         return self._page("내 정보", body, session, 400 if message.startswith('<p class="msg err">') else 200)
 
