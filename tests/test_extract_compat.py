@@ -189,6 +189,42 @@ async def test_search_snippet_shows_the_whole_query(store: LocalStore, data_dir:
 
 
 @pytest.mark.anyio
+async def test_title_hit_also_shows_attachment_excerpt(store: LocalStore, data_dir: Path):
+    """파일마다 글 하나(제목 = 파일 이름)로 올린 글이 제목에서 맞아도, 첨부 글자에 검색어가 있으면 그 발췌 한 줄을 함께(2026-10-14
+    메인 세션 요청: 전에는 '첨부 1개'만 보여 Claude가 내용을 보려면 한 번 더 불러야 했다)."""
+    with_library(store, "alice")
+    book = store.create_category("alice", "논문", "blank", "#1f2f5c", (), "common").id
+    store.put_category_item("alice", CategoryItem(POST, book, "", "me", title="논문06_도시_열섬", title_by="author"))
+    body = "서론 " * 400 + "\n도시 열섬 현상은 녹지가 적은 도심에서 밤 기온이 2도가량 높게 나타나는 것을 말한다.\n" + "결론 " * 50
+    att = store.put_attachment("alice", f"{book}/{POST}", "논문06_도시_열섬.txt", body.encode())
+    store.attachment_text("alice", f"{book}/{POST}", att.id)
+    settings = Settings.from_env({"USER_ID": "alice", "DATA_DIR": str(data_dir)})
+    async with Client(build_server(settings, store)) as c:
+        found = (await c.call_tool("category_search", {"query": "도시 열섬", "book": "논문"})).content[0].text
+    assert "제목 「논문06_도시_열섬」" in found and "“”" not in found, found
+    assert f"(첨부:{att.id}) 글자에서 맞음 · 쪽 1/1: “…" in found and "도시 열섬 현상은 녹지가 적은 도심" in found, found
+
+
+@pytest.mark.anyio
+async def test_search_hit_page_when_chunk_rejoins_paragraphs(store: LocalStore, data_dir: Path):
+    """색인 조각은 문단 사이를 빈 줄 하나("\\n\\n")로 다시 잇는다. 원문의 빈 줄에 빈칸이 있으면(공공 문서에 흔함) 조각 첫 80자로는
+    원문에서 자리를 못 찾아 늘 1쪽이라고 했다(2026-10-14, 실제 보도자료에서 4쪽짜리의 마지막 쪽 낱말을 1쪽이라고 함)."""
+    paras = [f"{n:02d}번 문단 " + "나루터 장날 소금 " * 6 for n in range(80)]
+    paras[70] = "70번 문단 옹기장수가 골목 끝에 자리를 잡았다 " + "가" * 20
+    text = "\n \n".join(p[:60] for p in paras) + "\n"
+    assert ex.page_of(text, "옹기장수") == 2
+    with_library(store, "alice")
+    book = store.create_category("alice", "자료", "blank", "#1f2f5c", (), "common").id
+    store.put_category_item("alice", CategoryItem(POST, book, "자료", "me", title="자료", title_by="author"))
+    att = store.put_attachment("alice", f"{book}/{POST}", "보도.txt", text.encode())
+    store.attachment_text("alice", f"{book}/{POST}", att.id)
+    settings = Settings.from_env({"USER_ID": "alice", "DATA_DIR": str(data_dir)})
+    async with Client(build_server(settings, store)) as c:
+        found = (await c.call_tool("category_search", {"query": "옹기장수"})).content[0].text
+    assert "글자에서 맞음 · 쪽 2/2" in found and "옹기장수가 골목" in found, found
+
+
+@pytest.mark.anyio
 async def test_search_hit_page_is_where_the_word_is(store: LocalStore, data_dir: Path):
     """맞은 쪽은 조각(800자)이 시작한 쪽이 아니라 조각 안에서 낱말이 있는 쪽이다(2026-10-14). 공공 문서는 빈 줄이 없어 조각이 800자씩
     잘리므로, 쪽 경계(3,000자) 바로 뒤의 낱말이 앞 쪽으로 안내될 수 있었다."""

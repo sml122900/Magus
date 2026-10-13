@@ -1218,15 +1218,19 @@ def page_of(text: str, needle: str, offset: int = 0) -> int:
     at = text.find(needle) if needle else -1
     if at < 0:
         return 1
-    at = min(len(text) - 1, at + max(0, offset))
+    return page_at(text, at + max(0, offset))
+
+
+def page_at(text: str, at: int) -> int:
+    """글자 자리 at이 든 쪽 번호(1부터)."""
     seen = 0
     for n, page in enumerate(pages(text), 1):
         seen += len(page)
         if at < seen:
             return n
-    return 1
+    return max(1, len(pages(text)))
 
 
 __all__ = ["DEADLINE", "DONE", "EXTRACTABLE", "FORMATS", "HWP_UNREADABLE", "NO_TEXT", "PAGE_CHARS", "READABLE", "SHEET_ROWS", "TEXT_DIR",
-           "TEXT_MAX", "Extracted", "due", "extract", "extractable", "no_text", "page_of", "pages", "read_status", "read_text", "save", "stale",
+           "TEXT_MAX", "Extracted", "due", "extract", "extractable", "no_text", "page_at", "page_of", "pages", "read_status", "read_text", "save", "stale",
            "text_paths", "unreadable_hwp"]
