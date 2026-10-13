@@ -410,6 +410,10 @@ def test_hwp_outline_numbers_become_text(store: LocalStore, tmp_path: Path):
                                           "가. 첫 절", "글.", "제3장 사람", "글."]
     report = import_manuscript(store, U, tmp_path / "번호.hwp", project_id="n")
     assert [(c[0], c[2]) for c in report.chapters] == [(1, "물고기의 결심"), (2, "뭍으로"), (3, "사람")]
+    # 구역 정의의 번호 id를 엉뚱하게 읽어도 번호 정의가 하나뿐이면 그것을 쓴다
+    odd = body.replace(struct.pack("<H", 1) + b"\0" * 20, struct.pack("<H", 7) + b"\0" * 20, 1)
+    m = read_manuscript(write(tmp_path, "번호2.hwp", hwp(body=odd, numbered=True)))
+    assert [b.text for b in m.blocks][1:3] == ["제1장 물고기의 결심", "가. 데본기"]
 
 
 def test_number_text_shapes():

@@ -95,6 +95,8 @@ class Outline:
         self.counts: dict[str, list[int]] = {}
 
     def prefix(self, numbering: str | None, level: int) -> str:
+        if (numbering or "") not in self.numberings and len(self.numberings) == 1:  # 가리키는 id를 못 읽었어도 정의가 하나뿐이면 그것
+            numbering = next(iter(self.numberings))
         levels = self.numberings.get(numbering or "")
         if not levels or not 0 <= level < len(levels):
             return ""
