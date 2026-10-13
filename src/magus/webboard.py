@@ -72,7 +72,9 @@ def text_state(status: dict | None, name: str) -> tuple[str, str]:
         return "Claude가 읽을 수 없음 · 글자가 없습니다(그림이나 스캔한 PDF)", "no"
     if state == "failed":
         why = unreadable_hwp(status)
-        return (f"Claude가 읽을 수 없음 · {why}" if why else "Claude가 읽을 수 없음 · 글자를 뽑지 못했습니다(깨졌거나 암호가 걸린 파일)"), "no"
+        fix = {"hwp_dist": " — 배포용으로 만들기 전 파일이나 PDF로 올려 주세요", "hwp_password": " — 한글에서 암호를 풀어 저장해 올려 주세요",
+               "hwp_old": " — 한글에서 hwp나 hwpx로 다시 저장해 올려 주세요"}.get(str((status or {}).get("reason") or ""), "")
+        return (f"Claude가 읽을 수 없음 · {why}{fix}" if why else "Claude가 읽을 수 없음 · 글자를 뽑지 못했습니다(깨졌거나 암호가 걸린 파일)"), "no"
     return "글자를 뽑는 중 · '글자 보기'를 누르면 이어서 뽑습니다", "wait"
 
 BOARD_STYLE = """
