@@ -397,8 +397,9 @@ def test_old_binary_formats_not_extracted(tmp_path: Path):
 
 def test_stale_status_is_extracted_again(tmp_path: Path):
     assert ex.due(None, "a.hwp") and ex.due({"status": "failed", "version": 1}, "a.hwp")  # 형식을 뽑기 전 VERSION의 상태
-    assert not ex.due({"status": "ok", "version": 1}, "a.pdf") and not ex.due({"status": "ok", "version": 2}, "a.hwp")
-    assert ex.due({"status": "ok", "version": 2}, "a.docx") and not ex.due({"status": "ok", "version": 3}, "a.docx")  # docx 각주 등(2026-10-14)
+    assert not ex.due({"status": "ok", "version": 1}, "a.pdf") and not ex.due({"status": "ok", "version": 2}, "a.odt")
+    for name in ("a.docx", "a.hwp", "a.hwpx", "a.pptx", "a.xlsx"):  # docx 각주·깨진 글자·빈 줄·xlsx 숫자(2026-10-14 공공 문서 점검): 다시 뽑는다
+        assert ex.due({"status": "ok", "version": 2}, name) and not ex.due({"status": "ok", "version": 3}, name)
     assert ex.due({"status": "later", "version": 2, "at": "2026-01-01T00:00:00.000Z"}, "a.hwp")
 
 

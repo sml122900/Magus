@@ -12,6 +12,7 @@ category_put = 글 넣기(어느 책에든. 서지·원문 확인을 주면 문�
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, Literal
@@ -44,7 +45,7 @@ from magus.project_args import (
 from magus.search import Embedder, find_all_words
 from magus.attachments import describe, title_from_files
 from magus.extract import FORMATS, HWP_UNREADABLE, NO_TEXT, no_text, page_of, pages, unreadable_hwp
-from magus.textindex import query_parts, tokens
+from magus.textindex import needle_of, query_parts, tokens
 from magus.store import Category, CategoryItem, MapNode, Passage, Ref, ShelfSettings, Store
 from magus.store.base import EditConflict
 from magus.store.floors import MoveError
@@ -698,9 +699,7 @@ def build_tools(
             return []
         # 조각 안에서 맞은 곳(2026-10-14): 조각은 800자라 맞은 곳이 다음 쪽일 수 있고, 공공 문서처럼 빈 줄이 없는 글은 조각이 글자 수로
         # 잘려 맞은 곳 앞이 비기도 했다. 앞뒤 100자는 조각이 아니라 뽑은 글자 전체에서 보인다
-        low = chunk.text.lower()
-        phrases, words = query_parts(query)
-        offset = next((low.find(t.lower()) for t in [*phrases, *words, *tokens(query)] if t and low.find(t.lower()) >= 0), -1)
+        offset = hit_at(chunk.text, query)
         page = page_of(text, chunk.text[:80], max(offset, 0))
         start = text.find(chunk.text[:80])
         if start >= 0 and offset >= 0:
@@ -712,12 +711,24 @@ def build_tools(
         return [f"   📎 첨부 「{hit[1].name}」(첨부:{chunk.part}) 글자에서 맞음 · 쪽 {page}/{len(pages(text))}: “{shown}”",
                 f"   → 그 쪽 읽기: category_search(attachment=\"{chunk.part}\", page={page})"]
 
+    def hit_at(text: str, query: str) -> int:
+        """text에서 검색어가 맞은 곳(없으면 -1). 2026-10-14: 검색어 전체(낱말 사이 빈칸·줄바꿈은 아무 공백) → 따옴표 구절 → 긴 낱말부터
+        → 2글자 조각. 전에는 낱말 차례대로 처음 나온 곳이라 '글 워드프로세서'가 앞쪽의 '한글'에, '해외건설 위기극복'이 머리말의
+        '해외건설정책과'에 걸려 정작 맞은 문장이 보이지 않았다."""
+        parts = needle_of(query).split()
+        if len(parts) > 1 and (m := re.search(r"\s+".join(map(re.escape, parts)), text, re.I)):
+            return m.start()
+        low = text.lower()
+        phrases, words = query_parts(query)
+        for t in [*phrases, *sorted(words, key=len, reverse=True), *tokens(query)]:
+            if t and (at := low.find(t.lower())) >= 0:
+                return at
+        return -1
+
     def around(text: str, query: str, width: int = 100) -> str:
         """맞은 곳 앞뒤 width자(한 줄). 맞은 곳을 못 찾으면 앞부분."""
         flat = one_line(text)
-        low = flat.lower()
-        phrases, words = query_parts(query)
-        at = next((low.find(t.lower()) for t in [*phrases, *words, *tokens(query)] if t and low.find(t.lower()) >= 0), -1)
+        at = hit_at(flat, query)
         if at < 0:
             return flat[: width * 2] + ("…" if len(flat) > width * 2 else "")
         start, end = max(0, at - width), min(len(flat), at + width)

@@ -48,8 +48,9 @@ PAGE_CHARS = 3_000  # 대화에서 한 번에 읽는 쪽
 EXTRACTABLE = (".docx", ".pdf", ".txt", ".md",  # VERSION 1(#100)
                ".hwp", ".hwpx", ".pptx", ".xlsx", ".odt", ".rtf", ".csv", ".html", ".htm")  # VERSION 2(2026-10-11)
 # 그 형식의 뽑은 글자가 마지막으로 바뀐 VERSION. 그보다 옛 상태는 다시 뽑는다(warm-cache·extract·처음 열 때).
-# 3(2026-10-14): docx 각주·미주·머리말·꼬리말, 글상자 한 번
-SINCE = dict.fromkeys(EXTRACTABLE[4:], 2) | {".docx": 3}
+# 3(2026-10-14 공공 문서 점검): docx 각주·미주·머리말·꼬리말·글상자 한 번·탭 위치, hwp·hwpx·docx·pptx 다듬기(tidy: PUA 기호·빈 줄),
+#   xlsx 숫자 15자리
+SINCE = dict.fromkeys(EXTRACTABLE[4:], 2) | dict.fromkeys((".docx", ".hwp", ".hwpx", ".pptx", ".xlsx"), 3)
 NO_TEXT_SUFFIXES = (".doc", ".ppt", ".xls")  # 옛 Office 바이너리: 이번에는 뽑지 않는다
 NO_TEXT = "글자를 뽑지 않는 형식"  # 저자·Claude에게 보이는 이름
 HWP_UNREADABLE = "읽을 수 없는 hwp"
@@ -166,10 +167,29 @@ def extract(path: Path, deadline: float = DEADLINE) -> Extracted:
     except Exception as e:  # 깨진 zip·암호 PDF 등. 이름·내용은 남기지 않는다
         log.info("extract failed kind=%s error=%s", suffix, type(e).__name__)
         return Extracted("failed", "", int((time.monotonic() - start) * 1000))
+    if suffix in TIDY:
+        text = tidy(text)
     ms = int((time.monotonic() - start) * 1000)
     if not text.strip():
         return Extracted("empty", "", ms)
     return Extracted("truncated" if cut else "ok", text, ms)
+
+
+# 문서 형식의 뽑은 글자 다듬기(2026-10-14 공공 문서 점검). 글꼴이 그리는 사용자 정의 영역(PUA) 기호를 보통 글자로, 빈 줄 여럿은 하나로.
+# PUA: 기호 글꼴(Wingdings) 글자는 문서에 U+F0xx로 들어 있어 뽑으면 깨진 글자다. 점검에서 본 것(·→ᄒᆞᆫ)과 Word 글머리표 기본 기호만 옮긴다.
+#   U+F09E 가운뎃점(보도자료 '외화·원화') · U+F09F 글머리 점(연구보고서 표의 '• 창업지원 업종 확대', 132곳)
+#   · U+F0E0 오른쪽 화살표(발표 자료 '클릭 → 추가') · U+F53A 한컴 옛한글 'ᄒᆞᆫ'(법령 서식 'ᄒᆞᆫ글 워드프로세서')
+#   · U+F06C ● · U+F06E ■ · U+F075 ◆ · U+F076 ❖ · U+F0A7 ▪ · U+F0D8 ➢ · U+F0FC ✓
+# PDF의 PUA(글꼴에 글자 대응표가 없는 것)는 무엇인지 알 수 없어 그대로 둔다.
+SYMBOL_PUA = str.maketrans({0xF09E: "·", 0xF09F: "•", 0xF0E0: "→", 0xF53A: "ᄒᆞᆫ", 0xF06C: "●", 0xF06E: "■", 0xF075: "◆",
+                            0xF076: "❖", 0xF0A7: "▪", 0xF0D8: "➢", 0xF0FC: "✓"})
+TIDY = (".hwp", ".hwpx", ".docx", ".pptx")
+_BLANKS = re.compile(r"\n[ \t　]*\n(?:[ \t　]*\n)+")
+
+
+def tidy(text: str) -> str:
+    """PUA 기호를 옮기고, 빈 줄이 둘 넘게 이어지면 한 줄로(발표 자료·보도자료의 빈 문단이 쪽을 채우지 않게)."""
+    return _BLANKS.sub("\n\n", text.translate(SYMBOL_PUA))
 
 
 def _limit(parts: list[str], total: int, piece: str) -> tuple[int, bool]:
@@ -422,30 +442,63 @@ def _zip_open(path: Path) -> zipfile.ZipFile:
 
 
 class _Hwpx(_Target):
-    """hwpx(OWPML) 구역: 문단(hp:p)마다 한 줄, 글자는 hp:t 안의 것만."""
+    """hwpx(OWPML) 구역: 문단(hp:p)마다 한 줄, 글자는 hp:t 안의 것만.
+    문단 안에 든 것(각주·미주·머리말·꼬리말·표·글상자의 문단)은 그 문단이 끝난 뒤에 잇는다(2026-10-14, hwp와 같은 차례).
+    전에는 각주가 문장 한가운데 끼어 '…단위이다(통계청, 2015)' + 각주 + 줄바꿈 + '. 개념의…'처럼 본문 문장이 끊겼다.
+    붙잡아 둔 글자가 30만 자를 넘으면 그때까지의 것을 내보내고 그만 읽는다(메모리)."""
 
     INSIDE = {"tab": "\t", "lineBreak": "\n", "nbSpace": " ", "fwSpace": " ", "hyphen": "-"}
 
     def __init__(self, sink: _Sink) -> None:
         self.sink, self.in_t = sink, 0
+        self.open: list[tuple[list[str], list[str]]] = []  # 열린 문단마다 (그 문단의 글자, 안에 든 문단들의 글자)
+        self.held = 0
+
+    def _put(self, piece: str) -> None:
+        if not self.open:
+            self.sink.add(piece)
+            return
+        self.open[-1][0].append(piece)
+        self.held += len(piece)
+        if self.held > TEXT_MAX:
+            self._spill()
+            self.stop = True
+
+    def _spill(self) -> None:
+        for own, inner in self.open:
+            self.sink.add("".join(own) + "".join(inner))
+        self.open.clear()
+        self.held = 0
 
     def start(self, tag: str, attrib: dict) -> None:
         name = _local(tag)
         if name == "t":
             self.in_t += 1
+        elif name == "p":
+            self.open.append(([], []))
         elif self.in_t and name in self.INSIDE:
-            self.sink.add(self.INSIDE[name])
+            self._put(self.INSIDE[name])
 
     def end(self, tag: str) -> None:
         name = _local(tag)
         if name == "t":
             self.in_t -= 1
-        elif name == "p":
-            self.sink.add("\n")
+        elif name == "p" and self.open:
+            own, inner = self.open.pop()
+            text = "".join(own) + "\n" + "".join(inner)
+            if self.open:
+                self.open[-1][1].append(text)
+                self.held += 1
+            else:
+                self.sink.add(text)
+                self.held = 0
 
     def data(self, data: str) -> None:
         if self.in_t:
-            self.sink.add(data)
+            self._put(data)
+
+    def close(self) -> None:
+        self._spill()  # 닫히지 않은 문단(깨진 XML 끝)
 
 
 def _hwpx_locked(z: zipfile.ZipFile, name: str) -> bool:
@@ -606,6 +659,18 @@ def date_text(raw: str, kind: str, date1904: bool) -> str:
     return when.strftime("%Y-%m-%d %H:%M") if minutes % 1440 else when.strftime("%Y-%m-%d")
 
 
+_NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
+
+
+def _number_text(raw: str) -> str:
+    """xlsx 숫자 칸의 저장 값 → 유효 숫자가 15자리를 넘을 때만 15자리로(엑셀이 보이는 정밀도. 부동소수 꼬리 0.94460617502999999 → 0.94460617503).
+    그 밖(정수·짧은 소수·숫자가 아닌 것)은 적힌 그대로."""
+    text = raw.strip()
+    if not _NUMBER.fullmatch(text) or len(text.split("e")[0].split("E")[0].replace("-", "").replace(".", "").lstrip("0")) <= 15:
+        return raw
+    return f"{float(text):.15g}"
+
+
 def _xlsx_dates(z: zipfile.ZipFile, rels: dict[str, str]) -> dict[int, str]:
     """styles.xml의 칸 서식 번호(cellXfs 순서) → 'date'·'time'. 날짜 서식이 아닌 것은 넣지 않는다."""
     name = next((t for t in rels.values() if t.endswith("styles.xml")), "xl/styles.xml")
@@ -680,7 +745,9 @@ class _Sheet(_Target):
             elif self.kind == "d":  # ISO 8601로 적힌 날짜(드묾): 2026-10-11T09:30:00 → 2026-10-11 09:30
                 stamp = raw.strip().replace("T", " ")
                 value = stamp[:10] if stamp[11:16] in ("", "00:00") else stamp[:16]
-            else:  # n·str·inlineStr·e: 적힌 그대로
+            elif self.kind == "n":  # 숫자: 엑셀처럼 유효 숫자 15자리까지(39.509900352700001 → 39.5099003527, 2026-10-14)
+                value = _number_text(raw)
+            else:  # str·inlineStr·e: 적힌 그대로
                 value = raw
             col = _column(self.ref)
             if col is not None and col > len(self.cells):

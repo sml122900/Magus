@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from mcp import Client
-from test_extract_formats import POST, _hwp, _write, _zip
+from test_extract_formats import POST, _hwp, _varied, _write, _zip
 
 from conftest import with_library
 from magus import extract as ex
@@ -80,6 +80,62 @@ def test_docx_without_extra_parts_unchanged(tmp_path: Path):
     assert ex.extract(_write(tmp_path, "a.docx", data)).text == "첫 문단\n둘째 문단\n"
 
 
+def test_hwp_pua_symbols_mapped(tmp_path: Path):
+    """한글 문서의 PUA 글자 둘(실제 공공 문서에서 봄): 기호 글꼴 가운뎃점 U+F09E → '·', 옛한글 U+F53A → 'ᄒᆞᆫ'."""
+    hwp = ex.extract(_write(tmp_path, "서식.hwp", _hwp([["용지는 백색 A4에 글 워드프로세서를 사용", "외화원화 차입"]])))
+    assert hwp.text == "용지는 백색 A4에 ᄒᆞᆫ글 워드프로세서를 사용\n외화·원화 차입\n"
+    section = ('<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+               "<hp:p><hp:run><hp:t>거주자비거주자</hp:t></hp:run></hp:p></hs:sec>")
+    hwpx = ex.extract(_write(tmp_path, "보도.hwpx", _zip({"Contents/section0.xml": section})))
+    assert hwpx.text == "거주자·비거주자\n"
+
+
+def test_pptx_symbols_and_blank_lines_tidied(tmp_path: Path):
+    """발표 자료(2026-10-14 점검): Wingdings 화살표 U+F0E0 → '→', 빈 문단이 수십 줄 이어지던 것은 빈 줄 하나로. PDF는 다듬지 않는다."""
+    A = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+    paras = "<a:p><a:r><a:t>폴더를 클릭  추가</a:t></a:r></a:p>" + "<a:p></a:p>" * 18 + "<a:p><a:r><a:t>다음 줄</a:t></a:r></a:p>"
+    slide = f"<p:sld {A}><p:cSld><p:spTree><p:sp><p:txBody>{paras}</p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+    got = ex.extract(_write(tmp_path, "발표.pptx", _zip({"ppt/slides/slide1.xml": slide})))
+    assert got.text == "## 슬라이드 1\n폴더를 클릭 → 추가\n\n다음 줄\n", got.text
+    assert ex.tidy("가\n \n　\n\n나\n\n다") == "가\n\n나\n\n다" and ".pdf" not in ex.TIDY
+
+
+def test_xlsx_numbers_15_digits():
+    """xlsx 숫자는 엑셀이 보이는 유효 숫자 15자리까지(부동소수 꼬리를 뗀다). 정수·짧은 소수·숫자 아닌 것은 그대로."""
+    assert ex._number_text("39.509900352700001") == "39.5099003527"
+    assert ex._number_text("0.94460617502999999") == "0.94460617503"
+    assert ex._number_text("14.3932937499") == "14.3932937499"  # 15자리 안
+    assert [ex._number_text(x) for x in ("103737", "1785", "-0.5", "1.5E-3", "#N/A", "")] == ["103737", "1785", "-0.5", "1.5E-3", "#N/A", ""]
+    assert ex._number_text("1.2345678901234568E+18") == "1.23456789012346e+18"
+
+
+HPX = 'xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"'
+
+
+def _hp(text: str, inner: str = "", after: str = "") -> str:
+    return f"<hp:p><hp:run><hp:t>{text}</hp:t>{inner}<hp:t>{after}</hp:t></hp:run></hp:p>"
+
+
+def test_hwpx_notes_and_tables_after_their_paragraph(tmp_path: Path):
+    """hwpx: 문단 안에 든 각주·머리말·표의 글자는 그 문단이 끝난 뒤에(2026-10-14, 실제 연구보고서에서 각주가 본문 문장 한가운데 끼었다)."""
+    note = f'<hp:ctrl><hp:footNote number="1"><hp:subList>{_hp(" 반면 사업체는 일정한 장소를 의미한다")}</hp:subList></hp:footNote></hp:ctrl>'
+    head = f"<hp:ctrl><hp:header><hp:subList>{_hp('소금청 보고서')}</hp:subList></hp:header></hp:ctrl>"
+    table = (f"<hp:tbl><hp:tr><hp:tc><hp:subList>{_hp('칸 하나')}</hp:subList></hp:tc>"
+             f"<hp:tc><hp:subList>{_hp('칸 둘')}</hp:subList></hp:tc></hp:tr></hp:tbl>")
+    section = (f"<hs:sec {HPX}>" + _hp("", head, "보도자료") + _hp("기업체란 관리하는 단위이다(통계청, 2015)", note, ". 개념을 그대로 적용하였다.")
+               + _hp("다음 표와 같다", table, " 끝.") + _hp("마지막 문단") + "</hs:sec>")
+    got = ex.extract(_write(tmp_path, "보고서.hwpx", _zip({"Contents/section0.xml": section})))
+    assert got.text == ("보도자료\n소금청 보고서\n"
+                        "기업체란 관리하는 단위이다(통계청, 2015). 개념을 그대로 적용하였다.\n 반면 사업체는 일정한 장소를 의미한다\n"
+                        "다음 표와 같다 끝.\n칸 하나\n칸 둘\n"
+                        "마지막 문단\n"), got.text
+    # 문단 하나에 든 큰 표: 붙잡아 둔 글자가 30만 자를 넘으면 그때까지를 내보내고 앞부분만(메모리를 무한히 쓰지 않는다)
+    cells = "".join(f"<hp:tc><hp:subList>{_hp(f'{n:05d}' + _varied(n, 995))}</hp:subList></hp:tc>" for n in range(400))  # 잘 압축되지 않게(zipguard)
+    big = f"<hs:sec {HPX}>" + _hp("머리", f"<hp:tbl><hp:tr>{cells}</hp:tr></hp:tbl>") + _hp("뒤 문단") + "</hs:sec>"
+    cut = ex.extract(_write(tmp_path, "큰 표.hwpx", _zip({"Contents/section0.xml": big})))
+    assert cut.status == "truncated" and len(cut.text) == ex.TEXT_MAX and cut.text.startswith("머리00000") and "뒤 문단" not in cut.text
+
+
 def test_encrypted_hwpx_says_locked(tmp_path: Path):
     """암호·배포용 hwpx: 목록에 암호화 정보가 있고 구역이 XML이 아니면 '읽을 수 없는 hwp'(까닭 있음). 전에는 까닭 없는 실패였다."""
     manifest = ('<?xml version="1.0"?><odf:manifest xmlns:odf="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0">'
@@ -111,6 +167,25 @@ async def test_search_item_with_only_attachment_has_no_empty_quote(store: LocalS
     assert "제목 「논문 1~10」" in found and f"(첨부:{att.id}) 글자에서 맞음" in found
     after_head = found.split("제목 「논문 1~10」", 1)[1].split("\n")
     assert "“”" not in found and after_head[1].startswith("   첨부 1개:"), found
+
+
+@pytest.mark.anyio
+async def test_search_snippet_shows_the_whole_query(store: LocalStore, data_dir: Path):
+    """맞은 곳 앞뒤 글자는 검색어 전체가 이어 나오는 곳(낱말 사이 줄바꿈 허용) → 긴 낱말부터(2026-10-14 공공 문서 점검).
+    전에는 첫 낱말이 처음 나온 곳(머리말의 담당 부서 이름 등)이 보였다."""
+    text = ("담당 부서 해외건설정책과\n" + "가나다라마바사 " * 40 + "\n정부 공공 금융기관 해외건설\n위기극복 지혜모아\n" + "아자차카 " * 40
+            + "\n용지는 한글 문서로 " + "타파하 " * 40 + "\nᄒᆞᆫ글 워드프로세서를 사용\n")
+    with_library(store, "alice")
+    book = store.create_category("alice", "자료", "blank", "#1f2f5c", (), "common").id
+    store.put_category_item("alice", CategoryItem(POST, book, "보도", "me", title="보도", title_by="author"))
+    att = store.put_attachment("alice", f"{book}/{POST}", "보도.txt", text.encode())
+    store.attachment_text("alice", f"{book}/{POST}", att.id)
+    settings = Settings.from_env({"USER_ID": "alice", "DATA_DIR": str(data_dir)})
+    async with Client(build_server(settings, store)) as c:
+        first = (await c.call_tool("category_search", {"query": "해외건설 위기극복"})).content[0].text
+        second = (await c.call_tool("category_search", {"query": "글 워드프로세서"})).content[0].text
+    assert "해외건설 위기극복 지혜모아" in first and "담당 부서" not in first, first
+    assert "ᄒᆞᆫ글 워드프로세서를 사용" in second, second
 
 
 @pytest.mark.anyio
