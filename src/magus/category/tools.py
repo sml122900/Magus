@@ -696,7 +696,10 @@ def build_tools(
         status, text = store.attachment_text(user, owner, chunk.part, make=False)
         if hit is None or not text:
             return []
-        page = page_of(text, chunk.text[:80])
+        low = chunk.text.lower()  # 조각 안에서 맞은 곳(조각은 800자라 맞은 곳이 다음 쪽일 수 있다, 2026-10-14)
+        phrases, words = query_parts(query)
+        offset = next((low.find(t.lower()) for t in [*phrases, *words, *tokens(query)] if t and low.find(t.lower()) >= 0), 0)
+        page = page_of(text, chunk.text[:80], offset)
         return [f"   📎 첨부 「{hit[1].name}」(첨부:{chunk.part}) 글자에서 맞음 · 쪽 {page}/{len(pages(text))}: “{around(chunk.text, query)}”",
                 f"   → 그 쪽 읽기: category_search(attachment=\"{chunk.part}\", page={page})"]
 
@@ -731,6 +734,9 @@ def build_tools(
         if state == "empty":
             return f"첨부 「{att.name}」: 글자 없음(그림이나 스캔한 PDF일 수 있다. 글자 읽기(OCR)는 아직 하지 않는다)."
         if why := unreadable_hwp(status):  # 암호·배포용·한글 97 이전 hwp(2026-10-11)
+            if status.get("reason") == "hwp_dist":  # 배포용은 받은 사람이 풀 수 없다(2026-10-14): 원본이나 PDF를 부탁한다
+                return (f"첨부 「{att.name}」: {HWP_UNREADABLE}다({why}: 만든 사람이 글자를 복사·저장할 수 없게 한 문서). "
+                        "저자에게 배포용으로 바꾸기 전의 원본 파일이나 같은 문서의 PDF를 올려 달라고 한다.")
             return (f"첨부 「{att.name}」: {HWP_UNREADABLE}다({why}). "
                     "저자에게 한글에서 암호·배포용을 풀거나 hwp·hwpx로 다시 저장해 올려 달라고 한다.")
         if state == "failed":
@@ -759,7 +765,8 @@ def build_tools(
         head += f" · 제목 「{item.title}」" + (" (AI가 지은 제목)" if item.title_by == "ai" else "") if item.title else ""
         if not item.title and (stem := title_from_files(a.name for a in store.list_attachments(user, f"{item.category_id}/{item.id}"))):
             head += f" · 제목 「{stem}」(첫 첨부의 파일 이름)"  # 제목 없는 글은 보일 때만 첫 첨부 이름(파일은 그대로)
-        out = [head, f"   “{summary(item)[:300]}”"]
+        text = summary(item)
+        out = [head, *([f"   “{text[:300]}”"] if text else [])]  # 본문 없이 첨부만 있는 글은 빈 인용 줄(“”)을 보이지 않는다(2026-10-14)
         out += [f"   이유: {one_line(item.reason)[:150]}"] if item.reason else []
         out += [f"   위치: {one_line(item.where)[:80]}"] if item.where else []
         out += [f"   쓸 부분: “{one_line(p.text)[:120]}”" for p in item.passages[:2]]
@@ -773,7 +780,8 @@ def build_tools(
         if item.parent_id:
             parent = store.get_category_item(user, item.category_id, item.parent_id)
             if parent is not None:
-                out.append(f"   ↳ 이 글이 응답한 저자의 말: “{summary(parent)[:80]}”")
+                said = summary(parent)
+                out.append(f"   ↳ 이 글이 응답한 저자의 말: “{said[:80]}”" if said else "   ↳ 이 글이 응답한 저자의 글: " + parent.id)
         out += attached(user, f"{item.category_id}/{item.id}")
         return out
 

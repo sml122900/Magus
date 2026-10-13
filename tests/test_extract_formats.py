@@ -256,10 +256,12 @@ def test_hwp_compressed_and_plain(tmp_path: Path):
 
 
 def test_hwp_locked_old_and_broken(tmp_path: Path, store: LocalStore, data_dir: Path):
-    for name, data in (("암호.hwp", _hwp([["비밀"]], flags=0x02)), ("배포용.hwp", _hwp([["비밀"]], flags=0x04)),
-                       ("뷰텍스트.hwp", _hwp([["비밀"]], view_text=True))):
+    # 까닭을 가른다(2026-10-14): 암호 · 배포용(속성 또는 ViewText) · DRM. 암호와 배포용이 함께면 암호
+    for name, data, reason in (("암호.hwp", _hwp([["비밀"]], flags=0x02), "hwp_password"), ("배포용.hwp", _hwp([["비밀"]], flags=0x04), "hwp_dist"),
+                               ("뷰텍스트.hwp", _hwp([["비밀"]], view_text=True), "hwp_dist"), ("drm.hwp", _hwp([["비밀"]], flags=0x10), "hwp_drm"),
+                               ("둘다.hwp", _hwp([["비밀"]], flags=0x06), "hwp_password")):
         got = ex.extract(_write(tmp_path, name, data))
-        assert (got.status, got.reason, got.text) == ("failed", "hwp_locked", "")
+        assert (got.status, got.reason, got.text) == ("failed", reason, ""), name
     old = ex.extract(_write(tmp_path, "옛.hwp", b"HWP Document File V3.00 \x1a\x01\x02\x03\x04\x05" + b"\0" * 200))
     assert (old.status, old.reason) == ("failed", "hwp_old")
     for name, data in (("가짜.hwp", b"not ole"), ("다른.hwp", _cfb({"FileHeader": b"x" * 4096}))):
@@ -269,9 +271,11 @@ def test_hwp_locked_old_and_broken(tmp_path: Path, store: LocalStore, data_dir: 
     att = tmp_path / "att"
     att.mkdir()
     status = ex.save(att, "암호.hwp", ex.extract(tmp_path / "암호.hwp"))
-    assert json.loads((att / ".text" / "status.json").read_text(encoding="utf-8"))["reason"] == "hwp_locked"
-    assert ex.read_status(att) == status and ex.unreadable_hwp(status) == "암호가 걸렸거나 배포용 문서"
-    assert ex.unreadable_hwp({"status": "failed"}) is None and ex.unreadable_hwp({"status": "ok", "reason": "hwp_locked"}) is None
+    assert json.loads((att / ".text" / "status.json").read_text(encoding="utf-8"))["reason"] == "hwp_password"
+    assert ex.read_status(att) == status and ex.unreadable_hwp(status) == "암호가 걸린 문서"
+    assert ex.unreadable_hwp({"status": "failed", "reason": "hwp_dist"}) == "배포용 문서"
+    assert ex.unreadable_hwp({"status": "failed", "reason": "hwp_locked"}) == "암호가 걸렸거나 배포용 문서"  # 2026-10-14 전에 뽑은 상태
+    assert ex.unreadable_hwp({"status": "failed"}) is None and ex.unreadable_hwp({"status": "ok", "reason": "hwp_password"}) is None
 
 
 def test_hwp_inflate_bomb_and_zip_bombs_refused(tmp_path: Path):
@@ -348,7 +352,7 @@ def test_extract_check_command_prints_only_counts_and_head(tmp_path: Path, capsy
     first = out.split("[2/5]")[0]
     assert "형식: .hwp · 한글 문서" in first and "상태: 뽑음" in first and "쪽 수: 2(대화에서 읽는 3,000자 쪽)" in first
     assert first.count("가") == 300 - len("엘알토 장날 ")  # 앞 300자만
-    assert "## 메모" in out and "상태: 글자를 뽑지 않는 형식" in out and "상태: 읽을 수 없는 hwp(암호가 걸렸거나 배포용 문서)" in out
+    assert "## 메모" in out and "상태: 글자를 뽑지 않는 형식" in out and "상태: 읽을 수 없는 hwp(암호가 걸린 문서)" in out
     assert "숨은 글" not in out and "상태: 파일이 없습니다" in out
 
 
@@ -393,7 +397,8 @@ def test_old_binary_formats_not_extracted(tmp_path: Path):
 
 def test_stale_status_is_extracted_again(tmp_path: Path):
     assert ex.due(None, "a.hwp") and ex.due({"status": "failed", "version": 1}, "a.hwp")  # 형식을 뽑기 전 VERSION의 상태
-    assert not ex.due({"status": "failed", "version": 1}, "a.docx") and not ex.due({"status": "ok", "version": 2}, "a.hwp")
+    assert not ex.due({"status": "ok", "version": 1}, "a.pdf") and not ex.due({"status": "ok", "version": 2}, "a.hwp")
+    assert ex.due({"status": "ok", "version": 2}, "a.docx") and not ex.due({"status": "ok", "version": 3}, "a.docx")  # docx 각주 등(2026-10-14)
     assert ex.due({"status": "later", "version": 2, "at": "2026-01-01T00:00:00.000Z"}, "a.hwp")
 
 
@@ -433,7 +438,7 @@ async def test_chat_finds_and_reads_hwp_and_labels(store: LocalStore, data_dir: 
         assert "옹기장수" in read and "마지막 쪽이다." in read and page > 1
         assert "0번째 문단" in text(await c.call_tool("category_search", {"attachment": ids["한글 원고.hwp"]}))
         locked = text(await c.call_tool("category_search", {"attachment": ids["암호.hwp"]}))
-        assert "읽을 수 없는 hwp다(암호가 걸렸거나 배포용 문서)" in locked
+        assert "읽을 수 없는 hwp다(암호가 걸린 문서)" in locked
         old = text(await c.call_tool("category_search", {"attachment": ids["옛 문서.doc"]}))
         assert "글자를 뽑지 않는 형식이다(doc·ppt·xls 같은 옛 형식)" in old
         sheet = text(await c.call_tool("category_search", {"query": "소금"}))
@@ -492,7 +497,7 @@ def test_web_labels_hwp_html_and_old_formats(server_proc):  # noqa: F811
                                 made.text))
         assert set(links) == {"나루 기록.hwp", "암호.hwp", "자료.html"}
         assert "옹기장수가 나루를 건넜다" in c.get(links["나루 기록.hwp"]).text
-        assert "읽을 수 없는 hwp입니다(암호가 걸렸거나 배포용 문서)." in c.get(links["암호.hwp"]).text
+        assert "읽을 수 없는 hwp입니다(배포용 문서)." in c.get(links["암호.hwp"]).text
         assert "칸1\t칸2" in c.get(links["자료.html"]).text
         board = c.get(f"/shelf/{book}", params={"q": "옹기장수"}).text
         assert "나루 기록.hwp" in board and "<mark>옹기" in board
@@ -505,4 +510,4 @@ def test_web_labels_hwp_html_and_old_formats(server_proc):  # noqa: F811
         missing = c.get(f"/shelf/{book}/{post}/text/{xls_file.group(2)}")
         assert missing.status_code == 404 and "글자를 뽑지 않는 형식입니다(doc·ppt·xls)." in missing.text
     log = Path(log_path).read_text(encoding="utf-8")
-    assert "extract failed kind=.hwp reason=hwp_locked" in log and "암호" not in log and "옹기" not in log
+    assert "extract failed kind=.hwp reason=hwp_dist" in log and "암호" not in log and "옹기" not in log

@@ -2,7 +2,9 @@
 
 - 대상: docx·pdf(글자가 있는 것)·txt·md. 그림·스캔 PDF는 이번에 하지 않는다(글자가 안 나오면 '글자 없음'으로 적는다. OCR은 다음 결정).
   2026-10-11(형식 늘림, VERSION 2): hwp·hwpx·pptx·xlsx·odt·rtf·csv·html·htm. 옛 Office 바이너리(doc·ppt·xls)는 뽑지 않고
-  '글자를 뽑지 않는 형식'으로 보인다. 암호·배포용 hwp는 failed + reason(hwp_locked)으로 적어 '읽을 수 없는 hwp'로 보인다.
+  '글자를 뽑지 않는 형식'으로 보인다. 암호·배포용 hwp는 failed + reason으로 적어 '읽을 수 없는 hwp'로 보인다.
+  2026-10-14(공공 문서 호환성 점검, VERSION 3): reason을 암호(hwp_password)·배포용(hwp_dist)·DRM(hwp_drm)으로 가르고,
+  docx에 각주·미주·머리말·꼬리말을 더하고 글상자가 두 번 나오던 것을 고쳤다(docx만 다시 뽑는다, SINCE).
 - 어디에: 그 첨부 폴더 안 `.text/<파일 이름>.txt`(뽑은 글자)와 `.text/status.json`({status, chars, ms, at, version, reason?}). 원본은 읽기만.
   썸네일(.thumb/)과 같은 방식이라 옛 코드는 첨부 폴더에서 파일만 세므로 무시한다. 첨부 폴더째 움직이므로 휴지통 왕복에도 함께 간다.
   reason은 옛 코드가 모르는 키일 뿐이다(옛 코드는 status만 보고 '뽑지 못함'으로 보인다).
@@ -45,21 +47,25 @@ DEADLINE = 20.0  # 초. 넘으면 '나중에'
 PAGE_CHARS = 3_000  # 대화에서 한 번에 읽는 쪽
 EXTRACTABLE = (".docx", ".pdf", ".txt", ".md",  # VERSION 1(#100)
                ".hwp", ".hwpx", ".pptx", ".xlsx", ".odt", ".rtf", ".csv", ".html", ".htm")  # VERSION 2(2026-10-11)
-SINCE = dict.fromkeys(EXTRACTABLE[4:], 2)  # 형식을 뽑기 시작한 VERSION. 그보다 옛 상태는 다시 뽑는다(warm-cache·extract·처음 열 때)
+# 그 형식의 뽑은 글자가 마지막으로 바뀐 VERSION. 그보다 옛 상태는 다시 뽑는다(warm-cache·extract·처음 열 때).
+# 3(2026-10-14): docx 각주·미주·머리말·꼬리말, 글상자 한 번
+SINCE = dict.fromkeys(EXTRACTABLE[4:], 2) | {".docx": 3}
 NO_TEXT_SUFFIXES = (".doc", ".ppt", ".xls")  # 옛 Office 바이너리: 이번에는 뽑지 않는다
 NO_TEXT = "글자를 뽑지 않는 형식"  # 저자·Claude에게 보이는 이름
 HWP_UNREADABLE = "읽을 수 없는 hwp"
 FORMATS = "docx·hwp·hwpx·pdf·pptx·xlsx·odt·rtf·txt·md·csv·html"  # 글자를 뽑는 형식(안내 문장에 쓴다)
-VERSION = 2
+VERSION = 3
 # status: ok(뽑음) · truncated(30만 자 넘어 앞부분만) · empty(글자 없음: 그림·스캔 PDF·빈 문서) · failed(읽지 못함: 깨진 파일·암호) · later(시간 넘음)
-# reason(failed일 때만, 있으면): hwp_locked(암호·배포용·DRM hwp) · hwp_old(한글 97 이전 hwp)
+# reason(failed일 때만, 있으면): hwp_password(암호) · hwp_dist(배포용 문서) · hwp_drm(DRM·공인인증서) · hwp_old(한글 97 이전 hwp)
+#   (2026-10-14 전에는 앞의 셋을 hwp_locked 하나로 적었다. 옛 상태는 그대로 읽는다)
 DONE = ("ok", "truncated", "empty", "failed")
 READABLE = ("ok", "truncated")
 SHEET_ROWS = 2_000  # xlsx 시트 하나에서 뽑는 행(빈 행은 세지 않는다)
 RAW_MAX = 50_000_000  # 통째로 읽는 것(hwp의 OLE 스트림 하나, rtf 파일)의 상한
 log = logging.getLogger("magus.extract")
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-_WHY = {"hwp_locked": "암호가 걸렸거나 배포용 문서", "hwp_old": "한글 97 이전 형식"}
+_WHY = {"hwp_password": "암호가 걸린 문서", "hwp_dist": "배포용 문서", "hwp_drm": "보안(DRM)이 걸린 문서", "hwp_old": "한글 97 이전 형식",
+        "hwp_locked": "암호가 걸렸거나 배포용 문서"}  # hwp_locked: 2026-10-14 전에 뽑은 상태(암호·배포용을 가르지 않았다)
 
 
 class _Late(Exception):
@@ -79,7 +85,7 @@ class Extracted:
     status: str
     text: str  # READABLE일 때만 글자가 있다
     ms: int = 0
-    reason: str = ""  # failed의 까닭(hwp_locked·hwp_old). 없으면 status.json에 쓰지 않는다
+    reason: str = ""  # failed의 까닭(hwp_password·hwp_dist·hwp_drm·hwp_old). 없으면 status.json에 쓰지 않는다
 
 
 def extractable(name: str) -> bool:
@@ -193,45 +199,73 @@ def _pdf(path: Path, check) -> tuple[str, bool]:
     return "".join(parts), False
 
 
-def _docx(path: Path, check) -> tuple[str, bool]:
-    from lxml import etree  # noqa: PLC0415
+_MC_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
+# 본문 뒤에 붙이는 docx 부분(2026-10-14 호환성 점검): 각주·미주, 그다음 머리말·꼬리말(같은 글은 한 번)
+_DOCX_NOTES = ((r"word/footnotes\.xml", "각주"), (r"word/endnotes\.xml", "미주"))
+_DOCX_HEADS = r"word/(header|footer)(\d{0,4})\.xml"
 
-    parts: list[str] = []
-    total = 0
+
+def _docx(path: Path, check) -> tuple[str, bool]:
+    """본문(word/document.xml), 그다음 '## 각주'·'## 미주'·'## 머리말·꼬리말'(글자가 있을 때만, 2026-10-14).
+    전에는 본문만 읽어 각주·머리말이 빠졌고, 글상자는 새 모양(mc:Choice)과 옛 모양(mc:Fallback)이 둘 다 들어가 두 번 나왔다."""
+    sink = _Sink()
     with zipfile.ZipFile(path) as z:
         zipguard.check(z)  # 압축 폭탄은 풀기 전에 막는다(2026-10-09 점검 7-c) → 글자를 뽑지 못함(failed)
-    # 글자(w:t)·탭·줄바꿈이 끝날 때마다 모으고, 읽은 요소와 그 앞 형제를 바로 버린다(2026-10-09 점검 7-b).
-    # 전에는 문단(w:p)이 끝나야 내보내 run 150만 개짜리 문단 하나가 통째로 트리에 올라갔다(84KB → 637MB).
-    # 시간은 요소 1만 개마다, 30만 자는 문단 안에서도 본다.
-    tags = {f"{_W}t": "t", f"{_W}tab": "\t", f"{_W}br": "\n", f"{_W}r": "", f"{_W}p": "p"}
-    pending: list[str] = []
-    room = TEXT_MAX
-    with zipfile.ZipFile(path) as z, z.open("word/document.xml") as f:
-        for n, (_, el) in enumerate(etree.iterparse(f, events=("end",), tag=tuple(tags))):
+        names = z.namelist()
+        _docx_xml(z, "word/document.xml", sink, check)
+        for pattern, title in _DOCX_NOTES:
+            for name in (n for n in names if re.fullmatch(pattern, n)):
+                _docx_extra(z, [name], title, sink, check)
+        heads = sorted((m.group(1) == "footer", m.group(2).zfill(4), n) for n in names if (m := re.fullmatch(_DOCX_HEADS, n)))  # 머리말 먼저
+        _docx_extra(z, [n for *_, n in heads], "머리말·꼬리말", sink, check)
+    return sink.result()
+
+
+def _docx_extra(z: zipfile.ZipFile, names: list[str], title: str, sink: _Sink, check) -> None:
+    """각주·머리말 같은 덧붙은 부분: 빈 줄을 빼고, 같은 줄은 한 번만(머리말이 쪽마다 같은 경우) 머리 '## 제목' 아래에."""
+    lines: list[str] = []
+    for name in names:
+        if sink.cut:
+            return
+        part = _Sink()
+        _docx_xml(z, name, part, check)
+        lines += [x for x in part.result()[0].split("\n") if x.strip()]
+    lines = list(dict.fromkeys(lines))
+    if lines:
+        sink.add(f"\n## {title}\n" + "\n".join(lines) + "\n")
+
+
+def _docx_xml(z: zipfile.ZipFile, name: str, sink: _Sink, check) -> None:
+    """word/*.xml 하나. 글자(w:t)·탭·줄바꿈이 끝날 때마다 모으고, 읽은 요소와 그 앞 형제를 바로 버린다(2026-10-09 점검 7-b).
+    전에는 문단(w:p)이 끝나야 내보내 run 150만 개짜리 문단 하나가 통째로 트리에 올라갔다(84KB → 637MB).
+    시간은 요소 1만 개마다, 30만 자는 sink가 본다. 탭·줄바꿈은 글자 묶음(w:r) 안의 것만(문단 서식의 탭 위치 w:tabs/w:tab은 글자가 아니다),
+    mc:Fallback(같은 글상자·도형의 옛 모양) 안은 건너뛴다(2026-10-14)."""
+    from lxml import etree  # noqa: PLC0415
+
+    tags = {f"{_W}t": "t", f"{_W}tab": "\t", f"{_W}br": "\n", f"{_W}cr": "\n", f"{_W}r": "", f"{_W}p": "\n", _MC_FALLBACK: ""}
+    fallback = 0
+    with z.open(name) as f:
+        for n, (event, el) in enumerate(etree.iterparse(f, events=("start", "end"), tag=tuple(tags), resolve_entities=False,
+                                                        no_network=True)):
             if n % 10_000 == 0:
                 check()
+            if el.tag == _MC_FALLBACK:
+                fallback += 1 if event == "start" else -1
+            if event == "start":
+                continue
             kind = tags[el.tag]
-            if kind == "t":
-                pending.append(el.text or "")
-                room -= len(pending[-1])
-            elif kind in ("\t", "\n"):
-                pending.append(kind)
-                room -= 1
-            elif kind == "p":
-                pending.append("\n")
-                room -= 1
-            if kind == "p" or room < 0:
-                total, cut = _limit(parts, total, "".join(pending))
-                pending, room = [], TEXT_MAX - total
-                if cut:
-                    return "".join(parts), True
-            el.clear(keep_tail=True)
             parent = el.getparent()
+            if not fallback and kind:
+                if kind == "t":
+                    sink.add(el.text or "")
+                elif el.tag == f"{_W}p" or (parent is not None and parent.tag == f"{_W}r"):
+                    sink.add(kind)
+                if sink.cut:
+                    return
+            el.clear(keep_tail=True)
             if parent is not None:
                 while el.getprevious() is not None:
                     del parent[0]
-    total, cut = _limit(parts, total, "".join(pending))
-    return "".join(parts), cut
 
 
 BAD_SHARE = 0.01  # 대체 문자(�)·제어 문자가 이 비율을 넘으면 그 인코딩이 아니다(점검 7-f)
@@ -736,7 +770,7 @@ def _odt(path: Path, check) -> tuple[str, bool]:
 # hwp 5.0(OLE 복합 파일). 한글 문서 파일 형식 5.0 공개 문서를 따른다
 _HWP_SIGNATURE = b"HWP Document File"
 _HWP_PARA_TEXT = 0x10 + 51  # HWPTAG_BEGIN + 51 = 67
-_HWP_LOCKED = 0x02 | 0x04 | 0x10 | 0x100 | 0x400  # FileHeader 속성: 암호 · 배포용 · DRM · 공인인증서 암호화 · 공인인증서 DRM
+_HWP_PASSWORD, _HWP_DIST, _HWP_DRM = 0x02, 0x04, 0x10 | 0x100 | 0x400  # FileHeader 속성: 암호 · 배포용 · DRM·공인인증서 암호화·공인인증서 DRM
 _HWP_CHAR = {10: "\n", 24: "-", 30: " ", 31: " "}  # 한 글자짜리 제어 문자(0·13·25~29는 버린다)
 _HWP_ONE = frozenset({0, 10, 13, *range(24, 32)})  # 그 밖(1~9·11·12·14~23)은 여덟 글자(16바이트)짜리 컨트롤
 _HWP_CTRL = re.compile(rb"[\x00-\x1f]\x00")
@@ -758,8 +792,14 @@ def _hwp(path: Path, check) -> tuple[str, bool]:
         if not header.startswith(_HWP_SIGNATURE) or len(header) < 40:
             raise ValueError("hwp가 아님")
         flags = int.from_bytes(header[36:40], "little")
-        if flags & _HWP_LOCKED or ole.exists("ViewText"):  # 배포용 문서는 본문이 ViewText에 암호화되어 있다
-            raise _Unreadable("hwp_locked")
+        # 까닭을 가른다(2026-10-14): 배포용 문서는 암호를 모르는 저자도 받는 흔한 문서라(공문·보도자료) '암호'와 다르게 알린다.
+        # 배포용은 본문이 ViewText에 암호화되어 있다(BodyText는 비었거나 없다)
+        if flags & _HWP_PASSWORD:
+            raise _Unreadable("hwp_password")
+        if flags & _HWP_DIST or ole.exists("ViewText"):
+            raise _Unreadable("hwp_dist")
+        if flags & _HWP_DRM:
+            raise _Unreadable("hwp_drm")
         sections = sorted((int(m.group(1)), e) for e in ole.listdir()
                           if len(e) == 2 and e[0] == "BodyText" and (m := re.fullmatch(r"Section(\d{1,6})", e[1])))
         for _, entry in sections:
@@ -1091,11 +1131,13 @@ def pages(text: str) -> list[str]:
     return out or [""]
 
 
-def page_of(text: str, needle: str) -> int:
-    """needle이 든 쪽 번호(1부터). 못 찾으면 1."""
+def page_of(text: str, needle: str, offset: int = 0) -> int:
+    """needle이 든 쪽 번호(1부터). 못 찾으면 1. offset: needle 시작에서 몇 글자 뒤의 쪽인지(2026-10-14: 조각(800자) 첫머리가 아니라
+    조각 안에서 맞은 곳의 쪽을 알린다. 전에는 맞은 곳이 다음 쪽에 있어도 조각이 시작한 쪽을 알렸다)."""
     at = text.find(needle) if needle else -1
     if at < 0:
         return 1
+    at = min(len(text) - 1, at + max(0, offset))
     seen = 0
     for n, page in enumerate(pages(text), 1):
         seen += len(page)
