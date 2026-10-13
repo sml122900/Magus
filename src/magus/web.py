@@ -48,7 +48,7 @@ from magus.webcontexts import ContextPages
 from magus.webdocs import DocumentPages
 from magus.webmap import MapPages
 from magus.webshelf import ShelfPages
-from magus.webstart import StartPages
+from magus.webstart import COPY_SCRIPT, START_STYLE, StartPages
 
 log = logging.getLogger("magus.web")
 SCREEN: contextvars.ContextVar[str] = contextvars.ContextVar("magus_screen", default="other")  # 도움말에 보낼 화면 이름 열쇠(#97)
@@ -565,8 +565,14 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPag
         if uid is None:  # 토큰은 유효하지만 허용 목록 밖. 본인의 사용자 id를 보여 준다(운영자가 목록에 넣을 값)
             sub = str(claims.get("sub", ""))
             log.warning("web login: not allowed sub_hash=%s", hashlib.sha256(sub.encode()).hexdigest()[:10])
+            # 초대 전 사람이 처음 보는 화면(2026-10-14): 무엇을 하면 되는지와 보낼 id를 복사 단추와 함께
             return self._page("로그인", '<p class="msg err">허용 목록에 없습니다(403).</p>'
-                              f"<p>사용자 id <code>{html.escape(sub)}</code></p>", status=403)
+                              "<p>아직 초대 목록에 없는 계정입니다. 아래 사용자 id를 운영자에게 보내 주시면 추가해 드립니다. "
+                              "추가된 뒤 다시 로그인하면 됩니다.</p>"
+                              f'<div class="url-box"><span id="sub-id"><code>{html.escape(sub)}</code></span>'
+                              '<button type="button" data-copy="sub-id">id 복사</button></div>'
+                              '<p class="copy-note muted" role="status" aria-live="polite"></p>'
+                              f'<p><a href="/login">다시 로그인</a></p>{COPY_SCRIPT}', status=403, css=START_STYLE)
         await run_in_threadpool(self._remember_email, uid, str(claims.get("sub", "")), tokens)
         response = RedirectResponse(str(pending.get("n") or "/shelf"), status_code=303)
         self._cookie(response, SESSION_COOKIE, sign({"uid": uid, "sid": secrets.token_hex(8)}, self.secret, "session",

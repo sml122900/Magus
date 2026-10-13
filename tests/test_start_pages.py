@@ -50,6 +50,7 @@ def test_steps_until_first_document_and_hints(server_proc):  # noqa: F811
         _, book = _book(data_dir)
         listed = c.get("/shelf").text
         assert "<li class=done><b>프로젝트 만들기</b>" in listed and "<li class=next><b>문서 올리기</b>" in listed and "프로젝트 열기" in listed
+        assert f'다음: <a href="/shelf/write/{book}">글쓰기</a>에서 문서를 첨부합니다.' in c.get(f"/shelf/{book}?done=made").text
         csrf = _csrf(c.get(f"/shelf/write/{book}").text)
         assert 'name="each"' in c.get(f"/shelf/write/{book}").text
         hwp = _hwp([["제1장 강가의 마을", "나루터에는 아침마다 소금 배가 닿았다."]])
@@ -59,6 +60,9 @@ def test_steps_until_first_document_and_hints(server_proc):  # noqa: F811
         assert "Claude에서 이렇게 물어보세요: 「magus에서 「강마을_원고」 읽어 줘」" in made.text
         assert '<small class="tstate ok">Claude가 읽을 수 있음 · 글자 ' in made.text
         assert '<small class="tstate no">Claude가 읽을 수 없음 · 새 형식(docx·pptx·xlsx)으로' in made.text
+        board = c.get(f"/shelf/{book}").text
+        assert 'class="nread" title="Claude가 읽을 수 없는 첨부 1개"' in board  # doc 하나는 읽을 수 없다
+        assert "다음: <a" not in c.get(f"/shelf/{book}?done=made").text  # 글이 생기면 다음 할 일은 보이지 않는다
         assert 'aria-label="시작 순서"' not in c.get("/shelf").text  # 문서를 올렸으면 시작 순서는 사라진다
         assert ">강마을_원고.hwp<" in c.get("/me/documents").text  # 문서 업데이트에 hwp도(2026-10-14)
         # 파일마다 글 하나로: 논문 셋 → 글 셋(제목은 파일 이름)

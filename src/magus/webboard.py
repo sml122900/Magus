@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import html
+import re
 import time
 import urllib.parse
 from collections.abc import Awaitable, Callable, Iterable
@@ -52,6 +53,7 @@ SEP = ' <span aria-hidden="true">›</span> '
 WHEN = "%Y-%m-%d %H:%M"
 DONE = {"made": "만들었습니다.", "edit": "저장했습니다.", "trashed": "휴지통으로 옮겼습니다.", "restored": "되살렸습니다.",
         "edited": "고쳤습니다."}
+ITEM_ID = re.compile(r"\d{17}-[0-9a-f]{6}")
 ASK_HINT = "Claude에서 이렇게 물어보세요: 「magus에서 {title} 읽어 줘」 · 「magus {book} 책에서 ○○ 찾아 줘」"  # 글쓰기 뒤(2026-10-14)
 
 
@@ -126,6 +128,7 @@ ul.files a.as-text{display:inline-flex;align-items:center;min-height:44px;paddin
 ul.files .tstate{display:block;font-size:14px;padding-left:2px}ul.files .tstate.ok{color:var(--ink2)}
 ul.files .tstate.no{color:var(--ink);border-left:3px solid var(--ruby);padding-left:6px}ul.files .tstate.wait{color:var(--ink2)}
 label.each{display:inline-flex;gap:8px;align-items:center;margin-top:8px;min-height:44px}
+.posts .nread{margin-left:4px;color:var(--ink)}
 pre.att-text{white-space:pre-wrap;word-break:break-word;background:var(--canvas);border:1px solid var(--line);border-radius:12px;padding:16px 20px;
 font:inherit;font-size:16px;line-height:1.7;max-width:100%;overflow-x:auto}
 .att-head{color:var(--ink2);margin:8px 0}
@@ -379,7 +382,7 @@ def marked_query(q: str, posts: Iterable[Post]) -> str:
     return " ".join([q, *stems]) if stems else q
 
 
-def post_row_html(post: Post, q: str = "", star: str = "") -> str:
+def post_row_html(post: Post, q: str = "", star: str = "", warn: str = "") -> str:
     """게시판 한 줄: 제목 · 첨부 표시(📎, 그림이면 작은 미리보기) · 날짜 · 스크랩(☆). 누르면 글 보기 페이지.
     star: 별표 단추 HTML(게시판). 없으면(찾기 결과 등) 스크랩한 글에 ★ 표시만."""
     if post.title:
@@ -400,6 +403,8 @@ def post_row_html(post: Post, q: str = "", star: str = "") -> str:
     thumb = (f'<img class="thumb" src="{html.escape(post.link)}/thumbs/{html.escape(pic.id)}" alt="" loading="lazy">' if pic else "")
     count = len(post.files)
     paperclip = f'<span class="clip" aria-label="첨부 {count}개" title="첨부 {count}개">📎 {count}</span>' if count else ""
+    if warn:  # Claude가 읽을 수 없는 첨부가 있다(2026-10-14): 열지 않아도 보이게
+        paperclip += f'<span class="nread" title="{html.escape(warn)}" aria-label="{html.escape(warn)}">⚠</span>'
     mark_only = '<span class="scrapped" title="스크랩" aria-label="스크랩">★</span>' if post.scrap and not star else ""
     return (f'<li><a class="post" href="{html.escape(post.link)}">{head}<span class="pa">{mark_only}{thumb}{paperclip}</span>'
             f'<time class="pd" datetime="{html.escape(post.at)}">{local_time(post.at, WHEN)}</time></a>{star}'
@@ -553,6 +558,8 @@ class BoardPages:
             done = f"글 {int(params['n'])}개를 만들었습니다. " + ASK_HINT.format(title=f"「{example}」", book=f"「{c.name}」")
         name = f"「{c.name}」 " if params.get("done") in ("made", "edit") else ""
         trash = (f' <a href="/shelf/p/{urllib.parse.quote(c.floor)}/trash">휴지통</a>' if params.get("done") == "trashed" else "")
+        if params.get("done") == "made" and not self.store.list_category_items(uid, c.id):  # 새 책의 다음 할 일(2026-10-14)
+            trash = f' 다음: <a href="/shelf/write/{html.escape(c.id)}">글쓰기</a>에서 문서를 첨부합니다.'
         message = f'<p class="msg">{html.escape(name)}{done}{trash}</p>' if done else ""
         items = self.store.list_category_items(uid, c.id)
         links = []
@@ -581,7 +588,7 @@ class BoardPages:
         csrf = self._csrf_input(session)
         if shown:
             lit = marked_query(q, shown)
-            board = (f'<ol class="posts">{"".join(post_row_html(p, lit, star_html(p.link, p.scrap, csrf, back)) for p in shown)}</ol>'
+            board = (f'<ol class="posts">{"".join(post_row_html(p, lit, star_html(p.link, p.scrap, csrf, back), self._unreadable(uid, c.id, p)) for p in shown)}</ol>'
                      + STAR_SCRIPT)
         elif q:
             board = ""  # 결과 줄이 '맞는 글이 없습니다.'라고 말한다
@@ -651,6 +658,14 @@ class BoardPages:
         title, body = await run_in_threadpool(self._post_body, uid, session, kind, obj, request.query_params)
         lead = await run_in_threadpool(self.trail, uid, kind.key, title[:40] + ("…" if len(title) > 40 else ""))
         return self._shelf_page(title, body, session, lead=lead)
+
+    def _unreadable(self, uid: str, book: str, post: Post) -> str:
+        """게시판 한 줄의 ⚠ 까닭(Claude가 읽을 수 없는 첨부가 있으면 'Claude가 읽을 수 없는 첨부 N개'). 글 보기와 같은 판정."""
+        if not post.files:
+            return ""
+        owner = f"{book}/{post.id}" if ITEM_ID.fullmatch(post.id) else f"ref:{post.id}"  # 글 id가 아니면 문헌 글(key)
+        bad = sum(1 for a in post.files if text_state(self._att_status(uid, owner, a.id), a.name)[1] == "no")
+        return f"Claude가 읽을 수 없는 첨부 {bad}개" if bad else ""
 
     def _att_status(self, uid: str, owner: str, att_id: str) -> dict | None:
         hit = self.store.attachment_path(uid, owner, att_id)
