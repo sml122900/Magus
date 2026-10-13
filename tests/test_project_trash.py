@@ -17,9 +17,10 @@ from test_web import server_proc  # noqa: F401 - 픽스처
 
 
 def _hashes(folder: Path) -> dict[str, str]:
-    """사용자 폴더의 파일 해시(휴지통·계산 캐시는 빼고)."""
+    """사용자 폴더의 파일 해시(휴지통·계산 캐시·활동 기록은 빼고. 활동 기록은 옮기고 되살릴 때마다 한 줄씩 는다)."""
     return {p.relative_to(folder).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(folder.rglob("*"))
-            if p.is_file() and not p.relative_to(folder).as_posix().startswith("trash/projects") and ".cache" not in p.parts}
+            if p.is_file() and not p.relative_to(folder).as_posix().startswith("trash/projects") and ".cache" not in p.parts
+            and p.name != ".activity.log"}
 
 
 def _seed(store: LocalStore, user: str = "alice") -> None:
@@ -48,7 +49,7 @@ def test_project_trash_round_trip(store: LocalStore):
     info = store.project_trash_info("alice", "city")
     assert info is not None and info.blocked is None and info.books == 2 and info.items == 1 and info.refs == 1 and info.chapters == 1
     assert store.project_trash_info("alice", "common") is None  # 새 사용자에게 「내 서재」는 없다(2026-10-11)
-    trash_id = store.trash_project("alice", "city", "웹에서 옮김")
+    trash_id = store.trash_project("alice", "city", "웹에서 옮김", confirm_name="도시의 책")  # 올린 문서가 있어 이름(2026-10-14)
     # 휴지통에 있는 동안: 목록·책·문헌·검색·현황에서 빠진다
     assert [f.id for f in store.list_floors("alice")] == ["river"]
     assert store.get_project("alice", "city") is None and store.get_category("alice", "walk") is None
@@ -109,9 +110,10 @@ def test_project_trash_web(server_proc):  # noqa: F811
         page = c.get("/login?next=/shelf/p/city").text
         csrf = _csrf(page)
         assert '<summary class="btn quiet"><span aria-hidden="true">🗑</span> 휴지통으로</summary>' in page
-        assert "프로젝트 「도시의 책」을 휴지통으로 옮길까요?" in page and '<p class="big-warn">수정본 1개가 함께 옮겨집니다.</p>' in page
+        assert "프로젝트 「도시의 책」을 휴지통으로 옮길까요?" in page
+        assert '<p class="big-warn">이 프로젝트에는 올린 문서(장 1개 · 수정본 E2)가 있습니다.</p>' in page  # 2026-10-14 이름 칸
         assert "node-del proj-del" not in c.get("/shelf/p/common").text  # 「내 서재」에는 없다
-        gone = c.post("/shelf/p/city/discard", data={"csrf": csrf})
+        gone = c.post("/shelf/p/city/discard", data={"csrf": csrf, "confirm_name": "도시의 책"})
         assert str(gone.url).startswith(f"{base}/shelf?done=project_trashed")
         assert "「도시의 책」 프로젝트를 휴지통으로 옮겼습니다." in gone.text and '<a href="/shelf/trash">휴지통 1</a>' in gone.text
         assert "도시의 책" not in re.sub(r'<p class="msg">.*?</p>', "", gone.text)  # 목록에서 빠짐

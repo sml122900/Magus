@@ -7,6 +7,8 @@
 - 새로 보이는 휴지통: 책 설정의 🗑로 옮긴 만든 문서(trash/shelf/documents/<id>/)와 올린 문서
   (trash/<프로젝트>-<시각>/, 올린 문서 휴지통·다시 가져오기). 이름이 그 꼴이 아니거나 project.json이 없는 폴더(운영자가 둔 것)는 건드리지 않는다.
 - 경로는 모두 사용자 휴지통(users/<id>/trash/) 안에서만 푼다. 밖으로 풀리면 ValueError.
+- 원고 프로젝트 삭제 보호(2026-10-14): 올린 문서가 든 휴지통 프로젝트와 휴지통의 올린 문서(trash_guard)는 이름을 그대로 적어야
+  (confirm_name) 영구 삭제한다. 영구 삭제한 일은 활동 기록(.activity.log)에 남는다.
 """
 
 from __future__ import annotations
@@ -18,9 +20,11 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
+from magus.activity import PURGE, logged
 from magus.ids import safe_id
-from magus.store.base import TrashedExtra
+from magus.store.base import TrashedExtra, UploadGuard, same_name
 from magus.store.fileio import locked, read_json
+from magus.store.project_trash import MANIFEST, last_edition, safe_pid
 
 PURGE_KINDS = ("node", "category_item", "attachment", "category", "document", "manuscript", "project", "inbox")
 _MS = re.compile(r"^(?P<pid>[A-Za-z0-9_\-]{1,64})-(?P<stamp>\d{4}-\d{2}-\d{2}T\d{6,9}Z)$")
@@ -113,10 +117,35 @@ class TrashPurgeMixin:
     # ---- 영구 삭제 ---------------------------------------------------------------------------
 
     @locked
-    def purge_trash(self, user_id: str, kind: str, item_id: str) -> int:
-        """휴지통의 항목 하나를 영구 삭제한다. 지운 바이트 수. 없으면 ValueError("missing")."""
+    def trash_guard(self, user_id: str, kind: str, item_id: str) -> UploadGuard | None:
+        """휴지통의 프로젝트(올린 문서가 들었던 것)·올린 문서면 보호 정보(이름·장 수·마지막 수정본), 아니면 None."""
+        trash = self._trash_dir(user_id)
+        if kind == "project" and safe_pid(item_id) and (trash / "projects" / item_id / MANIFEST).is_file():
+            data = read_json(trash / "projects" / item_id / MANIFEST)
+            pid = str(data.get("project_id") or "")
+            chapters = int(data.get("chapters") or 0)
+            edition = int(data.get("edition") or 0) or (
+                last_edition(trash / "projects" / item_id / "files" / "projects" / pid / "project.json") if safe_pid(pid) else 0)
+            name = str(data.get("title") or pid)
+            return UploadGuard("project", name, chapters, edition) if chapters or edition else None
+        if kind == "manuscript" and _MS.match(item_id) and (trash / item_id / "project.json").is_file():
+            folder = trash / item_id
+            chapters = len(list((folder / "book").glob("ch-*.md")))
+            edition = last_edition(folder / "project.json")
+            name = str(read_json(folder / "project.json").get("title") or _MS.match(item_id).group("pid"))  # type: ignore[union-attr]
+            return UploadGuard("manuscript", name, chapters, edition) if chapters or edition else None
+        return None
+
+    @logged(PURGE, lambda args: args[0], lambda args, kw, result: args[1])
+    @locked
+    def purge_trash(self, user_id: str, kind: str, item_id: str, *, confirm_name: str | None = None) -> int:
+        """휴지통의 항목 하나를 영구 삭제한다. 지운 바이트 수. 없으면 ValueError("missing").
+        올린 문서가 든 것은 confirm_name이 그 이름이어야 한다(아니면 ValueError("name", 이름))."""
         trash = self._trash_dir(user_id)
         shelf = trash / "shelf"
+        guard = self.trash_guard(user_id, kind, item_id)
+        if guard and not same_name(confirm_name, guard.name):
+            raise ValueError("name", guard.name)
         if kind == "node":
             floor, _, stem = item_id.partition("/")
             safe_id(floor, "project id")

@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO
 
+from magus.activity import TRASH, logged
 from magus.ids import new_id, safe_id, utcnow
 from magus.store.base import Attachment
 from magus.store.fileio import locked, read_json, write_data, write_json
@@ -129,6 +130,7 @@ class AttachmentMixin:
             return None
         return thumb if make_thumb(hit[0], thumb) else None
 
+    @logged(TRASH, "attachment", lambda args, kw, result: f"{args[0]}/{args[1]}" if result else None)
     @locked
     def trash_attachment(self, user_id: str, owner: str, attachment_id: str, note: str) -> bool:
         folder = self._owner_dir(user_id, owner, must_exist=True)

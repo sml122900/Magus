@@ -154,6 +154,9 @@ def main(argv: list[str] | None = None) -> None:
         if stale := [u for u in serving if (store.root / "users" / u).exists() and book_migrate.needs(store, u)]:
             parser.exit(2, f"옛 형식(#96 전) 책장이 있는 사용자 {len(stale)}명: {', '.join(stale)}. 먼저 "
                            "`magus maps apply --backup <폴더> --user <id>`로 이전합니다(docs/deploy.md 2-2절).\n")
+        from magus.activity import prune_all
+
+        prune_all(store.root / "users")  # 활동 기록의 90일 지난 줄(쓸 때도 지운다)
         if args.transport == "stdio":
             transports.run_stdio(build_server(settings, store, get_embedder(settings), local_files=True))
         else:

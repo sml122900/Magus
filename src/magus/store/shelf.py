@@ -21,6 +21,7 @@ from typing import Any
 
 import numpy as np
 
+from magus.activity import RESTORE, logged
 from magus.category.rules import DEFAULT_COLORS
 from magus.contexts import DEFAULTS, LEGACY_CONTEXT, find_saved
 from magus.floors import COMMON
@@ -365,6 +366,7 @@ class ShelfMixin:
                                    owner=owner))
         return sorted(items, key=lambda i: i.trashed_at, reverse=True)
 
+    @logged(RESTORE, lambda args: args[0], lambda args, kw, result: args[1])
     @locked
     def restore_trash(self, user_id: str, kind: TrashKind, item_id: str, *, name: str | None = None) -> list[str]:
         if kind == "category":

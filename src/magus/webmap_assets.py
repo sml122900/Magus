@@ -17,6 +17,7 @@ cursor:pointer;font-size:20px}.node-del>summary::-webkit-details-marker{display:
 border-left:4px solid var(--ruby);border-radius:10px;padding:4px 16px;box-shadow:0 8px 24px rgb(0 0 0/.18)}
 .del-box p{margin:10px 0}
 .del-box .big-warn{font-size:19px;font-weight:600;border-left:4px solid var(--ruby);padding:4px 0 4px 10px}
+.del-box label input[data-confirm-name]{display:block;width:100%;box-sizing:border-box;margin-top:6px}
 """
 
 MAP_STYLE = DEL_STYLE + """

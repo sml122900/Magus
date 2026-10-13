@@ -38,6 +38,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from magus.activity import TRASH, logged
 from magus.contexts import clean_contexts, from_record, to_record
 from magus.ids import new_id, utcnow
 from magus.maps import (
@@ -547,6 +548,7 @@ class MapMixin:
         self._write_map(user_id, floor, data)
         return True
 
+    @logged(TRASH, "node", lambda args, kw, result: f"{args[0]}/{args[1]}")
     @locked
     def trash_node(self, user_id: str, floor: str, node_id: str, note: str) -> MapNode:
         """노드를 휴지통으로(trash/shelf/nodes/<프로젝트>/<노드>.json, 이어진 선과 함께). 가운데 노드와 책이 꽂힌 노드는 옮기지 않는다
@@ -633,6 +635,7 @@ class MapMixin:
             blocked = "linked"
         return NodeTrashInfo(node, len(raw.get("books") or []), items, blocked, linked, refs_book)
 
+    @logged(TRASH, "node", lambda args, kw, result: f"{args[0]}/{args[1]}")
     @locked
     def trash_node_with_books(self, user_id: str, floor: str, node_id: str, note: str) -> MapNode:
         """노드를 그 책·글·첨부·문서째 휴지통으로(#97 노드 삭제, 웹). 연결 노드는 그 노드만(원본은 그대로).

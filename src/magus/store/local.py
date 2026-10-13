@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Any
 
+from magus import activity
+from magus.activity import CREATE, RESTORE, TRASH, logged
 from magus.ids import new_id, safe_id, utcnow
 from magus.store import formats
 from magus.store.fileio import locked as _locked
@@ -39,7 +41,7 @@ from magus.store.contexts import ContextMixin
 from magus.store.documents import DocumentMixin
 from magus.store.floors import FloorMixin
 from magus.store.maps import MapMixin
-from magus.store.project_trash import ProjectTrashMixin
+from magus.store.project_trash import ProjectTrashMixin, last_edition
 from magus.store.trash_purge import TrashPurgeMixin
 from magus.store.node_copy import NodeCopyMixin
 from magus.store.shelf import ShelfMixin, safe_ref_key
@@ -67,6 +69,7 @@ from magus.store.base import (
     Project,
     chapter_number_ok,
     reading_order,
+    same_name,
 )
 from magus.store.schema import SCHEMA, SCHEMA_VERSION, TABLES
 
@@ -202,6 +205,9 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
     def _project_dir(self, user_id: str, project_id: str) -> Path:
         return self._user_dir(user_id) / "projects" / safe_id(project_id, "project_id")
 
+    def record_activity(self, user_id: str, action: str, kind: str, target: str) -> None:
+        activity.write(self._user_dir(user_id), action, kind, target)
+
     def _require_project(self, user_id: str, project_id: str) -> Path:
         pdir = self._project_dir(user_id, project_id)
         if not (pdir / "project.json").exists():
@@ -217,6 +223,7 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
 
     # ---- 프로젝트 --------------------------------------------------------------------
 
+    @logged(CREATE, "project", lambda args, kw, result: result.id)
     @_locked
     def create_project(
         self, user_id: str, title: str, project_id: str | None = None, *, titles: BookTitles | None = None
@@ -275,6 +282,7 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
         )
         return [_project(r) for r in rows]
 
+    @logged(TRASH, "manuscript", lambda args, kw, result: result.rsplit("/", 1)[-1])  # book_import replace=True
     @_locked
     def archive_project(self, user_id: str, project_id: str) -> str:
         pdir = self._require_project(user_id, project_id)
@@ -288,13 +296,18 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
             self._db.execute("DELETE FROM projects WHERE user_id = ? AND id = ?", (user_id, project_id))
         return self._rel(target)
 
+    @logged(TRASH, "manuscript", lambda args, kw, result: result.rsplit("/", 1)[-1])
     @_locked
-    def trash_manuscript(self, user_id: str, project_id: str, note: str) -> str:
+    def trash_manuscript(self, user_id: str, project_id: str, note: str, *, confirm_name: str | None = None) -> str:
         """원고 책을 휴지통으로(#94): 작업물 폴더(장·확인 요청·결정·수정본 이력·원본)를 통째로 trash/<id>-<시각>/으로 옮기고,
-        같은 id·제목의 빈 층을 남긴다. 층에 꽂힌 다른 책(생각·문헌·카테고리·문서)은 그대로다. 지우지 않는다."""
+        같은 id·제목의 빈 층을 남긴다. 층에 꽂힌 다른 책(생각·문헌·카테고리·문서)은 그대로다. 지우지 않는다.
+        장이나 수정본 기록이 있으면 confirm_name이 그 이름이어야 한다(아니면 ValueError("name", 이름), 2026-10-14)."""
         project = self.get_project(user_id, project_id)
         if project is None:
             raise ValueError(f"프로젝트 {project_id!r}가 없다")
+        guarded = self.list_chapters(user_id, project_id) or last_edition(self._project_dir(user_id, project_id) / "project.json")
+        if guarded and not same_name(confirm_name, project.title):
+            raise ValueError("name", project.title)
         moved = self.archive_project(user_id, project_id)
         _write_json(self.root / moved / "trash-note.json", {"at": utcnow(), "note": note})
         self.create_project(user_id, project.title, project_id, titles=BookTitles(project.title, project.subtitle,
@@ -716,6 +729,7 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
     def _inbox_trash(self, user_id: str) -> Path:
         return self._user_dir(user_id) / "trash" / "inbox"
 
+    @logged(TRASH, "inbox", lambda args, kw, result: result)  # 파일 이름 대신 휴지통 id
     @_locked
     def trash_inbox(self, user_id: str, name: str, note: str) -> str:
         path = self._inbox_file(user_id, name)
@@ -738,6 +752,7 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
                 out.append((folder.name, _inbox_entry(files[0]), _read_json(mark)))
         return out
 
+    @logged(RESTORE, "inbox", lambda args, kw, result: args[0])
     @_locked
     def restore_inbox(self, user_id: str, trash_id: str) -> str:
         folder = self._inbox_trash(user_id) / safe_id(trash_id, "trash id")

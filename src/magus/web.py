@@ -33,6 +33,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
+from magus import activity
 from magus.attachments import MAX_FILES
 from magus.auth import JwtVerifier
 from magus.book.export import export_docx
@@ -370,9 +371,11 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPag
             if request.method in ("GET", "HEAD") and self._post_only(request):  # /shelf/projects는 /shelf/{책}보다 먼저 맞는 POST 전용 주소
                 return RedirectResponse(self._screen_of(request), status_code=303)
             screen = SCREEN.set(screen_key(request.url.path, request.url.query))
+            via = activity.VIA.set(activity.WEB)  # 활동 기록의 경로(2026-10-14)
             try:
                 return await handler(request)
             finally:
+                activity.VIA.reset(via)
                 SCREEN.reset(screen)
 
         return run

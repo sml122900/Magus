@@ -25,6 +25,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from magus.activity import TRASH, logged
 from magus.category.rules import (
     DEFAULT_COLORS, HEX, ITEM_SCHEMA, MAX_MY_COLORS, SCHEMA_VERSION, TITLE_MODES, name_key,
 )
@@ -118,6 +119,7 @@ class CategoryMixin:
             self._index_category(user_id, changed)
         return replace(changed, items=current.items, sources=current.sources, verified=current.verified)
 
+    @logged(TRASH, "category", lambda args, kw, result: args[0] if result else None)
     @locked
     def trash_category(self, user_id: str, category_id: str, note: str) -> Category | None:
         """책을 통째로 휴지통에. 문헌·참고문헌 항목이 든 책은 옮기지 않는다(ValueError: 인용 점검이 보는 기록이라)."""
@@ -243,6 +245,7 @@ class CategoryMixin:
         bundled = sorted((trash / "nodes").glob(f"*/*/categories/{category_id}/category.json"))
         return bundled[0].parents[3].name if bundled else None
 
+    @logged(TRASH, "category_item", lambda args, kw, result: f"{args[0]}/{args[1]}" if result else None)
     @locked
     def trash_item_with_replies(self, user_id: str, category_id: str, item_id: str, note: str) -> list[CategoryItem]:
         """[그 글, 함께 옮긴 응답 글…]. 없으면 []."""

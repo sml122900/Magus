@@ -8,6 +8,8 @@
   「내 서재」(옛 공용 층)도 2026-10-11부터 보통 프로젝트라 같은 규칙이다(올린 문서가 없으므로 지도·책·문헌·문서만 옮긴다).
 - 되살리기를 막는 경우: 같은 id의 프로젝트가 그사이 생겼을 때, 프로젝트가 가득 찼을 때, 같은 책·문헌·문서 폴더가 그사이 생겼을 때.
 - 옛 코드는 trash/projects/를 읽지 않는다. 옛 코드가 보면 그 프로젝트는 그냥 없다(순서에만 자리가 남는다).
+- 원고 프로젝트 삭제 보호(2026-10-14): 올린 문서가 든 프로젝트는 이름을 그대로 적어야(confirm_name) 휴지통으로 옮긴다.
+  옮기고 되살린 일은 활동 기록(.activity.log)에 남는다.
 """
 
 from __future__ import annotations
@@ -20,12 +22,19 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from magus.activity import RESTORE, TRASH, logged
 from magus.floors import MAX_FLOORS
 from magus.ids import safe_id, utcnow
-from magus.store.base import ProjectTrashInfo, TrashedProject
+from magus.store.base import ProjectTrashInfo, TrashedProject, same_name
 from magus.store.fileio import locked, read_json, write_json
 
 MANIFEST = "manifest.json"
+
+
+def last_edition(project_json: Path) -> int:
+    """project.json의 마지막 수정본 번호(E1 = 처음 올린 문서). 기록이 없으면 0."""
+    editions = read_json(project_json).get("editions") or [] if project_json.is_file() else []
+    return max((int(e.get("number") or 0) for e in editions if isinstance(e, dict)), default=0)
 
 
 class ProjectTrashMixin:
@@ -94,17 +103,22 @@ class ProjectTrashMixin:
         items, chapters, revisions = self._counts(user_id, project_id, cats)
         shown = self.get_map(user_id, project_id)
         linked = tuple(self._linked_into(user_id, project_id))
+        edition = last_edition(self._user_dir(user_id) / "projects" / project_id / "project.json")
         return ProjectTrashInfo(project_id, floor.title, len(shown.nodes) if shown else 0, len(cats), items, len(refs), chapters,
-                                revisions, "linked" if linked else None, linked)
+                                revisions, "linked" if linked else None, linked, edition)
 
+    @logged(TRASH, "project", lambda args, kw, result: args[0])
     @locked
-    def trash_project(self, user_id: str, project_id: str, note: str) -> str:
-        """프로젝트를 통째로 휴지통으로. 휴지통 id(폴더 이름)를 돌려준다. 막히면 ValueError(code, 보일 이름)."""
+    def trash_project(self, user_id: str, project_id: str, note: str, *, confirm_name: str | None = None) -> str:
+        """프로젝트를 통째로 휴지통으로. 휴지통 id(폴더 이름)를 돌려준다. 막히면 ValueError(code, 보일 이름).
+        올린 문서가 든 프로젝트는 confirm_name이 프로젝트 이름과 같아야 한다(code name, 2026-10-14)."""
         info = self.project_trash_info(user_id, project_id)
         if info is None:
             raise ValueError("missing", "")
         if info.blocked:
             raise ValueError(info.blocked, "·".join(f"「{x}」" for x in info.linked_from))
+        if info.guard and not same_name(confirm_name, info.title):
+            raise ValueError("name", info.title)
         udir = self._user_dir(user_id)
         paths, cats, refs, docs = self._project_parts(user_id, project_id)
         stamp = re.sub(r"[^0-9]", "", utcnow())
@@ -113,7 +127,7 @@ class ProjectTrashMixin:
         files = bundle / "files"
         manifest = {"project_id": project_id, "title": info.title, "at": utcnow(), "note": note, "paths": paths,
                     "categories": cats, "refs": refs, "documents": docs, "chapters": info.chapters, "revisions": info.revisions,
-                    "items": info.items}
+                    "items": info.items, "edition": info.edition}
         write_json(bundle / MANIFEST, {**manifest, "state": "moving"})  # 먼저 적고 옮긴다(중간에 멈춰도 무엇을 옮겼는지 남게)
         for rel in paths:
             target = files / rel
@@ -128,11 +142,15 @@ class ProjectTrashMixin:
         out = []
         for path in sorted(self._project_trash_root(user_id).glob(f"*/{MANIFEST}")):
             data = read_json(path)
-            out.append(TrashedProject(path.parent.name, str(data.get("project_id") or ""), str(data.get("title") or ""),
+            pid = str(data.get("project_id") or "")
+            edition = int(data.get("edition") or 0) or (last_edition(path.parent / "files" / "projects" / pid / "project.json")
+                                                        if pid and safe_pid(pid) else 0)  # 2026-10-14 전에 옮긴 것은 그 project.json에서
+            out.append(TrashedProject(path.parent.name, pid, str(data.get("title") or ""),
                                       str(data.get("at") or ""), int(data.get("chapters") or 0), int(data.get("revisions") or 0),
-                                      len(data.get("categories") or []), int(data.get("items") or 0)))
+                                      len(data.get("categories") or []), int(data.get("items") or 0), edition))
         return sorted(out, key=lambda t: t.trashed_at, reverse=True)
 
+    @logged(RESTORE, "project", lambda args, kw, result: result)
     @locked
     def restore_project(self, user_id: str, trash_id: str) -> str:
         """휴지통의 프로젝트를 제자리로. 프로젝트 id를 돌려준다. 막히면 아무것도 옮기지 않고 ValueError(code, 보일 이름).
@@ -164,3 +182,11 @@ class ProjectTrashMixin:
             bundle.rmdir()
         self._reindex_user(user_id)
         return project_id
+
+
+def safe_pid(value: str) -> bool:
+    try:
+        safe_id(value, "project_id")
+    except ValueError:
+        return False
+    return True

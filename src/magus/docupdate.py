@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
+from magus import activity
 from magus.attachments import clean_name
 from magus.book.reupload import ReuploadReport, reupload_manuscript
 from magus.ids import utcnow
@@ -249,13 +250,14 @@ def update_document(store: Store, user_id: str, key: str, chosen: str, data: IO[
                     said = "이미 올린 파일입니다. Word에서 고쳐 저장한 파일인지 확인해 주세요."
                 raise UpdateError(said, code) from e
             result.project_id = source.project_id
-        with path.open("rb") as f:
+        with path.open("rb") as f, activity.step(store, user_id, activity.UPDATE, "inbox" if inbox else "attachment") as act:
             note = f"문서 업데이트: 「{name}」로 바꿈"
-            if inbox:
-                store.trash_inbox(user_id, old_name, note)
+            if inbox:  # 활동 기록에는 파일 이름 대신 이전 파일의 휴지통 id
+                act.target = store.trash_inbox(user_id, old_name, note)
                 store.put_inbox(user_id, name, f)
             else:
                 new_att, _ = store.replace_attachment(user_id, owner, att_id, name, f, note)
+                act.target = f"{owner}/{att_id}"
                 result.title_changed = _title_rule(store, user_id, owner, old_name, name)
                 book = store.get_category(user_id, owner.partition("/")[0]) if not owner.startswith("ref:") else None
                 ref = store.get_ref(user_id, owner[4:]) if owner.startswith("ref:") else None

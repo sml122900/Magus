@@ -156,8 +156,9 @@ async def test_bookshelf_scenario(server_proc, tmp_path):  # noqa: F811
         assert '<span class="band top" aria-hidden="true"></span>' in c.get(f"/shelf/p/{floor_id}?node=center").text.split(f'data-key="ms.{floor_id}"')[1][:400]
         # 8. 원고 책 휴지통: 프로젝트는 원고 없는 프로젝트로 남고 문서 책은 그대로
         confirm = c.get(f"/shelf/trash/ms.{floor_id}").text
-        assert "장 7 · " in confirm
-        gone = c.post(f"/shelf/trash/ms.{floor_id}", data={"csrf": csrf})
+        assert "장 7 · " in confirm and 'data-confirm-name="닿으려는 종"' in confirm  # 올린 문서는 이름을 적어야(2026-10-14)
+        assert c.post(f"/shelf/trash/ms.{floor_id}", data={"csrf": csrf}).status_code == 400
+        gone = c.post(f"/shelf/trash/ms.{floor_id}", data={"csrf": csrf, "confirm_name": "닿으려는 종"})
         assert "휴지통으로 옮겼습니다." in gone.text and str(gone.url).startswith(f"{base}/shelf/p/{floor_id}")
         assert f'data-key="doc.{doc_id}"' in c.get(f"/shelf/p/{floor_id}?node=center").text
         assert c.get(f"/shelf/book/{floor_id}").status_code == 404

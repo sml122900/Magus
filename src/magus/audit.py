@@ -11,6 +11,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from magus import activity
+
 log = logging.getLogger("magus.audit")
 
 
@@ -30,6 +32,7 @@ class ToolCallLog:
             user = "-"
         started = time.perf_counter()
         status, kind = "ok", ""
+        via = activity.VIA.set(activity.CHAT)  # 활동 기록의 경로(2026-10-14): 도구가 지우고 되살리면 '대화'
         try:
             result = await call_next(ctx)
             failed = result.get("isError") if isinstance(result, dict) else getattr(result, "is_error", False)
@@ -40,5 +43,6 @@ class ToolCallLog:
             status, kind = "error", type(e).__name__
             raise
         finally:
+            activity.VIA.reset(via)
             ms = (time.perf_counter() - started) * 1000
             log.info("tool=%s user=%s ms=%.0f status=%s%s", tool, user, ms, status, f" error={kind}" if kind else "")

@@ -427,6 +427,12 @@ class ProjectTrashInfo:
     revisions: int  # 수정본 수(E2부터. 처음 올린 문서 E1은 세지 않는다)
     blocked: str | None = None
     linked_from: tuple[str, ...] = ()
+    edition: int = 0  # 마지막 수정본 번호(E1 = 처음 올린 문서, 기록 전 임포트는 0)
+
+    @property
+    def guard(self) -> UploadGuard | None:
+        """올린 문서가 들어 있으면 휴지통으로 옮길 때 이름을 적어야 한다(2026-10-14)."""
+        return UploadGuard("project", self.title, self.chapters, self.edition) if self.chapters or self.edition else None
 
 
 @dataclass(frozen=True)
@@ -439,6 +445,42 @@ class TrashedProject:
     revisions: int
     books: int
     items: int
+    edition: int = 0  # 마지막 수정본 번호(옮길 때의 project.json)
+
+
+@dataclass(frozen=True)
+class UploadGuard:
+    """원고 프로젝트 삭제 보호(2026-10-14, 사용자 결정): 올린 문서가 든 프로젝트(kind=project)나 휴지통의 올린 문서(manuscript)는
+    휴지통으로 옮기거나 영구 삭제할 때 이름(name)을 그대로 적어야 한다. '휴지통 비우기'는 이것을 빼고 비운다."""
+
+    kind: str  # project | manuscript
+    name: str
+    chapters: int
+    edition: int  # 마지막 수정본 번호(E1 = 처음 올린 문서, 기록 전 임포트는 0)
+
+    @property
+    def what(self) -> str:
+        """'장 42개 · 수정본 E3'(수정본이 없으면 장 수만)."""
+        return f"장 {self.chapters}개" + (f" · 수정본 E{self.edition}" if self.edition >= 2 else "")
+
+    @property
+    def sentence(self) -> str:
+        if self.kind == "project":
+            return f"이 프로젝트에는 올린 문서({self.what})가 있습니다."
+        return f"올린 문서({self.what})입니다."
+
+
+_QUOTES = "「」『』\"'“”‘’"
+
+
+def same_name(typed: str | None, name: str) -> bool:
+    """적은 이름이 그 이름인가. 공백 차이·앞뒤 따옴표(「」 등)·한글 조합 형태(NFC)는 같게 본다. 웹의 버튼 켜기(NAME_SCRIPT)와 같은 규칙."""
+    import unicodedata  # noqa: PLC0415
+
+    def norm(s: str) -> str:
+        return " ".join(unicodedata.normalize("NFC", s).split()).strip(_QUOTES).strip()
+
+    return bool(typed) and bool(name.strip()) and norm(typed or "") == norm(name)
 
 
 @dataclass(frozen=True)
@@ -824,8 +866,9 @@ class Store(Protocol):
     def project_trash_info(self, user_id: str, project_id: str) -> ProjectTrashInfo | None:
         """웹 확인 창: 노드·책·글·문헌·장·수정본 수와 막는 까닭(「내 서재」, 다른 프로젝트가 연결 중). 없는 프로젝트면 None."""
         ...
-    def trash_project(self, user_id: str, project_id: str, note: str) -> str:
-        """프로젝트를 통째로 휴지통으로(휴지통 id). 막히면 ValueError(code, 보일 이름)."""
+    def trash_project(self, user_id: str, project_id: str, note: str, *, confirm_name: str | None = None) -> str:
+        """프로젝트를 통째로 휴지통으로(휴지통 id). 막히면 ValueError(code, 보일 이름).
+        올린 문서가 든 프로젝트는 confirm_name이 그 이름이어야 한다(아니면 ValueError("name", 이름), 2026-10-14)."""
         ...
     def list_trashed_projects(self, user_id: str) -> list[TrashedProject]: ...
     def restore_project(self, user_id: str, trash_id: str) -> str:
@@ -850,8 +893,15 @@ class Store(Protocol):
     def trashed_books(self, user_id: str) -> dict[str, tuple[str, str, int]]:
         """책째 휴지통으로 옮긴 책: 휴지통 폴더 이름 → (프로젝트, 책 이름, 글 수)."""
         ...
-    def purge_trash(self, user_id: str, kind: str, item_id: str) -> int:
-        """kind: node·category_item·attachment·category·document·manuscript·project·inbox. 지운 바이트 수. 없으면 ValueError("missing")."""
+    def purge_trash(self, user_id: str, kind: str, item_id: str, *, confirm_name: str | None = None) -> int:
+        """kind: node·category_item·attachment·category·document·manuscript·project·inbox. 지운 바이트 수. 없으면 ValueError("missing").
+        올린 문서가 든 것(trash_guard)은 confirm_name이 그 이름이어야 한다(아니면 ValueError("name", 이름), 2026-10-14)."""
+        ...
+    def trash_guard(self, user_id: str, kind: str, item_id: str) -> UploadGuard | None:
+        """휴지통의 그 항목이 올린 문서가 든 것(프로젝트·올린 문서)이면 그 보호 정보, 아니면 None."""
+        ...
+    def record_activity(self, user_id: str, action: str, kind: str, target: str) -> None:
+        """활동 기록 한 줄(magus.activity, 사용자 폴더의 .activity.log). 내용·이름 없이 id만."""
         ...
     def trashed_node_books(self, user_id: str, floor: str) -> dict[str, tuple[str, str]]:
         """이 프로젝트에서 책째 휴지통으로 옮긴 노드의 책: 책 id → (책 이름, 노드 이름)."""
@@ -908,7 +958,7 @@ class Store(Protocol):
     def move_document(self, user_id: str, doc_id: str, to_floor: str, to_node: str | None = None) -> FloorMove:
         """문서 책을 다른 작업물 층으로(공용은 MoveError common_only)."""
         ...
-    def trash_manuscript(self, user_id: str, project_id: str, note: str) -> str:
+    def trash_manuscript(self, user_id: str, project_id: str, note: str, *, confirm_name: str | None = None) -> str:
         """원고 책을 휴지통으로: 작업물 폴더를 통째로 trash/로 옮기고, 같은 id·제목의 빈 층을 남긴다(층의 다른 책은 그대로)."""
         ...
     def set_project_color(self, user_id: str, project_id: str, color: str | None) -> None: ...

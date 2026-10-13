@@ -39,7 +39,8 @@ from magus.melchior.cache import CiteCache
 from magus.melchior.questions import build_questions
 from magus.melchior.report import build_cite_report
 from magus.store import BookTitles, Store
-from magus.store.base import CHAPTER_STATUS_NAMES, STALE_REASONS
+from magus.store.base import CHAPTER_STATUS_NAMES, STALE_REASONS, UploadGuard
+from magus.webtrash import NAME_SCRIPT, name_field
 from magus.webshelf import TRASH_BOOK_TITLE
 from magus.webshelf import color_fieldset, chosen_color, safe_color, state_url
 
@@ -490,6 +491,7 @@ class BookPages:
             return self._need_login(request)
         uid = session[0]
         kind, ident = key.split(".", 1)
+        guard: UploadGuard | None = None  # 올린 문서 휴지통도 이름을 적어야 옮긴다(2026-10-14 원고 프로젝트 삭제 보호)
         if kind == "ms":
             project = await run_in_threadpool(self.store.get_project, uid, ident)
             if project is None:
@@ -498,24 +500,38 @@ class BookPages:
             chapters = await run_in_threadpool(self.store.list_chapters, uid, ident)
             issues = await run_in_threadpool(self.store.list_issues, uid, ident, None)
             decisions = await run_in_threadpool(self.store.list_decisions, uid, ident)
+            editions = await run_in_threadpool(self.store.list_editions, uid, ident)
             what = f" · 장 {len(chapters)} · 확인 요청 {len(issues)} · 결정 {len(decisions)}"
+            if chapters or editions:
+                guard = UploadGuard("manuscript", project.title, len(chapters), max((e.number for e in editions), default=0))
         else:
             doc = await run_in_threadpool(self.store.get_document, uid, ident)
             if doc is None:
                 return self.not_found(request, session, "책")
             name, floor_id, back = doc.title, doc.floor, f"/shelf/doc/{ident}"
             what = f" · 만든 이력 {len(doc.versions)}"
+        error = ""
         if request.method == "POST":
             try:
-                await self._form(request, session)
+                form = await self._form(request, session)
             except PermissionError:
                 return self._book_page("휴지통", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
-            if kind == "ms":
-                await run_in_threadpool(self.store.trash_manuscript, uid, ident, "웹 책장에서 옮김")
+            try:
+                if kind == "ms":
+                    confirm = str(form.get("confirm_name") or "")
+                    await run_in_threadpool(lambda: self.store.trash_manuscript(uid, ident, "웹 책장에서 옮김", confirm_name=confirm))
+                else:
+                    await run_in_threadpool(self.store.trash_document, uid, ident, "웹 책장에서 옮김")
+            except ValueError as e:
+                if not (e.args and e.args[0] == "name"):
+                    raise
+                error = '<p class="msg err">이름이 맞지 않아 휴지통으로 옮기지 않았습니다. 보이는 이름을 그대로 적어 주세요.</p>'
             else:
-                await run_in_threadpool(self.store.trash_document, uid, ident, "웹 책장에서 옮김")
-            return RedirectResponse(state_url(floor_id, done="trash"), status_code=303)
-        body = (f'<div class="card"><p>「{html.escape(name)}」{what}</p><p>{"이 올린 문서를" if kind == "ms" else "이 문서를"} 휴지통으로 옮길까요?</p>'
+                return RedirectResponse(state_url(floor_id, done="trash"), status_code=303)
+        body = (f'{error}<div class="card"><p>「{html.escape(name)}」{what}</p><p>{"이 올린 문서를" if kind == "ms" else "이 문서를"} 휴지통으로 옮길까요?</p>'
                 f'<form method="post" action="/shelf/trash/{html.escape(key)}">{self._csrf_input(session)}'
-                f'<p><button class="primary">옮기기</button> <a href="{html.escape(back)}">취소</a></p></form></div>')
-        return self._book_page(TRASH_BOOK_TITLE, body, session, lead=await run_in_threadpool(self.trail, uid, key, TRASH_BOOK_TITLE))
+                + (name_field(guard) if guard else "")
+                + f'<p><button class="primary"{" disabled" if guard else ""}>옮기기</button> <a href="{html.escape(back)}">취소</a></p></form></div>'
+                + (NAME_SCRIPT if guard else ""))
+        return self._book_page(TRASH_BOOK_TITLE, body, session, 400 if error else 200,
+                               lead=await run_in_threadpool(self.trail, uid, key, TRASH_BOOK_TITLE))

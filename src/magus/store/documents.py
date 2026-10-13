@@ -20,6 +20,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
+from magus.activity import TRASH, logged
 from magus.category.rules import HEX
 from magus.contexts import from_record, to_record
 from magus.floors import COMMON
@@ -143,6 +144,7 @@ class DocumentMixin:
         with self._db:
             self._db.execute("UPDATE documents SET floor = ?, updated_at = ? WHERE user_id = ? AND id = ?", (floor, at, user_id, doc_id))
 
+    @logged(TRASH, "document", lambda args, kw, result: args[0] if result else None)
     @locked
     def trash_document(self, user_id: str, doc_id: str, note: str) -> Document | None:
         doc = self.get_document(user_id, doc_id)

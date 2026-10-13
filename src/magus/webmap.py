@@ -41,7 +41,8 @@ from magus.store.formats import UNTITLED, clip, display_title, one_line
 from magus.store.maps import MapError
 from magus.webboard import marked_query, post_row_html, search_line
 from magus.webmap_assets import MAP_SCRIPT, MAP_STYLE, PROJECTS_STYLE, TRASH_STYLE
-from magus.webtrash import PURGED, TrashRow, trash_list_html
+from magus import activity
+from magus.webtrash import NAME_ERROR, NAME_SCRIPT, TrashRow, done_message, name_field, trash_list_html
 from magus.contexts import Context, View
 from magus.webcontexts import (CONTEXT_SCRIPT, CONTEXT_STYLE, MANAGE, PICK_TITLE, context_fieldset, contexts_as_typed, contexts_from_form,
                                contexts_view_html, register_row)
@@ -533,7 +534,9 @@ class MapPages:
 
     def _project_delete(self, uid: str, session: tuple[str, str], floor: Floor) -> str:
         """지도 머리의 '🗑 휴지통으로'와 화면 안 확인 창(2026-10-09). 프로젝트째(가운데 노드·올린 문서 포함) 휴지통으로.
-        다른 프로젝트가 연결 중이면 그 프로젝트 이름과 '닫기'만. 수정본이 있으면 크게 알린다(「내 서재」도 같다, 2026-10-11)."""
+        다른 프로젝트가 연결 중이면 그 프로젝트 이름과 '닫기'만. 수정본이 있으면 크게 알린다(「내 서재」도 같다, 2026-10-11).
+        올린 문서가 든 프로젝트는 "이 프로젝트에는 올린 문서(장 N개 · 수정본 EN)가 있습니다."와 이름 칸, 이름을 그대로 적어야
+        [옮기기]가 켜진다(2026-10-14 원고 프로젝트 삭제 보호, 서버도 다시 본다)."""
         info = self.store.project_trash_info(uid, floor.id)
         if info is None:
             return ""
@@ -548,10 +551,13 @@ class MapPages:
             along += [f"문헌 글 {info.refs}편"] if info.refs else []
             along += [f"올린 문서 {info.chapters}장"] if info.chapters else []
             ask = f"프로젝트 {josa(name, '을/를')} 휴지통으로 옮길까요? 가운데 노드를 포함해 {'·'.join(along)}이 함께 옮겨집니다."
-            warn = f'<p class="big-warn">수정본 {info.revisions}개가 함께 옮겨집니다.</p>' if info.revisions else ""
+            guard = info.guard
+            warn = f'<p class="big-warn">수정본 {info.revisions}개가 함께 옮겨집니다.</p>' if info.revisions and not guard else ""
             inner = (f"<p>{html.escape(ask)}</p>{warn}"
                      f'<form method="post" action="/shelf/p/{urllib.parse.quote(floor.id)}/discard">{self._csrf_input(session)}'
-                     f'<p><button class="primary">옮기기</button> {close.format("취소")}</p></form>')
+                     + (name_field(guard) if guard else "")
+                     + f'<p><button class="primary"{" disabled" if guard else ""}>옮기기</button> {close.format("취소")}</p></form>'
+                     + (NAME_SCRIPT if guard else ""))
         return ('<details class="node-del proj-del"><summary class="btn quiet"><span aria-hidden="true">🗑</span> 휴지통으로</summary>'
                 f'<div class="del-box" role="dialog" aria-label="프로젝트 휴지통으로">{inner}</div></details>')
 
@@ -562,17 +568,20 @@ class MapPages:
             return self._need_login(request)
         uid = session[0]
         try:
-            await self._form(request, session)
+            form = await self._form(request, session)
         except PermissionError:
             return self._map_page("프로젝트", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
         floor_id = request.path_params["project"]
         try:
-            trash_id = await run_in_threadpool(self.store.trash_project, uid, floor_id, "웹 지도에서 옮김")
+            trash_id = await run_in_threadpool(lambda: self.store.trash_project(uid, floor_id, "웹 지도에서 옮김",
+                                                                               confirm_name=str(form.get("confirm_name") or "")))
         except ValueError as e:
             code = e.args[0] if e.args else ""
             if code == "missing":
                 return self.not_found(request, session, "프로젝트")
-            said = (f"{e.args[1]}에서 연결하고 있어 휴지통으로 옮길 수 없습니다." if code == "linked" else "휴지통으로 옮기지 못했습니다.")
+            said = (f"{e.args[1]}에서 연결하고 있어 휴지통으로 옮길 수 없습니다." if code == "linked"
+                    else "프로젝트 이름이 맞지 않아 휴지통으로 옮기지 않았습니다. 확인 창에 보이는 이름을 그대로 적어 주세요." if code == "name"
+                    else "휴지통으로 옮기지 못했습니다.")
             return await self.project_page(request, f'<p class="msg err">{html.escape(said)}</p>', 400)
         await run_in_threadpool(after_refs_changed, self.store, uid)  # 장별 미확인 수는 파생값이라 색인을 다시 만든 뒤 맞춘다
         return RedirectResponse(with_query("/shelf", done="project_trashed", t=trash_id), status_code=303)
@@ -592,7 +601,7 @@ class MapPages:
                 return self._map_page("휴지통", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
             if form.get("purge") or form.get("empty"):  # 영구 삭제(2026-10-11)
                 rows = await run_in_threadpool(self._projects_trash_rows, uid)
-                done = await run_in_threadpool(self._purge, uid, rows, form)
+                done = await run_in_threadpool(self._purge, uid, rows, form, "전체")
                 return RedirectResponse(with_query("/shelf/trash", **done), status_code=303)
             if inbox := str(form.get("inbox") or ""):  # 예전 올린 파일(문서 업데이트의 이전 파일)
                 try:
@@ -619,25 +628,27 @@ class MapPages:
                    "missing": "휴지통에 없는 프로젝트입니다.",
                    "file_taken": f"같은 이름의 올린 파일(「{named}」)이 있어 되살리지 못했습니다.",
                    "file_missing": "휴지통에 없는 파일입니다.",
-                   "purge": "영구 삭제하지 못했습니다(이미 없거나 이 휴지통의 것이 아닙니다)."}.get(params.get("err") or "", "")
+                   "purge": "영구 삭제하지 못했습니다(이미 없거나 이 휴지통의 것이 아닙니다).",
+                   "confirm": NAME_ERROR}.get(params.get("err") or "", "")
         from magus.webboard import SEP  # noqa: PLC0415
 
         lead = f'<nav class="trail" aria-label="위치"><a href="/shelf">프로젝트</a>{SEP}<span aria-current="page">휴지통</span></nav>'
-        done = PURGED.get(params.get("done") or "", "")
-        body = ((f'<p class="msg err">{html.escape(message)}</p>' if message else f'<p class="msg">{done}</p>' if done else "")
+        done = done_message(params)
+        body = ((f'<p class="msg err">{html.escape(message)}</p>' if message else f'<p class="msg">{html.escape(done)}</p>' if done else "")
                 + trash_list_html(rows, "/shelf/trash", self._csrf_input(session)))
         return self._map_page("휴지통", body, session, css=TRASH_STYLE, lead=lead)
 
     def _projects_trash_rows(self, uid: str) -> list[TrashRow]:
         """프로젝트 목록의 휴지통: 휴지통의 프로젝트, 예전 올린 파일, 프로젝트가 없어진 휴지통 항목(영구 삭제만). 최근 것부터."""
         rows = [TrashRow("project", t.trash_id, t.trashed_at, f"프로젝트 「{t.title}」",
-                         f"올린 문서 {t.chapters}장 · 수정본 {t.revisions}개 · 책 {t.books}권 · 글 {t.items}개", "trash")
+                         f"올린 문서 {t.chapters}장 · 수정본 {t.revisions}개 · 책 {t.books}권 · 글 {t.items}개", "trash",
+                         self.store.trash_guard(uid, "project", t.trash_id))
                 for t in self.store.list_trashed_projects(uid)]
         rows += [TrashRow("inbox", trash_id, str(rec.get("at") or f.modified), f"올린 파일 「{f.name}」", str(rec.get("note") or ""), "inbox")
                  for trash_id, f, rec in self.store.list_trashed_inbox(uid)]
         live = {f.id for f in self.store.list_floors(uid)}
         gone = "프로젝트가 없어진 휴지통 항목입니다(되살리지 않음)."
-        rows += [TrashRow(r.kind, r.id, r.at, r.label, gone) for r in self._extra_rows(uid) if r.sub not in live]
+        rows += [TrashRow(r.kind, r.id, r.at, r.label, gone, guard=r.guard) for r in self._extra_rows(uid) if r.sub not in live]
         books = self.store.trashed_books(uid)
         for t in self.store.list_trash(uid):
             floor = (t.id.partition("/")[0] if t.kind == "node" else books.get(t.id, ("",))[0] if t.kind == "category"
@@ -651,7 +662,8 @@ class MapPages:
         """만든 문서·올린 문서의 휴지통 줄(되살리기는 운영자). sub에는 잠시 그 프로젝트 id를 담는다(어느 화면에 보일지 고를 때)."""
         rows = [TrashRow("document", d.id, d.trashed_at, f"올린 문서에서 만든 문서 「{d.title}」", d.project_id)
                 for d in self.store.list_trashed_documents(uid)]
-        rows += [TrashRow("manuscript", m.id, m.trashed_at, f"올린 문서 「{m.title}」" + (f" · {m.detail}" if m.detail else ""), m.project_id)
+        rows += [TrashRow("manuscript", m.id, m.trashed_at, f"올린 문서 「{m.title}」" + (f" · {m.detail}" if m.detail else ""), m.project_id,
+                          guard=self.store.trash_guard(uid, "manuscript", m.id))
                  for m in self.store.list_trashed_manuscripts(uid)]
         return rows
 
@@ -674,23 +686,30 @@ class MapPages:
             return f"글 「{clip(t.preview, 60) or UNTITLED}」"
         return str(t.preview)
 
-    def _purge(self, uid: str, rows: list[TrashRow], form: Any) -> dict[str, str]:
-        """영구 삭제(purge = 'kind:id' 한 줄) 또는 휴지통 비우기(empty, 그 화면의 전부). 그 화면 목록에 있는 것만 지운다."""
+    def _purge(self, uid: str, rows: list[TrashRow], form: Any, scope: str) -> dict[str, str]:
+        """영구 삭제(purge = 'kind:id' 한 줄) 또는 휴지통 비우기(empty, 그 화면의 전부). 그 화면 목록에 있는 것만 지운다.
+        올린 문서가 든 줄(guard)은 비우기에서 빼고(남긴 수를 알린다), 하나씩 지울 때는 이름(confirm_name)이 맞아야 한다(2026-10-14).
+        scope: 활동 기록의 대상(프로젝트 휴지통은 그 프로젝트 id, 프로젝트 목록의 휴지통은 '전체')."""
         shown = {r.key: r for r in rows}
         if form.get("empty"):
+            self.store.record_activity(uid, activity.EMPTY, "trash", scope)  # 한 줄씩 지운 것은 '영구 삭제'로 따로 남는다
             for r in rows:
+                if r.guard:
+                    continue
                 try:
                     self.store.purge_trash(uid, r.kind, r.id)
                 except ValueError:
                     pass  # 앞의 것과 함께 이미 지워진 것(노드와 함께 버린 글 등)
-            return {"done": "emptied"}
+            projects = sum(1 for r in rows if r.guard and r.guard.kind == "project")
+            manuscripts = sum(1 for r in rows if r.guard and r.guard.kind != "project")
+            return {"done": "emptied", **({"kept": str(projects)} if projects else {}), **({"kept_ms": str(manuscripts)} if manuscripts else {})}
         row = shown.get(str(form.get("purge") or ""))
         if row is None:
             return {"err": "purge"}
         try:
-            self.store.purge_trash(uid, row.kind, row.id)
-        except ValueError:
-            return {"err": "purge"}
+            self.store.purge_trash(uid, row.kind, row.id, confirm_name=str(form.get("confirm_name") or ""))
+        except ValueError as e:
+            return {"err": "confirm" if e.args and e.args[0] == "name" else "purge"}
         return {"done": "purged"}
 
     def _node_delete(self, uid: str, session: tuple[str, str], floor: Floor, node: MapNode) -> str:
@@ -912,7 +931,7 @@ class MapPages:
                 return self._map_page("휴지통", '<p class="msg err">잘못된 요청입니다.</p>', session, 403)
             if form.get("purge") or form.get("empty"):  # 영구 삭제(2026-10-11)
                 rows = await run_in_threadpool(self._trash_rows, uid, floor)
-                done = await run_in_threadpool(self._purge, uid, rows, form)
+                done = await run_in_threadpool(self._purge, uid, rows, form, floor.id)
                 return RedirectResponse(with_query(here, **done), status_code=303)
             if book_id := str(form.get("book") or ""):  # 책째 옮긴 책 되살리기(2026-10-11) → 그 책
                 if (await run_in_threadpool(self.store.trashed_books, uid)).get(book_id, ("",))[0] != floor.id:
@@ -970,12 +989,14 @@ class MapPages:
             message = '<p class="msg err">그 첨부의 글이 휴지통에 있어 되살리지 못했습니다. 글을 먼저 되살려 주세요.</p>'
         elif params.get("err") == "purge":
             message = '<p class="msg err">영구 삭제하지 못했습니다(이미 없거나 이 휴지통의 것이 아닙니다).</p>'
+        elif params.get("err") == "confirm":
+            message = f'<p class="msg err">{NAME_ERROR}</p>'
         elif params.get("err"):
             message = '<p class="msg err">되살리지 못했습니다.</p>'
         elif code := params.get("maperr"):
             message = f'<p class="msg err">{html.escape(error_message(MapError(code, code), polite=True))}</p>'
-        if not message and (done := PURGED.get(params.get("done") or "")):
-            message = f'<p class="msg">{done}</p>'
+        if not message and (done := done_message(params)):
+            message = f'<p class="msg">{html.escape(done)}</p>'
         from magus.webboard import SEP  # noqa: PLC0415
 
         lead = (f'<nav class="trail" aria-label="위치"><a href="/shelf">프로젝트</a>{SEP}'
@@ -1033,7 +1054,8 @@ class MapPages:
                 along = [f"응답한 글 {replies}개" if replies else "", f"첨부 {files}개" if files else ""]  # 확인 창 문구와 같게
                 out.append(TrashRow("category_item", t.id, t.trashed_at, f"글 「{title}」 · 책 「{book.name}」"
                                     + (f" · {'·'.join(a for a in along if a)} 함께" if any(along) else ""), restore="item"))
-        out += [TrashRow(r.kind, r.id, r.at, r.label, "되살리기는 운영자에게 알려 주세요.") for r in self._extra_rows(uid) if r.sub == floor.id]
+        out += [TrashRow(r.kind, r.id, r.at, r.label, "되살리기는 운영자에게 알려 주세요.", guard=r.guard)
+                for r in self._extra_rows(uid) if r.sub == floor.id]
         return sorted(out, key=lambda r: r.at, reverse=True)
 
     def _post_name(self, uid: str, owner: str, trash: list[Any]) -> str:

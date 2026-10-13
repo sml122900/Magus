@@ -109,7 +109,7 @@ def _seed(store: LocalStore, user: str = "alice") -> dict[str, str]:
 
 def _hashes(root: Path, skip_text: bool = False) -> dict[str, str]:
     return {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob("*")
-            if p.is_file() and not (skip_text and "/.text/" in p.as_posix())}
+            if p.is_file() and not (skip_text and "/.text/" in p.as_posix()) and p.name != ".activity.log"}  # 활동 기록은 옮길 때마다 는다
 
 
 def test_store_keeps_text_beside_attachment_and_moves_with_trash(store: LocalStore, data_dir: Path):

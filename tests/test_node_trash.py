@@ -22,9 +22,10 @@ CHAPTER = "물고기가 뭍으로 올라왔다(Clack, 2012). 강가의 장날 �
 
 
 def _hashes(root: Path) -> dict[str, str]:
-    """원본 파일의 해시. 색인과 파생 캐시(.cache — 서버가 뒤에서 인용 계산을 데운다, 결정 f)는 뺀다."""
+    """원본 파일의 해시. 색인과 파생 캐시(.cache — 서버가 뒤에서 인용 계산을 데운다, 결정 f), 활동 기록(옮기고 되살릴 때마다 한 줄씩)은 뺀다."""
     return {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in root.rglob("*") if p.is_file() and not p.name.startswith("index.sqlite") and ".cache" not in p.parts}
+            for p in root.rglob("*") if p.is_file() and not p.name.startswith("index.sqlite") and ".cache" not in p.parts
+            and p.name != ".activity.log"}
 
 
 def _seed(store: LocalStore, user: str = "alice") -> dict[str, str]:

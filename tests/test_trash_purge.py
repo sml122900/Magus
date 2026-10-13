@@ -48,7 +48,7 @@ def _seed(store: LocalStore, user: str = U) -> dict[str, str]:
     store.trash_category(user, "oldbook", "책째")
     store.write_chapter(user, "city", 1, "본문 " * 500, "x", title="하나")
     store.write_chapter(user, "city", 2, "둘째 " * 500, "x", title="둘")
-    store.trash_manuscript(user, "city", "올린 문서 휴지통")
+    store.trash_manuscript(user, "city", "올린 문서 휴지통", confirm_name="도시")  # 장이 있어 이름(2026-10-14)
     doc = store.root / "users" / user / "trash" / "shelf" / "documents" / "doc1"
     doc.mkdir(parents=True)
     (doc / "document.json").write_text('{"title": "출처 확인 문서", "floor": "city", "versions": [{}], "_trash": {"at": '
@@ -90,7 +90,10 @@ def test_purge_each_kind_removes_files_and_frees_space(store: LocalStore):
     store.purge_trash(U, "category", "oldbook")
     [ms] = store.list_trashed_manuscripts(U)
     assert ms.project_id == "city" and ms.detail == "2장" and (trash / ms.id / "book" / "ch-01.md").exists()
-    store.purge_trash(U, "manuscript", ms.id)
+    with pytest.raises(ValueError) as e:  # 올린 문서는 이름을 적어야 영구 삭제(2026-10-14)
+        store.purge_trash(U, "manuscript", ms.id)
+    assert e.value.args == ("name", "도시") and (trash / ms.id / "book" / "ch-01.md").exists()
+    store.purge_trash(U, "manuscript", ms.id, confirm_name="도시")
     [doc] = store.list_trashed_documents(U)
     assert (doc.project_id, doc.title) == ("city", "출처 확인 문서")
     store.purge_trash(U, "document", doc.id)
@@ -140,8 +143,14 @@ def test_web_purge_one_and_empty_with_in_page_confirm(server_proc):  # noqa: F81
         assert "영구 삭제했습니다." in one.text and "글 「버릴 글」" not in one.text
         restored = c.post("/shelf/p/city/trash", data={"csrf": csrf, "book": "oldbook"})  # 책째 옮긴 책은 웹에서 되살린다
         assert restored.url.path == "/shelf/oldbook" and "책과 함께" in restored.text
-        emptied = c.post("/shelf/p/city/trash", data={"csrf": csrf, "empty": "1"})
-        assert "휴지통을 비웠습니다." in emptied.text and '<p class="empty">휴지통이 비었습니다.</p>' in emptied.text
+        emptied = c.post("/shelf/p/city/trash", data={"csrf": csrf, "empty": "1"})  # 올린 문서는 빼고 비운다(2026-10-14)
+        assert "휴지통을 비웠습니다. 올린 문서 1개는 남겼습니다." in emptied.text and '<p class="trash-count">1개</p>' in emptied.text
+        assert "올린 문서 「도시」 · 2장" in emptied.text and "올린 문서(장 2개)입니다." in emptied.text
+        ms_key = re.search(r'name="purge" value="(manuscript:[^"]+)"', emptied.text).group(1)
+        wrong = c.post("/shelf/p/city/trash", data={"csrf": csrf, "purge": ms_key, "confirm_name": "도"})
+        assert "err=confirm" in str(wrong.url) and "이름이 맞지 않아 영구 삭제하지 않았습니다." in wrong.text
+        gone = c.post("/shelf/p/city/trash", data={"csrf": csrf, "purge": ms_key, "confirm_name": " 「도시」 "})
+        assert "영구 삭제했습니다." in gone.text and '<p class="empty">휴지통이 비었습니다.</p>' in gone.text
         # 프로젝트 목록의 휴지통: 프로젝트·예전 올린 파일
         listed = c.get("/shelf/trash").text
         assert "프로젝트 「강」" in listed and "올린 파일 「예전원고.docx」" in listed and "휴지통 비우기" in listed
