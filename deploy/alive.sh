@@ -23,7 +23,7 @@ notify() {  # $1: 보낼 글(사용률 같은 숫자만, 비밀·자료 없음)
 
 limit=${DISK_ALERT_PERCENT:-85}
 state=${DISK_ALERT_STATE:-/var/tmp/magus-disk-alert}
-used=$(df -P / | awk 'NR == 2 { sub("%", "", $5); print $5 }')
+used=$(df -P / | awk 'NR == 2 { v = $(NF - 1); sub("%", "", v); print v }')  # 끝에서 두 번째 칸(파일 시스템 이름에 공백이 있어도)
 if [ "${DISK_ALERT_TEST:-}" = 1 ]; then
 	notify "[Magus] 디스크 알림 시험: 지금 사용률 ${used}% (알림 기준 ${limit}%)"
 elif [ -n "$used" ] && [ "$used" -gt "$limit" ]; then

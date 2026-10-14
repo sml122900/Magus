@@ -49,6 +49,15 @@ def test_user_limit_is_500mb_in_compose():
     assert 'MAX_USER_MB: "500"' in compose
 
 
+def _text(got: str) -> str:
+    """보낸 text 칸. 서버(리눅스)는 UTF-8이고, Windows 시험의 Git Bash curl은 한글을 ANSI 코드 페이지(CP949)로 보낸다."""
+    raw = urllib.parse.parse_qs(got.split("?", 1)[1], encoding="latin-1")["text"][0].encode("latin-1")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("cp949")
+
+
 class _Catch(http.server.BaseHTTPRequestHandler):
     got: list[str] = []
 
@@ -88,11 +97,12 @@ def test_alive_sends_disk_alert_once_then_waits(tmp_path, telegram):
 
     run(DISK_ALERT_PERCENT="0")  # 사용률이 0%를 넘으니 알림
     assert len(got) == 1 and got[0].startswith("/botfake-token/sendMessage?")
-    text = urllib.parse.parse_qs(got[0].split("?", 1)[1])["text"][0]
+    text = _text(got[0])
     assert text.startswith("[Magus] 디스크 사용률 ") and "알림 기준 0%" in text and state.exists()
+    assert 0 < int(text.split("사용률 ")[1].split("%")[0]) <= 100  # 사용률 칸을 제대로 읽었다
     run(DISK_ALERT_PERCENT="0")  # 6시간 안에는 다시 보내지 않는다
     assert len(got) == 1
     run(DISK_ALERT_PERCENT="100")  # 기준 아래로 내려오면 상태를 지운다(다음에 넘을 때 바로 알림)
     assert len(got) == 1 and not state.exists()
     run(DISK_ALERT_TEST="1")  # 시험 알림(상태 파일은 건드리지 않는다)
-    assert len(got) == 2 and "디스크 알림 시험" in urllib.parse.parse_qs(got[1].split("?", 1)[1])["text"][0] and not state.exists()
+    assert len(got) == 2 and "디스크 알림 시험" in _text(got[1]) and not state.exists()

@@ -99,8 +99,7 @@ class StartPages:
             raise HTTPException(status_code=404) from None
         lines = text.strip().splitlines()
         title = lines[0].lstrip("# ").strip() if lines and lines[0].startswith("# ") else "개인정보 처리방침"
-        body = to_html("
-".join(lines[1:] if lines and lines[0].startswith("# ") else lines))
+        body = to_html("\n".join(lines[1:] if lines and lines[0].startswith("# ") else lines))
         return self._page(title, body, self.user_of(request), css=START_STYLE)
 
     async def landing(self, request: Request) -> Response:
