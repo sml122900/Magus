@@ -74,6 +74,7 @@ from magus.store.base import (
 from magus.store.schema import SCHEMA, SCHEMA_VERSION, TABLES
 
 log = logging.getLogger("magus.store")
+CACHE_REPLACE_TRIES = 5  # 캐시 파일 교체를 다시 해 보는 횟수(Windows의 읽는 중 교체 막힘, 2026-10-14)
 INDEX_PENDING = "index-pending.json"  # 파일은 저장됐는데 색인이 늦은 글(파생, 다 하면 지운다, 점검 12-a)
 RETRY_WAITS = (0.0, 0.5, 1.0)  # 색인이 실패하면 기다렸다 다시(초). sqlite 자체도 잠김을 5초까지 기다린다
 REPAIR_EVERY, REPAIR_TRIES = 2.0, 90  # 그래도 안 되면 뒤에서 2초마다, 3분까지
@@ -411,7 +412,16 @@ class LocalStore(ShelfMixin, CategoryMixin, ContextMixin, FloorMixin, MapMixin, 
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")  # 두 요청이 함께 써도 서로의 임시 파일을 밟지 않게
         tmp.write_text(text, encoding="utf-8", newline="\n")
-        tmp.replace(path)
+        # 캐시는 파생값이라 못 써도 다음에 다시 계산한다. Windows는 다른 스레드가 그 파일을 읽는 동안 교체를 막는다(PermissionError,
+        # 2026-10-14 전체 시험의 문서 업데이트 500). 잠깐씩 다시 해 보고, 그래도 안 되면 이번 쓰기만 건너뛴다(사용자 동작은 그대로)
+        for attempt in range(CACHE_REPLACE_TRIES):
+            try:
+                tmp.replace(path)
+                return
+            except PermissionError:
+                time.sleep(0.05 * (attempt + 1))
+        tmp.unlink(missing_ok=True)
+        log.info("cache write skipped (file busy) name=%s", name)
 
     @_locked
     def set_parts(self, user_id: str, project_id: str, parts: list[Part]) -> None:

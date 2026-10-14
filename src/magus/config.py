@@ -40,6 +40,9 @@ class Settings:
     help_max_tokens: int = 600
     help_daily_limit: int = 30  # 사용자별 하루 질문 수
     help_dir: Path | None = None  # 도움말 문서 폴더(없으면 저장소의 docs/help)
+    # 개인정보 처리방침 화면 /privacy(2026-10-14): 사용자가 승인하기 전에는 꺼 둔다(꺼지면 404). 글은 저장소의 docs/drafts/privacy.md
+    privacy_page: bool = False
+    privacy_file: Path | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -68,6 +71,8 @@ class Settings:
             help_max_tokens=_count(env, "HELP_MAX_TOKENS", 600),
             help_daily_limit=_count(env, "HELP_DAILY_LIMIT", 30),
             help_dir=Path(env["HELP_DIR"]).resolve() if env.get("HELP_DIR") else None,
+            privacy_page=(env.get("PRIVACY_PAGE") or "").strip().lower() in ("1", "on", "true", "yes"),
+            privacy_file=Path(env["PRIVACY_FILE"]).resolve() if env.get("PRIVACY_FILE") else None,
         )
 
 

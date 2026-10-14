@@ -10,15 +10,20 @@ from __future__ import annotations
 import html
 import urllib.parse
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from magus.extract import EXTRACTABLE, NO_TEXT_SUFFIXES
+from magus.mdlite import to_html
 from magus.store import Store
 
+PRIVACY_FILE = Path(__file__).resolve().parents[2] / "docs" / "drafts" / "privacy.md"  # 저장소(Docker: /app)
+PRIVACY_CUT = "<!-- 여기부터 대조 기록(공개하지 않음) -->"
 ASK_ALL = "magus 전체 보여 줘"
 ASK_FIND = "magus에서 ○○ 찾아 줘"
 
@@ -74,12 +79,28 @@ def steps_card(projects: bool, document: bool, project_link: str = "") -> str:
 
 class StartPages:
     store: Store
+    settings: Any
     base_url: str
     user_of: Callable[[Request], tuple[str, str] | None]
     _page: Callable[..., HTMLResponse]
 
     def start_routes(self) -> list[tuple[str, list[str], Callable[..., Any]]]:
-        return [("/", ["GET"], self.landing), ("/connect", ["GET"], self.connect_page)]
+        return [("/", ["GET"], self.landing), ("/connect", ["GET"], self.connect_page), ("/privacy", ["GET"], self.privacy_page)]
+
+    async def privacy_page(self, request: Request) -> Response:
+        """개인정보 처리방침(2026-10-14 초안). PRIVACY_PAGE가 켜졌을 때만 보이고, 꺼져 있으면 없는 주소와 같은 404.
+        글은 docs/drafts/privacy.md의 대조 기록 앞까지(대조 표는 공개하지 않는다). 로그인 없이 열린다."""
+        if not self.settings.privacy_page:
+            raise HTTPException(status_code=404)
+        path = self.settings.privacy_file or PRIVACY_FILE
+        try:
+            text = (await run_in_threadpool(path.read_text, encoding="utf-8")).split(PRIVACY_CUT, 1)[0]
+        except OSError:
+            raise HTTPException(status_code=404) from None
+        lines = text.strip().splitlines()
+        title = lines[0].lstrip("# ").strip() if lines and lines[0].startswith("# ") else "개인정보 처리방침"
+        body = to_html("\n".join(lines[1:] if lines and lines[0].startswith("# ") else lines))
+        return self._page(title, body, self.user_of(request), css=START_STYLE)
 
     async def landing(self, request: Request) -> Response:
         if self.user_of(request):
