@@ -39,6 +39,15 @@
 > 그 전: 2026-10-06 KST — 비밀 대화 시험 결과 기록(되묻기 성공, 선택지에 원고가 섞임 → #90 수정, 커밋만), 사용자 서랍 설계안 #91(검토 대기, `docs/decisions/user-drawers.md`).
 > 2026-10-06 01시 KST — 토큰 aud 검사 강화(결정 #79)를 `p1-auth-audience`로 서버에 반영하고, 서버의 옛 git 이력을 새 이력으로 바꿨다(0-3절).
 
+## 0-43. 배포 `p1-nightly-1014a`(2026-10-14 14:51 KST, 사용자 승인) — 오늘 묶음
+
+- `a1d7f22` → `0d88a3e`. 전체 시험 단독 4번: 1회 615 통과, 2회 1건 실패(`test_followup_a.py::test_broken_manuscript_through_files_and_chat`: Windows asyncio가
+  클라이언트 연결 끊김 `ConnectionResetError`를 ERROR로 남겨 '로그에 ERROR 없음' 검사에 걸림) → `logsafe`가 그 경우만 WARNING·알림 없음으로(`2a2ceb5`) → 3·4회 616 통과.
+- 도구 목록·instructions 해시 배포본과 같음(재연결 필요 없음). 백업 `a03b37bc`(2,431개, 오류 없음). healthy·재시작 0·오류 로그 0, 데이터 해시 2,431개 두 번 같음,
+  수치 그대로(default 299·297·0·86, father 337·338·335·5·129·E3), 전체 현황 같음(father 834536a5에 새 '책에 첨부한 문서' 2줄만), 실데이터 GET 점검·/tmp 점검 16/16,
+  바깥 GET `/`·`/connect` 200. 되돌리기 이미지 `magus:rollback-a1d7f22`(남김 rollback-a1d7f22·rollback-5962dce), 디스크 46%.
+- 다음: 아침 묶음 `p1-nightly-1014b`, 그다음 한도 500MB·디스크 알림·처리방침(꺼짐) `p1-nightly-1014c`.
+
 ## 0-42. 야간 자율 작업(2026-10-14 새벽, 사용자 지시 '문서를 넣으면 AI가 쉽게 읽는다') — 배포 없음, 아침 승인 대기
 
 - **지금 바로 할 일**: 대기(사용자): 1. 아침 보고 `docs/nightly/2026-10-14-report.md`(브랜치 `nightly/2026-10-14`) 읽기.
