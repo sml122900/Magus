@@ -5,6 +5,7 @@ fixtures
 tests
 docs
 !docs/help
+!docs/drafts/privacy.md
 deploy
 **/__pycache__
 *.pyc

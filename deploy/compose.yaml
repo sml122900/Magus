@@ -15,6 +15,8 @@ services:
       DATA_DIR: /data
       # outline·체크리스트의 시각 표시(저장은 UTC). 사용자가 한국에 있다. 없으면 UTC로 보여 9시간 어긋난다
       TZ: Asia/Seoul
+      # 사용자별 저장 용량(MB, 2026-10-14 사용자 결정: 1,000 → 500. 그날 default 8.6MB·father 7.9MB). 비밀이 아니라 여기에 둔다
+      MAX_USER_MB: "500"
     volumes:
       - ./data:/data
     expose:

@@ -211,7 +211,7 @@
 | `ALLOWED_USERS` | — | `sub=user_id` 쉼표 목록(sub는 WorkOS 사용자 id `user_…`, 이메일 아님). 여기 없는 sub는 403. 비우면 모두 403(첫 배포에서 id를 얻는 단계). 같은 sub나 같은 이름이 두 번이면 서버가 시작하지 않는다(오류에는 항목 순서만, id는 쓰지 않음). 공개 가입은 없다 |
 | `PORT` | 8000 | `magus serve --transport http`의 기본 포트 |
 | `MAX_UPLOAD_MB` | 50 | 업로드 한 개 한도(책장의 원고·수정본, 올린 파일, 문헌 등록) |
-| `MAX_USER_MB` | 1000 | 사용자별 저장 용량(사용자 폴더 전체) |
+| `MAX_USER_MB` | 1000 | 사용자별 저장 용량(사용자 폴더 전체). 운영 서버는 `deploy/compose.yaml`에서 500(2026-10-14 사용자 결정) |
 | `MAX_REQUEST_MB` | 2 | MCP 요청 본문 한도(넘으면 413) |
 | `MAX_ATTACH_MB` | 20 | 글의 첨부 한 개 한도(#97). 한 번에 10개, 사용자 전체는 `MAX_USER_MB`에 함께 |
 | `ANTHROPIC_API_KEY` | — | 웹 도움말(#97). 서버에서만 쓰고 브라우저로 내려보내지 않는다. 없으면 도움말만 "지금은 도움말을 쓸 수 없어요." |
@@ -219,6 +219,8 @@
 | `SESSION_SECRET` | (로컬: 실행마다 무작위) | 웹 세션·내려받기 링크 서명 비밀. **원격 모드에서는 필수**(32자 이상) |
 | `WEB_CLIENT_ID` / `WEB_CLIENT_SECRET` | — | 웹 로그인용 OAuth 클라이언트(인증 서버에 등록, 콜백 `PUBLIC_URL/auth/callback`). 없으면 웹 로그인이 꺼진다 |
 | `VOYAGE_API_KEY` / `OPENAI_API_KEY` | — | 해당 제공자를 쓸 때만 |
+| `PRIVACY_PAGE` / `PRIVACY_FILE` | 꺼짐 / 저장소 `docs/drafts/privacy.md` | 개인정보 처리방침 화면 `/privacy`(2026-10-14 초안). `on`일 때만 보이고 꺼지면 없는 주소와 같은 404. 대조 기록(표시 아래)은 공개하지 않는다. 켜는 것은 사용자 승인 뒤 |
+| `DISK_ALERT_PERCENT` | 85 | 호스트 `deploy/alive.sh`의 디스크 알림 기준(텔레그램, 6시간에 한 번) |
 | `EMBEDDINGS_MODEL` | 제공자 기본값 | 임베딩 모델 이름 |
 
 ## 데이터 모델 (모든 테이블에 user_id가 있다)

@@ -15,6 +15,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
 # 웹 도움말(#97)의 시스템 프롬프트. magus.helpbot이 /app/docs/help를 읽는다
 COPY docs/help ./docs/help
+# 개인정보 처리방침 초안(2026-10-14). /privacy가 읽는다(PRIVACY_PAGE=on일 때만 보인다)
+COPY docs/drafts/privacy.md ./docs/drafts/privacy.md
 RUN uv sync --frozen --no-dev
 
 USER magus

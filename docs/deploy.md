@@ -497,6 +497,9 @@ sudo crontab -e
 ```
 
 손으로 한 번 돌려 healthchecks.io의 magus-alive가 초록이 되는지 본다: `sudo /opt/magus/deploy/alive.sh; echo $?`(0이면 `/healthz` 200과 핑 2xx).
+- **디스크(2026-10-14)**: 같은 `alive.sh`가 루트(/) 사용률이 85%(`DISK_ALERT_PERCENT`)를 넘으면 앱 알림과 같은 텔레그램으로 알린다(넘어 있는 동안 6시간에 한 번,
+  상태 파일 `/var/tmp/magus-disk-alert`, 기준 아래로 내려오면 지움). 보내는 것은 사용률 숫자뿐이다. 시험: `sudo DISK_ALERT_TEST=1 /opt/magus/deploy/alive.sh`(텔레그램에 '디스크 알림 시험').
+- **사용자별 저장 한도(2026-10-14)**: `deploy/compose.yaml`의 `MAX_USER_MB: "500"`(코드 기본값 1,000은 그대로, 운영만 500). 그날 사용량 default 8.6MB·father 7.9MB.
 
 - 2026-10-06 점검: 서버 `alive.sh`가 저장소 판과 같다(해시 `ea4684b`). `HEALTHCHECK_ALIVE_URL`은 `https://hc-ping.com/<uuid>` 형식이고, 손으로 돌려 종료 0을 확인했다. 값은 출력하지 않는다.
 - 시험할 때 `.env` 값을 셸에서 읽으려면 `alive.sh`의 `get` 함수를 그대로 쓴다. `tr -d "\x27…"`처럼 쓰면 GNU tr이 `\`·`x`·`2`·`7`을 지워 주소가 망가진다(2026-10-06 실제로 겪음, 400 invalid url format).
