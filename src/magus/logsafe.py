@@ -20,6 +20,9 @@ FORMAT = "%(asctime)s %(name)s %(levelname)s %(message)s"
 # 인자에 사용자 데이터가 들어가는 SDK 메시지: 첫 인자(도구·리소스 이름)만 남긴다
 _PEER_TEXT = {"Tool %r failed: %r", "Resource %r failed: %r"}
 ALERT_INTERVAL = 600.0
+# 상대가 먼저 연결을 끊은 것(서버 잘못이 아님): asyncio가 Windows Proactor에서 'Exception in callback …_call_connection_lost'를 ERROR로 남긴다.
+# 경고로 낮추고 알림은 보내지 않는다(2026-10-14, 전체 시험이 이 줄로 가끔 실패했다).
+_PEER_GONE = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
 
 
 def _short(path: str) -> str:
@@ -54,6 +57,9 @@ class RedactingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if record.msg in _PEER_TEXT and isinstance(record.args, tuple) and record.args:
             record.args = (record.args[0], "(내용 생략)")
+        if (record.name == "asyncio" and record.levelno >= logging.ERROR and record.exc_info
+                and isinstance(record.exc_info[1], _PEER_GONE)):
+            record.levelno, record.levelname = logging.WARNING, "WARNING"
         if record.exc_info and record.exc_info[1] is not None:
             # 메시지 없이 예외 종류와 위치만. 원래 traceback은 버린다.
             record.msg = f"{record.getMessage()} | {_frames(record.exc_info[1])}"
