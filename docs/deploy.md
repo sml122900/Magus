@@ -481,6 +481,23 @@ GET 뒤 활동 기록 파일 없음(GET은 쓰지 않는다). /tmp 점검 10/10.
 **되돌리기**: `docker tag magus:rollback-5962dce magus:latest && docker compose up -d --no-build`(데이터 형식 같음). 새 코드가 쓴 `.activity.log`와
 휴지통 묶음 manifest의 `edition` 칸은 옛 코드가 읽지 않는다(그대로 두어도 된다). 옛 코드로 돌아가면 이름 입력 보호와 활동 기록이 없어진다.
 
+### 2-19. 야간 묶음 a·b·c — 2026-10-14 오후 사용자 승인
+
+절차는 2-18절과 같다(스크립트 `private/tmp/deploy-nightly-{a,b,c}/`, 점검 도구 `/root/nightly-tools/`, 기록 `/root/deploy-20261014-nightly-{a,b,c}/`).
+데이터 이전 없음, 인덱스 v23, 의존성 그대로. 실데이터는 GET만(`nightly_check.py`·`c_check.py`), 쓰는 점검은 컨테이너 /tmp(`smoke.py` 16가지, `smoke_b.py` 공공 한글 표본).
+
+| 태그 | 커밋 | 무엇 | 백업 | 재연결 |
+|---|---|---|---|---|
+| `p1-nightly-1014a` | `a1d7f22` → `0d88a3e` | 첫 화면·Claude 연결 안내·시작 순서·첨부 글자 상태·파일마다 글 하나로·403 안내, 뽑기 VERSION 3, 대화 찾기 응답, 로그 필터 | `a03b37bc` | 필요 없음 |
+| `p1-nightly-1014b` | `0d88a3e` → `c7b6a32` | 한글(hwpx·hwp) 원고를 올린 문서로, 대화 book_import에서 replace 뺌 | `d6493a03` | **필요** |
+| `p1-nightly-1014c` | `c7b6a32` → `769b1bd` | `MAX_USER_MB: "500"`(compose), alive.sh 디스크 85% 알림, `/privacy`(꺼짐), 캐시 쓰기 안정화 | `82a49719` | 필요 없음 |
+
+세 번 모두 healthy·재시작 0·오류 로그 0, 데이터 2,431개 해시 같음(두 번씩), 수치(default 299·297·0·86, father 337·338·335·5·129·E3)·전체 현황 같음.
+주의: 비교 기준이 이미 새 줄을 가진 판이면 up.sh의 '책에 첨부한 문서' 줄 빼기가 한쪽에만 걸려 '다름'으로 보인다(b·c의 father 834536a5). 필터 없이 비교해 같음을 확인했다.
+
+**되돌리기**: c → b `docker tag magus:rollback-c7b6a32 magus:latest && docker compose up -d --no-build`(compose의 한도 500은 그대로 남는다. 1,000으로 돌리려면 코드도 `c7b6a32`로).
+b → a `magus:rollback-0d88a3e`(도구 스키마가 바뀌어 커넥터 재연결 필요). 남은 되돌리기 이미지는 `rollback-c7b6a32`·`rollback-0d88a3e`.
+
 ## 3. 알림 확인
 
 ```sh
