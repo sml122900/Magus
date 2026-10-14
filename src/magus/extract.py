@@ -2,7 +2,9 @@
 
 - 대상: docx·pdf(글자가 있는 것)·txt·md. 그림·스캔 PDF는 이번에 하지 않는다(글자가 안 나오면 '글자 없음'으로 적는다. OCR은 다음 결정).
   2026-10-11(형식 늘림, VERSION 2): hwp·hwpx·pptx·xlsx·odt·rtf·csv·html·htm. 옛 Office 바이너리(doc·ppt·xls)는 뽑지 않고
-  '글자를 뽑지 않는 형식'으로 보인다. 암호·배포용 hwp는 failed + reason(hwp_locked)으로 적어 '읽을 수 없는 hwp'로 보인다.
+  '글자를 뽑지 않는 형식'으로 보인다. 암호·배포용 hwp는 failed + reason으로 적어 '읽을 수 없는 hwp'로 보인다.
+  2026-10-14(공공 문서 호환성 점검, VERSION 3): reason을 암호(hwp_password)·배포용(hwp_dist)·DRM(hwp_drm)으로 가르고,
+  docx에 각주·미주·머리말·꼬리말을 더하고 글상자가 두 번 나오던 것을 고쳤다(docx만 다시 뽑는다, SINCE).
 - 어디에: 그 첨부 폴더 안 `.text/<파일 이름>.txt`(뽑은 글자)와 `.text/status.json`({status, chars, ms, at, version, reason?}). 원본은 읽기만.
   썸네일(.thumb/)과 같은 방식이라 옛 코드는 첨부 폴더에서 파일만 세므로 무시한다. 첨부 폴더째 움직이므로 휴지통 왕복에도 함께 간다.
   reason은 옛 코드가 모르는 키일 뿐이다(옛 코드는 status만 보고 '뽑지 못함'으로 보인다).
@@ -45,21 +47,26 @@ DEADLINE = 20.0  # 초. 넘으면 '나중에'
 PAGE_CHARS = 3_000  # 대화에서 한 번에 읽는 쪽
 EXTRACTABLE = (".docx", ".pdf", ".txt", ".md",  # VERSION 1(#100)
                ".hwp", ".hwpx", ".pptx", ".xlsx", ".odt", ".rtf", ".csv", ".html", ".htm")  # VERSION 2(2026-10-11)
-SINCE = dict.fromkeys(EXTRACTABLE[4:], 2)  # 형식을 뽑기 시작한 VERSION. 그보다 옛 상태는 다시 뽑는다(warm-cache·extract·처음 열 때)
+# 그 형식의 뽑은 글자가 마지막으로 바뀐 VERSION. 그보다 옛 상태는 다시 뽑는다(warm-cache·extract·처음 열 때).
+# 3(2026-10-14 공공 문서 점검): docx 각주·미주·머리말·꼬리말·글상자 한 번·탭 위치, hwp·hwpx·docx·pptx 다듬기(tidy: PUA 기호·빈 줄),
+#   xlsx 숫자 15자리
+SINCE = dict.fromkeys(EXTRACTABLE[4:], 2) | dict.fromkeys((".docx", ".hwp", ".hwpx", ".pptx", ".xlsx"), 3)
 NO_TEXT_SUFFIXES = (".doc", ".ppt", ".xls")  # 옛 Office 바이너리: 이번에는 뽑지 않는다
 NO_TEXT = "글자를 뽑지 않는 형식"  # 저자·Claude에게 보이는 이름
 HWP_UNREADABLE = "읽을 수 없는 hwp"
 FORMATS = "docx·hwp·hwpx·pdf·pptx·xlsx·odt·rtf·txt·md·csv·html"  # 글자를 뽑는 형식(안내 문장에 쓴다)
-VERSION = 2
+VERSION = 3
 # status: ok(뽑음) · truncated(30만 자 넘어 앞부분만) · empty(글자 없음: 그림·스캔 PDF·빈 문서) · failed(읽지 못함: 깨진 파일·암호) · later(시간 넘음)
-# reason(failed일 때만, 있으면): hwp_locked(암호·배포용·DRM hwp) · hwp_old(한글 97 이전 hwp)
+# reason(failed일 때만, 있으면): hwp_password(암호) · hwp_dist(배포용 문서) · hwp_drm(DRM·공인인증서) · hwp_old(한글 97 이전 hwp)
+#   hwp_locked(암호·배포용을 가리지 못함): 2026-10-14 전에 뽑은 hwp 상태(앞의 셋을 하나로 적었다), 그리고 암호화된 hwpx
 DONE = ("ok", "truncated", "empty", "failed")
 READABLE = ("ok", "truncated")
 SHEET_ROWS = 2_000  # xlsx 시트 하나에서 뽑는 행(빈 행은 세지 않는다)
 RAW_MAX = 50_000_000  # 통째로 읽는 것(hwp의 OLE 스트림 하나, rtf 파일)의 상한
 log = logging.getLogger("magus.extract")
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-_WHY = {"hwp_locked": "암호가 걸렸거나 배포용 문서", "hwp_old": "한글 97 이전 형식"}
+_WHY = {"hwp_password": "암호가 걸린 문서", "hwp_dist": "배포용 문서", "hwp_drm": "보안(DRM)이 걸린 문서", "hwp_old": "한글 97 이전 형식",
+        "hwp_locked": "암호가 걸렸거나 배포용 문서"}  # 옛 hwp 상태·암호화된 hwpx
 
 
 class _Late(Exception):
@@ -79,7 +86,7 @@ class Extracted:
     status: str
     text: str  # READABLE일 때만 글자가 있다
     ms: int = 0
-    reason: str = ""  # failed의 까닭(hwp_locked·hwp_old). 없으면 status.json에 쓰지 않는다
+    reason: str = ""  # failed의 까닭(hwp_password·hwp_dist·hwp_drm·hwp_old). 없으면 status.json에 쓰지 않는다
 
 
 def extractable(name: str) -> bool:
@@ -160,10 +167,29 @@ def extract(path: Path, deadline: float = DEADLINE) -> Extracted:
     except Exception as e:  # 깨진 zip·암호 PDF 등. 이름·내용은 남기지 않는다
         log.info("extract failed kind=%s error=%s", suffix, type(e).__name__)
         return Extracted("failed", "", int((time.monotonic() - start) * 1000))
+    if suffix in TIDY:
+        text = tidy(text)
     ms = int((time.monotonic() - start) * 1000)
     if not text.strip():
         return Extracted("empty", "", ms)
     return Extracted("truncated" if cut else "ok", text, ms)
+
+
+# 문서 형식의 뽑은 글자 다듬기(2026-10-14 공공 문서 점검). 글꼴이 그리는 사용자 정의 영역(PUA) 기호를 보통 글자로, 빈 줄 여럿은 하나로.
+# PUA: 기호 글꼴(Wingdings) 글자는 문서에 U+F0xx로 들어 있어 뽑으면 깨진 글자다. 점검에서 본 것(·→ᄒᆞᆫ)과 Word 글머리표 기본 기호만 옮긴다.
+#   U+F09E 가운뎃점(보도자료 '외화·원화') · U+F09F 글머리 점(연구보고서 표의 '• 창업지원 업종 확대', 132곳)
+#   · U+F0E0 오른쪽 화살표(발표 자료 '클릭 → 추가') · U+F53A 한컴 옛한글 'ᄒᆞᆫ'(법령 서식 'ᄒᆞᆫ글 워드프로세서')
+#   · U+F06C ● · U+F06E ■ · U+F075 ◆ · U+F076 ❖ · U+F0A7 ▪ · U+F0D8 ➢ · U+F0FC ✓
+# PDF의 PUA(글꼴에 글자 대응표가 없는 것)는 무엇인지 알 수 없어 그대로 둔다.
+SYMBOL_PUA = str.maketrans({0xF09E: "·", 0xF09F: "•", 0xF0E0: "→", 0xF53A: "ᄒᆞᆫ", 0xF06C: "●", 0xF06E: "■", 0xF075: "◆",
+                            0xF076: "❖", 0xF0A7: "▪", 0xF0D8: "➢", 0xF0FC: "✓"})
+TIDY = (".hwp", ".hwpx", ".docx", ".pptx")
+_BLANKS = re.compile(r"\n[ \t　]*\n(?:[ \t　]*\n)+")
+
+
+def tidy(text: str) -> str:
+    """PUA 기호를 옮기고, 빈 줄이 둘 넘게 이어지면 한 줄로(발표 자료·보도자료의 빈 문단이 쪽을 채우지 않게)."""
+    return _BLANKS.sub("\n\n", text.translate(SYMBOL_PUA))
 
 
 def _limit(parts: list[str], total: int, piece: str) -> tuple[int, bool]:
@@ -193,45 +219,73 @@ def _pdf(path: Path, check) -> tuple[str, bool]:
     return "".join(parts), False
 
 
-def _docx(path: Path, check) -> tuple[str, bool]:
-    from lxml import etree  # noqa: PLC0415
+_MC_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
+# 본문 뒤에 붙이는 docx 부분(2026-10-14 호환성 점검): 각주·미주, 그다음 머리말·꼬리말(같은 글은 한 번)
+_DOCX_NOTES = ((r"word/footnotes\.xml", "각주"), (r"word/endnotes\.xml", "미주"))
+_DOCX_HEADS = r"word/(header|footer)(\d{0,4})\.xml"
 
-    parts: list[str] = []
-    total = 0
+
+def _docx(path: Path, check) -> tuple[str, bool]:
+    """본문(word/document.xml), 그다음 '## 각주'·'## 미주'·'## 머리말·꼬리말'(글자가 있을 때만, 2026-10-14).
+    전에는 본문만 읽어 각주·머리말이 빠졌고, 글상자는 새 모양(mc:Choice)과 옛 모양(mc:Fallback)이 둘 다 들어가 두 번 나왔다."""
+    sink = _Sink()
     with zipfile.ZipFile(path) as z:
         zipguard.check(z)  # 압축 폭탄은 풀기 전에 막는다(2026-10-09 점검 7-c) → 글자를 뽑지 못함(failed)
-    # 글자(w:t)·탭·줄바꿈이 끝날 때마다 모으고, 읽은 요소와 그 앞 형제를 바로 버린다(2026-10-09 점검 7-b).
-    # 전에는 문단(w:p)이 끝나야 내보내 run 150만 개짜리 문단 하나가 통째로 트리에 올라갔다(84KB → 637MB).
-    # 시간은 요소 1만 개마다, 30만 자는 문단 안에서도 본다.
-    tags = {f"{_W}t": "t", f"{_W}tab": "\t", f"{_W}br": "\n", f"{_W}r": "", f"{_W}p": "p"}
-    pending: list[str] = []
-    room = TEXT_MAX
-    with zipfile.ZipFile(path) as z, z.open("word/document.xml") as f:
-        for n, (_, el) in enumerate(etree.iterparse(f, events=("end",), tag=tuple(tags))):
+        names = z.namelist()
+        _docx_xml(z, "word/document.xml", sink, check)
+        for pattern, title in _DOCX_NOTES:
+            for name in (n for n in names if re.fullmatch(pattern, n)):
+                _docx_extra(z, [name], title, sink, check)
+        heads = sorted((m.group(1) == "footer", m.group(2).zfill(4), n) for n in names if (m := re.fullmatch(_DOCX_HEADS, n)))  # 머리말 먼저
+        _docx_extra(z, [n for *_, n in heads], "머리말·꼬리말", sink, check)
+    return sink.result()
+
+
+def _docx_extra(z: zipfile.ZipFile, names: list[str], title: str, sink: _Sink, check) -> None:
+    """각주·머리말 같은 덧붙은 부분: 빈 줄을 빼고, 같은 줄은 한 번만(머리말이 쪽마다 같은 경우) 머리 '## 제목' 아래에."""
+    lines: list[str] = []
+    for name in names:
+        if sink.cut:
+            return
+        part = _Sink()
+        _docx_xml(z, name, part, check)
+        lines += [x for x in part.result()[0].split("\n") if x.strip()]
+    lines = list(dict.fromkeys(lines))
+    if lines:
+        sink.add(f"\n## {title}\n" + "\n".join(lines) + "\n")
+
+
+def _docx_xml(z: zipfile.ZipFile, name: str, sink: _Sink, check) -> None:
+    """word/*.xml 하나. 글자(w:t)·탭·줄바꿈이 끝날 때마다 모으고, 읽은 요소와 그 앞 형제를 바로 버린다(2026-10-09 점검 7-b).
+    전에는 문단(w:p)이 끝나야 내보내 run 150만 개짜리 문단 하나가 통째로 트리에 올라갔다(84KB → 637MB).
+    시간은 요소 1만 개마다, 30만 자는 sink가 본다. 탭·줄바꿈은 글자 묶음(w:r) 안의 것만(문단 서식의 탭 위치 w:tabs/w:tab은 글자가 아니다),
+    mc:Fallback(같은 글상자·도형의 옛 모양) 안은 건너뛴다(2026-10-14)."""
+    from lxml import etree  # noqa: PLC0415
+
+    tags = {f"{_W}t": "t", f"{_W}tab": "\t", f"{_W}br": "\n", f"{_W}cr": "\n", f"{_W}r": "", f"{_W}p": "\n", _MC_FALLBACK: ""}
+    fallback = 0
+    with z.open(name) as f:
+        for n, (event, el) in enumerate(etree.iterparse(f, events=("start", "end"), tag=tuple(tags), resolve_entities=False,
+                                                        no_network=True)):
             if n % 10_000 == 0:
                 check()
+            if el.tag == _MC_FALLBACK:
+                fallback += 1 if event == "start" else -1
+            if event == "start":
+                continue
             kind = tags[el.tag]
-            if kind == "t":
-                pending.append(el.text or "")
-                room -= len(pending[-1])
-            elif kind in ("\t", "\n"):
-                pending.append(kind)
-                room -= 1
-            elif kind == "p":
-                pending.append("\n")
-                room -= 1
-            if kind == "p" or room < 0:
-                total, cut = _limit(parts, total, "".join(pending))
-                pending, room = [], TEXT_MAX - total
-                if cut:
-                    return "".join(parts), True
-            el.clear(keep_tail=True)
             parent = el.getparent()
+            if not fallback and kind:
+                if kind == "t":
+                    sink.add(el.text or "")
+                elif el.tag == f"{_W}p" or (parent is not None and parent.tag == f"{_W}r"):
+                    sink.add(kind)
+                if sink.cut:
+                    return
+            el.clear(keep_tail=True)
             if parent is not None:
                 while el.getprevious() is not None:
                     del parent[0]
-    total, cut = _limit(parts, total, "".join(pending))
-    return "".join(parts), cut
 
 
 BAD_SHARE = 0.01  # 대체 문자(�)·제어 문자가 이 비율을 넘으면 그 인코딩이 아니다(점검 7-f)
@@ -388,36 +442,83 @@ def _zip_open(path: Path) -> zipfile.ZipFile:
 
 
 class _Hwpx(_Target):
-    """hwpx(OWPML) 구역: 문단(hp:p)마다 한 줄, 글자는 hp:t 안의 것만."""
+    """hwpx(OWPML) 구역: 문단(hp:p)마다 한 줄, 글자는 hp:t 안의 것만.
+    문단 안에 든 것(각주·미주·머리말·꼬리말·표·글상자의 문단)은 그 문단이 끝난 뒤에 잇는다(2026-10-14, hwp와 같은 차례).
+    전에는 각주가 문장 한가운데 끼어 '…단위이다(통계청, 2015)' + 각주 + 줄바꿈 + '. 개념의…'처럼 본문 문장이 끊겼다.
+    붙잡아 둔 글자가 30만 자를 넘으면 그때까지의 것을 내보내고 그만 읽는다(메모리)."""
 
     INSIDE = {"tab": "\t", "lineBreak": "\n", "nbSpace": " ", "fwSpace": " ", "hyphen": "-"}
 
     def __init__(self, sink: _Sink) -> None:
         self.sink, self.in_t = sink, 0
+        self.open: list[tuple[list[str], list[str]]] = []  # 열린 문단마다 (그 문단의 글자, 안에 든 문단들의 글자)
+        self.held = 0
+
+    def _put(self, piece: str) -> None:
+        if not self.open:
+            self.sink.add(piece)
+            return
+        self.open[-1][0].append(piece)
+        self.held += len(piece)
+        if self.held > TEXT_MAX:
+            self._spill()
+            self.stop = True
+
+    def _spill(self) -> None:
+        for own, inner in self.open:
+            self.sink.add("".join(own) + "".join(inner))
+        self.open.clear()
+        self.held = 0
 
     def start(self, tag: str, attrib: dict) -> None:
         name = _local(tag)
         if name == "t":
             self.in_t += 1
+        elif name == "p":
+            self.open.append(([], []))
         elif self.in_t and name in self.INSIDE:
-            self.sink.add(self.INSIDE[name])
+            self._put(self.INSIDE[name])
 
     def end(self, tag: str) -> None:
         name = _local(tag)
         if name == "t":
             self.in_t -= 1
-        elif name == "p":
-            self.sink.add("\n")
+        elif name == "p" and self.open:
+            own, inner = self.open.pop()
+            text = "".join(own) + "\n" + "".join(inner)
+            if self.open:
+                self.open[-1][1].append(text)
+                self.held += 1
+            else:
+                self.sink.add(text)
+                self.held = 0
 
     def data(self, data: str) -> None:
         if self.in_t:
-            self.sink.add(data)
+            self._put(data)
+
+    def close(self) -> None:
+        self._spill()  # 닫히지 않은 문단(깨진 XML 끝)
+
+
+def _hwpx_locked(z: zipfile.ZipFile, name: str) -> bool:
+    """암호·배포용 hwpx(2026-10-14): 목록(META-INF/manifest.xml)에 암호화 정보가 있고 구역이 XML이 아니면(암호화된 바이트).
+    전에는 XML 오류로 까닭 없는 '뽑지 못함'이 되었다."""
+    try:
+        manifest = z.read("META-INF/manifest.xml") if z.getinfo("META-INF/manifest.xml").file_size < 5_000_000 else b""
+        with z.open(name) as f:
+            head = f.read(64).lstrip(b"\xef\xbb\xbf \t\r\n")
+    except KeyError:
+        return False
+    return b"encryption-data" in manifest and not head.startswith(b"<")
 
 
 def _hwpx(path: Path, check) -> tuple[str, bool]:
     sink = _Sink()
     with _zip_open(path) as z:
         for name in _numbered(z, r"Contents/section(\d{1,6})\.xml"):
+            if _hwpx_locked(z, name):
+                raise _Unreadable("hwp_locked")  # 암호인지 배포용인지는 목록만으로 가리지 못한다
             _feed(z, name, _Hwpx(sink), sink, check)
             if sink.cut:
                 break
@@ -558,6 +659,18 @@ def date_text(raw: str, kind: str, date1904: bool) -> str:
     return when.strftime("%Y-%m-%d %H:%M") if minutes % 1440 else when.strftime("%Y-%m-%d")
 
 
+_NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
+
+
+def _number_text(raw: str) -> str:
+    """xlsx 숫자 칸의 저장 값 → 유효 숫자가 15자리를 넘을 때만 15자리로(엑셀이 보이는 정밀도. 부동소수 꼬리 0.94460617502999999 → 0.94460617503).
+    그 밖(정수·짧은 소수·숫자가 아닌 것)은 적힌 그대로."""
+    text = raw.strip()
+    if not _NUMBER.fullmatch(text) or len(text.split("e")[0].split("E")[0].replace("-", "").replace(".", "").lstrip("0")) <= 15:
+        return raw
+    return f"{float(text):.15g}"
+
+
 def _xlsx_dates(z: zipfile.ZipFile, rels: dict[str, str]) -> dict[int, str]:
     """styles.xml의 칸 서식 번호(cellXfs 순서) → 'date'·'time'. 날짜 서식이 아닌 것은 넣지 않는다."""
     name = next((t for t in rels.values() if t.endswith("styles.xml")), "xl/styles.xml")
@@ -632,7 +745,9 @@ class _Sheet(_Target):
             elif self.kind == "d":  # ISO 8601로 적힌 날짜(드묾): 2026-10-11T09:30:00 → 2026-10-11 09:30
                 stamp = raw.strip().replace("T", " ")
                 value = stamp[:10] if stamp[11:16] in ("", "00:00") else stamp[:16]
-            else:  # n·str·inlineStr·e: 적힌 그대로
+            elif self.kind == "n":  # 숫자: 엑셀처럼 유효 숫자 15자리까지(39.509900352700001 → 39.5099003527, 2026-10-14)
+                value = _number_text(raw)
+            else:  # str·inlineStr·e: 적힌 그대로
                 value = raw
             col = _column(self.ref)
             if col is not None and col > len(self.cells):
@@ -736,7 +851,7 @@ def _odt(path: Path, check) -> tuple[str, bool]:
 # hwp 5.0(OLE 복합 파일). 한글 문서 파일 형식 5.0 공개 문서를 따른다
 _HWP_SIGNATURE = b"HWP Document File"
 _HWP_PARA_TEXT = 0x10 + 51  # HWPTAG_BEGIN + 51 = 67
-_HWP_LOCKED = 0x02 | 0x04 | 0x10 | 0x100 | 0x400  # FileHeader 속성: 암호 · 배포용 · DRM · 공인인증서 암호화 · 공인인증서 DRM
+_HWP_PASSWORD, _HWP_DIST, _HWP_DRM = 0x02, 0x04, 0x10 | 0x100 | 0x400  # FileHeader 속성: 암호 · 배포용 · DRM·공인인증서 암호화·공인인증서 DRM
 _HWP_CHAR = {10: "\n", 24: "-", 30: " ", 31: " "}  # 한 글자짜리 제어 문자(0·13·25~29는 버린다)
 _HWP_ONE = frozenset({0, 10, 13, *range(24, 32)})  # 그 밖(1~9·11·12·14~23)은 여덟 글자(16바이트)짜리 컨트롤
 _HWP_CTRL = re.compile(rb"[\x00-\x1f]\x00")
@@ -758,8 +873,14 @@ def _hwp(path: Path, check) -> tuple[str, bool]:
         if not header.startswith(_HWP_SIGNATURE) or len(header) < 40:
             raise ValueError("hwp가 아님")
         flags = int.from_bytes(header[36:40], "little")
-        if flags & _HWP_LOCKED or ole.exists("ViewText"):  # 배포용 문서는 본문이 ViewText에 암호화되어 있다
-            raise _Unreadable("hwp_locked")
+        # 까닭을 가른다(2026-10-14): 배포용 문서는 암호를 모르는 저자도 받는 흔한 문서라(공문·보도자료) '암호'와 다르게 알린다.
+        # 배포용은 본문이 ViewText에 암호화되어 있다(BodyText는 비었거나 없다)
+        if flags & _HWP_PASSWORD:
+            raise _Unreadable("hwp_password")
+        if flags & _HWP_DIST or ole.exists("ViewText"):
+            raise _Unreadable("hwp_dist")
+        if flags & _HWP_DRM:
+            raise _Unreadable("hwp_drm")
         sections = sorted((int(m.group(1)), e) for e in ole.listdir()
                           if len(e) == 2 and e[0] == "BodyText" and (m := re.fullmatch(r"Section(\d{1,6})", e[1])))
         for _, entry in sections:
@@ -1091,19 +1212,25 @@ def pages(text: str) -> list[str]:
     return out or [""]
 
 
-def page_of(text: str, needle: str) -> int:
-    """needle이 든 쪽 번호(1부터). 못 찾으면 1."""
+def page_of(text: str, needle: str, offset: int = 0) -> int:
+    """needle이 든 쪽 번호(1부터). 못 찾으면 1. offset: needle 시작에서 몇 글자 뒤의 쪽인지(2026-10-14: 조각(800자) 첫머리가 아니라
+    조각 안에서 맞은 곳의 쪽을 알린다. 전에는 맞은 곳이 다음 쪽에 있어도 조각이 시작한 쪽을 알렸다)."""
     at = text.find(needle) if needle else -1
     if at < 0:
         return 1
+    return page_at(text, at + max(0, offset))
+
+
+def page_at(text: str, at: int) -> int:
+    """글자 자리 at이 든 쪽 번호(1부터)."""
     seen = 0
     for n, page in enumerate(pages(text), 1):
         seen += len(page)
         if at < seen:
             return n
-    return 1
+    return max(1, len(pages(text)))
 
 
 __all__ = ["DEADLINE", "DONE", "EXTRACTABLE", "FORMATS", "HWP_UNREADABLE", "NO_TEXT", "PAGE_CHARS", "READABLE", "SHEET_ROWS", "TEXT_DIR",
-           "TEXT_MAX", "Extracted", "due", "extract", "extractable", "no_text", "page_of", "pages", "read_status", "read_text", "save", "stale",
+           "TEXT_MAX", "Extracted", "due", "extract", "extractable", "no_text", "page_at", "page_of", "pages", "read_status", "read_text", "save", "stale",
            "text_paths", "unreadable_hwp"]

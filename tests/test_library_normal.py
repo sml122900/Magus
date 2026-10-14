@@ -90,7 +90,7 @@ def test_web_empty_list_and_library_like_others(server_proc):  # noqa: F811
     base, data_dir, _ = server_proc({})
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         empty = c.get("/login?next=/shelf").text
-        assert '<p class="empty">+ 프로젝트로 시작하세요.</p>' in empty and "<h2>+ 프로젝트</h2>" in empty
+        assert 'aria-label="시작 순서"' in empty and "<h2>+ 프로젝트</h2>" in empty  # 빈 목록은 시작 순서(2026-10-14)
         assert "내 서재" not in empty and 'aria-label="모든 프로젝트에서 찾기"' not in empty  # 빈 목록에는 찾기 칸도 없다
         assert c.get("/shelf/p/common").status_code == 404
         assert c.get("/shelf/new").url.path == "/shelf"  # 프로젝트 없이 책을 만들지 않는다
@@ -100,7 +100,7 @@ def test_web_empty_list_and_library_like_others(server_proc):  # noqa: F811
     setup.close()
     with httpx2.Client(base_url=base, follow_redirects=True, timeout=120) as c:
         listed = c.get("/login?next=/shelf").text
-        assert "+ 프로젝트로 시작하세요" not in listed and 'class="pcard library"' not in listed
+        assert "<li class=done><b>프로젝트 만들기</b>" in listed and 'class="pcard library"' not in listed  # 문서 전이라 순서는 남는다
         assert re.findall(r'<span class="pname">([^<]+)</span>', listed)[0] == "도시"  # 최근 수정 순(「내 서재」를 끝에 두지 않는다)
         page = c.get("/shelf/p/common").text
         assert "프로젝트 휴지통으로" in page and "🗑" in page  # 휴지통으로 옮기는 단추가 있다

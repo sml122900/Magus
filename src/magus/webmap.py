@@ -50,6 +50,7 @@ from magus.webshelf import (
     GROUP_SIZE, Book, Kind, add_book, book_html, category_kind, clean_query, find,
     safe_at, shelf_html, state_url, text_color,
 )
+from magus.webstart import START_STYLE, project_steps
 
 PROJECT_TITLE_MAX = 120
 Hits = tuple[list[Any], list[tuple[Any, Any, list[Any], bool]]]  # 찾기: (이름이 맞은 노드, [(노드, 책, 맞은 글, 책 이름이 맞음)])
@@ -214,11 +215,11 @@ class MapPages:
         notices = error + await run_in_threadpool(self._notices, uid, request, session, "/shelf")
         cards = await run_in_threadpool(self._project_cards, uid, floors, session, draft_title)
         trashed = len(await run_in_threadpool(self.store.list_trashed_projects, uid))
-        start = "" if floors else '<p class="empty">+ 프로젝트로 시작하세요.</p>'  # 새 사용자는 프로젝트 0개(2026-10-11)
-        body = (f"{notices}{form if floors else ''}{start}<ul class=\"projects\">{cards}</ul>"
-                '<p class="muted"><a href="/shelf/export.zip">전체 내려받기(zip)</a> · '
+        start = await project_steps(self.store, uid, floors)  # 문서를 올리기 전까지 시작 순서(2026-10-14)
+        body = (f"{notices}{start}{form if floors else ''}<ul class=\"projects\">{cards}</ul>"
+                '<p class="muted"><a href="/connect">Claude 연결 안내</a> · <a href="/shelf/export.zip">전체 내려받기(zip)</a> · '
                 f'<a href="/shelf/trash">휴지통{f" {trashed}" if trashed else ""}</a></p>')
-        return self._map_page("프로젝트", body, session, status, css=PROJECTS_STYLE)
+        return self._map_page("프로젝트", body, session, status, css=PROJECTS_STYLE + START_STYLE)
 
     def _project_cards(self, uid: str, floors: list[Floor], session: tuple[str, str], draft_title: str = "") -> str:
         cards = []
@@ -282,6 +283,9 @@ class MapPages:
                 text += f" {names} 인용 점검에서 빠짐." if names else ""
             trash = (f' <a href="/shelf/p/{urllib.parse.quote(found.floor)}/trash">휴지통</a>'
                      if done == "node_trash" and found else "")
+            if done == "project" and found:  # 다음 할 일(2026-10-14): 새 책 → 글쓰기에서 문서 첨부
+                query = urllib.parse.urlencode({"project": found.floor, "node": CENTER})
+                trash = f' 다음: <a href="/shelf/new?{html.escape(query)}">새 책 만들기</a> → 그 책의 글쓰기에서 문서를 첨부합니다.'
             out += f'<p class="msg">{html.escape(text, quote=False)}{trash}</p>'
         long = f"제목은 {PROJECT_TITLE_MAX}자까지입니다." + (f" 지금 {params.get('n')}자입니다." if (params.get("n") or "").isdigit() else "")
         if err := {"empty": "제목을 적어 주세요.", "full": f"프로젝트는 {MAX_FLOORS}개까지입니다.", "long": long}.get(

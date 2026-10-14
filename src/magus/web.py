@@ -48,6 +48,7 @@ from magus.webcontexts import ContextPages
 from magus.webdocs import DocumentPages
 from magus.webmap import MapPages
 from magus.webshelf import ShelfPages
+from magus.webstart import COPY_SCRIPT, START_STYLE, StartPages
 
 log = logging.getLogger("magus.web")
 SCREEN: contextvars.ContextVar[str] = contextvars.ContextVar("magus_screen", default="other")  # 도움말에 보낼 화면 이름 열쇠(#97)
@@ -285,7 +286,7 @@ def _pkce() -> tuple[str, str]:
 
 
 @dataclass
-class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPages):
+class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPages, StartPages):
     store: Store
     settings: Settings
     base_url: str  # 바깥에서 보이는 주소(원격: PUBLIC_URL, 로컬: http://127.0.0.1:포트)
@@ -348,7 +349,8 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPag
     # --- 라우트 등록 ---
     def register(self, server: MCPServer) -> None:
         routes: list[tuple[str, list[str], Callable[[Request], Awaitable[Response]]]] = [
-            ("/", ["GET"], self.home), ("/login", ["GET"], self.login), ("/auth/callback", ["GET"], self.callback),
+            *self.start_routes(),  # 로그인 전 첫 화면(/)·Claude 연결 안내(/connect)(2026-10-14)
+            ("/login", ["GET"], self.login), ("/auth/callback", ["GET"], self.callback),
             ("/logout", ["POST"], self.logout), ("/me", ["GET", "POST"], self.me),
             *self.document_routes(),  # 내 정보 › 문서 업데이트(2026-10-10). 옛 올린 파일 화면·올리기·지우기 주소도 여기서
             ("/book/export", ["POST"], self.do_export), ("/download/{token}", ["GET"], self.download),
@@ -520,9 +522,6 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPag
         return JSONResponse(body, status_code=status)
 
     # --- 로그인 ---
-    async def home(self, request: Request) -> Response:
-        return RedirectResponse("/shelf" if self.user_of(request) else "/login", status_code=303)
-
     async def login(self, request: Request) -> Response:
         nxt = request.query_params.get("next", "/shelf")
         nxt = nxt if nxt.startswith("/") and not nxt.startswith("//") else "/shelf"
@@ -566,8 +565,14 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPag
         if uid is None:  # 토큰은 유효하지만 허용 목록 밖. 본인의 사용자 id를 보여 준다(운영자가 목록에 넣을 값)
             sub = str(claims.get("sub", ""))
             log.warning("web login: not allowed sub_hash=%s", hashlib.sha256(sub.encode()).hexdigest()[:10])
+            # 초대 전 사람이 처음 보는 화면(2026-10-14): 무엇을 하면 되는지와 보낼 id를 복사 단추와 함께
             return self._page("로그인", '<p class="msg err">허용 목록에 없습니다(403).</p>'
-                              f"<p>사용자 id <code>{html.escape(sub)}</code></p>", status=403)
+                              "<p>아직 초대 목록에 없는 계정입니다. 아래 사용자 id를 운영자에게 보내 주시면 추가해 드립니다. "
+                              "추가된 뒤 다시 로그인하면 됩니다.</p>"
+                              f'<div class="url-box"><span id="sub-id"><code>{html.escape(sub)}</code></span>'
+                              '<button type="button" data-copy="sub-id">id 복사</button></div>'
+                              '<p class="copy-note muted" role="status" aria-live="polite"></p>'
+                              f'<p><a href="/login">다시 로그인</a></p>{COPY_SCRIPT}', status=403, css=START_STYLE)
         await run_in_threadpool(self._remember_email, uid, str(claims.get("sub", "")), tokens)
         response = RedirectResponse(str(pending.get("n") or "/shelf"), status_code=303)
         self._cookie(response, SESSION_COOKIE, sign({"uid": uid, "sid": secrets.token_hex(8)}, self.secret, "session",
@@ -643,7 +648,8 @@ class Web(ShelfPages, MapPages, BookPages, ContextPages, BoardPages, DocumentPag
             f'data-count-max="{DISPLAY_NAME_MAX}"></label></p>'
             f"<p>메일 {html.escape(profile.email or '—')}</p>"
             '<p><button class="primary">저장</button></p></form>'
-            '<ul class="links"><li><a href="/me/contexts">자주 쓰는 컨텍스트</a></li><li><a href="/me/documents">문서 업데이트</a></li></ul>'
+            '<ul class="links"><li><a href="/me/contexts">자주 쓰는 컨텍스트</a></li><li><a href="/me/documents">문서 업데이트</a></li>'
+            '<li><a href="/connect">Claude 연결</a></li></ul>'
         )
         return self._page("내 정보", body, session, 400 if message.startswith('<p class="msg err">') else 200)
 

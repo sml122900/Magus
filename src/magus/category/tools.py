@@ -12,6 +12,7 @@ category_put = 글 넣기(어느 책에든. 서지·원문 확인을 주면 문�
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, Literal
@@ -43,8 +44,8 @@ from magus.project_args import (
 )
 from magus.search import Embedder, find_all_words
 from magus.attachments import describe, title_from_files
-from magus.extract import FORMATS, HWP_UNREADABLE, NO_TEXT, no_text, page_of, pages, unreadable_hwp
-from magus.textindex import query_parts, tokens
+from magus.extract import FORMATS, HWP_UNREADABLE, NO_TEXT, no_text, page_at, page_of, pages, unreadable_hwp
+from magus.textindex import needle_of, query_parts, tokens
 from magus.store import Category, CategoryItem, MapNode, Passage, Ref, ShelfSettings, Store
 from magus.store.base import EditConflict
 from magus.store.floors import MoveError
@@ -689,23 +690,78 @@ def build_tools(
         return [h for n, h in enumerate(ranked) if n in chosen]
 
     def attach_hit(user: str, owner: str, chunk: Any, query: str) -> list[str]:
-        """첨부 글자에서 맞았으면(#100) 어느 첨부의 어느 부분인지: 앞뒤 100자와 쪽 번호, 읽는 법."""
-        if chunk is None or chunk.lane != "attach_text" or not chunk.part:
+        """첨부 글자에서 맞았으면(#100) 어느 첨부의 어느 부분인지: 앞뒤 100자와 쪽 번호, 읽는 법.
+        제목·본문·서지에서 맞은 글도 첨부 글자에 검색어가 있으면 그 한 곳을 함께 보인다(2026-10-14: 파일마다 글 하나로 올리면 제목이
+        파일 이름이라 제목에서만 맞았다고 보고 첨부 발췌를 빼, 내용을 보려면 한 번 더 불러야 했다). 원문·쓸 부분 조각은 이미 내용이다."""
+        if chunk is None or not query:
             return []
-        hit = store.attachment_path(user, owner, chunk.part)
-        status, text = store.attachment_text(user, owner, chunk.part, make=False)
-        if hit is None or not text:
+        if chunk.lane == "attach_text" and chunk.part:
+            tries: list[tuple[str, str | None]] = [(chunk.part, chunk.text)]
+        elif chunk.lane in ("ref_full", "ref_picked"):
             return []
-        page = page_of(text, chunk.text[:80])
-        return [f"   📎 첨부 「{hit[1].name}」(첨부:{chunk.part}) 글자에서 맞음 · 쪽 {page}/{len(pages(text))}: “{around(chunk.text, query)}”",
-                f"   → 그 쪽 읽기: category_search(attachment=\"{chunk.part}\", page={page})"]
+        else:
+            tries = [(a.id, None) for a in store.list_attachments(user, owner)[:5]]
+        for att_id, piece in tries:
+            hit = store.attachment_path(user, owner, att_id)
+            status, text = store.attachment_text(user, owner, att_id, make=False)
+            if hit is None or not text:
+                continue
+            # 맞은 곳(2026-10-14): 쪽 번호와 앞뒤 100자는 조각(800자)이 아니라 뽑은 글자 전체에서 맞은 자리로 정한다.
+            # 전에는 조각 첫 80자로 자리를 찾아 ① 조각 안에서 맞은 곳이 다음 쪽이어도 조각이 시작한 쪽을, ② 조각이 문단 사이를 빈 줄 하나로
+            # 다시 이어 붙여 원문과 달라지면 못 찾고 늘 1쪽을 알렸고, ③ 빈 줄 없는 공공 문서는 조각이 글자 수로 잘려 맞은 곳 앞이 비었다
+            at = locate(text, piece, query) if piece is not None else hit_at(text, query)
+            if at >= 0:
+                page = page_at(text, at)
+                s, e = max(0, at - 100), min(len(text), at + 100)
+                shown = ("…" if s else "") + one_line(text[s:e]) + ("…" if e < len(text) else "")
+            elif piece is not None:
+                page, shown = page_of(text, piece[:80]), around(piece, query)
+            else:
+                continue
+            return [f"   📎 첨부 「{hit[1].name}」(첨부:{att_id}) 글자에서 맞음 · 쪽 {page}/{len(pages(text))}: “{shown}”",
+                    f"   → 그 쪽 읽기: category_search(attachment=\"{att_id}\", page={page})"]
+        return []
+
+    def hit_span(text: str, query: str) -> tuple[int, int]:
+        """text에서 검색어가 맞은 곳(자리, 길이). 없으면 (-1, 0). 2026-10-14: 검색어 전체(낱말 사이 빈칸·줄바꿈은 아무 공백)
+        → 따옴표 구절 → 긴 낱말부터 → 2글자 조각. 전에는 낱말 차례대로 처음 나온 곳이라 '글 워드프로세서'가 앞쪽의 '한글'에,
+        '해외건설 위기극복'이 머리말의 '해외건설정책과'에 걸려 정작 맞은 문장이 보이지 않았다."""
+        parts = needle_of(query).split()
+        if len(parts) > 1 and (m := re.search(r"\s+".join(map(re.escape, parts)), text, re.I)):
+            return m.start(), m.end() - m.start()
+        low = text.lower()
+        phrases, words = query_parts(query)
+        for t in [*phrases, *sorted(words, key=len, reverse=True), *tokens(query)]:
+            if t and (at := low.find(t.lower())) >= 0:
+                return at, len(t)
+        return -1, 0
+
+    def hit_at(text: str, query: str) -> int:
+        return hit_span(text, query)[0]
+
+    def locate(text: str, piece: str, query: str) -> int:
+        """조각(piece)에서 맞은 곳을 뽑은 글자 전체(text)에서 찾는다. 조각의 첫 문단 머리가 나오는 자리마다(같은 머리가 되풀이되는 서식도 있다)
+        그 근처에 맞은 글자가 있는지 보고, 없으면 맞은 글자가 처음 나오는 곳. 못 찾으면 -1."""
+        pos, size = hit_span(piece, query)
+        if pos < 0:
+            return -1
+        needle = piece[pos:pos + size].lower()
+        low = text.lower()
+        head = piece.split("\n\n", 1)[0][:80] or piece[:80]
+        start = text.find(head) if head else -1
+        for _ in range(200):
+            if start < 0:
+                break
+            near = low.find(needle, max(start, start + pos - 40), start + pos + size + 80)  # 문단 사이 빈 줄 차이만큼 여유
+            if near >= 0:
+                return near
+            start = text.find(head, start + 1)
+        return low.find(needle)
 
     def around(text: str, query: str, width: int = 100) -> str:
         """맞은 곳 앞뒤 width자(한 줄). 맞은 곳을 못 찾으면 앞부분."""
         flat = one_line(text)
-        low = flat.lower()
-        phrases, words = query_parts(query)
-        at = next((low.find(t.lower()) for t in [*phrases, *words, *tokens(query)] if t and low.find(t.lower()) >= 0), -1)
+        at = hit_at(flat, query)
         if at < 0:
             return flat[: width * 2] + ("…" if len(flat) > width * 2 else "")
         start, end = max(0, at - width), min(len(flat), at + width)
@@ -731,6 +787,9 @@ def build_tools(
         if state == "empty":
             return f"첨부 「{att.name}」: 글자 없음(그림이나 스캔한 PDF일 수 있다. 글자 읽기(OCR)는 아직 하지 않는다)."
         if why := unreadable_hwp(status):  # 암호·배포용·한글 97 이전 hwp(2026-10-11)
+            if status.get("reason") == "hwp_dist":  # 배포용은 받은 사람이 풀 수 없다(2026-10-14): 원본이나 PDF를 부탁한다
+                return (f"첨부 「{att.name}」: {HWP_UNREADABLE}다({why}: 만든 사람이 글자를 복사·저장할 수 없게 한 문서). "
+                        "저자에게 배포용으로 바꾸기 전의 원본 파일이나 같은 문서의 PDF를 올려 달라고 한다.")
             return (f"첨부 「{att.name}」: {HWP_UNREADABLE}다({why}). "
                     "저자에게 한글에서 암호·배포용을 풀거나 hwp·hwpx로 다시 저장해 올려 달라고 한다.")
         if state == "failed":
@@ -759,7 +818,8 @@ def build_tools(
         head += f" · 제목 「{item.title}」" + (" (AI가 지은 제목)" if item.title_by == "ai" else "") if item.title else ""
         if not item.title and (stem := title_from_files(a.name for a in store.list_attachments(user, f"{item.category_id}/{item.id}"))):
             head += f" · 제목 「{stem}」(첫 첨부의 파일 이름)"  # 제목 없는 글은 보일 때만 첫 첨부 이름(파일은 그대로)
-        out = [head, f"   “{summary(item)[:300]}”"]
+        text = summary(item)
+        out = [head, *([f"   “{text[:300]}”"] if text else [])]  # 본문 없이 첨부만 있는 글은 빈 인용 줄(“”)을 보이지 않는다(2026-10-14)
         out += [f"   이유: {one_line(item.reason)[:150]}"] if item.reason else []
         out += [f"   위치: {one_line(item.where)[:80]}"] if item.where else []
         out += [f"   쓸 부분: “{one_line(p.text)[:120]}”" for p in item.passages[:2]]
@@ -773,7 +833,8 @@ def build_tools(
         if item.parent_id:
             parent = store.get_category_item(user, item.category_id, item.parent_id)
             if parent is not None:
-                out.append(f"   ↳ 이 글이 응답한 저자의 말: “{summary(parent)[:80]}”")
+                said = summary(parent)
+                out.append(f"   ↳ 이 글이 응답한 저자의 말: “{said[:80]}”" if said else "   ↳ 이 글이 응답한 저자의 글: " + parent.id)
         out += attached(user, f"{item.category_id}/{item.id}")
         return out
 

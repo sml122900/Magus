@@ -56,7 +56,8 @@ SCREENS = {
     "trash": "책을 휴지통으로 옮기기", "project_trash": "휴지통(프로젝트)", "new_book": "새 책", "book_settings": "책 설정",
     "doc_chapters": "올린 문서 · 장 목록", "doc_issues": "올린 문서 · 확인 요청", "doc_cites": "올린 문서 · 인용 상태",
     "doc_questions": "올린 문서 · 답해 주실 질문", "doc_editions": "올린 문서 · 수정본 이력", "made_doc": "올린 문서에서 만든 문서",
-    "me": "내 정보", "documents": "문서 업데이트", "contexts": "자주 쓰는 컨텍스트", "node_trash": "휴지통(지운 노드·글)", "other": "기타",
+    "me": "내 정보", "documents": "문서 업데이트", "contexts": "자주 쓰는 컨텍스트", "node_trash": "휴지통(지운 노드·글)",
+    "connect": "Claude 연결 안내", "other": "기타",
 }
 _TABS = {"issues": "doc_issues", "cites": "doc_cites", "editions": "doc_editions"}
 
@@ -67,6 +68,8 @@ def screen_key(path: str, query: str = "") -> str:
     params = dict(urllib.parse.parse_qsl(query))
     if parts[:1] == ["me"]:
         return {(): "me", ("documents",): "documents", ("contexts",): "contexts"}.get(tuple(parts[1:]), "other")
+    if parts == ["connect"]:
+        return "connect"
     if parts[:1] != ["shelf"]:
         return "other"
     rest = parts[1:]

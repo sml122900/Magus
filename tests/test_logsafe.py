@@ -56,3 +56,18 @@ def test_alerts_are_rate_limited():
     for _ in range(3):
         f.filter(logging.LogRecord("magus", logging.ERROR, __file__, 1, "디스크 가득", None, None))
     assert len(alerts) == 1
+
+
+def test_peer_reset_in_asyncio_is_a_warning_not_an_alert():
+    """상대가 먼저 연결을 끊은 것(Windows Proactor의 'Exception in callback …_call_connection_lost')은 서버 잘못이 아니다(2026-10-14)."""
+    alerts: list[str] = []
+    f = RedactingFilter(alerts.append)
+    for exc in (ConnectionResetError(10054, "원격 호스트가 끊음"), ConnectionAbortedError(), BrokenPipeError()):
+        record = logging.LogRecord("asyncio", logging.ERROR, __file__, 1, "Exception in callback %s", ("_call_connection_lost(None)",),
+                                   (type(exc), exc, None))
+        f.filter(record)
+        assert record.levelno == logging.WARNING and record.levelname == "WARNING" and "원격 호스트" not in record.getMessage()
+    assert alerts == []
+    other = logging.LogRecord("asyncio", logging.ERROR, __file__, 1, "Exception in callback", None, (ValueError, ValueError("x"), None))
+    f.filter(other)  # 다른 예외는 그대로 ERROR(알림도 간다)
+    assert other.levelno == logging.ERROR and len(alerts) == 1
