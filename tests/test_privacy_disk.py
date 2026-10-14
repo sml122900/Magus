@@ -106,3 +106,28 @@ def test_alive_sends_disk_alert_once_then_waits(tmp_path, telegram):
     assert len(got) == 1 and not state.exists()
     run(DISK_ALERT_TEST="1")  # 시험 알림(상태 파일은 건드리지 않는다)
     assert len(got) == 2 and "디스크 알림 시험" in _text(got[1]) and not state.exists()
+
+
+def test_cache_write_is_best_effort_when_file_is_busy(tmp_path, monkeypatch):
+    """캐시(파생값) 교체가 막혀도(Windows: 다른 스레드가 읽는 중) 예외 없이 이번 쓰기만 건너뛴다. 임시 파일도 남기지 않는다(2026-10-14)."""
+    from magus.store import LocalStore
+    from magus.store import local as local_mod
+
+    store = LocalStore(tmp_path / "data")
+    try:
+        store.create_project("alice", "책", project_id="b")
+        store.put_cache("alice", "b", "cites", "old")
+        tries = []
+
+        def busy(self, target):  # noqa: ANN001, ANN202
+            tries.append(1)
+            raise PermissionError(13, "사용 중")
+
+        monkeypatch.setattr(local_mod.time, "sleep", lambda s: None)
+        monkeypatch.setattr(Path, "replace", busy)
+        store.put_cache("alice", "b", "cites", "new")  # 예외 없음
+        monkeypatch.undo()
+        assert len(tries) == local_mod.CACHE_REPLACE_TRIES and store.get_cache("alice", "b", "cites") == "old"
+        assert not list((tmp_path / "data").rglob("*.tmp"))
+    finally:
+        store.close()
