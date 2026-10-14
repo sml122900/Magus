@@ -60,7 +60,7 @@ class Manuscript:
     figures: int = 0
     tables: int = 0
     equations: int = 0
-    source: Literal["docx", "pdf"] = "docx"
+    source: Literal["docx", "pdf", "hwpx", "hwp"] = "docx"
     notes: list[str] = field(default_factory=list)
 
 

@@ -34,7 +34,11 @@ def read_fulltext(path: Path) -> str:
         from magus.book.docx_reader import read_docx
 
         return "\n\n".join(b.text for b in read_docx(path).blocks if b.text.strip())
-    raise ValueError(f"전문 파일 형식을 읽을 수 없다: {path.name} (txt, md, pdf, docx)")
+    if suffix in (".hwpx", ".hwp"):  # 2026-10-14: 한글 문서도 올린 문서로 받으면서 함께. 깨진 파일은 저자에게 보일 문장(ValueError)
+        from magus.book.importer import read_manuscript
+
+        return "\n\n".join(b.text for b in read_manuscript(path).blocks if b.text.strip())
+    raise ValueError(f"전문 파일 형식을 읽을 수 없다: {path.name} (txt, md, pdf, docx, hwpx, hwp)")
 
 
 def derive_key(bib: dict[str, Any]) -> str:

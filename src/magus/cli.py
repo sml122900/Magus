@@ -22,7 +22,7 @@ def main(argv: list[str] | None = None) -> None:
     serve.add_argument("--transport", choices=["stdio", "http"], default="stdio")
     serve.add_argument("--host", default="127.0.0.1", help="http: 바인드 주소(인증 없이는 루프백만)")
     serve.add_argument("--port", type=int, default=int(os.environ.get("PORT") or 8000), help="http: 포트(기본 $PORT 또는 8000)")
-    imp = sub.add_parser("import", help="원고(docx/pdf)를 새 프로젝트로 임포트하고 전체 리포트를 출력")
+    imp = sub.add_parser("import", help="원고(docx/hwpx/hwp/pdf)를 새 프로젝트로 임포트하고 전체 리포트를 출력")
     imp.add_argument("path", type=Path)
     imp.add_argument("--project-id")
     imp.add_argument("--title")

@@ -235,14 +235,16 @@ def build_tools(
         project_id: str | None = None,
         title: Title | None = None,
         subtitle: Title | None = None,
-        replace: bool = False,
         new_edition: bool = False,
         force: bool = False,
     ) -> str:
+        # 바꾸기(replace)는 받지 않는다(2026-10-14, 운영 규칙 #78): 결정·확인 요청·수정본 이력까지 휴지통으로 보내기 때문이다.
+        # 같은 책은 new_edition, 처음부터 다시는 저자가 사이트에서 올린 문서를 휴지통으로(이름 입력) 옮긴 뒤 같은 project_id로.
+        # 옛 도구 목록을 든 클라이언트가 replace를 보내도 인자 모델이 버린다 → 이미 있는 프로젝트면 import_manuscript가 그 안내로 멈춘다.
         user = current_user()
         if not path or not path.strip():  # 원고 없이 제목만 있는 프로젝트(#93·#95). 원고는 나중에 같은 project_id로 가져온다
-            if new_edition or replace:
-                raise ToolError("수정본·바꾸기에는 문서 파일(path)이 필요하다.")
+            if new_edition:
+                raise ToolError("수정본에는 문서 파일(path)이 필요하다.")
             if not title or not title.strip():
                 raise ToolError("올린 문서 없이 프로젝트를 만들려면 제목(title)을 준다. 문서를 가져오려면 path에 files_list의 이름을 준다.")
             try:
@@ -269,7 +271,6 @@ def build_tools(
         try:
             report = import_manuscript(
                 store, user, resolve_file(user, path)[0], project_id=project_id, title=title, subtitle=subtitle,
-                replace=replace,
             )
         except (ValueError, FileNotFoundError) as e:
             raise ToolError(str(e)) from e
@@ -318,10 +319,10 @@ def build_tools(
             name="book_import",
             description=(
                 (
-                "올린 문서(docx, 없으면 pdf)를 새 프로젝트(또는 올린 문서가 없는 project_id)의 가운데 노드로 가져온다. path: files_list의 이름(첨부는 '첨부:<id>'). 문서 없이 프로젝트만 "
-                "만들면 path 없이 title. '제N부'·'제N장'으로 장을 나누고, Word 코멘트는 확인 요청, 참고문헌은 원문 확인 전 문헌 글로 넣는다. 수정본은 new_edition=true와 그 책의 "
+                "올린 문서(docx·hwpx·hwp, 없으면 pdf)를 새 프로젝트(또는 올린 문서가 없는 project_id)의 가운데 노드로 가져온다. path: files_list의 이름(첨부는 '첨부:<id>'). 문서 없이 프로젝트만 "
+                "만들면 path 없이 title. '제N부'·'제N장'으로 장을 나누고, Word 코멘트·hwpx 메모는 확인 요청, 참고문헌은 원문 확인 전 문헌 글로 넣는다. 수정본은 new_edition=true와 그 책의 "
                 "project_id: 바뀐 장만 바꾸고(E2, E3…), 같은 코멘트는 다시 넣지 않고, 사라진 코멘트는 '해결됐을 수 있음' 표시만 한다(결정·직접 남긴 확인 요청·다른 책은 그대로). 마지막 수정본과 같은 "
-                "파일이거나 장 제목이 30% 미만 겹치면 멈춘다(맞으면 force=true). replace=true는 기존 프로젝트를 통째 휴지통으로 보내니 수정본에 쓰지 않는다. title·subtitle을 비우면 문서에서 "
+                "파일이거나 장 제목이 30% 미만 겹치면 멈춘다(맞으면 force=true). title·subtitle을 비우면 문서에서 "
                 "읽는다. 리포트와 장 매핑표를 돌려준다."
             )
             ),
