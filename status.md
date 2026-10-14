@@ -39,6 +39,14 @@
 > 그 전: 2026-10-06 KST — 비밀 대화 시험 결과 기록(되묻기 성공, 선택지에 원고가 섞임 → #90 수정, 커밋만), 사용자 서랍 설계안 #91(검토 대기, `docs/decisions/user-drawers.md`).
 > 2026-10-06 01시 KST — 토큰 aud 검사 강화(결정 #79)를 `p1-auth-audience`로 서버에 반영하고, 서버의 옛 git 이력을 새 이력으로 바꿨다(0-3절).
 
+## 0-44. 배포 `p1-nightly-1014b`(2026-10-14 15:05 KST, 사용자 승인) — 아침 묶음(한글 원고를 올린 문서로 + 대화 replace 뺌)
+
+- `0d88a3e` → `c7b6a32`. 아침 묶음에 오늘 묶음 최신(`2a2ceb5`까지)을 합친 뒤 전체 시험 단독 두 번 631·631 통과.
+- 도구 목록 해시 바뀜(book_import·files_list 설명, book_import 스키마에서 replace 뺌, 추정 6,888 → 6,851토큰), instructions 그대로 → **커넥터 재연결 필요(두 계정)**.
+- 백업 `d6493a03`(2,431개, 오류 없음). healthy·재시작 0·오류 로그 0, 데이터 해시 2,431개 두 번 같음, 수치 그대로, 전체 현황 넷 모두 같음(필터 없이 비교),
+  실데이터 GET 점검·/tmp 점검 16/16, 아침 묶음 /tmp 점검 6/6: 공공 hwp(공청회 자료) 장 5개, 공공 hwpx(연구조사보고서) 장 4개, 배포용 hwp는 안내로 거절,
+  대화 book_import(replace=true) 거절 + 수정본·휴지통 안내, 원고 그대로. 되돌리기 이미지 `magus:rollback-0d88a3e`(남김 rollback-0d88a3e·rollback-a1d7f22), 디스크 42%.
+
 ## 0-43. 배포 `p1-nightly-1014a`(2026-10-14 14:51 KST, 사용자 승인) — 오늘 묶음
 
 - `a1d7f22` → `0d88a3e`. 전체 시험 단독 4번: 1회 615 통과, 2회 1건 실패(`test_followup_a.py::test_broken_manuscript_through_files_and_chat`: Windows asyncio가
